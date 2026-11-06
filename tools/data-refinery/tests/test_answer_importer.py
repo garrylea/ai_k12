@@ -168,6 +168,29 @@ class TestLocatePaper:
     def test_substring_fallback(self):
         assert locate_paper("海淀", [("2024 海淀 初三 模拟二", 2, 37)]) == (2, [])
 
+    def test_source_folder_name_matches_when_title_is_normalized(self):
+        # 库里 title 是归一化的「年 地点 年级 考试类型」，文档 `# 试卷：` 常抄素材原名
+        papers = [("2026 海淀 初三 期中", 433, 30,
+                   "道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治/"
+                   "2026北京海淀初三（上）期中道德与法治")]
+        assert locate_paper("2026北京海淀初三（上）期中道德与法治", papers) == (433, [])
+
+    def test_source_folder_name_ambiguous_lists_candidates(self):
+        papers = [("2026 海淀 初三 期中", 433, 30, "道法/初中/first/2026/同名卷/同名卷"),
+                  ("2026 海淀 初三 期中", 434, 28, "数学/初中/first/2026/同名卷/同名卷")]
+        pid, candidates = locate_paper("同名卷", papers)
+        assert pid is None
+        assert [c[1] for c in candidates] == [433, 434]
+
+    def test_single_source_key_substring_hit(self):
+        # 关键词落在 source_key 中间段（带学科/年份前缀）且只有一条命中
+        papers = [("2026 海淀 初三 期中", 433, 30,
+                   "道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治/卷")]
+        assert locate_paper("道法/初中/first/2026", papers) == (433, [])
+
+    def test_empty_stays_unmatched(self):
+        assert locate_paper("不存在的卷", []) == (None, [])
+
 
 class TestReport:
     def test_sections(self):

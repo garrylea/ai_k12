@@ -233,13 +233,39 @@ def load_scope_ids(conn, scope: ScopeFilter) -> set[int] | None:
         return {r[0] for r in cur.fetchall()}
 
 
+def _like_escape(keyword: str) -> str:
+    """LIKE 通配符转义：卷名里的 % 或 _（如「2025_一模」）否则会扩成通配。"""
+    return keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def load_papers(conn, keyword: str):
+    """按关键词找卷：库里归一化的 `title` 和素材原名 `source_key` 都要认。
+
+    `# 试卷：` 常直接抄素材文件夹名（= source_key 末段），而 title 是
+    `年 地点 年级 考试类型` 的归一化结果（paper_meta 生成）。只比 title 会让
+    「拿原名补答案」永远定位不到（2026-11-07 海淀道法卷实测）。
+    返回 (title, id, question_count, source_key)。
+    """
+    kw = f"%{_like_escape(keyword)}%"
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT title, id, question_count FROM exam_papers WHERE title LIKE %s ORDER BY id",
-            (f"%{keyword}%",),
+            "SELECT title, id, question_count, source_key FROM exam_papers "
+            "WHERE title LIKE %s OR source_key LIKE %s ORDER BY id",
+            (kw, kw),
         )
         return cur.fetchall()
+
+
+def paper_label(row: tuple) -> str:
+    """候选行的人类可读标签：标题为主，来源原名与之不同时并列（同名卷靠它区分）。"""
+    title, _pid, _count, source_key = row
+    leaf = (source_key or "").rstrip("/").rsplit("/", 1)[-1]
+    return title if leaf in ("", title) else f"{title}（来源：{leaf}）"
+
+
+def print_candidates(rows: list[tuple]) -> None:
+    for row in rows:
+        print(f"  #{row[1]}\t{row[2]} 题\t{paper_label(row)}")
 
 
 def load_export_rows(conn, scope: ScopeFilter, limit: int) -> list[ExportRow]:
@@ -267,17 +293,23 @@ def _records_from_doc(conn, args, paper_id: int | None):
         papers = list(load_papers(conn, doc.title))
         paper_id, candidates = locate_paper(doc.title, papers)
         if paper_id is None:
-            print(f"试卷「{doc.title}」无法唯一定位，候选如下（用 --paper-id 指定）：")
-            for title, pid, count in (candidates or papers):
-                print(f"  #{pid}\t{count} 题\t{title}")
+            if not papers:
+                print(f"库里没有标题或素材路径包含「{doc.title}」的试卷。")
+                print("  用 `--list-papers <关键词>` 查现有卷名，或先用 --paper-id 指定。")
+            else:
+                print(f"试卷「{doc.title}」无法唯一定位，候选如下（用 --paper-id 指定）：")
+                print_candidates(candidates or papers)
             return None, None
     return doc_to_records(doc, paper_id), f"试卷 #{paper_id} {doc.title}"
 
 
 def _run(conn, args) -> int:
     if args.list_papers:
-        for title, pid, count in load_papers(conn, args.list_papers):
-            print(f"  #{pid}\t{count} 题\t{title}")
+        rows = list(load_papers(conn, args.list_papers))
+        if not rows:
+            print(f"没有标题或素材路径包含「{args.list_papers}」的试卷。")
+            return 0
+        print_candidates(rows)
         return 0
 
     # 解析试卷范围：--paper-id 优先；否则 --paper-title 经 DB 唯一命中解析为 paper_id
@@ -286,9 +318,12 @@ def _run(conn, args) -> int:
         papers = list(load_papers(conn, args.paper_title))
         resolved_paper_id, candidates = locate_paper(args.paper_title, papers)
         if resolved_paper_id is None:
-            print(f"试卷「{args.paper_title}」无法唯一定位，候选如下（用 --paper-id 指定）：")
-            for title, pid, count in (candidates or papers):
-                print(f"  #{pid}\t{count} 题\t{title}")
+            if not papers:
+                print(f"库里没有标题或素材路径包含「{args.paper_title}」的试卷。")
+                print("  用 `--list-papers <关键词>` 查现有卷名，或先用 --paper-id 指定。")
+            else:
+                print(f"试卷「{args.paper_title}」无法唯一定位，候选如下（用 --paper-id 指定）：")
+                print_candidates(candidates or papers)
             return 2
 
     scope = build_scope(args, paper_id=resolved_paper_id)

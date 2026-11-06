@@ -699,7 +699,7 @@ python src/answer_importer_cli.py --records edits.jsonl --apply         # 确认
 python src/answer_importer_cli.py --records edits.jsonl --apply --yes   # 跳过交互确认（编排调用用）
 python src/answer_importer_cli.py --doc 答案.md --paper-id 3
 python src/answer_importer_cli.py --export --where answer_empty --out to_fill.jsonl
-python src/answer_importer_cli.py --list-papers 海淀                    # 标题重名时列候选
+python src/answer_importer_cli.py --list-papers 海淀                    # 列候选（title 或素材原名命中）
 ```
 
 **选择器 `--where`（只圈范围，不承载内容）**：`--question-id 1,2,10-20`、`--paper-id` / `--paper-title`（+`--question-no`）、`--where answer_empty,approach_empty,explanation_empty`、`--source`（LIKE）/`--type`/`--difficulty`/`--content-hash`。
@@ -990,6 +990,8 @@ python src/import_cli.py --answers output/answers/西城35中期中练习1.md
 ```
 
 **只给 `--answers`（不带范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入**；同时给 `--subject/--files` 才是「新卷导入 + 答案一次走完」。`.md` 定位优先级：**显式 `--paper-id` > `--file/--files` 卷名关键词反查（须唯一命中）> 文档 `# 试卷：` 标题**；`.jsonl` 直接走 `--records`（自带定位，`--paper-id` 忽略）。非 dry-run 自动 `--apply --yes`。
+
+文档 `# 试卷：` 里的标题**可以直接写素材原名（文件夹名）**，不必改成库里的归一化标题：定位同时查 `exam_papers.title` 和 `source_key`（`--list-papers` 同口径），候选行会并列显示「来源：原名」。例：`# 试卷：2026北京海淀初三（上）期中道德与法治` 能直接命中库里的 `2026 海淀 初三 期中`（#433）。
 
 卷名重名时（例：「昌平一中」同时命中 2024 语文卷 #26 与 2026 数学卷 #362，报「无法唯一定位」）用 `--paper-id` 指定，**不要用 `--file`** —— 给了范围参数就不再是「只导答案」，前 5 步会一起跑：
 

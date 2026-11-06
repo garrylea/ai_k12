@@ -2,7 +2,7 @@
 
 文档格式（spec 2026-09-10 §4.2）：
 
-    # 试卷：<试卷标题>          —— 用于定位 exam_papers（可重名，CLI 列候选）
+    # 试卷：<试卷标题>          —— 用于定位 exam_papers（可用库内 title 或素材原名；重名时 CLI 列候选）
     ## <印刷题号>               —— 对应 paper_questions.question_no
     答案：<内容，可多行>         —— 必填；公式用 $...$ LaTeX
     思路：<内容，可多行>         —— 可选；写入 questions.approach

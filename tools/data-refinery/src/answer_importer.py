@@ -163,16 +163,34 @@ def build_diff(paired: list[tuple[AnswerRecord, QuestionRow]]) -> list[DiffEntry
     return diff
 
 
-def locate_paper(title: str, papers: list[tuple[str, int, int]]) -> tuple[int | None, list[tuple[str, int, int]]]:
-    """在 (title, id, question_count) 列表中定位试卷：唯一精确命中返回 id；
-    重名/多条候选返回 (None, 候选)；无精确命中时子串匹配兜底（仍多条则列候选）。"""
+def _source_leaf(source_key: str) -> str:
+    """source_key 的末段 = 素材原名（卷文件夹名 / 卷文件名）。"""
+    return (source_key or "").rstrip("/").rsplit("/", 1)[-1]
+
+
+def locate_paper(title: str, papers: list[tuple]) -> tuple[int | None, list[tuple]]:
+    """在 (title, id, question_count[, source_key]) 列表中定位试卷，唯一命中返回 id。
+
+    匹配顺序：标题精确 → **素材原名（source_key 末段）精确** → 标题子串；仍不唯一就
+    返回候选（(None, 候选)），绝不猜。
+
+    认 source_key 是必须的：`# 试卷：` 常直接抄素材文件夹名，而库里的 title 是
+    `年 地点 年级 考试类型` 的归一化结果（paper_meta 生成），原名永远对不上 title。
+    只比 title 会把「用原名」的用户判成「无法唯一定位」（2026-11-07 海淀道法卷实测）。
+    """
     exact = [p for p in papers if p[0] == title]
     if len(exact) == 1:
         return exact[0][1], []
-    hits = exact or [p for p in papers if title in p[0]]
+    by_source = [p for p in papers if len(p) > 3 and _source_leaf(p[3]) == title]
+    if len(by_source) == 1:
+        return by_source[0][1], []
+    hits = exact or by_source or [p for p in papers if title in p[0]]
     if len(hits) == 1:
         return hits[0][1], []
-    return None, hits
+    if not hits and len(papers) == 1:
+        # 关键词只命中了 source_key 的中间段（如带学科/年份前缀），唯一候选直接用
+        return papers[0][1], []
+    return None, hits or papers
 
 
 def _trunc(s: str | None, n: int = 40) -> str:

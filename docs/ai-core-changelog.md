@@ -8,6 +8,21 @@
 
 ---
 
+## 2026-11-07 `--answers` 用素材原名定位不到卷：`load_papers` 只比 title
+
+**问题**（用户导入海淀道法答案实测）：文档首行 `# 试卷：2026北京海淀初三（上）期中道德与法治`（素材文件夹原名），库里这张卷的 title 被 paper_meta 归一化成 `2026 海淀 初三 期中`（#433，原名只存在 `source_key`）。`answer_importer_cli.load_papers()` 只查 `title LIKE`，命中 0 条；`locate_paper` 无候选返回 `(None, [])`，于是打出「候选如下」却一条都没列，用户完全无从下手（只能改用 `--paper-id 433`）。用户判定：拿原名识别不了说不过去。
+
+**改动**：
+1. `load_papers` 改为 `title LIKE %s OR source_key LIKE %s`，返回值加 `source_key`；LIKE 通配符按 `import_cli._lookup_paper_id` 同款转义（`%`/`_`/`\`），避免「2025_一模」扩成通配。
+2. `locate_paper` 接受 4 元组 `(title, id, count, source_key)`，匹配顺序：**标题精确 → source_key 末段（素材原名）精确 → 标题子串 → 唯一候选兜底**；仍不唯一才返回候选（3 元组旧调用不受影响，向后兼容）。
+3. 候选打印统一走 `print_candidates`/`paper_label`：标题与来源原名不同时并列显示 `2026 海淀 初三 期中（来源：2026北京海淀初三（上）期中道德与法治）`；**0 候选不再空列**，明确说「库里没有标题或素材路径包含「X」的试卷」并提示 `--list-papers` / `--paper-id`。`--list-papers`、`--paper-title` 两条路径同改。
+
+**测试**：`tests/test_answer_importer.py` 新增 source_key 精确命中/重名候选/中间段唯一命中/空列表四例；`tests/test_answer_importer_cli.py` 新增 `load_papers` SQL 与转义的 fake-conn 用例。相关 82 passed。真库 dry-run 验证：原名直接命中 #433，30 题全部产生 diff。
+
+**环境注**：本机 `python3 -m pytest` 会在 `_pytest/capture.py` 导入 `readline` 时挂住，需用 `python3 -c "import sys,types; sys.modules['readline']=types.ModuleType('readline'); import pytest; pytest.main([...])"` 绕开（与本次改动无关）。
+
+---
+
 ## 2026-11-06 判断题作答：选项改成绿勾 / 红叉，不再重复写「对/错」
 
 **问题**（用户实测道法考试 `/student/training/exam/run/66`）：判断题只有「对/错」两项，`ChoiceOptionList` 既在圆形 label 里写「对」，又在选项正文再写一次「对」，两个视觉元素重复，且文字比图形难扫。

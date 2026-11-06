@@ -125,3 +125,49 @@ class TestBuildScopePaperResolution:
     def test_args_paper_id_still_used_without_param(self):
         args = parse_args(["--records", "a.jsonl", "--paper-id", "3"])
         assert build_scope(args).paper_ids == [3]
+
+
+class _FakeCursor:
+    def __init__(self):
+        self.sql = None
+        self.params = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params):
+        self.sql, self.params = sql, params
+
+    def fetchall(self):
+        return [("2026 海淀 初三 期中", 433, 30, "道法/2026北京海淀初三（上）期中道德与法治/卷")]
+
+
+class _FakeConn:
+    def __init__(self):
+        self.cur = _FakeCursor()
+
+    def cursor(self):
+        return self.cur
+
+
+class TestLoadPapers:
+    def test_matches_title_and_source_key(self):
+        """归一化 title 之外还要认素材原名，否则「# 试卷：」抄文件夹名永远定位不到。"""
+        from answer_importer_cli import load_papers
+
+        conn = _FakeConn()
+        rows = load_papers(conn, "2026北京海淀初三（上）期中道德与法治")
+        assert "title LIKE %s" in conn.cur.sql
+        assert "source_key LIKE %s" in conn.cur.sql
+        assert conn.cur.params == ("%2026北京海淀初三（上）期中道德与法治%",) * 2
+        assert rows[0][1] == 433
+
+    def test_like_wildcards_escaped(self):
+        from answer_importer_cli import load_papers
+
+        conn = _FakeConn()
+        load_papers(conn, "2025_一模")
+        assert conn.cur.params == ("%2025\\_一模%",) * 2
