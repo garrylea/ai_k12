@@ -361,6 +361,22 @@ class TestScopeFilters:
         assert "page_001.jsonl" in out
         assert "语文-某卷-试卷.jsonl" not in out
 
+    def test_file_filter_splits_keywords(self, tmp_path, capsys):
+        """`--file "人教版 下册"`：分词后都要命中；差一个词就不算。"""
+        published = self._tree(tmp_path)
+        with patch("db_loader_cli.RefineryConfig"):
+            from db_loader_cli import main
+            main(["--input-dir", str(published), "--file", "人教版 下册", "--load-cards", "--dry-run"])
+        out = capsys.readouterr().out
+        assert "page_001.jsonl" in out
+        assert "语文-某卷-试卷.jsonl" not in out
+
+        with patch("db_loader_cli.RefineryConfig"):
+            from db_loader_cli import main
+            main(["--input-dir", str(published), "--file", "人教版 上册", "--load-cards", "--dry-run"])
+        out = capsys.readouterr().out
+        assert "page_001.jsonl" not in out
+
     def test_scope_filter_rejected_with_full_reload(self, tmp_path, capsys):
         """范围过滤 + full-reload 会删全库，必须拒绝（不重写已完成数据）。"""
         published = self._tree(tmp_path)

@@ -139,7 +139,7 @@ python src/convert_cli.py --source smartedu
 
 **命名（不必打中点）**：`西城35中期中练习1.docx` 会解析成 区县=西城 / 学校=35中，标题 `2026 西城·35中 初三 期中`。地点段支持 `·`、`-`、`_`、`/`、空格、`、`、`，`，也支持直接连写；学校简称认「数字/中文数字 + 中」（`35中`、`八十中`、`北京三十五中`），`初中/高中/期中` 不会被误判。新增区县改 `paper_meta.DISTRICTS`。
 
-按维度筛（精确过滤，与 `--materials` 子串取交集）：
+按维度筛（精确过滤，与 `--materials` 取交集）：
 
 ```bash
 python src/convert_cli.py --source zgkao --year 2025 --term 下      # 2025 年下学期全部试卷
@@ -152,6 +152,10 @@ python src/convert_cli.py --source smartedu --materials "数学九年级上册"
 `{学科}/{学段}/{出版社}/{年级}/{学期}/{书名}`（教材）；每个参数都可用逗号分隔多个值（同参数内取并集，
 参数之间取交集，与 `--materials` 也取交集）。学期中英文互通（`下` = `second` = 下册，
 `上` = `first` = 上册），`--year` 仅试卷有。按范围重转加 `--reconvert`（只作用于筛出的素材）。
+
+`--materials` 是**关键词**，不是整段子串：按空格（含全角）、`-`、`_`、`/`、`·`、`、` 分词，
+**每个词都要出现在相对路径里**（顺序无关、不分大小写）。条目之间用逗号分隔、取 OR；单条内部取 AND。
+所以 `--materials "2026 海淀"` 与 `--materials "海淀-2026"` 等价。
 完整参数表见 [使用手册 §4.1](../../docs/data-refinery-使用手册.md)。
 
 输出到 `tools/data-refinery/output/md/`，保留 MinerU 生成的 `.md`、`images/` 及中间文件。
@@ -163,10 +167,10 @@ python src/extract_cli.py --source zgkao --dry-run
 python src/extract_cli.py --source smartedu
 ```
 
-只提取单个文件（按相对路径子串匹配，如某份漏抽的试卷）：
+只提取单份卷 / 单本书（关键词分词匹配，所有词都命中）：
 
 ```bash
-python src/extract_cli.py --file "2024/数学-初三(下)-202407-西城-模拟二-试卷"
+python src/extract_cli.py --file "2024 西城 模拟二"      # 顺序无所谓，差一个词就不命中
 ```
 
 输出到 `tools/data-refinery/output/extracted/`，每份 Markdown 镜像一个 `<stem>.jsonl`（如 `page_001.jsonl`、`<试卷名>.jsonl`），多页教材各自独立、互不覆盖。
@@ -179,11 +183,11 @@ python src/extract_cli.py --file "2024/数学-初三(下)-202407-西城-模拟�
 python src/publish_cli.py --source zgkao --dry-run
 python src/publish_cli.py --source smartedu
 
-# 只发布某一卷试卷 / 某一本教材（rel_path 子串匹配）
+# 只发布某一卷试卷 / 某一本教材（关键词分词匹配）
 python src/publish_cli.py --book "数学-初三(上)-202507-海淀-（上）期末考-试卷"
 ```
 
-> `--dry-run` 只按 `--source`/`--pages` 过滤，**不响应 `--book`**（会列出全部文件），不能用它验证单卷命中。
+> `--dry-run` 与正式发布同口径应用 `--source`/`--pages`/`--book`，可以用它验证单卷命中。
 
 读 `output/extracted/` 的 `<stem>.jsonl`，把 `content`/`options`/`explanation` 里的原始图片引用 `![](images/xxx.jpg)` 按 §9 规范名（`stem_NN`、`opt_{label}`、`explain_NN`、`page_{N}_fig_{NN}`）物化到 `output/assets/`，改写为规范相对路径，并填充 `content_metadata.images[]` / `options[].image_url`。产物写到 `output/published/`（与 extracted 同构的 `<stem>.jsonl`）。
 
@@ -272,6 +276,9 @@ python src/answer_importer_cli.py --list-papers 海淀                    # 标�
 **从 import_cli 一条命令导入（2026-11-05）**：`--answers PATH` 把答案文件交给第 6 步，不必单独跑本 CLI。
 
 ```bash
+# 单卷：按关键词定位（空格分词、所有词都命中；命中多份会让你选）
+python src/import_cli.py --subject 道法 --file "2026 海淀"
+
 # 新卷：导入 + 答案一次走完（非 dry-run 自动 --apply --yes）
 python src/import_cli.py --subject 数学 --files "西城35中" \
   --answers output/answers/西城35中期中练习1.md
@@ -282,7 +289,7 @@ python src/import_cli.py --answers output/answers/西城35中期中练习1.md
 
 **只给 `--answers`（不带 `--file/--files/--subject` 等范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入** —— 避免为了补答案把全库管线重跑一遍。想「新卷导入 + 答案一次走完」就同时给范围参数（`--subject/--files`）。
 
-`.md` 定位优先级：**显式 `--paper-id` > `--file/--files` 卷名子串反查 > 文档里的 `# 试卷：` 标题**。卷名重名（如「昌平一中」同时命中语文卷和数学卷）时用 `--paper-id` 指定，不要用 `--file`（给了范围参数会连带跑前 5 步）：
+`.md` 定位优先级：**显式 `--paper-id` > `--file/--files` 卷名关键词反查（须唯一命中）> 文档里的 `# 试卷：` 标题**。卷名重名（如「昌平一中」同时命中语文卷和数学卷）时用 `--paper-id` 指定，不要用 `--file`（给了范围参数会连带跑前 5 步）：
 
 ```bash
 python src/import_cli.py --answers 昌平一中题解.md --paper-id 362

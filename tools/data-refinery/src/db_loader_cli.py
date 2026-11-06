@@ -43,7 +43,7 @@ def parse_args(argv=None):
     parser.add_argument("--stage", help="学段过滤（初中/小学/高中 或 junior/primary/senior），逗号分隔多个")
     parser.add_argument("--term", help="学期过滤（上/下 或 first/second；教材也可写 上册/下册），逗号分隔多个")
     parser.add_argument("--year", help="年份过滤（4 位，仅试卷素材，如 2025），逗号分隔多个")
-    parser.add_argument("--file", help="只加载相对路径包含该子串的素材（单卷/单书，如 '202507-海淀-模拟二-试卷'）")
+    parser.add_argument("--file", help="关键词（空格等分隔符分词，所有词都命中相对路径，如 '2025 海淀'）")
     kind_group = parser.add_mutually_exclusive_group()
     kind_group.add_argument("--questions-only", action="store_true", help="只加载试卷题，不碰教材卡")
     kind_group.add_argument("--cards-only", action="store_true", help="只加载教材卡，不碰试卷题")

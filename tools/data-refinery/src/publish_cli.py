@@ -20,7 +20,7 @@ from config import RefineryConfig
 from image_rewrite import rewrite_item
 from material_kind import SCOPE_KIND, kind_of_jsonl
 from models import ExamQuestion, TextbookCard
-from scope_filter import build_scope, describe, match_scope
+from scope_filter import build_scope, describe, match_keyword, match_scope
 from subject_codes import subject_code_for_path as _subject_code_for
 
 # 发布口径版本：改写范围/规则变化时 +1。旧版本的产物会被**自动重发**，
@@ -34,7 +34,7 @@ def parse_args(argv=None):
     parser.add_argument("--input-dir", help="extract 产物目录（默认 output/extracted）")
     parser.add_argument("--output-dir", help="published 输出目录（默认 output/published）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
-    parser.add_argument("--book", help="只发布匹配的教材/试卷（rel_path 子串匹配，如'九年级/上册'）")
+    parser.add_argument("--book", help="只发布命中的教材/试卷（空格等分隔符分词，所有词都命中 rel_path，如 '九年级 上册'）")
     parser.add_argument("--pages", help="页码过滤，如 '1-6' 或 '1,3,5-8'")
     parser.add_argument("--subject", help="学科过滤（中文名或 code，如 语文 / chinese），逗号分隔多个")
     parser.add_argument("--stage", help="学段过滤（初中/小学/高中 或 junior/primary/senior），逗号分隔多个")
@@ -133,7 +133,7 @@ def main(argv=None):
             if not _match_source(rel, args.source):
                 continue
             # --book 与正式发布同口径（否则预演范围偏大，误导重发布判断）
-            if args.book and args.book not in str(rel):
+            if args.book and not match_keyword(rel, args.book):
                 continue
             print(f"[dry-run] {rel}.jsonl ({_kind_for(p)})")
         return
@@ -146,7 +146,7 @@ def main(argv=None):
             rel_file = rel.with_suffix("")
             if not _match_source(rel_file, args.source):
                 continue
-            if args.book and args.book not in str(rel_file):
+            if args.book and not match_keyword(rel_file, args.book):
                 continue
             key = str(rel_file)
             if checkpoint.is_published(key):
@@ -167,7 +167,7 @@ def main(argv=None):
         rel_file = rel.with_suffix("")  # 去掉 .jsonl
         if not _match_source(rel_file, args.source):
             continue
-        if args.book and args.book not in str(rel_file):
+        if args.book and not match_keyword(rel_file, args.book):
             continue
         key = str(rel_file)
         src_hash = hashlib.sha256(jsonl_path.read_bytes()).hexdigest()

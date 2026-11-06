@@ -119,6 +119,15 @@ class TestMatchMaterials:
         m = Material(kind="images", source_dir=Path("."), rel_path=Path("数学/初中/书A"), input_paths=[])
         assert _match_materials(m, ["书B", "书A"]) is True
 
+    def test_tokens_within_one_entry_must_all_match(self):
+        """单个条目内空格分词：所有词都命中才算（条目之间仍是 OR）。"""
+        m = Material(kind="images", source_dir=Path("."),
+                     rel_path=Path("数学/初中/人教版/九年级/上册/书A"), input_paths=[])
+        assert _match_materials(m, ["九年级 上册 书A"]) is True
+        assert _match_materials(m, ["九年级 下册 书A"]) is False
+        # 条目之间 OR：第一条整条不中，第二条中，仍算命中
+        assert _match_materials(m, ["九年级 下册", "书A"]) is True
+
 
 class TestParseDimensions:
     def test_paper_flat_layout(self):

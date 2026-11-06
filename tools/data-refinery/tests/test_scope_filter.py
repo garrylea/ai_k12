@@ -1,9 +1,10 @@
-"""统一范围过滤（scope_filter）单测：维度解析 / 别名归一 / 交集匹配。"""
+"""统一范围过滤（scope_filter）单测：维度解析 / 别名归一 / 交集匹配 / 关键词分词。"""
 
 from pathlib import Path
 
 from scope_filter import (
-    build_scope, describe, match_scope, parse_dimensions, scope_argv,
+    build_scope, describe, match_keyword, match_scope, parse_dimensions,
+    scope_argv, split_keyword,
 )
 
 
@@ -32,10 +33,52 @@ def test_match_scope_intersection():
     assert not match_scope("数学/初中/second/2025/卷", scope)
 
 
-def test_match_scope_file_substring():
-    scope = build_scope(file="202507-海淀")
-    assert match_scope("语文/初中/second/2025/语文-初三(下)-202507-海淀-模拟二-试卷", scope)
-    assert not match_scope("语文/初中/second/2025/语文-初三(下)-202507-西城-模拟二-试卷", scope)
+def test_match_scope_file_tokens():
+    """`--file "2026 海淀"`：分词后逐个命中，不再要求整串连续。"""
+    scope = build_scope(file="2026 海淀")
+    paper = "道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治"
+    assert match_scope(paper, scope)
+    assert not match_scope("道法/初中/first/2026/2026北京西城初三（上）期中道德与法治", scope)
+    assert not match_scope("道法/初中/first/2025/2025北京海淀初三（上）期中道德与法治", scope)
+
+
+def test_match_keyword_separators_and_case():
+    paper = Path("语文/初中/second/2025/语文-初三(下)-202507-海淀-模拟二-试卷")
+    # 空格 / 全角空格 / 横线 / 下划线 / 斜杠 / 中点 / 顿号 都算分隔符
+    for keyword in ("2025 海淀", "2025　海淀", "2025-海淀", "2025_海淀",
+                    "2025/海淀", "海淀·2025", "2025、海淀"):
+        assert match_keyword(paper, keyword), keyword
+    # 顺序无关
+    assert match_keyword(paper, "海淀 2025 模拟二")
+    # 有一个词不命中就整体不命中
+    assert not match_keyword(paper, "2025 西城")
+    # 大小写无关
+    assert match_keyword(Path("英语/初中/second/2025/Unit1-ABC"), "unit1 abc")
+
+
+def test_match_keyword_ignores_known_suffixes():
+    assert match_keyword(Path("语文/初中/second/2025/卷-x.md"), "卷-x")
+    assert match_keyword(Path("语文/初中/second/2025/卷-x.jsonl"), "卷-x.md") is False
+    # 点号是卷名的一部分时不剥（只有已知产物后缀才剥）
+    assert match_keyword(Path("数学/初中/second/2025/模拟.二"), "模拟.二")
+
+
+def test_match_keyword_empty_does_not_filter():
+    assert match_keyword("任意/路径", None)
+    assert match_keyword("任意/路径", "")
+    assert match_keyword("任意/路径", "  -／、 ")   # 纯分隔符 = 没给关键词
+
+
+def test_split_keyword_dedupes_and_keeps_order():
+    assert split_keyword("2026 海淀 2026") == ("2026", "海淀")
+    assert split_keyword(None) == ()
+
+
+def test_scope_file_tokens_cached():
+    scope = build_scope(file="2026 海淀")
+    assert scope.file_tokens == ("2026", "海淀")
+    assert scope.active
+    assert describe(scope) == "file~2026 海淀"   # describe 仍显示原串
 
 
 def test_match_scope_inactive_matches_all():

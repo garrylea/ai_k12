@@ -228,11 +228,12 @@ python src/crawler_cli.py --site smartedu --subject 数学 --level 初中 --dry-
 | `--stage` | `初中` / `junior`（`小学/小学 primary`、`高中/senior`） | 学段 |
 | `--term` | `上/下`、`first/second`；教材也可写 `上册/下册` | 学期 |
 | `--year` | 4 位年份，如 `2025` | 仅试卷有该维度 |
-| `--file` | 相对路径子串，如 `202507-海淀` | 单卷/单书 |
+| `--file` | 关键词，空格等分隔符分词、**所有词都命中**，如 `2026 海淀` | 单卷/单书 |
 | `--pages` | `1-6` / `1,3,5-8` | 仅 extract/publish |
 
 - `--questions-only` / `--cards-only` 是入库阶段（db_loader）专属的题/卡类型过滤。
 - 干跑时各阶段会打印 `[scope] subject=语文 year=2025 -> N 个文件`，可先确认范围。
+- `--file` 是关键词不是文件路径：`--file "2026 海淀"` 会拆成 `2026` 与 `海淀`，两者都在相对路径里才命中（顺序无关、不分大小写）。`import_cli` 会在入口先解析一次——命中 0 份直接报「在 某个目录 下没有同时含「2026」「海淀」的素材」并退出，命中 1 份打印命中的是哪份，命中多份列编号让你选一份（非交互终端直接报错，不猜）。
 - 示例：`python src/extract_cli.py --subject 语文 --year 2025 --dry-run`
 - 注：`answer_extract_cli` 的 `--subject` 是「覆盖学科识别」（文件名不规范时用），不是过滤条件；它同样支持 `--stage/--term/--year` 过滤定位。
 
@@ -247,10 +248,10 @@ python src/convert_cli.py
 # 只转换 smartedu 教材
 python src/convert_cli.py --source smartedu
 
-# 只转换指定书目（子串匹配 rel_path，逗号分隔可多条；一条命中多本则全转）
+# 只转换指定书目（关键词分词匹配；逗号分隔多条，条目之间 OR；一条命中多本则全转）
 python src/convert_cli.py --source smartedu --materials "（根据2022年版课程标准修订）义务教育教科书·数学九年级上册"
 
-# 批量：列表文件，一行一个子串，# 注释，空行忽略
+# 批量：列表文件，一行一个关键词（可含空格），# 注释，空行忽略
 python src/convert_cli.py --source smartedu --materials-file books.txt
 
 # 按维度精确筛：2025 年 · 下学期 · 全部试卷
@@ -275,8 +276,8 @@ python src/convert_cli.py --dry-run
 | `--input-dir` | path | `tools/crawler/data` | 素材输入目录 |
 | `--output-dir` | path | `output`（输出根） | **输出根目录**：MD 落 `{该目录}/md/` 下，不是直接落该目录 |
 | `--source` | all / zgkao / smartedu | `all` | 按来源过滤 |
-| `--materials` | str | 空 | 只处理 rel_path 包含指定子串的素材，逗号分隔多条，与 `--materials-file` 取并集 |
-| `--materials-file` | path | 空 | 素材列表文件，一行一个子串，`#` 开头为注释，空行忽略 |
+| `--materials` | str | 空 | 只处理命中的素材：逗号分隔多条（条目间 OR），单条内空格等分词、所有词都命中；与 `--materials-file` 取并集 |
+| `--materials-file` | path | 空 | 素材列表文件，一行一个关键词，`#` 开头为注释，空行忽略 |
 | `--subject` | str | 空 | 学科过滤，精确匹配目录第 1 段（如 `数学`、`语文`），逗号分隔多个 |
 | `--stage` | str | 空 | 学段过滤，第 2 段（`初中`/`小学`/`高中`，或 `junior`/`primary`/`senior`），逗号分隔多个 |
 | `--term` | str | 空 | 学期过滤：试卷用 `first`/`second`（可写 `上`/`下`），教材用 `上册`/`下册`，逗号分隔多个 |
@@ -287,7 +288,8 @@ python src/convert_cli.py --dry-run
 
 **维度过滤（`--subject`/`--stage`/`--term`/`--year`）**：按素材 rel_path 的目录段精确匹配
 （试卷 `{学科}/{学段}/{first|second}/{年份}/{试卷名}`，教材 `{学科}/{学段}/{出版社}/{年级}/{上册|下册}/{书名}`），
-与 `--materials` 子串过滤**取交集**。每个参数都可用逗号分隔多个值——**同参数内取并集，参数之间取交集**，
+与 `--materials` 关键词过滤**取交集**。每个参数都可用逗号分隔多个值——**同参数内取并集，参数之间取交集**，
+`--materials` 单条内部再按空格等分词、**所有词都命中**（条目之间仍是 OR）。
 如 `--year 2026,2024 --subject 数学,物理` = 这两年的数学和物理试卷。学期中英文互通
 （`下` = `second` = `下册`，`上` = `first` = `上册`），学段中英文互通（`初中` = `junior`）。
 `--year` 只对试卷有效——教材路径不含年份，带 `--year` 筛教材必为空。
@@ -321,7 +323,7 @@ python src/toc_parse_cli.py --subject 数学 --publisher 人教版
 # 组合过滤：数学 人教版 九年级上册
 python src/toc_parse_cli.py --subject 数学 --publisher 人教版 --grade 九上
 
-# 路径子串匹配（兼容旧方式）
+# 关键词分词匹配（如 `--book "九年级 下册"`，所有词都命中）
 python src/toc_parse_cli.py --book "九年级/下册"
 
 # 重新解析
@@ -340,7 +342,7 @@ python src/toc_parse_cli.py --dry-run
 | `--publisher` | str | — | 出版社过滤（如 人教版） |
 | `--grade` | str | — | 年级过滤，支持简写：`九上`→九年级上册、`9上`→九年级上册 |
 | `--term` | str | — | 学期过滤：上册/下册。`--grade` 简写已含学期时无需单独指定 |
-| `--book` | str | — | 路径子串匹配（兼容旧方式，如 `九年级/下册`） |
+| `--book` | str | — | 关键词分词匹配，如 `九年级 下册`（所有词都命中） |
 | `--reconvert` | flag | 否 | 清 checkpoint + 删已有 JSON，重新解析 |
 | `--dry-run` | flag | 否 | 只打印目录页不解析 |
 
@@ -407,9 +409,9 @@ python src/extract_cli.py --dry-run
 | `--input-dir` | path | `output/md` | MD 输入目录 |
 | `--output-dir` | path | `output`（输出根） | **输出根目录**：JSONL 落 `{该目录}/extracted/` 下，不是直接落该目录 |
 | `--source` | all / zgkao / smartedu | `all` | 来源过滤 |
-| `--file` | str | — | 文件名子串匹配 |
+| `--file` | str | — | 关键词匹配（空格等分词、所有词都命中相对路径） |
 | `--pages` | str | — | 页码过滤，如 `1-6` 或 `1,3,5-8` |
-| `--book` | str | — | 教材路径子串匹配，如 `九年级/上册` |
+| `--book` | str | — | 教材路径关键词匹配，如 `九年级 上册` |
 | `--force` | flag | 否 | 忽略 checkpoint，不删已有输出 |
 | `--reconvert` | flag | 否 | 清 checkpoint + 删已有 JSONL，重新提取 |
 | `--toc` | path | — | TOC JSON 路径，启用 lesson_id 校验+修正（单文件模式） |
@@ -434,7 +436,7 @@ python src/publish_cli.py
 # 只发布 smartedu
 python src/publish_cli.py --source smartedu
 
-# 只发布某一卷试卷 / 某一本教材（rel_path 子串匹配）
+# 只发布某一卷试卷 / 某一本教材（关键词分词匹配）
 python src/publish_cli.py --book "数学-初三(上)-202507-海淀-（上）期末考-试卷"
 
 # 只发布指定页（如教材第 8-20 页）
@@ -455,11 +457,11 @@ python src/publish_cli.py --dry-run
 | `--input-dir` | path | `output/extracted` | extracted JSONL 目录 |
 | `--output-dir` | path | `output/published` | published 输出目录 |
 | `--source` | all / zgkao / smartedu | `all` | 来源过滤 |
-| `--book` | str | — | 教材/试卷路径子串匹配，如 `数学-初三(上)-202507-海淀-（上）期末考-试卷` |
+| `--book` | str | — | 教材/试卷关键词匹配（空格等分词、所有词都命中），如 `2025 海淀 期末考` |
 | `--pages` | str | — | 页码过滤，如 `1-6` 或 `1,3,5-8`（仅 page_*.jsonl，试卷/答案聚合文件不受影响） |
 | `--force` | flag | 否 | 忽略 checkpoint |
 | `--reconvert` | flag | 否 | 清 checkpoint + 删已有输出 |
-| `--dry-run` | flag | 否 | 只打印不发布（**只按 `--source`/`--pages` 过滤，不响应 `--book`**，会列出全部文件） |
+| `--dry-run` | flag | 否 | 只打印不发布（与正式发布同口径应用 `--source`/`--pages`/`--book`） |
 
 **输出**：`output/published/…`（JSONL，图片路径已改写）+ `output/assets/…`（物化图片）
 
@@ -537,7 +539,7 @@ python src/db_loader_cli.py --reload-source "数学-初三(上)-202507-海淀-�
 # 只导语文的试卷题（不碰任何教材卡）
 python src/db_loader_cli.py --load-cards --subject 语文 --questions-only
 
-# 只导某一张卷 / 某一本书（相对路径子串）
+# 只导某一张卷 / 某一本书（关键词分词匹配）
 python src/db_loader_cli.py --load-cards --file "202507-海淀-模拟二-试卷"
 
 # 只导数学教材卡
@@ -563,7 +565,7 @@ python src/db_loader_cli.py --load-cards --subject 语文 --questions-only --dry
 | `--reload-source` | str | — | 模式 D：只重载该卷（文件名去扩展名）；published 下找不到则报错退出 |
 | `--purge-paper-data` | flag | 否 | 配合 `--reload-source`：该卷题被业务表引用时，显式删这些业务记录后重载（**不可恢复**） |
 | `--subject` | str | — | 模式 E：只加载指定学科（code 或中文名，逗号分隔），按素材路径首段匹配 |
-| `--file` | str | — | 模式 E：只加载相对路径包含该子串的素材（单卷/单书） |
+| `--file` | str | — | 模式 E：只加载命中的素材（空格等分词、所有词都命中相对路径；单卷/单书，如 `2025 海淀`） |
 | `--questions-only` | flag | 否 | 模式 E：只加载试卷题，不碰教材卡 |
 | `--cards-only` | flag | 否 | 模式 E：只加载教材卡，不碰试卷题 |
 | `--purge-business-data` | flag | 否 | full-reload 前清空引用 cards/questions 的业务数据（answers/错题本/变式题/作业提交/progress，**不可恢复**）；默认遇业务数据报错退出 |
@@ -634,7 +636,7 @@ python src/pipeline_cli.py --dry-run                # 试运行
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--source` | all / zgkao / smartedu | `all` | 来源过滤（zgkao 自动跳过 toc/merge——试卷无目录） |
-| `--book` | str | — | 只处理指定书目（rel_path 子串匹配），作用于 toc_parse 和 extract |
+| `--book` | str | — | 只处理指定书目（关键词分词匹配，所有词都命中），作用于 toc_parse 和 extract |
 | `--pages` | str | — | 只提取指定页码（如 `8-30`），作用于 extract 和 publish |
 | `--reconvert` | flag | 否 | 忽略已提取/已发布记录，重新切割 + 标注 + 发布（仅作用 extract/publish；作用域由 `--book`/`--pages` 限定，未限定则全量重做；目录重解析用 `toc_parse_cli --reconvert` 单独跑） |
 | `--dry-run` | flag | 否 | 所有步骤只打印 |
@@ -658,7 +660,7 @@ card 分析发现的、目录页没有的新小节（如 `26.1.1`）由 `toc_mer
 
 把人工或 AI 产出的题目内容回写 `questions` 表：`answer`（答案）、`approach`（解题思路）、`explanation`（详细解析）、`type`（题型）。默认 dry-run 只出 diff 报告，`--apply` 才写入；幂等可重跑。
 
-> **从试卷自动生成答案文档（2026-10-28）**：`import_cli` 第 5 步已自动完成这一步（默认只补空答案）；需要单独重跑或人工修正时，再按本节两段式操作：先跑 `python src/answer_extract_cli.py --file "<试卷 md 相对路径子串>"`，按学科 case 从「参考答案」段提取（纯程序，不调 LLM），产出 `output/answers/<卷名>.md`，再用本文档的 `--doc --paper-id` 回写。语文/数学走各自 case；提取不到的答案留空并记 `output/answer_issues.jsonl`，绝不猜。完整命令见 `docs/data-refinery-管线总结与后续.md` §4。
+> **从试卷自动生成答案文档（2026-10-28）**：`import_cli` 第 5 步已自动完成这一步（默认只补空答案）；需要单独重跑或人工修正时，再按本节两段式操作：先跑 `python src/answer_extract_cli.py --file "<试卷关键词，如 2026 海淀>"`，按学科 case 从「参考答案」段提取（纯程序，不调 LLM），产出 `output/answers/<卷名>.md`，再用本文档的 `--doc --paper-id` 回写。语文/数学走各自 case；提取不到的答案留空并记 `output/answer_issues.jsonl`，绝不猜。完整命令见 `docs/data-refinery-管线总结与后续.md` §4。
 
 **输入一：JSONL（推荐，可编程批量）** 每行一条记录：
 
@@ -987,7 +989,7 @@ python src/import_cli.py --subject 数学 --files "西城35中" \
 python src/import_cli.py --answers output/answers/西城35中期中练习1.md
 ```
 
-**只给 `--answers`（不带范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入**；同时给 `--subject/--files` 才是「新卷导入 + 答案一次走完」。`.md` 定位优先级：**显式 `--paper-id` > `--file/--files` 卷名子串反查 > 文档 `# 试卷：` 标题**；`.jsonl` 直接走 `--records`（自带定位，`--paper-id` 忽略）。非 dry-run 自动 `--apply --yes`。
+**只给 `--answers`（不带范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入**；同时给 `--subject/--files` 才是「新卷导入 + 答案一次走完」。`.md` 定位优先级：**显式 `--paper-id` > `--file/--files` 卷名关键词反查（须唯一命中）> 文档 `# 试卷：` 标题**；`.jsonl` 直接走 `--records`（自带定位，`--paper-id` 忽略）。非 dry-run 自动 `--apply --yes`。
 
 卷名重名时（例：「昌平一中」同时命中 2024 语文卷 #26 与 2026 数学卷 #362，报「无法唯一定位」）用 `--paper-id` 指定，**不要用 `--file`** —— 给了范围参数就不再是「只导答案」，前 5 步会一起跑：
 
@@ -1062,7 +1064,7 @@ python src/import_cli.py --subject 语文 --skip-answers
 
 - `--redo` = 重转（MinerU）+ 重抽 + 重发布；`--reconvert`/`--re-extract`/`--re-publish` 可单独用。
 - `--questions-only` / `--cards-only` 控制入库只写题或只写卡。
-- **`--file` 不写 `--subject` 时有多学科守卫**：子串命中多个学科（如 `202507-海淀-模拟二-试卷` 同时命中语文/数学/物理）会**拒绝执行**并列出学科；`--dry-run` 可继续查看完整清单。学科始终由素材路径首段判定，不会导错科目，但范围会超出预期——建议要么加 `--subject`，要么把 `--file` 写完整（如 `语文/初中/second/2025/...`）。
+- **`--file` 是关键词**：按空格（含全角）、`-`、`_`、`/`、`·`、`、` 分词，所有词都出现在素材相对路径里才命中（顺序无关）。入口会先解析一次：0 命中打印「在 <目录> 下没有同时含「…」「…」的素材 + 逐词命中数」并退出（不空跑 9 步）；1 命中打印 `[解析] 关键词 → 完整相对路径` 后继续；多命中列编号让你选一份（**非交互终端直接报错**，不替用户猜）。`--files "A,B"` 仍按逗号分份，空格不是分份符（如 `--files "2025 海淀,2026 海淀"` 是两份）。
 - **答案回填**（第 5 步）：默认 `--where answer_empty`，只补空答案，人工改过的行一律不动；`--re-answer` 才覆盖。卷内没有「参考答案」段的会跳过并打印 `[answers] 跳过（没有参考答案段）`。仍可单独跑 `answer_extract_cli` → `answer_importer_cli`（§4.8）做人工修正。
 
 ### 5.1 一站式（pipeline_cli，推荐）

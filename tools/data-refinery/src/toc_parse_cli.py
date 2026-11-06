@@ -9,6 +9,7 @@ from config import RefineryConfig
 from llm import create_llm_client
 from extract import _parse_json_object
 from extract_cli import _load_prompt
+from scope_filter import match_keyword
 from textbook_profile import TextbookProfile, get_profile, profile_for_md_path
 
 
@@ -266,8 +267,8 @@ def _build_textbook_list(md_dir: Path, args) -> list[Path]:
         if term_filter and parts[4] != term_filter:
             continue
 
-        # 7. book 子串匹配
-        if args.book and args.book not in rel:
+        # 7. book 关键词匹配（分词，所有词命中）
+        if args.book and not match_keyword(rel, args.book):
             continue
 
         textbooks.append(d)

@@ -30,6 +30,7 @@ from config import RefineryConfig  # noqa: E402
 from db_loader import content_hash  # noqa: E402
 from image_rewrite import MissingImageError, rewrite_fields  # noqa: E402
 from manual_fix import mark_issue  # noqa: E402
+from scope_filter import match_keyword  # noqa: E402
 from subject_codes import subject_code_for_parts  # noqa: E402
 
 FIXES_DIR = ROOT / "output" / "manual_fixes"
@@ -202,7 +203,7 @@ def pending_records(subject: str | None = None, source: str | None = None,
                 continue
             if subject and Path(rec.get("rel_path", "")).parts[:1] != (subject,):
                 continue
-            if source and source not in rec.get("source", ""):
+            if source and not match_keyword(rec.get("source", ""), source):
                 continue
             rec["_file"] = str(f)
             out.append(rec)
@@ -224,7 +225,7 @@ def needing_replay(subject: str | None = None, source: str | None = None,
                 continue
             if subject and Path(rec.get("rel_path", "")).parts[:1] != (subject,):
                 continue
-            if source and source not in rec.get("source", ""):
+            if source and not match_keyword(rec.get("source", ""), source):
                 continue
             rec["_file"] = str(f)
             recs.append(rec)

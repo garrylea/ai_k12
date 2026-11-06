@@ -1,4 +1,6 @@
-"""import_cli 单测：各阶段 argv 拼装 + 阶段顺序/跳过。"""
+"""import_cli 单测：各阶段 argv 拼装 + 阶段顺序/跳过 + --file 入口解析。"""
+
+from pathlib import Path
 
 import import_cli
 from import_cli import (
@@ -87,35 +89,134 @@ def _stub_stages(monkeypatch):
 
 
 def test_file_only_multi_subject_refused(monkeypatch, capsys):
+    """多学科命中不再直接拒绝，而是列出来让人选（非交互终端才报错退出）。"""
     calls = _stub_stages(monkeypatch)
-    monkeypatch.setattr(import_cli, "_subjects_for_file", lambda args: {"语文", "数学", "物理"})
-    rc = import_cli.main(["--file", "202507-海淀-模拟二-试卷"])
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("语文/初中/second/2025/202507-海淀-模拟二-试卷"),
+        Path("数学/初中/second/2025/202507-海淀-模拟二-试卷"),
+        Path("物理/初中/second/2025/202507-海淀-模拟二-试卷"),
+    ], []))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    rc = import_cli.main(["--file", "202507 海淀 模拟二"])
     out = capsys.readouterr().out
     assert rc == 2
-    assert "命中了多个学科" in out and "拒绝执行" in out
+    assert "命中 3 份" in out and "非交互终端无法选择" in out
     assert calls == []  # 一步都不跑
 
 
 def test_file_only_multi_subject_dry_run_continues(monkeypatch, capsys):
+    """dry-run 是只读的：多命中列出候选并继续预演，不逼用户选。"""
     calls = _stub_stages(monkeypatch)
-    monkeypatch.setattr(import_cli, "_subjects_for_file", lambda args: {"语文", "数学"})
-    rc = import_cli.main(["--file", "202507-海淀", "--dry-run"])
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("语文/初中/second/2025/202507-海淀-模拟二-试卷"),
+        Path("数学/初中/second/2025/202507-海淀-模拟二-试卷"),
+    ], []))
+
+    rc = import_cli.main(["--file", "202507 海淀", "--dry-run"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "dry-run 继续" in out
+    assert "命中 2 份" in out and "按全部候选预演" in out
     assert calls == ["convert_main", "extract_main", "publish_main", "db_loader_main"]
 
 
-def test_file_with_subject_skips_guard(monkeypatch):
+def test_file_with_subject_narrows_candidates(monkeypatch):
     calls = _stub_stages(monkeypatch)
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("语文/初中/second/2025/202507-海淀-模拟二-试卷"),
+        Path("数学/初中/second/2025/202507-海淀-模拟二-试卷"),
+    ], []))
 
-    def boom(args):
-        raise AssertionError("指定 --subject 时不应再扫描学科")
-
-    monkeypatch.setattr(import_cli, "_subjects_for_file", boom)
-    rc = import_cli.main(["--file", "202507-海淀", "--subject", "语文"])
+    rc = import_cli.main(["--file", "202507 海淀", "--subject", "语文"])
     assert rc == 0
     assert len(calls) == 4
+
+
+def test_zero_hit_reports_what_is_missing(monkeypatch, capsys):
+    """0 命中：说清在哪个范围、缺哪些词，并列出该范围现有素材；不跑任何阶段。"""
+    calls = _stub_stages(monkeypatch)
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("道法/初中/first/2026/2026北京西城初三（上）期中道德与法治"),
+    ], []))
+
+    rc = import_cli.main(["--subject", "道法", "--year", "2026", "--file", "2026 海淀"])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "在 道法/初中/first/2026 下没有同时含「2026」「海淀」的素材" in out
+    assert "逐词命中：2026 → 1 份；海淀 → 0 份" in out
+    assert "该范围现有 1 份" in out
+    assert "2026北京西城" in out
+    assert calls == []
+
+
+def test_single_hit_rewrites_selector_for_all_stages(monkeypatch, capsys):
+    """1 命中：打印命中的是哪份，并把精确相对路径传给各阶段（不再用模糊关键词）。"""
+    seen = []
+    for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
+        monkeypatch.setattr(import_cli, name, lambda argv, n=name: seen.append((n, argv)))
+    monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治"),
+    ], []))
+
+    rc = import_cli.main(["--subject", "道法", "--file", "2026 海淀", "--skip-review"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "[解析] 2026 海淀 → 道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治" in out
+    for name, argv in seen:
+        flag = "--materials" if name == "convert_main" else ("--book" if name == "publish_main" else "--file")
+        assert argv[argv.index(flag) + 1] == "道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治"
+
+
+def test_multi_hit_tty_selects_one(monkeypatch, capsys):
+    """多命中 + 交互终端：选第 2 份后，各阶段只用第 2 份。"""
+    seen = []
+    for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
+        monkeypatch.setattr(import_cli, name, lambda argv, n=name: seen.append((n, argv)))
+    monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治"),
+        Path("道法/初中/first/2026/2026北京海淀·人大附中初三（上）期中道德与法治"),
+    ], []))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    answers = iter(["9\n", "2\n"])          # 第一次非法 → 重问；第二次选第 2 份
+    monkeypatch.setattr("sys.stdin.readline", lambda: next(answers))
+
+    rc = import_cli.main(["--file", "2026 海淀", "--skip-review"])
+    assert rc == 0
+    assert "请输入 1–2 之间的编号" in capsys.readouterr().out
+    for _, argv in seen:
+        joined = " ".join(argv)
+        assert "人大附中" in joined
+        assert "2026北京海淀初三（上）期中道德与法治" not in joined
+
+
+def test_cancel_multi_hit_does_nothing(monkeypatch, capsys):
+    calls = _stub_stages(monkeypatch)
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("道法/初中/first/2026/卷A"),
+        Path("道法/初中/first/2026/卷B"),
+    ], []))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdin.readline", lambda: "\n")
+
+    rc = import_cli.main(["--file", "卷"])
+    assert rc == 2
+    assert "未选择，未做任何改动" in capsys.readouterr().out
+    assert calls == []
+
+
+def test_scan_error_is_not_reported_as_zero_hit(monkeypatch, capsys):
+    _stub_stages(monkeypatch)
+    monkeypatch.setattr(import_cli, "_collect_candidates",
+                        lambda cfg: ([], ["扫描素材目录 /x 失败：boom"]))
+
+    rc = import_cli.main(["--file", "2026 海淀"])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "扫描素材目录 /x 失败：boom" in out
+    assert "素材目录扫描失败，无法判断是否命中" in out
+    assert "未命中" not in out
 
 
 def _stub_all(monkeypatch):
@@ -544,3 +645,79 @@ def test_answers_only_detection():
     assert not import_cli._answers_only(
         parse_args(["--answers", "a.md", "--re-extract"]))
     assert not import_cli._answers_only(parse_args(["--subject", "数学"]))
+
+
+# ---------- 候选收集（卷/书粒度去重） ----------
+
+def _touch(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}", encoding="utf-8")
+
+
+def _cfg(tmp_path):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(input_dir=tmp_path / "data", output_dir=tmp_path / "out")
+
+
+def test_collect_candidates_dedupes_pdf_and_md(tmp_path):
+    """同一份卷的 pdf 与已转 md 不能算成两份。"""
+    cfg = _cfg(tmp_path)
+    _touch(cfg.input_dir / "道法/初中/first/2026/卷子.pdf")
+    _touch(cfg.output_dir / "md/道法/初中/first/2026/卷子.md")
+
+    cands, errors = import_cli._collect_candidates(cfg)
+    assert [c.as_posix() for c in cands] == ["道法/初中/first/2026/卷子"]
+    assert errors == []
+
+
+def test_collect_candidates_collapses_book_pages(tmp_path):
+    """教材拆页 page_001/002 收敛成一本书，不能算成 N 份。"""
+    cfg = _cfg(tmp_path)
+    book = cfg.output_dir / "md/数学/初中/人教版/九年级/上册/书A"
+    _touch(book / "page_001.md")
+    _touch(book / "page_002.md")
+
+    cands, _ = import_cli._collect_candidates(cfg)
+    assert [c.as_posix() for c in cands] == ["数学/初中/人教版/九年级/上册/书A"]
+
+
+def test_collect_candidates_nested_layout_not_doubled(tmp_path):
+    """嵌套布局 卷名/卷名.md 只算一份（不能变成 卷名/卷名/卷名）。"""
+    cfg = _cfg(tmp_path)
+    _touch(cfg.output_dir / "md/语文/初中/second/2025/某卷/某卷.md")
+
+    cands, _ = import_cli._collect_candidates(cfg)
+    assert [c.as_posix() for c in cands] == ["语文/初中/second/2025/某卷"]
+
+
+def test_collect_candidates_records_scan_error(tmp_path, monkeypatch):
+    """扫描异常必须上报，不能静默吞掉变成「0 命中」。"""
+    import scanner
+
+    class Boom:
+        def __init__(self, *_a, **_k):
+            raise RuntimeError("权限不足")
+
+    monkeypatch.setattr(scanner, "MaterialScanner", Boom)
+    cands, errors = import_cli._collect_candidates(_cfg(tmp_path))
+    assert cands == []
+    assert any("扫描素材目录" in e and "权限不足" in e for e in errors)
+
+
+def test_files_batch_resolves_each_keyword(monkeypatch):
+    """--files 按逗号分份，每份各自解析一次（空格是同份内部的关键词）。"""
+    monkeypatch.delenv  # noqa: B018  (占位，说明这里不依赖环境)
+    stub_calls = []
+    for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
+        monkeypatch.setattr(import_cli, name, lambda argv, n=name: 0)
+    monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
+
+    def fake_collect(cfg):
+        stub_calls.append(1)
+        return ([Path("物理/初中/second/2025/一零一中学-期中-试卷"),
+                 Path("物理/初中/second/2025/人大附中-期中-试卷")], [])
+
+    monkeypatch.setattr(import_cli, "_collect_candidates", fake_collect)
+    import_cli.main(["--subject", "物理", "--files", "一零一中学,人大附中", "--skip-review"])
+    assert len(stub_calls) == 2

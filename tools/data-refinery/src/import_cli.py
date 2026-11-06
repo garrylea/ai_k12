@@ -6,8 +6,16 @@
     python src/import_cli.py --subject 物理 --files "一零一中学,人大附中"  # 一次导入多份卷
     python src/import_cli.py --subject 语文 --year 2025 --dry-run   # 先看范围
     python src/import_cli.py --subject 语文 --year 2025             # PDF → md → jsonl → 题库
-    python src/import_cli.py --file "202507-海淀"                    # 单卷导入
+    python src/import_cli.py --subject 道法 --file "2026 海淀"       # 关键词定位单卷
     python src/import_cli.py --answers 题解.md --paper-id 362         # 卷名重名时指定卷
+
+`--file` 是**关键词**不是文件路径，也不是一段连续子串：按空格等分隔符分词，
+所有词都出现在素材相对路径里才算命中（顺序无关）。入口会先解析一次：
+
+- 命中 0 份 → 打印「在 道法/初中/first/2026 下没有同时含「2026」「海淀」的素材」并退出，
+  不会空跑后面 9 步；
+- 命中 1 份 → 打印命中的是哪一份，继续；
+- 命中多份 → 列编号选一份（非交互终端直接报错退出，不猜）。
 
 设计原则（与 db_loader 的 P0/P1 一致）：
 - **只碰指定范围**：每个子阶段都带同样的范围参数；未指定范围时才会全量。
@@ -27,6 +35,7 @@
 
 import argparse
 import copy
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -38,7 +47,10 @@ from db_loader_cli import main as db_loader_main
 from extract_cli import main as extract_main
 from paper_meta_cli import main as paper_meta_main
 from publish_cli import main as publish_main
-from scope_filter import add_scope_args, describe, scope_argv, scope_from_args
+from scope_filter import (
+    add_scope_args, build_scope, describe, match_keyword, match_scope,
+    normalize_path, scope_argv, scope_from_args, scope_prefix, split_keyword,
+)
 
 
 def parse_args(argv=None):
@@ -110,11 +122,16 @@ def _common(args) -> list[str]:
     return ["--source", args.source] + scope_argv(args, include_file=False)
 
 
+def _stage_file(args) -> str | None:
+    """传给各阶段的文件范围：入口解析出唯一一份时用精确相对路径，否则用原始关键词。"""
+    return getattr(args, "_resolved_rel", None) or args.file
+
+
 def convert_argv(args) -> list[str]:
-    """convert：--file 映射为 --materials（同为 rel_path 子串）。"""
+    """convert：--file 映射为 --materials（同一套关键词匹配）。"""
     argv = _common(args)
-    if args.file:
-        argv += ["--materials", args.file]
+    if _stage_file(args):
+        argv += ["--materials", _stage_file(args)]
     if args.dry_run:
         argv.append("--dry-run")
     if args.reconvert or args.redo:
@@ -124,8 +141,8 @@ def convert_argv(args) -> list[str]:
 
 def extract_argv(args) -> list[str]:
     argv = _common(args)
-    if args.file:
-        argv += ["--file", args.file]
+    if _stage_file(args):
+        argv += ["--file", _stage_file(args)]
     if args.dry_run:
         argv.append("--dry-run")
     if args.re_extract or args.redo:
@@ -140,10 +157,10 @@ def extract_argv(args) -> list[str]:
 
 
 def publish_argv(args) -> list[str]:
-    """publish：没有 --file，用 --book（同样是 rel_path 子串）。"""
+    """publish：没有 --file，用 --book（同一套关键词匹配）。"""
     argv = _common(args)
-    if args.file:
-        argv += ["--book", args.file]
+    if _stage_file(args):
+        argv += ["--book", _stage_file(args)]
     if args.dry_run:
         argv.append("--dry-run")
     if args.re_publish or args.redo:
@@ -152,10 +169,10 @@ def publish_argv(args) -> list[str]:
 
 
 def meta_argv(args) -> list[str]:
-    """paper_meta_cli：与 extract 同样用 --file（rel_path 子串）。"""
+    """paper_meta_cli：与 extract 同样用 --file。"""
     argv = _common(args)
-    if args.file:
-        argv += ["--file", args.file]
+    if _stage_file(args):
+        argv += ["--file", _stage_file(args)]
     if args.dry_run:
         argv.append("--dry-run")
     return argv
@@ -164,8 +181,8 @@ def meta_argv(args) -> list[str]:
 def load_argv(args) -> list[str]:
     """db_loader：固定增量（--load-cards），绝不隐式 full-reload。"""
     argv = _common(args)
-    if args.file:
-        argv += ["--file", args.file]
+    if _stage_file(args):
+        argv += ["--file", _stage_file(args)]
     argv.append("--load-cards")
     if args.questions_only:
         argv.append("--questions-only")
@@ -176,37 +193,148 @@ def load_argv(args) -> list[str]:
     return argv
 
 
-def _matched_subjects(paths: list[str], keyword: str) -> set[str]:
-    """从一组相对路径里找出包含 keyword 的素材所属学科（路径首段）。"""
-    return {
-        rel.split("/", 1)[0]
-        for rel in paths
-        if keyword in rel and "/" in rel
-    }
+_PAGE_MD_RE = re.compile(r"^page_\d+$")
 
 
-def _scan_rel_paths(input_dir, md_dir) -> list[str]:
-    """收集素材相对路径：爬虫素材（PDF/图片） + 已转 md（--skip-convert 时也能判）。"""
-    rels: list[str] = []
+def _collect_candidates(cfg) -> tuple[list[Path], list[str]]:
+    """收集「卷 / 书」粒度的素材相对路径（去重）与扫描错误。
+
+    两处来源形状不同：爬虫素材里试卷是「父目录/文件名」，教材拆页是「书目录」；
+    md 里嵌套布局是 `卷名/卷名.md`、平面布局是 `卷名.md`、教材是 `书目录/page_001.md`。
+    统一收敛成同一粒度，否则一本教材会被算成 N 页、pdf+md 会被算成两份。
+    """
+    from markdown_scanner import MarkdownScanner
+    from scanner import MaterialScanner
+
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    errors: list[str] = []
+
+    def add(rel: Path) -> None:
+        key = rel.as_posix()
+        if key not in seen:
+            seen.add(key)
+            candidates.append(rel)
+
     try:
-        from scanner import MaterialScanner
+        for material in MaterialScanner(cfg.input_dir).scan():
+            add(material.rel_path)
+    except Exception as exc:                       # 扫描失败不能伪装成「0 命中」
+        errors.append(f"扫描素材目录 {cfg.input_dir} 失败：{exc}")
 
-        rels.extend(m.rel_path.as_posix() for m in MaterialScanner(input_dir).scan())
-    except Exception:
-        pass
+    md_dir = cfg.output_dir / "md"
     try:
-        rels.extend(p.relative_to(md_dir).as_posix() for p in md_dir.rglob("*.md"))
-    except Exception:
-        pass
-    return rels
+        for source in MarkdownScanner(md_dir).scan():
+            stem = source.md_path.stem
+            if _PAGE_MD_RE.match(stem) or source.rel_path.name == stem:
+                add(source.rel_path)               # 教材拆页 → 书目录；嵌套布局 → 卷目录
+            else:
+                add(source.rel_path / stem)        # 平面布局 → 卷名
+    except Exception as exc:
+        errors.append(f"扫描已转换目录 {md_dir} 失败：{exc}")
+
+    return candidates, errors
 
 
-def _subjects_for_file(args) -> set[str]:
-    """--file 子串命中的学科集合（用于多学科守卫）。"""
-    from config import RefineryConfig
+def _common_parent(paths: list[Path]) -> str:
+    """一组素材所在目录的最长公共前缀（0 命中文案里说「在哪个目录下没找到」）。"""
+    if not paths:
+        return ""
+    parts = [p.parent.parts for p in paths]
+    common: list[str] = []
+    for segment in zip(*parts):
+        if len(set(segment)) == 1:
+            common.append(segment[0])
+        else:
+            break
+    return "/".join(common)
 
-    cfg = RefineryConfig.from_env()
-    return _matched_subjects(_scan_rel_paths(cfg.input_dir, cfg.output_dir / "md"), args.file)
+
+def _print_no_match(args, scope, candidates: list[Path]) -> None:
+    """0 命中：说清在哪个范围、缺哪个词，并列出该范围现有的素材。"""
+    tokens = "".join(f"「{t}」" for t in split_keyword(args.file))
+    narrowed = [c for c in candidates if match_scope(c, scope)]
+    if narrowed:
+        where = _common_parent(narrowed) or "全部素材"
+        print(f"[未命中] 在 {where} 下没有同时含{tokens}的素材。", flush=True)
+        # 逐词点名：一眼看出是哪个词没找到（用户常写「年份 + 区县」，缺的往往就是区县）
+        counts = [(t, sum(1 for c in narrowed if t in normalize_path(c)))
+                  for t in split_keyword(args.file)]
+        print("         逐词命中：" + "；".join(f"{t} → {n} 份" for t, n in counts), flush=True)
+        print(f"         该范围现有 {len(narrowed)} 份：", flush=True)
+        # 相关度高的排前面：命中词数多的先显示，别把不相关的老卷顶在最上面
+        keywords = split_keyword(args.file)
+        ordered = sorted(narrowed,
+                         key=lambda c: -sum(t in normalize_path(c) for t in keywords))
+        for rel in ordered[:5]:
+            print(f"           - {rel.as_posix()}", flush=True)
+        if len(ordered) > 5:
+            print(f"           …另有 {len(ordered) - 5} 份", flush=True)
+        print("         换个关键词，或去掉 --year/--subject 扩大范围。", flush=True)
+    else:
+        where = scope_prefix(args.subject, args.stage, args.term, args.year) or "全部素材"
+        print(f"[未命中] 在 {where} 下没有任何素材 —— 检查 --subject/--stage/--year 是否写错。",
+              flush=True)
+
+
+def _ask_candidate(hits: list[Path]) -> Path | None:
+    """多命中：列编号让用户选一份；回车取消。"""
+    while True:
+        print(f"\n输入编号 1-{len(hits)}（直接回车取消）› ", end="", flush=True)
+        raw = (sys.stdin.readline() or "").strip()
+        if not raw:
+            print("[取消] 未选择，未做任何改动", flush=True)
+            return None
+        if raw.isdigit() and 1 <= int(raw) <= len(hits):
+            return hits[int(raw) - 1]
+        print(f"请输入 1–{len(hits)} 之间的编号", flush=True)
+
+
+def _resolve_file(args, cfg) -> int | None:
+    """把用户写的 `--file` 关键词解析成唯一一份素材；返回非 None 表示要中止（值即 rc）。
+
+    这是「一次导入只碰指定范围」的入口闸门：0 命中就说清没命中什么，
+    多命中就让人选一份，绝不猜、也不整批跑。
+    """
+    raw = args.file
+    if not raw:
+        return None
+
+    scope = build_scope(subject=args.subject, stage=args.stage, term=args.term, year=args.year)
+    candidates, errors = _collect_candidates(cfg)
+    hits = [c for c in candidates if match_scope(c, scope) and match_keyword(c, raw)]
+
+    if not hits:
+        if errors:
+            for err in errors:
+                print(f"[ERROR] {err}", flush=True)
+            print("[ERROR] 素材目录扫描失败，无法判断是否命中；修好后重跑本命令", flush=True)
+            return 2
+        _print_no_match(args, scope, candidates)
+        return 2
+
+    if len(hits) > 1:
+        print(f"[命中 {len(hits)} 份] 关键词 {raw} 需要收窄，先选一份：", flush=True)
+        for idx, rel in enumerate(hits, 1):
+            print(f"  {idx}. {rel.as_posix()}", flush=True)
+        if args.dry_run:
+            print("         [dry-run] 正式执行时会让你选一份；本次按全部候选预演", flush=True)
+            return None
+        if not sys.stdin.isatty():
+            print("[ERROR] 非交互终端无法选择，请把 --file 写得更精确"
+                  "（如再补区县/学校），或改用 --files 逐份指定", flush=True)
+            return 2
+        chosen = _ask_candidate(hits)
+        if chosen is None:
+            return 2
+    else:
+        chosen = hits[0]
+
+    args.file = chosen.name                     # 卷名/书名：第 7/8/9 步与 paper_id 反查用
+    args._resolved_rel = chosen.as_posix()      # 精确相对路径：五个路径阶段用
+    args._resolved_subject = chosen.parts[0] if chosen.parts else None
+    print(f"[解析] {raw} → {args._resolved_rel}", flush=True)
+    return None
 
 
 def _answers_entry(args):
@@ -223,6 +351,8 @@ def _lookup_paper_id(cfg, keyword: str) -> int | None:
     """按卷名/来源键子串在 exam_papers 里查 paper_id；唯一命中才返回。"""
     import pymysql
 
+    # LIKE 的通配符必须转义：卷名里出现 % 或 _（如「2025_一模」）会扩成通配，误命中别的卷
+    escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     conn = pymysql.connect(
         host=cfg.db_host, port=cfg.db_port, user=cfg.db_user,
         password=cfg.db_pass, database=cfg.db_name, charset="utf8mb4",
@@ -232,7 +362,7 @@ def _lookup_paper_id(cfg, keyword: str) -> int | None:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id FROM exam_papers WHERE title LIKE %s OR source_key LIKE %s",
-                (f"%{keyword}%", f"%{keyword}%"),
+                (f"%{escaped}%", f"%{escaped}%"),
             )
             rows = cur.fetchall()
         return int(rows[0][0]) if len(rows) == 1 else None
@@ -276,7 +406,8 @@ def _scan_entry(args):
     """识别问题扫描：按本次范围（学科 + 卷名子串）扫已提取的 jsonl。"""
     def _run(_argv) -> int:
         from recognition_scan import run as scan_run
-        issues = scan_run(args.subject or "物理", args.file, write=not args.dry_run)
+        issues = scan_run(args.subject or getattr(args, "_resolved_subject", None) or "物理",
+                          args.file, write=not args.dry_run)
         args._scanned_sources = {i["source"] for i in issues}
         if args.dry_run:
             for it in issues:
@@ -313,7 +444,7 @@ def _fix_entry(args):
         # 扫描只报它认得出的结构问题；PDF→MD 阶段丢图/丢字它未必能发现
         # （2026-11-03 汇文题6 一张图没截出来）。所以每次都在交互终端里问一句
         # 「还有哪道题要主动重录」，用户可直接粘「材料+题干+选项+图片」整段。
-        review_by_numbers(args.subject, args.file)
+        review_by_numbers(args.subject or getattr(args, "_resolved_subject", None), args.file)
         return 0
     return _run
 
@@ -344,20 +475,12 @@ def _execute(args) -> int:
     print(f"=== import_cli：范围 {describe(scope)} "
           f"{'(dry-run)' if args.dry_run else ''} ===", flush=True)
 
-    # 多学科守卫：只给 --file 不给 --subject 时，子串可能命中多科素材。
-    # 各阶段都会照单全收（学科由路径判定，不会导错，但会顺带改别的学科），
-    # 与「导一科不动别科」的原则冲突，直接拒绝并提示收窄范围。
-    if args.file and not args.subject:
-        subjects = _subjects_for_file(args)
-        if len(subjects) > 1:
-            print("[WARN] --file 子串命中了多个学科："
-                  f"{' / '.join(sorted(subjects))}", flush=True)
-            if not args.dry_run:
-                print("[ERROR] 拒绝执行：请加 --subject 指定学科，或用更精确的 --file"
-                      "（如 '语文/初中/second/2025/...'）后重试", flush=True)
-                print("        （--dry-run 可继续查看完整命中清单）", flush=True)
-                return 2
-            print("        dry-run 继续；正式执行前请加 --subject 收窄范围", flush=True)
+    # 入口解析：把 --file 关键词在「当前维度范围」里解析成一份素材。
+    # 0 命中就说清没命中什么（直接退出，不跑 9 步），多命中就让人选一份；
+    # 解析完 args.file 变成精确卷名，后续各阶段不会再靠模糊词扫到别的卷。
+    resolve_rc = _resolve_file(args, RefineryConfig.from_env())
+    if resolve_rc is not None:
+        return resolve_rc
 
     stages = []
     if not args.skip_convert:

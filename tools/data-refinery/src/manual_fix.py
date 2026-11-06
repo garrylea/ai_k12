@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 from cli_ui import Console
+from scope_filter import match_keyword
 from subject_codes import subject_code_for_path
 from subject_strategies import get_strategy
 
@@ -733,12 +734,12 @@ def mark_issue(source: str, group_order: int, status: str, *,
 
 def pending_issues(sources: set[str] | None = None,
                    file: str | None = None) -> list[dict]:
-    """取待处理的识别问题；sources 精确限定卷（import_cli 用），file 是卷名子串。"""
+    """取待处理的识别问题；sources 精确限定卷（import_cli 用），file 是卷名关键词。"""
     issues = [i for i in _read_jsonl(ISSUES_FILE) if i.get("status") == "pending"]
     if sources is not None:
         issues = [i for i in issues if i["source"] in sources]
     if file:
-        issues = [i for i in issues if file in i["source"]]
+        issues = [i for i in issues if match_keyword(i["source"], file)]
     return issues
 
 
@@ -904,7 +905,7 @@ def papers_in_scope(subject: str | None, file: str | None) -> list[dict]:
         if subject and str(rel_dir).split("/")[0] != subject:
             continue
         source = jsonl.stem
-        if file and file not in source:
+        if file and not match_keyword(source, file):
             continue
         md = md_root / rel_dir / f"{source}.md"
         pdf = locate_pdf(pdf_root, rel_dir, source)

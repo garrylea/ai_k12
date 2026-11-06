@@ -168,6 +168,29 @@ class TestPublishCli:
         assert (out / "published/数学/初中/人教版/九年级/上册/书A/page_001.jsonl").exists()
         assert not (out / "published/数学/初中/人教版/九年级/上册/书B/page_001.jsonl").exists()
 
+    def test_book_filter_splits_keywords(self, tmp_path):
+        """--book 也走分词：'九年级 上册 书A' 命中，'九年级 下册 书A' 不命中。"""
+        out = tmp_path / "out"
+        b1 = out / "extracted" / "数学/初中/人教版/九年级/上册/书A"
+        b1.mkdir(parents=True)
+        card = {"lesson_id": "26.1 X", "sort_order": 1, "card_type": "concept",
+                "title": None, "content": "c", "content_metadata": None,
+                "knowledge_point_ids": [], "textbook_page": "P1"}
+        (b1 / "page_001.jsonl").write_text(
+            json.dumps(card, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"), "--book", "九年级 下册"])
+
+        assert not (out / "published/数学/初中/人教版/九年级/上册/书A/page_001.jsonl").exists()
+
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"), "--book", "上册 书A"])
+
+        assert (out / "published/数学/初中/人教版/九年级/上册/书A/page_001.jsonl").exists()
+
     def test_dry_run_applies_book_filter(self, tmp_path, capsys):
         """回归：--dry-run 必须与正式发布同口径应用 --book（曾忽略，预演范围偏大）。"""
         out = tmp_path / "out"

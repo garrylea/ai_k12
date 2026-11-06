@@ -8,6 +8,24 @@
 
 ---
 
+## 2026-11-06 data-refinery：`--file` 改为关键词分词 + 入口解析（0/1/多命中）
+
+**需求**（用户导入 2026 海淀道法卷时踩到）：`--file "2026 海淀"` 永远 0 命中，因为实现是把整串当连续子串比素材相对路径（`道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治` 里没有「2026␣海淀」）。用户的原话是「2026 海淀才是关键词」——应先按 `--subject/--year` 缩小范围，再按词在文件名里找；命中多个要列出来让用户选，0 个要说清没命中什么。
+
+**现状**：`scope_filter.match_scope` 和各 CLI 各自 `keyword in rel`（convert `--materials`、extract `--file/--book`、publish `--book`、paper_meta 重复判两次、recognition_scan/manual_fix/apply_fixes 对卷名 stem 判断）；`import_cli` 只有「多学科守卫」，0 命中时 9 个阶段全空跑，也不告诉用户缺哪个词。
+
+**改动**：
+- `scope_filter` 新增唯一实现：`split_keyword`（按空白含全角、`-`、`_`、`/`、`·`、`、` 分词）、`normalize_path`（只剥已知产物后缀 `.md/.jsonl/.pdf/...`，不用 `with_suffix` 以免吃掉卷名里的点）、`match_keyword`（所有 token 都命中，顺序无关、casefold）。`Scope` 缓存 `file_tokens`，`describe`/`scope_argv` 仍输出原串。
+- 六个过滤点全部改走它；`--materials` 的逗号仍是「条目间 OR」，单条内部才 AND（三个既有 OR 用例保持通过）；paper_meta 删掉重复的第二次判断。
+- `import_cli` 新增 `_collect_candidates`（扫描素材库 + 已转 md，收敛到「卷/书」粒度：教材 `page_xxx.md` 归书目录、嵌套布局 `卷名/卷名.md` 不多算、pdf+md 去重；扫描异常单独收集，**不再 `except: pass` 伪装成 0 命中**）与 `_resolve_file`：0 命中打印「在 <目录> 下没有同时含「2026」「海淀」的素材 + 逐词命中 N 份 + 该范围现有清单（按相关度排序）」rc=2；1 命中打印 `[解析]` 后继续；多命中列编号选一份（无「全部」），dry-run 列候选继续预演，非 TTY 直接 rc=2。解析后 `args.file` 改写成卷名 stem 供 7/8/9 步与 paper_id 反查，`_resolved_rel` 传给五个路径阶段。
+- 删除 `_matched_subjects/_scan_rel_paths/_subjects_for_file` 与多学科守卫（解析列表自带完整路径，多学科自然并列展示；非 TTY 依旧不猜）。`_lookup_paper_id` 顺手转义 `%`/`_`。
+
+**测试**：`tests/test_scope_filter.py` 重写分词用例（全角空格、横线、大小写、顺序、后缀、纯分隔符）；convert/extract/publish/db_loader/paper_meta 各补 token 用例；`tests/test_import_cli.py` 重写多学科守卫用例 + 新增候选去重/书页收敛/嵌套布局/扫描异常/0 命中/单命中改写/多命中选第 2 份/回车取消/`--files` 各自解析，全量 `python3 -m pytest -q` 通过。
+
+**用法**：`cd tools/data-refinery && python3 src/import_cli.py --subject 道法 --file "2026 海淀"`
+
+---
+
 ## 2026-11-06 浅停留页去掉左侧「返回」；来源页补 search/hash
 
 **问题**：`574f62cb` 把个人中心/奖励册/练习记录右上角「退出本页」改成来源页协议后，与左侧「返回」落点完全相同，两个入口重复（用户指出）。另外来源只记 `location.pathname`，`/student/training/home?subjectId=5` 退出后丢掉 `subjectId`，物理/化学训练页被解析成默认数学（用户确认存在）。

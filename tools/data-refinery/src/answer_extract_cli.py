@@ -20,7 +20,7 @@ from pathlib import Path
 
 from config import RefineryConfig
 from paper_meta import parse_paper_meta
-from scope_filter import build_scope, match_scope
+from scope_filter import build_scope, match_keyword, match_scope
 from subject_codes import subject_code_for_path
 from subject_strategies import UnknownStrategyError, get_strategy
 
@@ -42,11 +42,12 @@ def parse_args(argv=None):
 
 
 def find_paper_md(md_dir: Path, keyword: str, scope=None) -> Path | None:
-    """按相对路径子串找唯一试卷 md；命中多个/0 个打印候选并返回 None。
+    """按关键词（分词、所有词命中）找唯一试卷 md；命中多个/0 个打印候选并返回 None。
 
     scope（scope_filter.Scope）非空时先按学科/学段/学期/年份过滤。
     """
-    hits = [p for p in sorted(md_dir.rglob("*.md")) if keyword in str(p.relative_to(md_dir))]
+    hits = [p for p in sorted(md_dir.rglob("*.md"))
+            if match_keyword(p.relative_to(md_dir), keyword)]
     if scope is not None and scope.active:
         hits = [p for p in hits if match_scope(p.relative_to(md_dir), scope)]
     if len(hits) == 1:

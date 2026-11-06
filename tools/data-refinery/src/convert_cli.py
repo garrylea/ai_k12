@@ -7,7 +7,7 @@ from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
 from convert import Converter, MineruRunner, token_problem_message
 from scanner import Material, MaterialScanner
-from scope_filter import build_scope, match_scope
+from scope_filter import build_scope, match_keyword, match_scope
 from scope_filter import parse_dimensions as _parse_dimensions  # 兼容旧引用/单测
 
 
@@ -19,7 +19,8 @@ def parse_args(argv=None):
     parser.add_argument("--force", action="store_true", help="跳过 checkpoint，尝试继续处理未转完的页")
     parser.add_argument("--reconvert", action="store_true", help="删除已有输出，重新转换所有页")
     parser.add_argument("--dry-run", action="store_true", help="只打印将要处理的素材")
-    parser.add_argument("--materials", help="只处理 rel_path 包含指定子串的素材，逗号分隔多个")
+    parser.add_argument("--materials", help="只处理 rel_path 命中的素材：逗号分隔多条（条目间 OR），"
+                                            "单条内按空格等分隔符分词、所有词都命中（单卷/单书）")
     parser.add_argument("--materials-file", help="素材列表文件，一行一个子串，# 开头为注释，空行忽略")
     parser.add_argument("--subject", help="学科过滤，精确匹配目录第 1 段（如 数学、语文），逗号分隔多个")
     parser.add_argument("--stage", help="学段过滤，第 2 段（初中/小学/高中，或 junior/primary/senior），逗号分隔多个")
@@ -81,16 +82,16 @@ def _load_material_entries(materials: str | None, materials_file: str | None) ->
 
 
 def _match_materials(material: Material, entries: list[str]) -> bool:
+    """条目之间 OR；单个条目内按关键词分词，所有词都命中才算（与 --file 同语义）。"""
     if not entries:
         return True
-    rel = material.rel_path.as_posix()
-    return any(entry in rel for entry in entries)
+    return any(match_keyword(material.rel_path, entry) for entry in entries)
 
 
 def _warn_unmatched_entries(entries: list[str], materials: list[Material]) -> None:
     """按全量扫描结果判定，避免被 --source 过滤后误报未命中。"""
     for entry in entries:
-        if not any(entry in m.rel_path.as_posix() for m in materials):
+        if not any(match_keyword(m.rel_path, entry) for m in materials):
             print(f"[WARN] 未命中素材: {entry}")
 
 

@@ -33,6 +33,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+from scope_filter import match_keyword  # noqa: E402
 from subject_codes import subject_code_for_path  # noqa: E402
 
 ISSUES_FILE = ROOT / "output" / "recognition_issues.jsonl"
@@ -565,7 +566,7 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
         if str(rel_dir).split("/")[0] != subject:
             continue
         source = jsonl_path.stem
-        if file and file not in source:
+        if file and not match_keyword(source, file):
             continue
         if sources is not None and source not in sources:
             continue

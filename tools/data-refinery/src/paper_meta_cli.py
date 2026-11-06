@@ -50,8 +50,6 @@ def run(cfg: RefineryConfig, args, llm=None) -> int:
     sources = [s for s in scanner.scan() if _is_paper(s, kind_cache)]
     if scope.active:
         sources = [s for s in sources if match_scope(s.rel_path / s.md_path.name, scope)]
-    if args.file:
-        sources = [s for s in sources if args.file in str(s.rel_path / s.md_path.name)]
     print(f"[meta] 范围 {describe(scope)} · 命中 {len(sources)} 份试卷", flush=True)
     if not sources:
         return 0

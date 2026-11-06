@@ -79,7 +79,7 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 ### 答案提取（按学科策略分派，2026-10-28 起；已并入 import_cli 第 5 步）
 `import_cli` 的第 5 步会自动完成「试卷 md → 答案文档 → questions.answer」：逐卷查 `exam_papers.source_key` 拿 paper_id，**默认 `--where answer_empty` 只补空答案**，`--re-answer` 才覆盖；没有「参考答案」段的卷跳过并打印原因。下面两段式仍保留，用于单独重跑或人工修正：
 
-1. `src/answer_extract_cli.py --file <相对路径子串>`：定位唯一的试卷 md → 按路径首段识别学科（`subject_codes.subject_code_for_path`）→ 调 `get_strategy(subject).extract_answers` → 输出 `answer_doc` 规范文档（`# 试卷：<标题>` / `## 题号` / `答案：` / `解析：`）+ `output/answer_issues.jsonl`。
+1. `src/answer_extract_cli.py --file <关键词，如 2026 海淀>`：定位唯一的试卷 md → 按路径首段识别学科（`subject_codes.subject_code_for_path`）→ 调 `get_strategy(subject).extract_answers` → 输出 `answer_doc` 规范文档（`# 试卷：<标题>` / `## 题号` / `答案：` / `解析：`）+ `output/answer_issues.jsonl`。
 2. `src/answer_importer_cli.py --doc <文档> --paper-id <id> [--apply]`：按 `(paper_id, question_no)` 回写，语义=缺省不改/非空覆盖/空串不改/幂等/写 `answer_verified=1`。
 
 分派结构（`src/subject_strategies/`，2026-10-30 起）：`chinese.py` 独立实现，`math/physics/chemistry/politics` 继承 `generic.py` 的默认答案提取（复用 `split_page`，与主管线一致），`english.py` 直接用同一份 generic 实现。新增学科时在策略文件里实现 `extract_answers` 并 `register()`；未登记学科（生物/历史/地理）抛 `UnknownStrategyError`，不静默回退 generic。
@@ -140,7 +140,7 @@ DB 一次性初始化：`tools/db/install_mysql.sh`（建库 + ai_k12 用户 + s
 - **lesson_id 解析**：`第N章 X`（中文数字转 int）-> unit + 章综述 lesson；`N.M[.K] X` -> unit + 节 lesson。find-or-create。
 - **页码锚定 lesson_anchor**（2026-09-02 加）：TOC 模式挂卡前 `load_book_cards` 用 `LessonAnchor` 确定性修正章归属——章边界首选综述卡锚定（每章「第N章」标签卡最小 md 页 = 章头页，零偏移误差、取 min 免疫错章综述标签；兜底首节 printed + 偏移众数 − 3 余量）；规则 A 错章重写（content「复习题 N」> 时间线活跃节 > 标题匹配 > 章综述兜底）/ B 同名消歧（「小结」「数学活动」按页所在章，修各章同名 lesson 全挂第一个的 bug）/ C 复习题归一（「复习题 N」挂该章「小结」，不建 TOC 外 lesson）。无 TOC/对不上整体退化纯标签匹配。extract/publish/jsonl 不动；锚定每次 load 重算，重处理任意页不影响结构。观测日志 `[anchor] offset/corrected/disambiguated/normalized`。
 - **cards sort_order 跨页全局重排**：每 lesson 内 1..N（抽取的页内序会碰撞 `uniq_cards_lesson_sort`）。
-- **范围过滤（2026-10-28，P0）**：`--subject <code或中文名>` / `--file <路径子串>` / `--questions-only` / `--cards-only`。默认扫全库会让「导入语文」顺带重载数学教材卡；加过滤后**只碰指定范围**。范围过滤只能配 `--load-cards`（full-reload 会删全库，CLI 直接拒绝）。
+- **范围过滤（2026-10-28，P0；2026-11-06 改分词）**：`--subject <code或中文名>` / `--file <关键词，空格分词且全部命中>` / `--questions-only` / `--cards-only`。默认扫全库会让「导入语文」顺带重载数学教材卡；加过滤后**只碰指定范围**。范围过滤只能配 `--load-cards`（full-reload 会删全库，CLI 直接拒绝）。
 - **卡片增量 upsert（2026-10-28，P1）**：无 TOC 动态建结构分支改为按唯一键 `(lesson_id, sort_order)` **原地 upsert**——`id` 不变、内容不变则跳过、只有变化行才 UPDATE。不再「删旧卡重插」（那会换 id，`practice_results.card_id` 是 CASCADE、`ai_dialogues.card_id` 会被置 NULL）。输出 `新增/更新/未变` 统计；published 少页导致的陈旧行只告警不删除（防误删未参与本次导入的数据）。
 - **题目同卷原址更新（2026-10-28，P1）**：带试卷上下文入库时按 `(paper_id, question_no)` 定位旧题原址更新。重抽会让 `content_hash` 变化，只按 hash 去重会插出重复题；`answer_verified=1` 的题**不覆盖**（人工核验优先），新内容与已有题撞 hash 时也保留原题并告警。
 - **full-reload 幂等**：`reset_cards()` 删 `textbook_versions`（级联清 cards/lessons/units/semesters）+ `reset_questions()` 删 questions，再重插。结构 find-or-create。每次跑都全量重载（无增量）。
@@ -172,14 +172,14 @@ cd tools/data-refinery
 # 前段（单独跑）
 python src/convert_cli.py --source all          # 素材 -> md
 python src/extract_cli.py --source all          # md -> extracted
-python src/extract_cli.py --file "2024/...西城-模拟二-试卷"  # 单文件
+python src/extract_cli.py --file "2024 西城 模拟二"            # 关键词分词定位
 python src/extract_cli.py --subject 语文 --year 2025 --dry-run  # 统一范围参数（各阶段同义）
 python src/publish_cli.py --subject 语文 --dry-run              # 同上；配合 --book 更细
 
 # 一键导入（convert → extract → publish → 入库 → 答案回填，增量）
 python src/import_cli.py --subject 语文 --year 2025 --dry-run
 python src/import_cli.py --subject 语文 --year 2025
-python src/import_cli.py --file "202507-海淀-模拟二-试卷" --re-extract --re-publish
+python src/import_cli.py --file "2025 海淀 模拟二" --re-extract --re-publish
 python src/import_cli.py --subject 语文 --skip-answers        # 只到入库，不回填答案
 python src/import_cli.py --subject 语文 --re-answer           # 覆盖已有答案（默认只补空）
 
@@ -192,11 +192,11 @@ python src/refinery_cli.py --skip-load          # 只 publish
 # 增量入库（只动指定范围，推荐用于单科/单卷）
 python src/db_loader_cli.py --load-cards --subject 语文 --questions-only          # 只导语文题
 python src/db_loader_cli.py --load-cards --subject 语文 --questions-only --dry-run # 先看范围
-python src/db_loader_cli.py --load-cards --file "202507-海淀-模拟二-试卷"          # 只导单卷/单书
+python src/db_loader_cli.py --load-cards --file "2025 海淀 模拟二"                # 只导单卷/单书
 python src/db_loader_cli.py --load-cards --subject 数学 --cards-only              # 只导数学教材卡
 
 # 答案回填已并入 import_cli 第 5 步；需要单独重跑/人工修正时仍可两段式：
-python src/answer_extract_cli.py --file "语文/初中/second/2025/语文-初三(下)-202507-海淀-模拟二-试卷" --dry-run
+python src/answer_extract_cli.py --file "2025 海淀 模拟二" --dry-run
 python src/answer_extract_cli.py --file "<同上>"            # -> output/answers/<卷名>.md
 python src/answer_importer_cli.py --doc output/answers/<卷名>.md --paper-id 17          # dry-run 看 diff
 echo yes | python src/answer_importer_cli.py --doc output/answers/<卷名>.md --paper-id 17 --apply

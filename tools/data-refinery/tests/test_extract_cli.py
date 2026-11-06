@@ -401,6 +401,38 @@ class TestExtractCliFileFilter:
         assert "西城" in out
         assert "海淀" not in out
 
+    def test_file_filter_splits_keywords(self, tmp_path, capsys):
+        """`--file "西城 2024"`：分词后都要命中，顺序无关。"""
+        sub1 = tmp_path / "数学" / "2024"
+        sub2 = tmp_path / "数学" / "2025"
+        sub1.mkdir(parents=True)
+        sub2.mkdir(parents=True)
+
+        with patch("extract_cli.RefineryConfig") as mock_config, \
+             patch("extract_cli.MarkdownScanner") as mock_scanner:
+            mock_config.from_env.return_value = MagicMock(
+                input_dir=tmp_path,
+                output_dir=tmp_path / "out",
+                llm_api_key="fake",
+                llm_model="gpt-4o",
+                llm_base_url=None,
+                llm_timeout=120,
+                llm_max_retries=0,
+                llm_thinking=False,
+                llm_enable_cache=False,
+            )
+            mock_scanner.return_value.scan.return_value = [
+                MarkdownSource(md_path=sub1 / "西城-试卷.md", rel_path=Path("数学/2024"), kind="questions"),
+                MarkdownSource(md_path=sub2 / "西城-试卷.md", rel_path=Path("数学/2025"), kind="questions"),
+            ]
+
+            from extract_cli import main
+            main(["--input-dir", str(tmp_path), "--file", "西城 2024", "--dry-run"])
+
+        out = capsys.readouterr().out
+        assert "2024/西城-试卷.md" in out
+        assert "2025/西城-试卷.md" not in out
+
 
 class TestExtractCliMultiPage:
     def test_multi_page_textbook_writes_one_jsonl_per_page(self, tmp_path):

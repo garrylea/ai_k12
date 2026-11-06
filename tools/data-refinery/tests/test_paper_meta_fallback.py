@@ -118,12 +118,12 @@ def test_meta_from_sidecar_refuses_incomplete():
 
 # === 第 4 步整体 ===
 
-def _run(tmp_path, md_text, name="2026北京北京中学初三（上）期中数学"):
+def _run(tmp_path, md_text, name="2026北京北京中学初三（上）期中数学", file=None):
     md_dir = tmp_path / "md/数学/初中/first/2026" / name
     md_dir.mkdir(parents=True)
     (md_dir / f"{name}.md").write_text(md_text, encoding="utf-8")
     cfg = RefineryConfig.from_env(output_dir=str(tmp_path))
-    args = SimpleNamespace(input_dir=None, output_dir=str(tmp_path), file=None,
+    args = SimpleNamespace(input_dir=None, output_dir=str(tmp_path), file=file,
                            dry_run=False, no_llm=True, source="all", subject="数学",
                            stage=None, term=None, year=None)
     rel = Path("数学/初中/first/2026") / name / f"{name}.jsonl"
@@ -149,6 +149,17 @@ def test_paper_meta_cli_asks_when_exam_type_unknown(tmp_path, monkeypatch):
     assert rc == 0
     text = (tmp_path / "meta" / rel.with_suffix(".json")).read_text(encoding="utf-8")
     assert '"exam_type": "期末"' in text
+
+
+def test_paper_meta_cli_file_filter_splits_keywords(tmp_path):
+    """第 4 步的 --file 也走分词：差一个词就不该写 sidecar（且只判一次，不重复过滤）。"""
+    rc, rel = _run(tmp_path, PAPER_MD, file="2026 期中")
+    assert rc == 0
+    assert (tmp_path / "meta" / rel.with_suffix(".json")).exists()
+
+    rc2, rel2 = _run(tmp_path, PAPER_MD, name="2026北京西城初三（上）期中数学", file="2026 海淀")
+    assert rc2 == 0
+    assert not (tmp_path / "meta" / rel2.with_suffix(".json")).exists()
 
 
 def test_paper_meta_cli_skips_when_not_interactive(tmp_path, monkeypatch):
