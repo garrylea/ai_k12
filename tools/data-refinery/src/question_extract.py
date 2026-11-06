@@ -18,7 +18,7 @@ import pymysql
 from answer_merger import maybe_merge_answer_md
 from extract import _parse_json_object
 from question_splitter import is_junk_question, split_page, split_options
-from question_labeler import QuestionLabeler, LabeledQuestion
+from question_labeler import QuestionLabeler, LabeledQuestion, apply_true_false_exemption
 from section_analyzer import analyze_sections
 from qr_detect import strip_qr_images
 from subject_codes import subject_code_for_parts
@@ -606,6 +606,12 @@ def extract_questions_file(source, config, llm, fb_llm,
         detail = "，".join(f"{s.gid}:{s.start_no}-{s.end_no}={s.type}"
                           f"{'(推断)' if s.inferred else ''}" for s in sections)
         print(f"[sections] 按大题定型 {detail}；纠正 {overridden} 题", flush=True)
+
+    # 判断题的题干本来就是陈述句：定型之后 type 才是准的，这时再清一次「缺设问」误判
+    # （LLM 常把判断题标成 short_answer，labeler 阶段判据还不成立）。
+    exemption = apply_true_false_exemption(labeled)
+    if exemption:
+        print(f"[true_false] {exemption} 道判断题按陈述句放行（无设问不算缺陷）", flush=True)
 
     # 6. 写 JSONL
     _write_exam_questions_jsonl(labeled, source, extracted_dir,

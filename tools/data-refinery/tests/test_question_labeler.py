@@ -704,3 +704,71 @@ def test_chinese_option_truncation_not_treated_as_material_defect():
 
     assert llm.called == 2
     assert res[0].is_complete is True
+
+
+def test_true_false_statement_without_question_is_complete():
+    """判断题的题干就是一句陈述，LLM 判「缺设问」是误判，不能因此 is_active=0。
+
+    事故（2026-11-06 海淀道法）：10 道判断题里 8 道被判「题干缺失具体设问」，
+    全部 needs_review → is_active=0，学生端整卷少 8 题。
+    """
+    item = ('{"type":"true_false","difficulty":1,"knowledge_points":[],'
+            '"suggested_new_kps":[],'
+            '"completeness":{"is_complete":false,'
+            '"issues":["题干缺失具体设问（如判断正误），仅包含陈述性文字"]}}')
+    llm = _seq_llm(item)  # 只给一次：若走重试会耗尽抛错
+    labeler = QuestionLabeler(llm=llm, prompt="{{content}}", knowledge_points=KPS,
+                              subject="politics")
+    q = RawQuestion(group_order=1, group_id="一",
+                    content="伟大建党精神是全党全国各族人民攻坚克难、奋勇前行的强大精神动力。")
+    res = labeler.label([q], batch_size=1)
+    assert llm.called == 1
+    assert res[0].type == "true_false"
+    assert res[0].is_complete is True
+    assert res[0].completeness_issues == []
+
+
+def test_true_false_empty_or_truncated_stays_incomplete():
+    """真缺陷仍然拦：题干几乎为空、或明显截断（结尾停在逗号/括号）→ 保持待复核。"""
+    item = ('{"type":"true_false","difficulty":1,"knowledge_points":[],'
+            '"suggested_new_kps":[],'
+            '"completeness":{"is_complete":false,"issues":["题干截断"]}}')
+    for content in ("。", "", "发展是执政兴国的第一要务，"):
+        labeler = QuestionLabeler(llm=_seq_llm(item), prompt="{{content}}",
+                                  knowledge_points=KPS, subject="politics")
+        q = RawQuestion(group_order=2, group_id="一", content=content)
+        res = labeler.label([q], batch_size=1)
+        assert res[0].is_complete is False, content
+
+
+def test_true_false_with_image_is_complete():
+    """带图的判断题（看图判断）也算完整，文字少不等于截断。"""
+    item = ('{"type":"true_false","difficulty":2,"knowledge_points":[],'
+            '"suggested_new_kps":[],'
+            '"completeness":{"is_complete":false,"issues":["无法校验图片内容"]}}')
+    labeler = QuestionLabeler(llm=_seq_llm(item), prompt="{{content}}",
+                              knowledge_points=KPS, subject="politics")
+    q = RawQuestion(group_order=3, group_id="一",
+                    content="![](images/q3.jpg)")
+    res = labeler.label([q], batch_size=1)
+    assert res[0].is_complete is True
+
+
+def test_true_false_exemption_applies_after_section_typing():
+    """按大题定型后才变成 true_false 的题也要放行（LLM 常把判断题标成 short_answer）。"""
+    from question_labeler import apply_true_false_exemption
+
+    lab = LabeledQuestion.from_raw(RawQuestion(
+        group_order=1, group_id="一",
+        content="伟大建党精神是全党全国各族人民攻坚克难、奋勇前行的强大精神动力。"))
+    lab.type = "short_answer"            # 标注阶段模型给错
+    lab.is_complete = False
+    lab.completeness_issues = ["题干缺失具体设问"]
+
+    assert apply_true_false_exemption([lab]) == 0      # 还不是判断题，不动
+    assert lab.is_complete is False
+
+    lab.type = "true_false"               # 按大题定型后
+    assert apply_true_false_exemption([lab]) == 1
+    assert lab.is_complete is True
+    assert lab.completeness_issues == []

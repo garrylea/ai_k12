@@ -4,6 +4,7 @@ LLM 只标注元数据，不改 content、不给答案（answer 由 question_spl
 知识点列表由调用方从 DB 查询后注入（动态读取，不写死在 prompt 文件）。
 """
 
+import html
 import re
 
 from extract import _parse_json_object  # 复用 JSON 解析逻辑
@@ -12,6 +13,46 @@ from dataclasses import dataclass
 
 # 合法题型枚举（prompt 与 ExamQuestion 契约）
 _VALID_TYPES = {"choice", "multi_choice", "fill_blank", "true_false", "short_answer", "proof", "calculation"}
+
+# 判断题被截断的结尾：停在逗号/分号/左括号上，说明后面还有话被切走了
+_CUT_TAIL = ("，", ",", "、", "；", ";", "：", ":", "（", "(", "“", "「")
+_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(|<img\b", re.IGNORECASE)
+
+
+def _true_false_stem_is_self_contained(content: str) -> bool:
+    """判断题的题干就是一句陈述，没有「请判断正误」的设问是正常的。
+
+    LLM 的完整性检查是按「有没有设问」判的，会把道法/历史判断题全判成
+    「题干缺失设问」→ needs_review → is_active=0 → 学生端整卷题目消失
+    （2026-11-06 海淀道法：10 道判断题里 8 道被误判）。
+    这里只认两种真缺陷：题干为空/几乎为空、以及明显截断（结尾停在逗号/括号）。
+    带图的判断题一律算完整（图本身就是题干的一部分）。
+    """
+    raw = content or ""
+    if _IMAGE_RE.search(raw):
+        return True
+    text = re.sub(r"<[^>]+>", " ", raw)
+    text = re.sub(r"\s+", "", html.unescape(text))
+    if len(text) < 6:
+        return False
+    return not text.endswith(_CUT_TAIL)
+
+
+def apply_true_false_exemption(labeled) -> int:
+    """把判断题「缺设问」的误判清掉（题干是陈述句不算缺陷）；返回清掉的题数。
+
+    两处调用：labeler 出结果时（LLM 已判 true_false），以及按大题定型之后
+    （LLM 可能把判断题标成 short_answer，定型才改成 true_false）——后者不补，
+    海淀道法仍会剩 5 道判断题被挂着 is_active=0。
+    """
+    cleared = 0
+    for lab in labeled:
+        if (getattr(lab, "type", "") == "true_false" and not lab.is_complete
+                and _true_false_stem_is_self_contained(lab.content)):
+            lab.is_complete = True
+            lab.completeness_issues = []
+            cleared += 1
+    return cleared
 # 选择题选项标签（语文可能 3 项；label 已归一为 A-F）
 _VALID_LABELS = {"A", "B", "C", "D", "E", "F"}
 
@@ -457,6 +498,9 @@ class QuestionLabeler:
         ):
             labeled.is_complete = True
             labeled.completeness_issues = []
+        # 判断题同理：陈述句没有「设问」是题型本身决定的，不是缺陷。
+        # 只有题干为空或明显截断才保留缺陷（2026-11-06 海淀道法 8/10 误判）。
+        apply_true_false_exemption([labeled])
         regen = item.get("regenerated")
         if isinstance(regen, dict):
             # 原文无答案（Python 对齐 answer 为空）时清空 LLM 返回的答案：

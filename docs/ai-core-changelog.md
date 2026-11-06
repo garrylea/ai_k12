@@ -8,6 +8,22 @@
 
 ---
 
+## 2026-11-06 道法卷导入打通：学科别名 + 判断题完整性误判
+
+**需求**：导入 `2026北京海淀初三（上）期中道德与法治.pdf`。第一次跑 `import_cli --subject 道法 --file "2026 海淀"`，convert 成功，extract 直接失败；修好后能入库，但 10 道判断题里 8 道被隐藏。
+
+**问题与改动**：
+1. **学科 code 为空**：爬虫目录叫「道法」，`subjects.name` 叫「道德与法治」，`SUBJECT_NAME_TO_CODE` 只有全称 → `subject_code_for_parts(..., default=None)` 返回 `None` → `get_strategy(None)` 抛错，整卷 0 题。补 `"道法": "politics"` 别名；`db_loader._subject_code_by_name_fallback` 删掉自己那份重复映射，改为复用 `subject_codes`（两份必然漂移）。
+2. **判断题被误判「缺设问」**：LLM 完整性检查按「有没有设问」判，判断题本来就只有陈述句 → `is_complete=false` → `needs_review` → `is_active=0`，学生端整卷少题（与 2026-11-03 汇文「图选项误判」同类事故）。新增确定性放行 `_true_false_stem_is_self_contained`（题干带图，或去标签后 ≥6 字且不以 `，、；：（` 收尾），真空题干/截断仍拦；`apply_true_false_exemption` 在 **labeler 出结果** 与 **按大题定型之后** 各调一次——LLM 把 5 道判断题标成了 `short_answer`，只在第一处改会漏掉。
+
+**测试**：`tests/test_subject_codes.py`（新增，道法/全称别名、未知学科返回 None）；`test_question_labeler.py` 新增 4 例（陈述句放行、空/截断仍拦、图片判断题放行、定型后才变 true_false 也放行）。
+
+**实测**：道法 2026 海淀卷入库 `paper=433`、29 题；判断题 10/10 `is_active=1`（原 2/10）。剩余 26–30 是材料大题（`politics` 策略尚无材料题切分，按 choice 入库缺选项、保持 `is_active=0`），以及第 11 题 OCR 缺号，均未在本条处理。
+
+**用法**：`cd tools/data-refinery && python3 src/import_cli.py --subject 道法 --file "2026 海淀"`
+
+---
+
 ## 2026-11-06 data-refinery：`--file` 改为关键词分词 + 入口解析（0/1/多命中）
 
 **需求**（用户导入 2026 海淀道法卷时踩到）：`--file "2026 海淀"` 永远 0 命中，因为实现是把整串当连续子串比素材相对路径（`道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治` 里没有「2026␣海淀」）。用户的原话是「2026 海淀才是关键词」——应先按 `--subject/--year` 缩小范围，再按词在文件名里找；命中多个要列出来让用户选，0 个要说清没命中什么。

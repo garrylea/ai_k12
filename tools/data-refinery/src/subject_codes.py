@@ -7,10 +7,13 @@
 from pathlib import Path
 
 # 中文学科名 -> subject code（与 tools/db/schema.sql 的 subjects.code 一致）
+# 爬虫目录用的是简称「道法」，subjects.name 是全称「道德与法治」：两者都要能反查，
+# 否则 道法/... 下的卷子在 extract 第一步就报「学科 code 为空」（2026-11-06 实测）。
 SUBJECT_NAME_TO_CODE: dict[str, str] = {
     "数学": "math", "语文": "chinese", "英语": "english",
     "物理": "physics", "化学": "chemistry", "生物": "biology",
-    "历史": "history", "地理": "geography", "道德与法治": "politics",
+    "历史": "history", "地理": "geography",
+    "道德与法治": "politics", "道法": "politics",
 }
 
 # 识别不出学科时的回退（兼容历史资产路径，publish/extract 保持不变）

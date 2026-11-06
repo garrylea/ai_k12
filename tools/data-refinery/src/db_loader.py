@@ -321,11 +321,14 @@ def grade_to_code(grade: str) -> str:
 
 
 def _subject_code_by_name_fallback(name: str) -> str:
-    """根据 subject 中文名找 code，找不到返回原名。"""
-    name_map = {"数学": "math", "语文": "chinese", "英语": "english",
-                "物理": "physics", "化学": "chemistry", "生物": "biology",
-                "历史": "history", "地理": "geography", "道德与法治": "politics"}
-    return name_map.get(name, name)
+    """根据 subject 中文名找 code，找不到返回原名。
+
+    映射只在 `subject_codes.SUBJECT_NAME_TO_CODE` 维护一份（道法/道德与法治都在里面）；
+    这里再存一份会漂移（2026-11-06：道法目录因缺别名在 extract 直接失败）。
+    """
+    from subject_codes import SUBJECT_NAME_TO_CODE
+
+    return SUBJECT_NAME_TO_CODE.get(name, name)
 
 
 def _grade_band_from_path(toc_path: str) -> str:
