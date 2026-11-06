@@ -43,6 +43,23 @@ describe('SpecialAnswerRecordsRepository', () => {
     );
   });
 
+  // 未作答占位行（2026-11-06）：数理化专项开练时把整轮题单落库，历史详情才能显示「未作答」。
+  it('ensurePlannedQuestions 按顺序写入空作答行', async () => {
+    const pool = { query: vi.fn().mockResolvedValue([{}]) };
+    const repo = new SpecialAnswerRecordsRepository(pool as never);
+    await repo.ensurePlannedQuestions(9, [11, 12]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('INSERT IGNORE INTO special_answer_records');
+    expect(params).toEqual([9, 11, 1, 9, 12, 2]);
+  });
+
+  it('ensurePlannedQuestions 空数组不查库（缺省入参不该产生任何 SQL）', async () => {
+    const pool = { query: vi.fn() };
+    const repo = new SpecialAnswerRecordsRepository(pool as never);
+    await repo.ensurePlannedQuestions(9, []);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
   it('listBySession 用 q.content 列名（questions 表无 text 列，防 ER_BAD_FIELD_ERROR 回归）', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([[], []]);

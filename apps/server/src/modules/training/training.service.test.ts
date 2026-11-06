@@ -10,7 +10,11 @@ const mk = (overrides: any = {}) => ({
     bumpLevels: vi.fn().mockResolvedValue(undefined),
   },
   judgeCore: { judgeQuestion: vi.fn(), recordSelfAssessment: vi.fn() },
-  questionsRepo: { findById: vi.fn(), findRandomByKpAndType: vi.fn().mockResolvedValue([]) },
+  questionsRepo: {
+    findById: vi.fn(),
+    findRandomByKpAndType: vi.fn().mockResolvedValue([]),
+    findByIds: vi.fn().mockResolvedValue([]),
+  },
   questionHintsRepo: {
     findByQuestionId: vi.fn().mockResolvedValue(null),
     upsert: vi.fn().mockResolvedValue(undefined),
@@ -44,7 +48,11 @@ const mk = (overrides: any = {}) => ({
   variationGenerator: { generateForErrorItem: vi.fn().mockResolvedValue(undefined) },
   // 作答记录旁路写入（Task 3，2026-11-01）：judgeTraining 带 sessionUid 时调。
   specialSessionsRepo: { upsertSession: vi.fn().mockResolvedValue(101) },
-  specialAnswersRepo: { upsertAnswer: vi.fn().mockResolvedValue(undefined), upsertSpecialAnswer: vi.fn().mockResolvedValue(undefined) },
+  specialAnswersRepo: {
+    upsertAnswer: vi.fn().mockResolvedValue(undefined),
+    upsertSpecialAnswer: vi.fn().mockResolvedValue(undefined),
+    ensurePlannedQuestions: vi.fn().mockResolvedValue(undefined),
+  },
   ...overrides,
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
@@ -730,8 +738,38 @@ describe('TrainingController.judge — 可选 sessionId 只做审计留痕', () 
 });
 
 
-describe('TrainingController 解析拉取端点', () => {
-  const mkController = (service: any) =>
+// 未作答占位行（2026-11-06）：题单只透传正整数，垃圾值一律挡在控制器。
+describe('TrainingController.judge — plannedQuestionIds 白名单化', () => {
+  const user = { sub: 7, role: 'student' } as any;
+  const DTO = { questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'targeted' } as const;
+
+  const mkC = () => {
+    const sessionsRepo = { incrementJudged: vi.fn().mockResolvedValue(undefined) };
+    const svc = { judgeTraining: vi.fn().mockResolvedValue({ isCorrect: true }) };
+    const c = new TrainingController(svc as never, sessionsRepo as never, {} as never, {} as never);
+    return { c, svc };
+  };
+
+  it('只保留正整数、按原顺序透传 service', async () => {
+    const { c, svc } = mkC();
+    await c.judge({ ...DTO, plannedQuestionIds: [11, 0, -2, 1.5, 12, NaN] } as never, user);
+    expect(svc.judgeTraining).toHaveBeenCalledWith(expect.objectContaining({
+      plannedQuestionIds: [11, 12],
+    }));
+  });
+
+  it('非数组（缺省 / 字符串 / 对象）-> undefined，不把垃圾传进 service', async () => {
+    const { c, svc } = mkC();
+    await c.judge({ ...DTO } as never, user);
+    await c.judge({ ...DTO, plannedQuestionIds: '11,12' } as never, user);
+    await c.judge({ ...DTO, plannedQuestionIds: { 0: 11 } } as never, user);
+    for (const call of svc.judgeTraining.mock.calls) {
+      expect(call[0].plannedQuestionIds).toBeUndefined();
+    }
+  });
+});
+
+describe('TrainingController 解析拉取端点', () => {  const mkController = (service: any) =>
     new TrainingController(service, {} as never, {} as never, {} as never);
 
   it('getExplanations：ids 逗号分隔字符串 -> 数字数组（空/坏值过滤后由 service 再兜底）', async () => {
@@ -935,5 +973,84 @@ describe('TrainingService.judgeTraining — special_answer_records 旁路写入'
     expect(deps.specialSessionsRepo.upsertSession).toHaveBeenCalledWith(expect.objectContaining({
       module: 'physics_targeted', subjectId: 4,
     }));
+  });
+
+  // 未作答占位行（2026-11-06）：前端 Task 9 起在首题判题时带上整轮题单。
+  describe('plannedQuestionIds — 整轮题单落库', () => {
+    const mkJudge = (over: any = {}) => mk({
+      judgeCore: { judgeQuestion: vi.fn().mockResolvedValue(judgeResult) },
+      ...over,
+    });
+
+    it('按入参顺序只保留存在/在架/同学科的 id 写占位行（题单里的已答行由 upsertAnswer 写）', async () => {
+      const deps = mkJudge({
+        questionsRepo: {
+          findById: vi.fn(),
+          findRandomByKpAndType: vi.fn(),
+          // findByIds 只回 is_active=1 的题：12 已下线/不存在 -> 不在结果里
+          findByIds: vi.fn().mockResolvedValue([
+            { id: 11, subject_id: 1 },
+            { id: 13, subject_id: 1 },
+            { id: 14, subject_id: 4 }, // 别的学科
+          ]),
+        },
+      });
+      await mkSvc(deps).judgeTraining({
+        studentId: 7, questionId: 11, subjectId: 1, studentAnswer: 'B', source: 'targeted',
+        sessionUid: 'uid-1', questionCount: 4, questionOrder: 1,
+        plannedQuestionIds: [11, 12, 13, 14],
+      });
+
+      expect(deps.questionsRepo.findByIds).toHaveBeenCalledWith([11, 12, 13, 14]);
+      expect(deps.specialAnswersRepo.ensurePlannedQuestions).toHaveBeenCalledWith(101, [11, 13]);
+    });
+
+    it('不传 plannedQuestionIds（旧客户端）-> 不查题、不写占位行，判题与作答记录照旧', async () => {
+      const deps = mkJudge();
+      await mkSvc(deps).judgeTraining({
+        studentId: 7, questionId: 100, subjectId: 1, studentAnswer: 'B', source: 'targeted',
+        sessionUid: 'uid-2', questionOrder: 1,
+      });
+      expect(deps.questionsRepo.findByIds).not.toHaveBeenCalled();
+      expect(deps.specialAnswersRepo.ensurePlannedQuestions).not.toHaveBeenCalled();
+      expect(deps.specialAnswersRepo.upsertAnswer).toHaveBeenCalled();
+    });
+
+    it('题单里的 id 全部失效（都下线/别学科）-> 不写占位行（空集合非错误）', async () => {
+      const deps = mkJudge({
+        questionsRepo: {
+          findById: vi.fn(), findRandomByKpAndType: vi.fn(),
+          findByIds: vi.fn().mockResolvedValue([]),
+        },
+      });
+      await mkSvc(deps).judgeTraining({
+        studentId: 7, questionId: 100, subjectId: 1, studentAnswer: 'B', source: 'targeted',
+        sessionUid: 'uid-3', questionOrder: 1, plannedQuestionIds: [999],
+      });
+      expect(deps.specialAnswersRepo.ensurePlannedQuestions).not.toHaveBeenCalled();
+    });
+
+    it('占位行写入抛错（尽力而为）-> 作答记录已写、判题结果照常返回', async () => {
+      const deps = mkJudge({
+        questionsRepo: {
+          findById: vi.fn(), findRandomByKpAndType: vi.fn(),
+          findByIds: vi.fn().mockResolvedValue([{ id: 11, subject_id: 1 }, { id: 12, subject_id: 1 }]),
+        },
+        specialAnswersRepo: {
+          upsertAnswer: vi.fn().mockResolvedValue(undefined),
+          upsertSpecialAnswer: vi.fn(),
+          ensurePlannedQuestions: vi.fn().mockRejectedValue(new Error('db down')),
+        },
+      });
+      const result = await mkSvc(deps).judgeTraining({
+        studentId: 7, questionId: 11, subjectId: 1, studentAnswer: 'B', source: 'targeted',
+        sessionUid: 'uid-4', questionCount: 2, questionOrder: 1,
+        plannedQuestionIds: [11, 12],
+      });
+      expect(result).toBe(judgeResult);
+      expect(deps.specialAnswersRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 101, questionId: 11, answerText: 'B',
+      }));
+    });
   });
 });

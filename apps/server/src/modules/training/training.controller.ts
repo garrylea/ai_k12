@@ -71,6 +71,10 @@ export class TrainingController {
       title: typeof dto.title === 'string' ? dto.title : undefined,
       questionCount: typeof dto.questionCount === 'number' ? dto.questionCount : undefined,
       questionOrder: typeof dto.questionOrder === 'number' ? dto.questionOrder : undefined,
+      // 未作答占位行（2026-11-06）：题单只认正整数，垃圾值不往下传（服务端还会按在架/同学科再筛）。
+      plannedQuestionIds: Array.isArray(dto.plannedQuestionIds)
+        ? dto.plannedQuestionIds.filter((n) => Number.isInteger(n) && n > 0)
+        : undefined,
     });
     // 判题完成后再记审计：放前面一旦抛错就会把判题结果顶掉。
     await this.recordSessionJudged(dto.sessionId, user.sub);

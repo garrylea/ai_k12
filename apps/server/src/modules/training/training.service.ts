@@ -185,13 +185,18 @@ export class TrainingService {
   /** 训练判题：JudgeCore 题中心变体的薄封装（source 由端点语义决定，不透传客户端任意值）。
    *  带 sessionUid 时旁路写作答记录（Task 3，2026-11-01）：数学/物理/化学 → math_targeted /
    *  physics_targeted / chemistry_targeted；写入失败只 warn、不阻断判题（与 special_practice_logs
-   *  同口径）。 */
+   *  同口径）。
+   *  带 plannedQuestionIds 时（2026-11-06）再把整轮题单里**未作答**的题写成空行，
+   *  历史详情才显示得出「未作答」。 */
   async judgeTraining(input: {
     studentId: number; questionId: number; subjectId: number; studentAnswer: string;
     source: 'targeted' | 'error_practice';
     sessionUid?: string; title?: string; questionCount?: number; questionOrder?: number;
+    plannedQuestionIds?: number[];
   }) {
-    const result = await this.judgeCore.judgeQuestion({ ...input, sourceRefId: null });
+    // plannedQuestionIds 只是作答记录的入参，不能顺带喂给 JudgeCore（它不认这个字段）。
+    const { plannedQuestionIds, ...judgeInput } = input;
+    const result = await this.judgeCore.judgeQuestion({ ...judgeInput, sourceRefId: null });
     // 旁路写作答记录：判题结果算出后、返回前。sessionUid 缺失 = 旧客户端，不写、不报错。
     if (input.sessionUid && this.specialSessionsRepo && this.specialAnswersRepo) {
       const module: SpecialSessionModule =
@@ -217,6 +222,23 @@ export class TrainingService {
           analysis: result.explanation ?? null,
           judgedAt: new Date(),
         });
+        // 整轮题单落库：**必须排在本行作答之后、且自己兜异常**——占位行是「锦上添花」，
+        // 它失败绝不能把已经写成功的作答记录或判题结果顶掉（只 warn）。
+        // 只写存在、在架（findByIds 已按 is_active=1 过滤）、同学科的题，保持入参顺序。
+        if (plannedQuestionIds?.length && this.questionsRepo) {
+          try {
+            const rows = await this.questionsRepo.findByIds(plannedQuestionIds);
+            const valid = new Set(rows.filter((q) => q.subject_id === input.subjectId).map((q) => q.id));
+            const ordered = plannedQuestionIds.filter((id) => valid.has(id));
+            if (ordered.length > 0) {
+              await this.specialAnswersRepo.ensurePlannedQuestions(sessionId, ordered);
+            }
+          } catch (err) {
+            this.logger.warn(
+              `special_answer_records 占位行写入失败（已忽略，不影响判题）: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
       } catch (err) {
         this.logger.warn(
           `special_answer_records 写入失败（已忽略，不影响判题）: ${err instanceof Error ? err.message : String(err)}`,

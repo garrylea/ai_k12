@@ -22,4 +22,7 @@ export interface JudgeTrainingDto {
   title?: string;
   questionCount?: number;
   questionOrder?: number;
+  /** 数理化专项开练的整轮题单（有序，含已答与未答）；缺省不写占位行。
+   *  服务端只保留存在、在架、与 `subjectId` 同学科的 id，按本数组顺序落 `question_order`。 */
+  plannedQuestionIds?: number[];
 }
