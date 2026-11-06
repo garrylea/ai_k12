@@ -23,6 +23,7 @@ function make() {
     countSubmittedByStudent: vi.fn().mockResolvedValue(0),
     countAnswersBySession: vi.fn().mockResolvedValue({ total: 0, correct: 0 }),
     findAnswersWithQuestions: vi.fn().mockResolvedValue([]),
+    findAnswersBySession: vi.fn().mockResolvedValue([]),
     findByIdOwned: vi.fn().mockResolvedValue(null),
   };
   const specialSessionsRepo = {
@@ -38,12 +39,16 @@ function make() {
   const questionsRepo = {
     findKpIdsByQuestionIds: vi.fn().mockResolvedValue(new Map<number, number>()),
   };
+  const historyPractice = {
+    loadRedoQuestion: vi.fn().mockResolvedValue(null),
+    startSimilar: vi.fn(),
+  };
   const service = new PracticeHistoryService(
     examSessionsRepo as never, specialSessionsRepo as never,
     specialAnswersRepo as never, passagesRepo as never,
-    questionsRepo as never,
+    questionsRepo as never, historyPractice as never,
   );
-  return { service, examSessionsRepo, specialSessionsRepo, specialAnswersRepo, passagesRepo, questionsRepo };
+  return { service, examSessionsRepo, specialSessionsRepo, specialAnswersRepo, passagesRepo, questionsRepo, historyPractice };
 }
 
 describe('PracticeHistoryService.list', () => {
@@ -275,5 +280,70 @@ describe('PracticeHistoryService.getDetail', () => {
     const r = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
     expect(r?.questions[0].canRedo).toBe(true);
     expect(r?.questions[0].canSimilar).toBe(true);
+  });
+});
+
+describe('PracticeHistoryService.redo', () => {
+  let h: ReturnType<typeof make>;
+  beforeEach(() => { h = make(); });
+
+  it('会话/题目归属通过时返回单题 + 标题', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ title: '期中卷' }));
+    h.examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 100, question_order: 3 }]);
+    h.historyPractice.loadRedoQuestion.mockResolvedValue({
+      questionId: 100, text: '题干', type: 'choice', options: null, materialText: null,
+    });
+    const r = await h.service.redo({ studentId: 7, source: 'exam', sessionId: 1, questionId: 100 });
+    expect(r?.title).toBe('重做：期中卷 · 第 3 题');
+    expect(r?.questions).toEqual([{
+      questionId: 100, text: '题干', type: 'choice', options: null, materialText: null,
+    }]);
+  });
+
+  it('标题无 title 时兜底「练习」', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ title: null }));
+    h.examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 100, question_order: 1 }]);
+    h.historyPractice.loadRedoQuestion.mockResolvedValue({
+      questionId: 100, text: '题干', type: 'choice', options: null, materialText: null,
+    });
+    const r = await h.service.redo({ studentId: 7, source: 'exam', sessionId: 1, questionId: 100 });
+    expect(r?.title).toBe('重做：练习 · 第 1 题');
+  });
+
+  it('题目不在该会话 -> null（防越权）', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession());
+    h.examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 999, question_order: 1 }]);
+    await expect(h.service.redo({ studentId: 7, source: 'exam', sessionId: 1, questionId: 100 })).resolves.toBeNull();
+  });
+
+  it('非本人会话 -> null（不查作答行）', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(null);
+    await expect(h.service.redo({ studentId: 7, source: 'exam', sessionId: 1, questionId: 100 })).resolves.toBeNull();
+    expect(h.examSessionsRepo.findAnswersBySession).not.toHaveBeenCalled();
+  });
+
+  it('专项：归属按 listBySession 的 question_id 判定', async () => {
+    h.specialSessionsRepo.findByIdOwned.mockResolvedValue(mkSpecialSession({ title: '默写专项' }));
+    h.specialAnswersRepo.listBySession.mockResolvedValue([{ question_id: 200, question_order: 2 }]);
+    h.historyPractice.loadRedoQuestion.mockResolvedValue({
+      questionId: 200, text: '题干', type: 'choice', options: null, materialText: null,
+    });
+    const r = await h.service.redo({ studentId: 7, source: 'special', sessionId: 5, questionId: 200 });
+    expect(r?.title).toBe('重做：默写专项 · 第 2 题');
+    expect(r?.questions).toHaveLength(1);
+  });
+
+  it('专项：题目不在该会话 -> null', async () => {
+    h.specialSessionsRepo.findByIdOwned.mockResolvedValue(mkSpecialSession());
+    h.specialAnswersRepo.listBySession.mockResolvedValue([{ question_id: 999, question_order: 1 }]);
+    await expect(h.service.redo({ studentId: 7, source: 'special', sessionId: 5, questionId: 100 })).resolves.toBeNull();
+  });
+
+  it('题目已下架 -> BadRequestException', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession());
+    h.examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 100, question_order: 1 }]);
+    h.historyPractice.loadRedoQuestion.mockResolvedValue(null);
+    await expect(h.service.redo({ studentId: 7, source: 'exam', sessionId: 1, questionId: 100 }))
+      .rejects.toBeInstanceOf(BadRequestException);
   });
 });

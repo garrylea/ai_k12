@@ -8,6 +8,7 @@ function make() {
   const service = {
     list: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 }),
     getDetail: vi.fn().mockResolvedValue(null),
+    redo: vi.fn().mockResolvedValue(null),
   };
   return { controller: new PracticeHistoryController(service as never), service };
 }
@@ -56,5 +57,29 @@ describe('PracticeHistoryController.detail', () => {
     service.getDetail.mockResolvedValue(detail);
     await expect(controller.detail('exam', 1, USER)).resolves.toBe(detail);
     expect(service.getDetail).toHaveBeenCalledWith({ studentId: 7, source: 'exam', sessionId: 1 });
+  });
+});
+
+describe('PracticeHistoryController.redo', () => {
+  it('source 非法 → 404，且不调 service', async () => {
+    const { controller, service } = make();
+    await expect(controller.redo('xxx', 1, 100, USER)).rejects.toBeInstanceOf(NotFoundException);
+    expect(service.redo).not.toHaveBeenCalled();
+  });
+
+  it('service 返回 null（非本人/题目不在会话）→ 404', async () => {
+    const { controller } = make();
+    await expect(controller.redo('exam', 1, 100, USER)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('正常重做原样返回，studentId 只取 JWT', async () => {
+    const { controller, service } = make();
+    const res = {
+      questions: [{ questionId: 100, text: '题干', type: 'choice', options: null, materialText: null }],
+      title: '重做：期中卷 · 第 3 题',
+    };
+    service.redo.mockResolvedValue(res);
+    await expect(controller.redo('exam', 1, 100, USER)).resolves.toBe(res);
+    expect(service.redo).toHaveBeenCalledWith({ studentId: 7, source: 'exam', sessionId: 1, questionId: 100 });
   });
 });

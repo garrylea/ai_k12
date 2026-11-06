@@ -1,4 +1,4 @@
-import { Controller, Get, NotFoundException, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -54,5 +54,26 @@ export class PracticeHistoryController {
     });
     if (!detail) throw new NotFoundException({ code: 1002, message: '记录不存在' });
     return detail;
+  }
+
+  /**
+   * 单题重做（2026-11-06）。
+   *
+   * 只回放这一道原题（白名单字段，不含答案/解析），不建会话、不写作答、不发分。
+   * 归属不通过一律 404；题已下架 400（service 抛 BadRequestException）。
+   */
+  @Post(':source/:sessionId/questions/:questionId/redo')
+  async redo(
+    @Param('source') source: string,
+    @Param('sessionId', ParseIntPipe) sessionId: number,
+    @Param('questionId', ParseIntPipe) questionId: number,
+    @CurrentUser() user: JwtUser,
+  ): Promise<{ questions: unknown[]; title: string }> {
+    if (source !== 'exam' && source !== 'special') {
+      throw new NotFoundException({ code: 1002, message: '记录不存在' });
+    }
+    const res = await this.service.redo({ studentId: user.sub, source, sessionId, questionId });
+    if (!res) throw new NotFoundException({ code: 1002, message: '记录不存在' });
+    return res;
   }
 }

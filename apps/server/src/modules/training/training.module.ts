@@ -24,6 +24,7 @@ import { VariationService } from './variation.service.js';
 import { VariationGeneratorService } from './variation-generator.service.js';
 import { VariationQuestionsRepository } from '../../database/repositories/variation-questions.repo.js';
 import { ExamSessionsRepository } from '../../database/repositories/exam-sessions.repo.js';
+import { HistoryPracticeService } from './history-practice.service.js';
 
 /**
  * 错题训练模块（Task 1 骨架 + Task 2 判题 + Task 3 提示缓存 + Task 8 专项练习 + Task 7 解析拉取）。
@@ -60,6 +61,8 @@ import { ExamSessionsRepository } from '../../database/repositories/exam-session
   // imports AnalyticsModule（埋点 Phase 2）：TrainingController 注入其导出的 EventsService（hint_requested）
   imports: [PracticeModule, PointsModule, AnalyticsModule],
   controllers: [TrainingController, VocabularyController, MeaningController, RemediationController, VariationController],
-  providers: [TrainingService, VocabularyService, MeaningService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability, ChineseMeaningJudgeCapability, TrainingSessionsRepository, SpecialPracticeLogsRepository, SpecialPracticeSessionsRepository, SpecialAnswerRecordsRepository, RemediationService, RemediationGeneratorService, RemediationRepository, ExamSessionsRepository, VariationCapability, VariationService, VariationGeneratorService, VariationQuestionsRepository],
+  providers: [TrainingService, VocabularyService, MeaningService, MainErrorBooksRepository, QuestionsRepository, QuestionHintsRepository, KnowledgePointsRepository, StudentHiddenQuestionsRepository, AdminNotificationsRepository, HintCapability, ChinesePassagesRepository, DictationFeedbackCapability, InterpretationJudgeCapability, EnglishWordsRepository, StudentWordProgressRepository, EnglishWordJudgeCapability, ChineseMeaningJudgeCapability, TrainingSessionsRepository, SpecialPracticeLogsRepository, SpecialPracticeSessionsRepository, SpecialAnswerRecordsRepository, RemediationService, RemediationGeneratorService, RemediationRepository, ExamSessionsRepository, VariationCapability, VariationService, VariationGeneratorService, VariationQuestionsRepository, HistoryPracticeService],
+  // HistoryPracticeService 供 PracticeHistoryModule 的「单题重做 / 同类型练习」复用（2026-11-06）
+  exports: [HistoryPracticeService],
 })
 export class TrainingModule {}

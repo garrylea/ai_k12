@@ -4,6 +4,8 @@ import { SpecialPracticeSessionsRepository } from '../../database/repositories/s
 import { SpecialAnswerRecordsRepository } from '../../database/repositories/special-answer-records.repo.js';
 import { ChinesePassagesRepository, toSentences } from '../../database/repositories/chinese-passages.repo.js';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
+import type { HistoryRunQuestion } from '../training/history-practice.service.js';
+import { HistoryPracticeService } from '../training/history-practice.service.js';
 import type {
   PracticeHistoryQueryDto,
   PracticeHistoryItem,
@@ -26,6 +28,7 @@ export class PracticeHistoryService {
     private readonly specialAnswersRepo: SpecialAnswerRecordsRepository,
     private readonly passagesRepo: ChinesePassagesRepository,
     private readonly questionsRepo: QuestionsRepository,
+    private readonly historyPractice: HistoryPracticeService,
   ) {}
 
   async list(query: PracticeHistoryQueryDto & { studentId: number }): Promise<PracticeHistoryListResult> {
@@ -212,5 +215,46 @@ export class PracticeHistoryService {
       },
       questions,
     };
+  }
+
+  /**
+   * 单题重做（2026-11-06）。
+   *
+   * 归属双校验：先 `findByIdOwned`（会话必须是本人的），再确认该 questionId 确实出现在
+   * 这个会话的作答行里——只凭 sessionId 换 questionId 就能重做别人的题（IDOR）。
+   * 任一步不通过 → null（controller 转 404，不泄露存在性）。
+   * **不建会话、不写作答、不发分**。
+   */
+  async redo(input: {
+    studentId: number; source: 'exam' | 'special'; sessionId: number; questionId: number;
+  }): Promise<{ questions: HistoryRunQuestion[]; title: string } | null> {
+    const found = await this.loadSessionQuestion(input);
+    if (!found) return null;
+    const question = await this.historyPractice.loadRedoQuestion(input.questionId);
+    // 题目下架 / 被删：会话里有作答行但题已不可练，属可重试的无效请求
+    if (!question) throw new BadRequestException({ code: 400, message: '题目已下架' });
+    return {
+      questions: [question],
+      title: `重做：${found.title ?? '练习'} · 第 ${found.order} 题`,
+    };
+  }
+
+  private async loadSessionQuestion(input: {
+    studentId: number; source: 'exam' | 'special'; sessionId: number; questionId: number;
+  }): Promise<{ subjectId: number; title: string | null; order: number } | null> {
+    if (input.source === 'exam') {
+      const session = await this.examSessionsRepo.findByIdOwned(input.sessionId, input.studentId);
+      if (!session) return null;
+      const answers = await this.examSessionsRepo.findAnswersBySession(input.sessionId);
+      const row = answers.find((a) => a.question_id === input.questionId);
+      if (!row) return null;
+      return { subjectId: session.subject_id, title: session.title, order: row.question_order };
+    }
+    const session = await this.specialSessionsRepo.findByIdOwned(input.sessionId, input.studentId);
+    if (!session) return null;
+    const rows = await this.specialAnswersRepo.listBySession(input.sessionId);
+    const row = rows.find((a) => a.question_id === input.questionId);
+    if (!row) return null;
+    return { subjectId: session.subject_id, title: session.title, order: row.question_order };
   }
 }
