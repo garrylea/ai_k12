@@ -153,6 +153,22 @@ describe('HistoryPracticeService.startSimilar', () => {
     );
   });
 
+  it('种子难度 5（超出 1..3）：阶梯先收敛为 [3]，绝不传空数组（否则 SQL IN () 500）', async () => {
+    const { svc, questionsRepo, kpRepo } = make();
+    questionsRepo.findById.mockResolvedValue(mkQ({ difficulty: 5 }));
+    questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
+    kpRepo.findById.mockResolvedValue({ id: 28, name: '反比例函数' });
+    questionsRepo.findRandomByKpTypeDifficulty
+      .mockResolvedValueOnce([{ id: 201, content: '题1', type: 'choice', options: null, material_text: null }])
+      .mockResolvedValueOnce([]);
+
+    await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 });
+
+    expect(questionsRepo.findRandomByKpTypeDifficulty).toHaveBeenNthCalledWith(
+      2, 7, 1, 28, 'choice', [3], 2, [100, 201],
+    );
+  });
+
   it('题够但没有 ≤ 实际题数的可用档位 -> 照常出题、不建会话', async () => {
     const { svc, questionsRepo, kpRepo, pointRules, trainingSessionsRepo } = make();
     questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));

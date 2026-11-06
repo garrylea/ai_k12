@@ -25,14 +25,25 @@ export function toDifficulty(value: number): Difficulty {
  *  若将来题库引入判断题，**必须**同样把 answer 归一到 `对`/`错` 并强制 `options=null`。 */
 export function toStoredAnswer(v: VariationQuestion, type: string): string {
   // 多选：答案必须是「正确项 label 排序拼接」（BD），与 judge-core 的多选集合比对同口径；
-  // 顺序无关，故入库前统一排序，避免 DB 里出现 DB / BD 两种写法。
+  // 顺序无关，故入库前统一排序，避免 DB 里出现 DB / BD 两种写法。label 重复时先 Set 去重，
+  // 否则两个同 label 的正确项会拼成 "BB" —— 学生提交 "B" 永远判错。
   if (type === 'multi_choice') {
     const correct = (v.options ?? []).filter((o) => o.isCorrect === true).map((o) => o.label);
-    return correct.length > 0 ? [...correct].sort().join('') : v.answer;
+    return correct.length > 0 ? [...new Set(correct)].sort().join('') : v.answer;
   }
   if (type !== 'choice') return v.answer;
   const correct = (v.options ?? []).find((o) => o.isCorrect === true);
   return correct?.label ?? v.answer;
+}
+
+/** 选项 label 重复检测：返回首个重复的 label（无重复返回 null）。 */
+function findDuplicateLabel(options: Array<{ label: string }>): string | null {
+  const seen = new Set<string>();
+  for (const o of options) {
+    if (seen.has(o.label)) return o.label;
+    seen.add(o.label);
+  }
+  return null;
 }
 
 /** AI 生成题轻校验（remediation spec §5.3 / 变式生成同口径）：返回拒绝原因，null = 通过。 */
@@ -43,6 +54,9 @@ export function variationRejectionReason(v: VariationQuestion, type: string): st
     if (!Array.isArray(v.options) || v.options.length < 2) {
       return `multi_choice 选项不足 2 个（实际 ${v.options?.length ?? 0}）`;
     }
+    // label 必须唯一：judge-core 按 label 命中选项，重复 label 会让提交恒判错/命错项
+    const dupLabel = findDuplicateLabel(v.options);
+    if (dupLabel) return `multi_choice 选项 label 重复（${dupLabel}）`;
     // 至少 1 个正确项：零个正确项时「正确答案」不存在，判题无从比对
     const correct = v.options.filter((o) => o.isCorrect === true);
     if (correct.length < 1) return 'multi_choice 至少需要 1 个正确选项';
@@ -57,6 +71,9 @@ export function variationRejectionReason(v: VariationQuestion, type: string): st
     if (!Array.isArray(v.options) || v.options.length < 2) {
       return `choice 选项不足 2 个（实际 ${v.options?.length ?? 0}）`;
     }
+    // label 必须唯一：choice 的答案就是 label，重复 label 时「正确项」无法确定
+    const dupLabel = findDuplicateLabel(v.options);
+    if (dupLabel) return `choice 选项 label 重复（${dupLabel}）`;
     // 有且仅有一个正确选项：多个/零个都会让判题（choice 走程序比对）行为不确定
     const correct = v.options.filter((o) => o.isCorrect === true);
     if (correct.length !== 1) {

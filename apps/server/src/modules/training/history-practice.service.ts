@@ -103,10 +103,10 @@ export class HistoryPracticeService {
     let selected: HistoryRunQuestion[] = picked.map((q) => this.toRunQuestion(q));
 
     if (selected.length < input.count) {
+      // 先收敛再去重：难度可能超出口径（种子 difficulty >= 5 时 [d-1,d,d+1] 全被过滤会得到
+      // 空数组，SQL 变成 `IN ()` 直接 500）。toDifficulty 会把越界值夹到 1..3。
       const ladder = [...new Set(
-        [seed.difficulty - 1, seed.difficulty, seed.difficulty + 1]
-          .filter((d) => d >= 1 && d <= 3)
-          .map((d) => toDifficulty(d)),
+        [seed.difficulty - 1, seed.difficulty, seed.difficulty + 1].map((d) => toDifficulty(d)),
       )];
       const more = await this.questionsRepo.findRandomByKpTypeDifficulty(
         input.studentId, input.subjectId, kpId, seed.type, ladder,

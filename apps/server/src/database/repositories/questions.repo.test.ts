@@ -83,6 +83,26 @@ describe('QuestionsRepository.findKpIdsByQuestionIds', () => {
   });
 });
 
+describe('QuestionsRepository.findRandomByKpTypeDifficulty', () => {
+  it('难度数组为空：直接返回 []，不发 SQL（避免 IN () 语法错误 → 500）', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    expect(await repo.findRandomByKpTypeDifficulty(7, 1, 3, 'choice', [], 5, [])).toEqual([]);
+    expect(pool.query).not.toHaveBeenCalled();
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+
+  it('正常难度数组：IN (?,?) 与参数顺序正确（含排除 id 与 LIMIT）', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    await repo.findRandomByKpTypeDifficulty(7, 1, 3, 'choice', [1, 3], 5, [100, 201]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('q.difficulty IN (?,?)');
+    expect(sql).toContain('q.id NOT IN (?,?)');
+    expect(params).toEqual([7, 1, 3, 'choice', 1, 3, 100, 201, 5]);
+  });
+});
+
 describe('QuestionsRepository.updateExplanation', () => {
   it('执行 UPDATE questions SET explanation = ? WHERE id = ? 回写解析缓存', async () => {
     const pool = mockPool([]);

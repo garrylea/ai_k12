@@ -163,6 +163,9 @@ export class QuestionsRepository {
     count: number,
     excludeQuestionIds: number[],
   ): Promise<QuestionRow[]> {
+    // 空难度数组会生成 `q.difficulty IN ()` → MySQL ER_PARSE_ERROR（500）。调用方理论上
+    // 已经收敛过，这里再兜一层：无档位可抽时直接返回空，不发 SQL。
+    if (difficulties.length === 0) return [];
     const diffFilter = difficulties.map(() => '?').join(',');
     const exclusion = excludeQuestionIds.length > 0
       ? ` AND q.id NOT IN (${excludeQuestionIds.map(() => '?').join(',')})`

@@ -298,6 +298,20 @@ describe('TargetedRunPage 完成发分', () => {
     expect(await screen.findByText('已回到配置页')).toBeTruthy();
   });
 
+  it('returnTo 是穿越路径（形状不符）：忽略并退回配置页', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+
+    await answerOnlyQuestion(
+      `/?subjectId=1&returnTo=${encodeURIComponent('/student/practice-history/../../admin/x')}`,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    });
+
+    expect(await screen.findByText('已回到配置页')).toBeTruthy();
+  });
+
   /**
    * 练习记录复用本页（2026-11-06 Task 9）：同一页跑两种模式。
    * - redo：单题、不计时不发分 → 不带 sessionId/sessionUid/plannedQuestionIds，只带 suppressErrorFixPoints；
@@ -328,6 +342,37 @@ describe('TargetedRunPage 完成发分', () => {
       sessionId: 88, plannedQuestionIds: [101], questionOrder: 1,
     }));
     expect(typeof judgeMock.mock.calls[0][0].sessionUid).toBe('string');
+  });
+
+  /**
+   * 题号必须是题单里的 1-based 位置，不是常量 1：只测单题的话，写死 `questionOrder: 1`
+   * 也能过。两题题单里答第二题必须送 2（旧实现误把 questionId / 常量当题号）。
+   */
+  it('两题题单：第二题送 questionOrder 2（1..N，不是常量）', async () => {
+    sessionStorage.setItem(KEY, JSON.stringify({
+      sessionId: 88,
+      questions: [QUESTION, { ...QUESTION, questionId: 205, text: '2 + 2 = ?' }],
+    }));
+    judgeMock.mockResolvedValue(JUDGED);
+
+    renderPage();
+    fireEvent.click(screen.getAllByRole('radio')[1]);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '提交' }));
+    });
+
+    // 第一题提交后切到第二题
+    await screen.findByText('2 + 2 = ?');
+    fireEvent.click(screen.getAllByRole('radio')[1]);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '提交' }));
+    });
+
+    await screen.findByText('答题结果');
+
+    expect(judgeMock).toHaveBeenCalledTimes(2);
+    expect(judgeMock.mock.calls[0][0]).toMatchObject({ questionId: 101, questionOrder: 1 });
+    expect(judgeMock.mock.calls[1][0]).toMatchObject({ questionId: 205, questionOrder: 2 });
   });
 
   /**

@@ -99,7 +99,8 @@
 - 完成/返回：回 `returnTo`（原练习详情页）；`returnTo` 只允许 `/student/practice-history/...`，否则回落训练首页。
 - 结果页：
   - `mode=similar`：现有发分/庆祝/补偿套题逻辑不变，返回按钮回原详情。
-  - `mode=redo`：不显示发分块、不显示补偿套题卡；标题「重做：<原记录标题> · 第 N 题」；返回按钮回原详情。
+  - `mode=redo`：不显示发分块、不显示补偿套题卡；结果页沿用**标准结果页头**（`AnswerResultList` 固定文案「答题结果」）；返回按钮回原详情。
+- 交接体里的 `title` 只用于**同类型练习**的记录/积分标题（`useSessionPointsCompletion`）；重做不发分、不落记录，故其标题不会出现在结果页头（后端返回的「重做：<原记录标题> · 第 N 题」仅用于识别本次请求）。
 
 ---
 
@@ -187,7 +188,7 @@
   3. 题库第一轮：同 subject/kp/type/难度，排除 seed、已选、`student_hidden_questions`、`is_active=0`、`answer=''`，随机取 `count`。
   4. 不足：难度放宽到 `[d-1, d, d+1]`（边界收敛 1..3），排除已选，再取缺口。
   5. 仍不足：AI 生成缺口（见 6.7），最多 20 秒；失败/超时用题库已有题。
-  6. 返回 `min(count, 实际得到)`；实际 0 → `{ questions: [], sessionId: null, title }`（200，不报错）。
+  6. 返回 `min(count, 实际得到)`；实际 0 → `{ questions: [], sessionId: null, title }`（201 / 2xx，不报错；POST 默认 201）。
 - 发分：
   - `tierCount = max(可用档位 ∩ {1,2,3,5} ∩ ≤ 实际题数 的值)`；实际 0 或没有可用档位时不建会话（`sessionId=null`，只练习不计分）；
   - 建 `training_sessions`：`task_code=targetedTaskCode(subjectId)`、`tier_key=String(tierCount)`、`expected_count=actual`、`ref_type='question'`、`ref_id=null`；
@@ -240,8 +241,8 @@
 ### 6.7 异常与边界
 
 - 会话/题目不属于当前学生：404。
-- `source` 非 exam/special：400；`count` 非法：400；学科不支持：400；无 KP / 无答案：400。
-- 题库 0 且 AI 失败：200 + 空数组；前端 toast「暂时没有同类题」，不跳转。
+- `source` 非 exam/special：404（controller 与详情同口径，不泄露存在性）；`count` 非法：400；学科不支持：400；无 KP / 无答案：400。
+- 题库 0 且 AI 失败：2xx + 空数组；前端 toast「暂时没有同类题」，不跳转。
 - 实际题数 < 请求：照常进入答题页，标题用实际题数，档位按实际题数取。
 - 判题/写入记录失败：沿用现有「旁路写入失败只 warn、不阻断判题」。
 - 计划题单里有非法 id：跳过并 warn，不影响判题。
@@ -275,7 +276,7 @@
   - 判题 `source='targeted'` + `suppressErrorFixPoints: true`；主观题自评也带同一字段；
   - 不带 `sessionId`、`sessionUid`、`plannedQuestionIds`；
   - 不调用 `useSessionPointsCompletion` 的 complete；
-  - 结果页隐藏发分块与补偿套题卡。
+  - 结果页隐藏发分块与补偿套题卡；结果页头仍是标准「答题结果」，交接标题不参与结果页渲染；
 - `mode='similar'` 与普通专项：判题时都带 `plannedQuestionIds`（题单顺序），否则未作答的题仍不可见。
 - 两者都：`returnTo` 优先作为完成/退出目标；`returnTo` 白名单校验。
 - 题号：`orderByQuestionId` 取下标 +1，替代 `Number(q.n)`。

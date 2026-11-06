@@ -38,12 +38,13 @@ export default function TargetedRunPage() {
   const subjectId = parseSubjectId(searchParams.get('subjectId'));
   const subjectQuery = `?subjectId=${subjectId}`;
   /**
-   * 练习记录详情页发起的练习带 `returnTo`（回详情页）；只放行练习记录内部路径，
-   * 其它值（外链 / 手改 URL）一律忽略，退回专项配置页。
+   * 练习记录详情页发起的练习带 `returnTo`（回详情页）。只放行**固定形状**的练习记录详情路径
+   * （`/student/practice-history/{exam|special}/{数字}`），不用前缀判断——前缀判断会放过
+   * `/student/practice-history/../../admin/x` 这类穿越路径。其它值退回专项配置页。
    */
   const returnToRaw = searchParams.get('returnTo');
   const exitTarget =
-    returnToRaw && returnToRaw.startsWith('/student/practice-history/')
+    returnToRaw && /^\/student\/practice-history\/(exam|special)\/\d+$/.test(returnToRaw)
       ? returnToRaw
       : `/student/training/targeted${subjectQuery}`;
   /** 补偿套题当前只支持数学（后端 remediation 不认语文会话）。 */

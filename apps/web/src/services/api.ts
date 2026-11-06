@@ -964,8 +964,9 @@ export function judgeTraining(payload: {
   questionCount?: number;
   questionOrder?: number;
   /**
-   * 单题重做（练习记录详情页「重做」）：不建练习记录、不发分，后端据此跳过
-   * `special_answer_records` 与错题本积分。与 `sessionUid` 互斥（重做不带该字段）。
+   * 单题重做（练习记录详情页「重做」）：只关闭错题本订正积分（`pointsAwarded=0`）。
+   * **不写 `special_answer_records` 靠的是不带 `sessionUid`**，不是靠这个开关 ——
+   * 两者是独立条件，重做必须同时满足（不带 sessionUid + 本字段 true）才不会留下记录。
    */
   suppressErrorFixPoints?: boolean;
   /** 本轮题单的 questionId 顺序快照（答题历史回放用）；重做不带。 */

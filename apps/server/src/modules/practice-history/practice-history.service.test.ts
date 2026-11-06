@@ -298,6 +298,8 @@ describe('PracticeHistoryService.redo', () => {
     expect(r?.questions).toEqual([{
       questionId: 100, text: '题干', type: 'choice', options: null, materialText: null,
     }]);
+    // 重做是纯读路径：不得走抽题/AI 补题（那是同类型练习的事）
+    expect(h.historyPractice.startSimilar).not.toHaveBeenCalled();
   });
 
   it('标题无 title 时兜底「练习」', async () => {

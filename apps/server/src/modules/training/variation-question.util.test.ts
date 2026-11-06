@@ -43,6 +43,32 @@ describe('multi_choice 归一与校验', () => {
     )).toBeNull();
   });
 
+  it('选项 label 重复 -> 拒绝（multi_choice），且 toStoredAnswer 去重不产出 BB', () => {
+    const dupOpts = [
+      { label: 'A', text: '甲', isCorrect: false },
+      { label: 'B', text: '乙', isCorrect: true },
+      { label: 'B', text: '丙', isCorrect: true },
+    ];
+    expect(variationRejectionReason(
+      { content: 'x', answer: 'B', explanation: '', difficulty: 2, variationType: '换数', options: dupOpts },
+      'multi_choice',
+    )).toContain('label 重复');
+    expect(toStoredAnswer(
+      { content: 'x', answer: 'B', explanation: '', difficulty: 2, variationType: '换数', options: dupOpts },
+      'multi_choice',
+    )).toBe('B');
+  });
+
+  it('选项 label 重复 -> 拒绝（choice）', () => {
+    expect(variationRejectionReason(
+      { content: 'x', answer: 'A', explanation: '', difficulty: 2, variationType: '换数', options: [
+        { label: 'A', text: '甲', isCorrect: true },
+        { label: 'A', text: '乙', isCorrect: false },
+      ] },
+      'choice',
+    )).toContain('label 重复');
+  });
+
   it('无正确项时 toStoredAnswer 回落原 answer（不产出空串）', () => {
     expect(toStoredAnswer(
       { content: 'x', answer: 'AB', explanation: '', difficulty: 2, variationType: '换数', options: opts.map((o) => ({ ...o, isCorrect: false })) },
