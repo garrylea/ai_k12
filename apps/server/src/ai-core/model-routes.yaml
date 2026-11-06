@@ -161,6 +161,12 @@ routes:
     - subject: math
       primary: qwen3.8-max
       fallback: gemini-3.1-pro
+    # 2026-11-06：同类型练习补题（subject_id=4）走物理变式，模型档与数学一致。
+    # 注意：这里是「库空时的种子」。运行期真源是 DB / 管理端模型配置，
+    # 部署到已有环境时必须在管理端确认 variation+physics 路由存在。
+    - subject: physics
+      primary: qwen3.8-max
+      fallback: gemini-3.1-pro
 
   analysis:
     - subject: "*"

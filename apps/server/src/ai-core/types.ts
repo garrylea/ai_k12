@@ -567,6 +567,10 @@ export interface VariationRequest {
   knowledgePoint: { id: string; name: string };
   count: number;
   targetDifficulty?: Difficulty;
+  /** 2026-11-06：变式生成按学科选 prompt/路由（默认数学，现有调用方不变）。 */
+  subject?: 'math' | 'physics';
+  /** 2026-11-06：本次调用的硬上限（毫秒），不传走 retry.yaml 的 variation 超时。 */
+  timeoutMs?: number;
 }
 
 export interface VariationQuestion {

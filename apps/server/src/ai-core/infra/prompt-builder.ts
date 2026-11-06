@@ -82,7 +82,8 @@ export class PromptBuilder {
       return `hint/${subject}.md`;
     }
     if (capability === 'variation') {
-      return `variation/generate.md`;
+      // 2026-11-06：变式按学科分模板；数学沿用 generate.md（既有调用方零改动）。
+      return subject === 'math' ? 'variation/generate.md' : `variation/${subject}.md`;
     }
     if (capability === 'analysis') {
       return `analytics/report.md`;

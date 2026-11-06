@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { VariationCapability } from './variation.capability.js';
 import { ModelClient } from '../infra/model-client/index.js';
+import { timeoutConfig } from '../config.js';
 import type { ChatResponse } from '../types.js';
 
 describe('VariationCapability', () => {
@@ -49,5 +50,52 @@ describe('VariationCapability', () => {
     expect(result.variations[0].answer).toBe('x=5');
     expect(result.variations[0].variationType).toBe('换数');
     expect(result.generatedBy).toBeTruthy();
+  });
+
+  // 2026-11-06：subject 决定 prompt 与路由；不传仍是数学（既有调用方零改动）。
+  describe('subject 分流', () => {
+    const mockContent = JSON.stringify({
+      variations: [{ content: '题', answer: 'A', explanation: '解析', difficulty: 2, variationType: '换数' }],
+    });
+
+    function makeSpy() {
+      const calls: { messages: { role: string; content: string }[]; timeout?: number }[] = [];
+      const modelClient = {
+        chat: async (req: { messages: { role: string; content: string }[]; timeout?: number }): Promise<ChatResponse> => {
+          calls.push(req);
+          return {
+            id: 'r1', model: 'qwen3.8-max', content: mockContent,
+            finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5,
+          };
+        },
+      } as unknown as ModelClient;
+      return { calls, capability: new VariationCapability({ modelClient }) };
+    }
+
+    it('physics -> 物理 prompt + timeoutMs 生效', async () => {
+      const { calls, capability } = makeSpy();
+      await capability.generate({
+        originalQuestion: { content: '一辆车 20m/s 行驶 10s', answer: '200m', difficulty: 2 },
+        knowledgePoint: { id: 'kp1', name: '速度' },
+        count: 1,
+        subject: 'physics',
+        timeoutMs: 20000,
+      });
+      const system = calls[0].messages[0].content;
+      expect(system).toContain('物理命题专家');
+      expect(system).not.toContain('数学命题专家');
+      expect(calls[0].timeout).toBe(20000);
+    });
+
+    it('不传 subject -> 数学 prompt + retry.yaml 的 variation 超时', async () => {
+      const { calls, capability } = makeSpy();
+      await capability.generate({
+        originalQuestion: { content: '解方程 2x+3=7', answer: 'x=2', difficulty: 1 },
+        knowledgePoint: { id: 'kp1', name: '一元一次方程' },
+        count: 1,
+      });
+      expect(calls[0].messages[0].content).toContain('数学命题专家');
+      expect(calls[0].timeout).toBe(timeoutConfig.timeout.variation ?? timeoutConfig.timeout.default);
+    });
   });
 });

@@ -42,14 +42,16 @@ export class VariationCapability {
   }
 
   async generate(request: VariationRequest): Promise<VariationResponse> {
+    // 2026-11-06：按学科走对应 prompt 与路由；不传 subject 的既有调用方仍是数学。
+    const subject = request.subject ?? 'math';
     const routeResult = this.modelRouter.route({
       scene: 'variation',
-      subject: 'math',
+      subject,
     });
 
     const promptResult = await this.promptBuilder.build({
       capability: 'variation',
-      subject: 'math',
+      subject,
       context: {
         student: { grade: '', gradeLevel: '' },
         question: { content: request.originalQuestion.content, answer: request.originalQuestion.answer },
@@ -66,7 +68,7 @@ export class VariationCapability {
       model: routeResult.primary,
       messages: promptResult.messages,
       responseFormat: 'json_object',
-      timeout: timeoutConfig.timeout.variation ?? timeoutConfig.timeout.default,
+      timeout: request.timeoutMs ?? timeoutConfig.timeout.variation ?? timeoutConfig.timeout.default,
     });
 
     const parseResult = this.responseParser.parse<{ variations: VariationQuestion[] }>({
