@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { BadRequestException } from '@nestjs/common';
 import { HistoryPracticeService } from './history-practice.service.js';
 
 const mkQ = (over: any = {}) => ({
@@ -52,5 +53,57 @@ describe('HistoryPracticeService.loadRedoQuestion', () => {
 
     questionsRepo.findById.mockResolvedValue(null);
     await expect(svc.loadRedoQuestion(100)).resolves.toBeNull();
+  });
+});
+
+describe('HistoryPracticeService.startSimilar', () => {
+  it('同类型：题库抽满 3 题 -> 建 3 题档会话', async () => {
+    const { svc, questionsRepo, kpRepo, trainingSessionsRepo } = make();
+    questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
+    kpRepo.findById.mockResolvedValue({ id: 28, name: '反比例函数' });
+    questionsRepo.findRandomByKpTypeDifficulty
+      .mockResolvedValueOnce([{ id: 201, content: '题1', type: 'choice', options: null, material_text: null }])
+      .mockResolvedValueOnce([
+        { id: 202, content: '题2', type: 'choice', options: null, material_text: null },
+        { id: 203, content: '题3', type: 'choice', options: null, material_text: null },
+      ]);
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 });
+    expect(r.sessionId).toBe(88);
+    expect(r.questions.map((q) => q.questionId)).toEqual([201, 202, 203]);
+    expect(trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      task_code: 'math_targeted', tier_key: '3', expected_count: 3,
+    }));
+    expect(r.title).toBe('同类练习：反比例函数 · 3 题');
+  });
+
+  it('同类型：实际只有 2 题（请求 5）-> 按 2 题档发分', async () => {
+    const { svc, questionsRepo, kpRepo, trainingSessionsRepo } = make();
+    questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
+    kpRepo.findById.mockResolvedValue({ id: 28, name: '反比例函数' });
+    questionsRepo.findRandomByKpTypeDifficulty
+      .mockResolvedValueOnce([{ id: 201, content: '题1', type: 'choice', options: null, material_text: null }])
+      .mockResolvedValueOnce([{ id: 202, content: '题2', type: 'choice', options: null, material_text: null }]);
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 5 });
+    expect(r.questions).toHaveLength(2);
+    expect(trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({ tier_key: '2' }));
+  });
+
+  it('同类型：0 题 -> 不建会话', async () => {
+    const { svc, questionsRepo, kpRepo, trainingSessionsRepo } = make();
+    questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
+    kpRepo.findById.mockResolvedValue({ id: 28, name: '反比例函数' });
+    questionsRepo.findRandomByKpTypeDifficulty.mockResolvedValue([]);
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 });
+    expect(r.questions).toEqual([]);
+    expect(r.sessionId).toBeNull();
+    expect(trainingSessionsRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('化学 / 非法题量 -> 400', async () => {
+    const { svc } = make();
+    await expect(svc.startSimilar({ studentId: 7, subjectId: 5, questionId: 100, count: 3 }))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 4 }))
+      .rejects.toBeInstanceOf(BadRequestException);
   });
 });

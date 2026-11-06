@@ -347,3 +347,36 @@ describe('PracticeHistoryService.redo', () => {
       .rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('PracticeHistoryService.similar', () => {
+  let h: ReturnType<typeof make>;
+  beforeEach(() => { h = make(); });
+
+  it('similar：归属通过后交给 HistoryPracticeService', async () => {
+    h.specialSessionsRepo.findByIdOwned.mockResolvedValue(mkSpecialSession({ subject_id: 1 }));
+    h.specialAnswersRepo.listBySession.mockResolvedValue([{ question_id: 100, question_order: 1 }]);
+    h.historyPractice.startSimilar.mockResolvedValue({ questions: [], sessionId: null, title: '同类练习：X · 0 题' });
+    const r = await h.service.similar({ studentId: 7, source: 'special', sessionId: 5, questionId: 100, count: 3 });
+    expect(r?.title).toBe('同类练习：X · 0 题');
+    expect(h.historyPractice.startSimilar).toHaveBeenCalledWith({ studentId: 7, subjectId: 1, questionId: 100, count: 3 });
+  });
+
+  it('归属不通过（题目不在该会话）-> null，且不抽题', async () => {
+    h.specialSessionsRepo.findByIdOwned.mockResolvedValue(mkSpecialSession({ subject_id: 1 }));
+    h.specialAnswersRepo.listBySession.mockResolvedValue([{ question_id: 999, question_order: 1 }]);
+    await expect(h.service.similar({
+      studentId: 7, source: 'special', sessionId: 5, questionId: 100, count: 3,
+    })).resolves.toBeNull();
+    expect(h.historyPractice.startSimilar).not.toHaveBeenCalled();
+  });
+
+  it('考试会话：把会话学科透传给 startSimilar', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 4 }));
+    h.examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 200, question_order: 2 }]);
+    h.historyPractice.startSimilar.mockResolvedValue({ questions: [], sessionId: null, title: 't' });
+    await h.service.similar({ studentId: 7, source: 'exam', sessionId: 1, questionId: 200, count: 2 });
+    expect(h.historyPractice.startSimilar).toHaveBeenCalledWith({
+      studentId: 7, subjectId: 4, questionId: 200, count: 2,
+    });
+  });
+});

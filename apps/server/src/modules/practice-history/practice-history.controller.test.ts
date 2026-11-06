@@ -9,6 +9,7 @@ function make() {
     list: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 }),
     getDetail: vi.fn().mockResolvedValue(null),
     redo: vi.fn().mockResolvedValue(null),
+    similar: vi.fn().mockResolvedValue(null),
   };
   return { controller: new PracticeHistoryController(service as never), service };
 }
@@ -81,5 +82,39 @@ describe('PracticeHistoryController.redo', () => {
     service.redo.mockResolvedValue(res);
     await expect(controller.redo('exam', 1, 100, USER)).resolves.toBe(res);
     expect(service.redo).toHaveBeenCalledWith({ studentId: 7, source: 'exam', sessionId: 1, questionId: 100 });
+  });
+});
+
+describe('PracticeHistoryController.similar', () => {
+  it('source 非法 → 404，且不调 service', async () => {
+    const { controller, service } = make();
+    await expect(controller.similar('xxx', 1, 100, { count: 3 }, USER))
+      .rejects.toBeInstanceOf(NotFoundException);
+    expect(service.similar).not.toHaveBeenCalled();
+  });
+
+  it('service 返回 null（非本人/题目不在会话）→ 404', async () => {
+    const { controller } = make();
+    await expect(controller.similar('special', 5, 100, { count: 3 }, USER))
+      .rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('正常返回；count 转 number，studentId 只取 JWT', async () => {
+    const { controller, service } = make();
+    const res = { questions: [], sessionId: null, title: '同类练习：X · 0 题' };
+    service.similar.mockResolvedValue(res);
+    await expect(controller.similar('special', 5, 100, { count: 3 }, USER)).resolves.toBe(res);
+    expect(service.similar).toHaveBeenCalledWith({
+      studentId: 7, source: 'special', sessionId: 5, questionId: 100, count: 3,
+    });
+  });
+
+  it('count 缺失 -> 交给 service 的 NaN（由 service 判 400）', async () => {
+    const { controller, service } = make();
+    service.similar.mockResolvedValue({ questions: [], sessionId: null, title: 't' });
+    await controller.similar('exam', 1, 100, {}, USER);
+    expect(service.similar).toHaveBeenCalledWith(
+      expect.objectContaining({ count: Number.NaN }),
+    );
   });
 });

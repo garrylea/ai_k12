@@ -1,11 +1,14 @@
-import { Controller, Get, NotFoundException, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import { PracticeHistoryService } from './practice-history.service.js';
 import type { PracticeHistoryDetail, PracticeHistoryListResult } from './practice-history.dto.js';
-import type { HistoryRunQuestion } from '../training/history-practice.service.js';
+import type {
+  HistoryRunQuestion,
+  SimilarPracticeResult,
+} from '../training/history-practice.service.js';
 
 /**
  * 学生端「练习记录」（Task 4，2026-11-01）。
@@ -74,6 +77,30 @@ export class PracticeHistoryController {
       throw new NotFoundException({ code: 1002, message: '记录不存在' });
     }
     const res = await this.service.redo({ studentId: user.sub, source, sessionId, questionId });
+    if (!res) throw new NotFoundException({ code: 1002, message: '记录不存在' });
+    return res;
+  }
+
+  /**
+   * 同类型练习（2026-11-06）。
+   *
+   * 归属不通过一律 404；学科/题量/无 KP/无答案由 service 抛 400。
+   * 返回 `sessionId` 供答题页收尾 complete 发分；为 null = 本轮不计分（照常出题）。
+   */
+  @Post(':source/:sessionId/questions/:questionId/similar')
+  async similar(
+    @Param('source') source: string,
+    @Param('sessionId', ParseIntPipe) sessionId: number,
+    @Param('questionId', ParseIntPipe) questionId: number,
+    @Body() body: { count?: number },
+    @CurrentUser() user: JwtUser,
+  ): Promise<SimilarPracticeResult> {
+    if (source !== 'exam' && source !== 'special') {
+      throw new NotFoundException({ code: 1002, message: '记录不存在' });
+    }
+    const res = await this.service.similar({
+      studentId: user.sub, source, sessionId, questionId, count: Number(body?.count),
+    });
     if (!res) throw new NotFoundException({ code: 1002, message: '记录不存在' });
     return res;
   }

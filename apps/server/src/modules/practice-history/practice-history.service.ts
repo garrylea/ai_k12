@@ -4,7 +4,7 @@ import { SpecialPracticeSessionsRepository } from '../../database/repositories/s
 import { SpecialAnswerRecordsRepository } from '../../database/repositories/special-answer-records.repo.js';
 import { ChinesePassagesRepository, toSentences } from '../../database/repositories/chinese-passages.repo.js';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
-import type { HistoryRunQuestion } from '../training/history-practice.service.js';
+import type { HistoryRunQuestion, SimilarPracticeResult } from '../training/history-practice.service.js';
 import { HistoryPracticeService } from '../training/history-practice.service.js';
 import type {
   PracticeHistoryQueryDto,
@@ -238,6 +238,26 @@ export class PracticeHistoryService {
       questions: [question],
       title: `重做：${found.title ?? '练习'} · 第 ${found.order} 题`,
     };
+  }
+
+  /**
+   * 同类型练习（2026-11-06）。
+   *
+   * 归属校验与 redo 同源（`loadSessionQuestion`）：会话必须属于本人，且 questionId 必须在
+   * 这个会话的作答行里，否则 null（controller 转 404，不泄露存在性）。
+   * 通过后把会话学科交给 `HistoryPracticeService` 抽题 + 建训练会话。
+   */
+  async similar(input: {
+    studentId: number; source: 'exam' | 'special'; sessionId: number; questionId: number; count: number;
+  }): Promise<SimilarPracticeResult | null> {
+    const found = await this.loadSessionQuestion(input);
+    if (!found) return null;
+    return this.historyPractice.startSimilar({
+      studentId: input.studentId,
+      subjectId: found.subjectId,
+      questionId: input.questionId,
+      count: input.count,
+    });
   }
 
   private async loadSessionQuestion(input: {
