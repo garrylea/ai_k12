@@ -431,6 +431,32 @@ describe('judgeQuestion error_fix 发分（错题订正）', () => {
   });
 });
 
+describe('suppressErrorFixPoints（单题重做关闭错题订正分，2026-11-06）', () => {
+  it('suppressErrorFixPoints=true：答对清零但不发订正分', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findById: vi.fn().mockResolvedValue({
+          id: 10, type: 'choice', answer: 'A',
+          options: '[{"label":"A","text":"1","isCorrect":true}]',
+        }),
+      },
+      mainErrorRepo: {
+        ...mk().mainErrorRepo,
+        clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(1),
+      },
+    });
+    const svc = mkSvc(deps);
+    const r = await svc.judgeQuestion({
+      studentId: 1, subjectId: 1, questionId: 10, studentAnswer: 'A',
+      source: 'targeted', suppressErrorFixPoints: true,
+    });
+    expect(r.isCorrect).toBe(true);
+    expect(r.pointsAwarded).toBe(0);
+    expect(deps.pointsService.award).not.toHaveBeenCalled();
+    expect(deps.mainErrorRepo.clearUnclearedByStudentQuestionId).toHaveBeenCalledWith(1, 10);
+  });
+});
+
 describe('judgeForPractice error_fix 发分（card 中心 / 主线清零入口）', () => {
   const input = { studentId: 7, subjectId: 1, cardId: 3, lessonId: 5, questionN: '0-1', questionText: '题面', studentAnswer: 'A' };
   const correctQ = { id: 10, type: 'choice', answer: 'A', options: '[{"label":"A","isCorrect":true}]' };
@@ -563,6 +589,17 @@ describe('recordSelfAssessment', () => {
     });
     await svc.recordSelfAssessment({ studentId: 7, subjectId: 1, questionId: 10, assessment: 'correct', source: 'exam', sourceRefId: 55 });
     expect(pointsService.award).not.toHaveBeenCalled();
+  });
+
+  it('自评对 + suppressErrorFixPoints=true：清零但不发分', async () => {
+    const { svc, mainError, pointsService } = makeService();
+    mainError.clearUnclearedByStudentQuestionId.mockResolvedValue(1);
+    await svc.recordSelfAssessment({
+      studentId: 1, subjectId: 1, questionId: 10,
+      assessment: 'correct', source: 'targeted', suppressErrorFixPoints: true,
+    });
+    expect(pointsService.award).not.toHaveBeenCalled();
+    expect(mainError.clearUnclearedByStudentQuestionId).toHaveBeenCalledWith(1, 10);
   });
 });
 

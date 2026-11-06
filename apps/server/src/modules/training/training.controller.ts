@@ -75,6 +75,8 @@ export class TrainingController {
       plannedQuestionIds: Array.isArray(dto.plannedQuestionIds)
         ? dto.plannedQuestionIds.filter((n) => Number.isInteger(n) && n > 0)
         : undefined,
+      // 单题重做（2026-11-06）：只接受真正的 true，其它值一律按不压制处理。
+      suppressErrorFixPoints: dto.suppressErrorFixPoints === true,
     });
     // 判题完成后再记审计：放前面一旦抛错就会把判题结果顶掉。
     await this.recordSessionJudged(dto.sessionId, user.sub);
@@ -113,6 +115,8 @@ export class TrainingController {
       assessment: dto.assessment,
       source: dto.source,
       sourceRefId: dto.sourceRefId ?? null,
+      // 单题重做（2026-11-06）：只接受真正的 true，其它值一律按不压制处理。
+      suppressErrorFixPoints: dto.suppressErrorFixPoints === true,
     });
   }
 

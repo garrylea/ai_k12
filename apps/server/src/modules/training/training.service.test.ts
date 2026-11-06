@@ -216,7 +216,16 @@ describe('TrainingController.selfAssess 校验', () => {
     const svc: any = { selfAssess: vi.fn().mockResolvedValue({ errorBookId: 42 }) };
     const c = mkController(svc);
     await c.selfAssess({ questionId: 10, subjectId: 1, assessment: 'incorrect', source: 'exam', sourceRefId: 5 }, user);
-    expect(svc.selfAssess).toHaveBeenCalledWith({ studentId: 7, questionId: 10, subjectId: 1, assessment: 'incorrect', source: 'exam', sourceRefId: 5 });
+    expect(svc.selfAssess).toHaveBeenCalledWith({ studentId: 7, questionId: 10, subjectId: 1, assessment: 'incorrect', source: 'exam', sourceRefId: 5, suppressErrorFixPoints: false });
+  });
+
+  it('suppressErrorFixPoints 只认 true，非布尔值按 false 透传', async () => {
+    const svc: any = { selfAssess: vi.fn().mockResolvedValue({ errorBookId: undefined }) };
+    const c = mkController(svc);
+    const base = { questionId: 10, subjectId: 1, assessment: 'correct', source: 'targeted' } as const;
+    await c.selfAssess({ ...base, suppressErrorFixPoints: true } as any, user);
+    await c.selfAssess({ ...base, suppressErrorFixPoints: 'true' } as any, user);
+    expect(svc.selfAssess.mock.calls.map((call: any[]) => call[0].suppressErrorFixPoints)).toEqual([true, false]);
   });
 });
 
@@ -766,6 +775,15 @@ describe('TrainingController.judge — plannedQuestionIds 白名单化', () => {
     for (const call of svc.judgeTraining.mock.calls) {
       expect(call[0].plannedQuestionIds).toBeUndefined();
     }
+  });
+
+  // 单题重做（2026-11-06）：@Post 默认透传的是原始 JSON，只认真正的 true。
+  it('suppressErrorFixPoints 只认 true 透传 service（非 true 一律 false）', async () => {
+    const { c, svc } = mkC();
+    await c.judge({ ...DTO, suppressErrorFixPoints: true } as never, user);
+    await c.judge({ ...DTO, suppressErrorFixPoints: 1 } as never, user);
+    await c.judge({ ...DTO } as never, user);
+    expect(svc.judgeTraining.mock.calls.map((call: any[]) => call[0].suppressErrorFixPoints)).toEqual([true, false, false]);
   });
 });
 

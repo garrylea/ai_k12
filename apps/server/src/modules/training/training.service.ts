@@ -193,6 +193,8 @@ export class TrainingService {
     source: 'targeted' | 'error_practice';
     sessionUid?: string; title?: string; questionCount?: number; questionOrder?: number;
     plannedQuestionIds?: number[];
+    /** 单题重做（2026-11-06）：答对仍清零错题，但不发错题订正分（透传给 JudgeCore）。 */
+    suppressErrorFixPoints?: boolean;
   }) {
     // plannedQuestionIds 只是作答记录的入参，不能顺带喂给 JudgeCore（它不认这个字段）。
     const { plannedQuestionIds, ...judgeInput } = input;
@@ -705,6 +707,8 @@ export class TrainingService {
     assessment: 'correct' | 'incorrect';
     source: 'targeted' | 'error_practice' | 'exam';
     sourceRefId?: number | null;
+    /** 单题重做（2026-11-06）：自评对仍清零错题，但不发错题订正分（透传给 JudgeCore）。 */
+    suppressErrorFixPoints?: boolean;
   }) {
     const q = await this.questionsRepo.findById(input.questionId);
     if (!q) {

@@ -134,6 +134,10 @@ export interface JudgeCoreQuestionInput {
   studentAnswer: string;
   source: string;            // 'targeted' | 'error_practice' | 'exam' | 'remediation' | 'variation'
   sourceRefId?: number | null; // 考试传 session_id；practice 沿用现结构不经过此变体
+  /** 单题重做（历史记录重做 / 快速练习，2026-11-06）：清错误题照做，但不发 `error_fix`。
+   *  客户端传入的布尔值，**不是安全边界**——置 true 只会压制调用者自己的订正分，
+   *  没有越权面（题/错题归属仍全由 JWT + SQL 谓词守）。缺省/false 保持既有发分行为。 */
+  suppressErrorFixPoints?: boolean;
 }
 
 export interface JudgeDictationInput {
@@ -402,9 +406,9 @@ export class JudgeCoreService {
       try {
         const cleared = await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
         // source='exam' 排除：交卷补判在途题不得额外发订正分（考试分只由 math_paper 一次性给）。
+        // suppressErrorFixPoints（单题重做）同款排除：清零照做、error_book_cleared 照发，只是不发分。
         // 「清掉几条 -> 发不发分」的判决统一在 awardErrorFixOnClear（与 card 路径同一实现）。
-        // exam 清零照发 error_book_cleared（不发分 ≠ 没发生清零）。
-        if (input.source !== 'exam') {
+        if (input.source !== 'exam' && !input.suppressErrorFixPoints) {
           const award = await this.awardErrorFixOnClear(input.studentId, input.questionId, cleared);
           pointsAwarded = award.pointsAwarded;
           awardReason = award.awardReason;
@@ -760,6 +764,9 @@ export class JudgeCoreService {
     assessment: 'correct' | 'incorrect';
     source: string;
     sourceRefId?: number | null;
+    /** 单题重做（2026-11-06）：自评对仍清零错题，但不发 `error_fix`。
+     *  客户端传入的布尔值，**不是安全边界**——只压制调用者自己的订正分。缺省/false 行为不变。 */
+    suppressErrorFixPoints?: boolean;
   }): Promise<{ errorBookId: number | undefined }> {
     await this.selfAssessRepo.create({
       studentId: input.studentId,
@@ -782,7 +789,8 @@ export class JudgeCoreService {
       const cleared = await this.mainErrorRepo.clearUnclearedByStudentQuestionId(input.studentId, input.questionId);
       // source='exam'（考试结果页自评）与 judgeQuestion 同款排除：考试分只由 math_paper
       // 一次性给，自评答对不得冒出额外的订正分；但清零照发 error_book_cleared。
-      if (input.source !== 'exam') {
+      // suppressErrorFixPoints（单题重做）同理：清零与事件照做，只是不发分。
+      if (input.source !== 'exam' && !input.suppressErrorFixPoints) {
         await this.awardErrorFixOnClear(input.studentId, input.questionId, cleared);
       } else {
         this.trackCleared(input.studentId, input.questionId, cleared);

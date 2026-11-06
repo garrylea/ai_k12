@@ -12,4 +12,7 @@ export interface SelfAssessTrainingDto {
   source: 'targeted' | 'error_practice' | 'exam';
   /** 考试来源传 sessionId */
   sourceRefId?: number;
+  /** 单题重做（2026-11-06）：自评对仍清零错题，但不发错题订正分。
+   *  客户端布尔值，**不是安全边界**（只压制调用者自己的分数）；缺省/false 行为不变。 */
+  suppressErrorFixPoints?: boolean;
 }

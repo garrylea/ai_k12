@@ -25,4 +25,7 @@ export interface JudgeTrainingDto {
   /** 数理化专项开练的整轮题单（有序，含已答与未答）；缺省不写占位行。
    *  服务端只保留存在、在架、与 `subjectId` 同学科的 id，按本数组顺序落 `question_order`。 */
   plannedQuestionIds?: number[];
+  /** 单题重做（历史记录重做 / 快速练习，2026-11-06）：答对仍清零错题，但不发错题订正分。
+   *  客户端布尔值，**不是安全边界**（只压制调用者自己的分数）；缺省/false 行为不变。 */
+  suppressErrorFixPoints?: boolean;
 }
