@@ -963,6 +963,13 @@ export function judgeTraining(payload: {
   title?: string;
   questionCount?: number;
   questionOrder?: number;
+  /**
+   * 单题重做（练习记录详情页「重做」）：不建练习记录、不发分，后端据此跳过
+   * `special_answer_records` 与错题本积分。与 `sessionUid` 互斥（重做不带该字段）。
+   */
+  suppressErrorFixPoints?: boolean;
+  /** 本轮题单的 questionId 顺序快照（答题历史回放用）；重做不带。 */
+  plannedQuestionIds?: number[];
 }): Promise<JudgeResult> {
   return fetchApi<JudgeResult>('/training/judge', {
     method: 'POST',
@@ -1005,6 +1012,8 @@ export function selfAssessTraining(payload: {
   assessment: 'correct' | 'incorrect';
   source: 'targeted' | 'error_practice' | 'exam';
   sourceRefId?: number;
+  /** 单题重做：不记录、不发错题积分（见 `judgeTraining` 同名参数）。 */
+  suppressErrorFixPoints?: boolean;
 }): Promise<{ errorBookId?: number }> {
   return fetchApi<{ errorBookId?: number }>('/training/self-assess', {
     method: 'POST',

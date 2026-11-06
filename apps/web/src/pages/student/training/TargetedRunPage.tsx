@@ -37,6 +37,15 @@ export default function TargetedRunPage() {
   const [searchParams] = useSearchParams();
   const subjectId = parseSubjectId(searchParams.get('subjectId'));
   const subjectQuery = `?subjectId=${subjectId}`;
+  /**
+   * 练习记录详情页发起的练习带 `returnTo`（回详情页）；只放行练习记录内部路径，
+   * 其它值（外链 / 手改 URL）一律忽略，退回专项配置页。
+   */
+  const returnToRaw = searchParams.get('returnTo');
+  const exitTarget =
+    returnToRaw && returnToRaw.startsWith('/student/practice-history/')
+      ? returnToRaw
+      : `/student/training/targeted${subjectQuery}`;
   /** 补偿套题当前只支持数学（后端 remediation 不认语文会话）。 */
   const remediationSupported = subjectId !== SUBJECT_CHINESE;
 
@@ -63,12 +72,20 @@ export default function TargetedRunPage() {
   const [entries, setEntries] = useState<TargetedPracticeQuestion[] | null>(null);
   // 配置页交接来的会话 id：收尾发分的唯一凭据；null = 会话 INSERT 降级（不发分）
   const [sessionId, setSessionId] = useState<number | null>(null);
+  // 两种模式共用一个页面：similar（等同普通专项，带会话发分）/ redo（单题、不记录、不发分）
+  const [mode, setMode] = useState<'similar' | 'redo'>('similar');
+  // 交接体里的标题（练习记录详情页会写；配置页老入口没有 → 用默认标题）
+  const [runTitle, setRunTitle] = useState<string | null>(null);
   // 作答历史（2026-11-01）：本次练习 UUID，判题时带上 → 后端写 special_answer_records
   const sessionUid = useMemo(() => newSessionUid(), []);
 
   // 完成发分（乙类会话页唯一入口）：末题收尾时调 complete；失败可重试
+  // redo 的 sessionId 恒为 null → hook 内部直接跳过，不发分、不报错
   const { complete: completeSession, retry, needsRetry, unrecoverable, retrying, celebrationProps } =
-    useSessionPointsCompletion(sessionId, `${subjectName(subjectId)}专项 · ${entries?.length ?? 0} 题`);
+    useSessionPointsCompletion(
+      sessionId,
+      runTitle ?? `${subjectName(subjectId)}专项 · ${entries?.length ?? 0} 题`,
+    );
 
   // StrictMode 下 effect 会跑两次：ref 守卫保证「读 + 删」只执行一次，
   // 否则第二次读到空会误判为无题单而踢回配置页。
@@ -78,25 +95,34 @@ export default function TargetedRunPage() {
     if (bootstrappedRef.current) return;
     bootstrappedRef.current = true;
 
-    // 交接体是 { sessionId, questions }；形状不对/解析失败一律视为空题单
+    // 交接体是 { sessionId, questions, title?, mode? }；形状不对/解析失败一律视为空题单
     const handoff = parseRunHandoff<TargetedPracticeQuestion>(sessionStorage.getItem(SESSION_KEY));
     // 读后即删：无论内容是否有效都清掉，避免刷新/回退后带着旧题单重复进入
     sessionStorage.removeItem(SESSION_KEY);
     setEntries(handoff?.questions ?? []);
     setSessionId(handoff?.sessionId ?? null);
+    setMode(handoff?.mode ?? 'similar');
+    setRunTitle(handoff?.title ?? null);
   }, []);
 
-  // 空题单（直接访问 / 解析失败 / 刷新后读不到）回配置页
+  // 空题单（直接访问 / 解析失败 / 刷新后读不到）：回来源页（练习记录详情 / 配置页）
   useEffect(() => {
     if (entries !== null && entries.length === 0) {
-      navigate(`/student/training/targeted${subjectQuery}`, { replace: true });
+      navigate(exitTarget, { replace: true });
     }
-  }, [entries, navigate, subjectQuery]);
+  }, [entries, navigate, exitTarget]);
 
   // n（= String(questionId)）-> 题单条目映射
   const entryByN = useMemo(() => {
     const map = new Map<string, TargetedPracticeQuestion>();
     for (const e of entries ?? []) map.set(String(e.questionId), e);
+    return map;
+  }, [entries]);
+
+  // 题号 = 题单里的 1-based 位置（旧实现误把 questionId 当题号，答题历史里会显示成 101）
+  const orderByQuestionId = useMemo(() => {
+    const map = new Map<string, number>();
+    (entries ?? []).forEach((e, i) => map.set(String(e.questionId), i + 1));
     return map;
   }, [entries]);
 
@@ -154,14 +180,20 @@ export default function TargetedRunPage() {
         source: 'targeted',
         // 会话留痕（后端累加 judged_count）；sessionId 为 null 时不带这个字段
         ...(sessionId != null ? { sessionId } : {}),
-        // 作答历史（2026-11-01）：本次练习 UUID → 后端写 special_answer_records
-        sessionUid,
-        title: `${subjectName(subjectId)}专项练习`,
-        questionCount: questions.length,
-        questionOrder: Number(q.n) || 1,
+        // 两种模式分流：redo 只要「不算分不记录」这一个信号；similar/普通专项走完整会话链路
+        ...(mode === 'redo'
+          ? { suppressErrorFixPoints: true }
+          : {
+              // 作答历史（2026-11-01）：本次练习 UUID → 后端写 special_answer_records
+              sessionUid,
+              title: runTitle ?? `${subjectName(subjectId)}专项练习`,
+              questionCount: questions.length,
+              plannedQuestionIds: (entries ?? []).map((e) => e.questionId),
+            }),
+        questionOrder: orderByQuestionId.get(q.n) ?? 1,
       });
     },
-    [entryByN, sessionId, subjectId, sessionUid, questions.length],
+    [entryByN, sessionId, subjectId, sessionUid, mode, runTitle, questions.length, entries, orderByQuestionId],
   );
 
   const handleRequestHint = useCallback(
@@ -280,7 +312,7 @@ export default function TargetedRunPage() {
               const res = await waitTrainingExplanation(qid);
               return res.explanation;
             }}
-            onClose={() => navigate(`/student/training/targeted${subjectQuery}`)}
+            onClose={() => navigate(exitTarget)}
           />
         ) : (
           <>
@@ -329,6 +361,8 @@ export default function TargetedRunPage() {
                       subjectId,
                       assessment,
                       source: 'targeted',
+                      // 重做不计分：错题本仍要更新，但不得触发错题积分
+                      suppressErrorFixPoints: mode === 'redo',
                     });
                   }}
                   onFinish={handleFinish}
@@ -380,7 +414,7 @@ export default function TargetedRunPage() {
               <button
                 onClick={() => {
                   guardRef.current = false;
-                  navigate(`/student/training/targeted${subjectQuery}`, { replace: true });
+                  navigate(exitTarget, { replace: true });
                 }}
                 className="h-10 px-4 rounded-[var(--radius-button)] bg-[var(--brand-500)] text-sm font-semibold text-white transition-colors hover:bg-[var(--brand-600)]"
               >

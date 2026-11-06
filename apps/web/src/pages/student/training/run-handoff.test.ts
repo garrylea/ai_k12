@@ -41,4 +41,26 @@ describe('parseRunHandoff', () => {
     expect(parseRunHandoff('')).toBeNull();
     expect(parseRunHandoff('{')).toBeNull();
   });
+
+  /**
+   * 练习记录详情页（2026-11-06 Task 8）额外写 `title` 与 `mode`：
+   * 老入口（配置页 / 薄弱点图谱）不写这两个字段，所以它们必须是**可选**且只在出现时返回，
+   * 否则旧交接体解析结果会多出两个 `undefined` 键、两侧形状对不上。
+   */
+  it('可选 title/mode 原样返回', () => {
+    const parsed = parseRunHandoff(JSON.stringify({
+      sessionId: null, questions: [], title: '重做：卷 · 第 1 题', mode: 'redo',
+    }));
+    expect(parsed).toEqual({
+      sessionId: null, questions: [], title: '重做：卷 · 第 1 题', mode: 'redo',
+    });
+  });
+
+  it('非法 mode -> null', () => {
+    expect(parseRunHandoff(JSON.stringify({ sessionId: 1, questions: [], mode: 'x' }))).toBeNull();
+  });
+
+  it('title 不是字符串 -> null', () => {
+    expect(parseRunHandoff(JSON.stringify({ sessionId: 1, questions: [], title: 1 }))).toBeNull();
+  });
 });

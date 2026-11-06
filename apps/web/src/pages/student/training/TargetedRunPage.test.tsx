@@ -72,20 +72,21 @@ function seed(sessionId: number | null) {
 
 /** RunExitGuard 用 useBlocker —— 必须是 data router（createMemoryRouter）。
  *  第二条路由是结果页「确认」离开后的落点，用来断言导航真的发生了。 */
-function renderPage() {
+function renderPage(url = '/') {
   const router = createMemoryRouter(
     [
       { path: '/', element: <TargetedRunPage /> },
       { path: '/student/training/targeted', element: <div>已回到配置页</div> },
+      { path: '/student/practice-history/exam/9', element: <div>已回到详情页</div> },
     ],
-    { initialEntries: ['/'] },
+    { initialEntries: [url] },
   );
   return render(<RouterProvider router={router} />);
 }
 
 /** 答完唯一一题（点选 B）并提交 → QuestionRunner 收尾 → handleFinish。 */
-async function answerOnlyQuestion() {
-  renderPage();
+async function answerOnlyQuestion(url = '/') {
+  renderPage(url);
   fireEvent.click(screen.getAllByRole('radio')[1]);
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '提交' }));
@@ -267,6 +268,66 @@ describe('TargetedRunPage 完成发分', () => {
 
     expect(judgeMock).toHaveBeenCalledTimes(1);
     expect(judgeMock.mock.calls[0][0]).not.toHaveProperty('sessionId');
+  });
+
+  /**
+   * 练习记录入口的 `returnTo`：只在白名单内回详情页，其它值（手改 URL / 外链）
+   * 必须退回专项配置页——否则学生会被导航到一个非本站路径。
+   */
+  it('returnTo 指向练习记录详情：结果页「确认」回详情页', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+
+    await answerOnlyQuestion(`/?subjectId=1&returnTo=${encodeURIComponent('/student/practice-history/exam/9')}`);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    });
+
+    expect(await screen.findByText('已回到详情页')).toBeTruthy();
+  });
+
+  it('returnTo 不在白名单：忽略并退回配置页', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+
+    await answerOnlyQuestion(`/?subjectId=1&returnTo=${encodeURIComponent('https://evil.example/x')}`);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    });
+
+    expect(await screen.findByText('已回到配置页')).toBeTruthy();
+  });
+
+  /**
+   * 练习记录复用本页（2026-11-06 Task 9）：同一页跑两种模式。
+   * - redo：单题、不计时不发分 → 不带 sessionId/sessionUid/plannedQuestionIds，只带 suppressErrorFixPoints；
+   * - similar：走原有会话发分链路，额外带 plannedQuestionIds（答题历史的题单快照）。
+   * 两种模式都必须送**真实 1-based 题号**（旧实现误把 questionId 当题号）。
+   */
+  it('redo 模式：judge 带 suppressErrorFixPoints，不带 sessionUid/sessionId/plannedQuestionIds', async () => {
+    sessionStorage.setItem(KEY, JSON.stringify({
+      sessionId: null, questions: [QUESTION], mode: 'redo', title: '重做：卷 · 第 1 题',
+    }));
+    judgeMock.mockResolvedValue(JUDGED);
+    await answerOnlyQuestion();
+    expect(judgeMock).toHaveBeenCalledWith(expect.objectContaining({
+      suppressErrorFixPoints: true,
+      questionOrder: 1,
+    }));
+    const arg = judgeMock.mock.calls[0][0];
+    expect(arg.sessionId).toBeUndefined();
+    expect(arg.sessionUid).toBeUndefined();
+    expect(arg.plannedQuestionIds).toBeUndefined();
+  });
+
+  it('similar 模式：judge 带 plannedQuestionIds 与真实题号', async () => {
+    seed(88);
+    judgeMock.mockResolvedValue(JUDGED);
+    await answerOnlyQuestion();
+    expect(judgeMock).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 88, plannedQuestionIds: [101], questionOrder: 1,
+    }));
+    expect(typeof judgeMock.mock.calls[0][0].sessionUid).toBe('string');
   });
 
   /**
