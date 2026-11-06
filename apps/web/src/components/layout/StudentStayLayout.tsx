@@ -30,14 +30,12 @@ import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
  * 学生从星图进来、切过奖励册再切回来按「返回」就会退回奖励册而不是星图（2026-09-21 用户实测反馈）。
  * 两页互跳时来源原样带过去，来源缺失时兜底回星图。
  *
- * 顶栏右侧是「回到开始页」（→ `/student/entry` 登录后的学习/答疑/训练三入口页），
- * **不是退出登录**（2026-11-04 用户裁决）：个人中心是「看一眼就走」的浅停留页，
- * 学生看完该回到登录后的主菜单继续学，而不是被踢回登录页 —— 游戏里进个人中心看完
- * 回主界面，不会直接退到登录界面。登出仍可在开始页右上角完成（`LogoutButton` 在
- * `EntrySelectPage` 保留），鉴权清理逻辑也仍在那一处。
+ * 顶栏右侧是「退出本页」：落点与左侧「返回」相同——**进入本页之前的那一页**（来源页协议），
+ * **不是登出**（2026-11-04 用户裁决），也**不是**固定回 `/student/entry`（2026-11-06 用户要求）。
+ * 学生从星图进来就回星图，从课程详情进来就回课程详情（连它的 `location.state` 一起还回去）；
+ * 来源缺失时兜底回星图。登出仍只在开始页右上角完成（`LogoutButton` 在 `EntrySelectPage` 保留）。
  *
- * 图标用全仓统一的 `ExitIcon`（与 `LogoutButton` 同一个图标，2026-11-06 用户要求）：
- * 小房子换成「离开」图标，行为仍是回开始页、不登出。
+ * 图标用全仓统一的 `ExitIcon`（与 `LogoutButton` 同一个图标，2026-11-06 用户要求）。
  */
 const stayItems = [
   { to: '/student/rewards', label: '奖励册' },
@@ -85,12 +83,12 @@ export default function StudentStayLayout() {
           ))}
         </nav>
 
-        {/* 回到登录后的开始页（不是登出）：浅停留页看完回主菜单继续学 */}
+        {/* 退出本页：回到进入本页之前的那一页（与左侧「返回」同一落点），不是登出 */}
         <button
           type="button"
-          onClick={() => navigate('/student/entry')}
-          title="回到开始页"
-          aria-label="回到开始页"
+          onClick={() => navigate(back.to, { state: back.state })}
+          title="退出本页"
+          aria-label="退出本页"
           className="p-2.5 rounded-full bg-[var(--bg-card)] border border-[var(--bg-subtle)] shadow-sm hover:bg-[var(--bg-base)] transition-colors text-[var(--text-secondary)]"
         >
           <ExitIcon />

@@ -367,8 +367,8 @@ function expectStayPageShell() {
     'href',
     '/student/practice-history',
   );
-  // 回到开始页（2026-11-04 用户裁决：浅停留页的出口是回登录后的三入口页，**不是**退出登录）
-  expect(screen.getByRole('button', { name: '回到开始页' })).toBeInTheDocument();
+  // 退出本页（2026-11-06 用户要求：回进入本页之前的那一页，不是固定回入口选择页、也不是登出）
+  expect(screen.getByRole('button', { name: '退出本页' })).toBeInTheDocument();
 }
 
 describe('路由表：积分相关页面', () => {

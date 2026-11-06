@@ -101,25 +101,37 @@ describe('StudentStayLayout 顶栏「返回」', () => {
   });
 });
 
-describe('StudentStayLayout 顶栏「回到开始页」', () => {
-  it('右上角回登录后的入口选择页，且不清鉴权（不是退出登录）', async () => {
+describe('StudentStayLayout 顶栏「退出本页」', () => {
+  it('回进入本页之前的那一页，并把来源页的 state 一起带回去（不是登出）', async () => {
     const user = userEvent.setup();
     localStorage.setItem('token', 'still-logged-in');
-    const router = renderStay({ pathname: '/student/profile' });
+    const router = renderStay({
+      pathname: '/student/profile',
+      state: buildStayReturnState('/student/course-detail', { subjectId: 7, lessonId: 42 }),
+    });
 
-    // 个人中心不再提供登出：登出只在开始页（EntrySelectPage）右上角
+    // 个人中心不提供登出：登出只在开始页（EntrySelectPage）右上角
     expect(screen.queryByRole('button', { name: '退出登录' })).not.toBeInTheDocument();
 
-    const homeButton = screen.getByRole('button', { name: '回到开始页' });
-    // 2026-11-06 用户要求：小房子换成全仓统一的退出图标（只换图标，行为仍是回开始页）
-    expect(homeButton.querySelector('[data-icon="exit"]')).toBeInTheDocument();
+    const exitButton = screen.getByRole('button', { name: '退出本页' });
+    // 2026-11-06 用户要求：小房子换成全仓统一的退出图标
+    expect(exitButton.querySelector('[data-icon="exit"]')).toBeInTheDocument();
 
-    await user.click(homeButton);
+    await user.click(exitButton);
 
-    expect(router.state.location.pathname).toBe('/student/entry');
-    expect(screen.getByText('入口选择页')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/student/course-detail');
+    expect(router.state.location.state).toEqual({ subjectId: 7, lessonId: 42 });
     expect(localStorage.getItem('token')).toBe('still-logged-in');
     localStorage.removeItem('token');
+  });
+
+  it('没有来源时兜底回星图（不是回入口选择页）', async () => {
+    const user = userEvent.setup();
+    const router = renderStay({ pathname: '/student/profile' });
+
+    await user.click(screen.getByRole('button', { name: '退出本页' }));
+
+    expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
   });
 });
 

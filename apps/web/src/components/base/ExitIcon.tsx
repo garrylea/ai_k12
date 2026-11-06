@@ -1,7 +1,7 @@
 /**
  * 统一的「退出/离开」线性图标：门框在左、箭头向右离开门框。
  *
- * 全仓只此一处定义——`LogoutButton` 和浅停留页顶栏的「回到开始页」共用，
+ * 全仓只此一处定义——`LogoutButton` 和浅停留页顶栏的「退出本页」共用，
  * 保证凡是「离开」语义的按钮都用同一个图标（2026-11-06 用户要求）。
  */
 export function ExitIcon({ className = 'w-5 h-5' }: { className?: string }) {
