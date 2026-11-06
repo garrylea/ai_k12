@@ -982,12 +982,12 @@ describe('TrainingService.judgeTraining — special_answer_records 旁路写入'
       ...over,
     });
 
-    it('按入参顺序只保留存在/在架/同学科的 id 写占位行（题单里的已答行由 upsertAnswer 写）', async () => {
+    it('按入参顺序只保留存在/在架/同学科的 id 写占位行，且保留原始题单位次（题单里的已答行由 upsertAnswer 写）', async () => {
       const deps = mkJudge({
         questionsRepo: {
           findById: vi.fn(),
           findRandomByKpAndType: vi.fn(),
-          // findByIds 只回 is_active=1 的题：12 已下线/不存在 -> 不在结果里
+          // findByIds 只回 is_active=1 的题：999 已下线/不存在 -> 不在结果里
           findByIds: vi.fn().mockResolvedValue([
             { id: 11, subject_id: 1 },
             { id: 13, subject_id: 1 },
@@ -998,11 +998,16 @@ describe('TrainingService.judgeTraining — special_answer_records 旁路写入'
       await mkSvc(deps).judgeTraining({
         studentId: 7, questionId: 11, subjectId: 1, studentAnswer: 'B', source: 'targeted',
         sessionUid: 'uid-1', questionCount: 4, questionOrder: 1,
-        plannedQuestionIds: [11, 12, 13, 14],
+        plannedQuestionIds: [11, 999, 13, 14],
       });
 
-      expect(deps.questionsRepo.findByIds).toHaveBeenCalledWith([11, 12, 13, 14]);
-      expect(deps.specialAnswersRepo.ensurePlannedQuestions).toHaveBeenCalledWith(101, [11, 13]);
+      expect(deps.questionsRepo.findByIds).toHaveBeenCalledWith([11, 999, 13, 14]);
+      // 999 占住第 2 位：13 必须是 order 3，不能被压缩成 2（upsertAnswer 的
+      // ON DUPLICATE KEY UPDATE 不重写 question_order，错了就永久错）。
+      expect(deps.specialAnswersRepo.ensurePlannedQuestions).toHaveBeenCalledWith(101, [
+        { questionId: 11, order: 1 },
+        { questionId: 13, order: 3 },
+      ]);
     });
 
     it('不传 plannedQuestionIds（旧客户端）-> 不查题、不写占位行，判题与作答记录照旧', async () => {

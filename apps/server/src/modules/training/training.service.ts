@@ -224,14 +224,18 @@ export class TrainingService {
         });
         // 整轮题单落库：**必须排在本行作答之后、且自己兜异常**——占位行是「锦上添花」，
         // 它失败绝不能把已经写成功的作答记录或判题结果顶掉（只 warn）。
-        // 只写存在、在架（findByIds 已按 is_active=1 过滤）、同学科的题，保持入参顺序。
+        // 只写存在、在架（findByIds 已按 is_active=1 过滤）、同学科的题。
+        // order 取**未过滤题单里的原始位次**：中间有题失效被跳过时，后一题不压缩题号
+        // （upsertAnswer 的 ON DUPLICATE KEY UPDATE 不重写 question_order，压错就永久错）。
         if (plannedQuestionIds?.length && this.questionsRepo) {
           try {
             const rows = await this.questionsRepo.findByIds(plannedQuestionIds);
             const valid = new Set(rows.filter((q) => q.subject_id === input.subjectId).map((q) => q.id));
-            const ordered = plannedQuestionIds.filter((id) => valid.has(id));
-            if (ordered.length > 0) {
-              await this.specialAnswersRepo.ensurePlannedQuestions(sessionId, ordered);
+            const planned = plannedQuestionIds
+              .map((id, i) => ({ questionId: id, order: i + 1 }))
+              .filter((e) => valid.has(e.questionId));
+            if (planned.length > 0) {
+              await this.specialAnswersRepo.ensurePlannedQuestions(sessionId, planned);
             }
           } catch (err) {
             this.logger.warn(

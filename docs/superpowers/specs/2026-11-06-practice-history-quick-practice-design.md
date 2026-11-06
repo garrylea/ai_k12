@@ -117,9 +117,10 @@
 ### 5.2 题单保存时机
 
 - 数理化专项的答题页在每次判题请求里带 `plannedQuestionIds: number[]`（按题单顺序，含已答与未答）。
-- 后端在惰性创建专项会话后，调用 `ensurePlannedQuestions(sessionId, ids)`：
+- 后端在惰性创建专项会话后，调用 `ensurePlannedQuestions(sessionId, entries)`：
   - 校验每个 id 存在、`is_active=1`、学科与会话一致；不合法跳过并 warn（不阻断判题）；
-  - `INSERT IGNORE` 占位行，`question_order` 按数组下标 +1。
+  - `INSERT IGNORE` 占位行，`question_order` 取**未过滤题单**的数组下标 +1：中途有题失效被跳过时，
+    后一题仍保留原始位次、不压缩（`upsertAnswer` 的 ON DUPLICATE KEY UPDATE 不重写 `question_order`）。
 - 老客户端不传该字段 → 不插占位行，行为与现在一致。
 - 一轮专项如果一道题都没答，不会创建会话（现状），因此也不会形成记录。
 

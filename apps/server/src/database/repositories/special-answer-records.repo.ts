@@ -92,14 +92,19 @@ export class SpecialAnswerRecordsRepository {
    * 数理化专项开练时保存整轮题单：未答的题写空行，历史详情才能显示「未作答」。
    *
    * 空作答 = 四列全 NULL（`answer_text` / `is_correct` / `score` / `method`），
-   * `question_order` 取**题单里的位次**（1-based），不是 question id。
+   * `order` 由调用方显式给出（题单里的**原始位次**，1-based）：题单中间有题失效被跳过时，
+   * 后一题仍保留原位次、不压缩——`upsertAnswer` 的 ON DUPLICATE KEY UPDATE 不重写
+   * `question_order`，一旦压缩错位就是永久错。
    * `INSERT IGNORE` 打 `uniq_sar_session_q`：已判过的题由 upsertAnswer 写过，重复判题不产生重复行。
    */
-  async ensurePlannedQuestions(sessionId: number, questionIds: number[]): Promise<void> {
-    if (questionIds.length === 0) return;
-    const values = questionIds.map(() => '(?, ?, ?, NULL, NULL, NULL, NULL)').join(',');
+  async ensurePlannedQuestions(
+    sessionId: number,
+    entries: Array<{ questionId: number; order: number }>,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    const values = entries.map(() => '(?, ?, ?, NULL, NULL, NULL, NULL)').join(',');
     const params: Array<number> = [];
-    questionIds.forEach((qid, i) => params.push(sessionId, qid, i + 1));
+    entries.forEach((e) => params.push(sessionId, e.questionId, e.order));
     // 批量插入用 query（多行 VALUES 与仓内其它批量写一致）
     await this.pool.query(
       `INSERT IGNORE INTO special_answer_records

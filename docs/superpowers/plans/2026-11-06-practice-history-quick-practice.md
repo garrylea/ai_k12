@@ -309,24 +309,28 @@ git commit -m "feat(practice-history): 详情返回 canRedo/canSimilar"
 - Test: `apps/server/src/modules/training/training.service.test.ts`
 
 **Interfaces:**
-- Produces: `ensurePlannedQuestions(sessionId: number, questionIds: number[]): Promise<void>`；判题入参 `plannedQuestionIds?: number[]`。
+- Produces: `ensurePlannedQuestions(sessionId: number, entries: Array<{ questionId: number; order: number }>): Promise<void>`；判题入参 `plannedQuestionIds?: number[]`。
 
 - [ ] **Step 1: 写失败测试**
 
 `special-answer-records.repo.test.ts` 加：
 
 ```ts
-it('ensurePlannedQuestions 按顺序写入空作答行', async () => {
+it('ensurePlannedQuestions 按显式 order 写入空作答行', async () => {
   const pool = { query: vi.fn().mockResolvedValue([{}]) };
   const repo = new SpecialAnswerRecordsRepository(pool as never);
-  await repo.ensurePlannedQuestions(9, [11, 12]);
+  // 题单第 2 题失效被跳过：后一题仍保留 order 3
+  await repo.ensurePlannedQuestions(9, [
+    { questionId: 11, order: 1 },
+    { questionId: 13, order: 3 },
+  ]);
   const [sql, params] = pool.query.mock.calls[0];
   expect(sql).toContain('INSERT IGNORE INTO special_answer_records');
-  expect(params).toEqual([9, 11, 1, 9, 12, 2]);
+  expect(params).toEqual([9, 11, 1, 9, 13, 3]);
 });
 ```
 
-`training.service.test.ts` 的判题用例里加：传入 `plannedQuestionIds` 时，`specialAnswersRepo.ensurePlannedQuestions` 被调用，且只保留存在、在架、同学科的 id（用 `questionsRepo.findByIds` mock）。
+`training.service.test.ts` 的判题用例里加：传入 `plannedQuestionIds` 时，`specialAnswersRepo.ensurePlannedQuestions` 被调用，且只保留存在、在架、同学科的 id（用 `questionsRepo.findByIds` mock），`order` 取**未过滤题单**里的原始位次。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -339,11 +343,14 @@ Expected: FAIL（方法不存在）。
 
 ```ts
 /** 数理化专项开练时保存整轮题单：未答的题写空行，历史详情才能显示「未作答」。 */
-async ensurePlannedQuestions(sessionId: number, questionIds: number[]): Promise<void> {
-  if (questionIds.length === 0) return;
-  const values = questionIds.map(() => '(?, ?, ?, NULL, NULL, NULL, NULL)').join(',');
+async ensurePlannedQuestions(
+  sessionId: number,
+  entries: Array<{ questionId: number; order: number }>,
+): Promise<void> {
+  if (entries.length === 0) return;
+  const values = entries.map(() => '(?, ?, ?, NULL, NULL, NULL, NULL)').join(',');
   const params: Array<number> = [];
-  questionIds.forEach((qid, i) => params.push(sessionId, qid, i + 1));
+  entries.forEach((e) => params.push(sessionId, e.questionId, e.order));
   await this.pool.query(
     `INSERT IGNORE INTO special_answer_records
      (session_id, question_id, question_order, answer_text, is_correct, score, method)
@@ -370,15 +377,18 @@ plannedQuestionIds: Array.isArray(dto.plannedQuestionIds)
   : undefined,
 ```
 
-`training.service.ts` 的 `judgeTraining` 入参加 `plannedQuestionIds?: number[]`；在 `upsertSession` 之后、`upsertAnswer` 之前：
+`training.service.ts` 的 `judgeTraining` 入参加 `plannedQuestionIds?: number[]`；在 `upsertSession` 之后、`upsertAnswer` 之后（独立 try/catch，只 warn）：
 
 ```ts
 if (input.plannedQuestionIds?.length && this.questionsRepo) {
   const rows = await this.questionsRepo.findByIds(input.plannedQuestionIds);
   const valid = new Set(rows.filter((q) => q.subject_id === input.subjectId).map((q) => q.id));
-  const ordered = input.plannedQuestionIds.filter((id) => valid.has(id));
-  if (ordered.length > 0) {
-    await this.specialAnswersRepo.ensurePlannedQuestions(sessionId, ordered);
+  // order 取未过滤题单的原始位次：中间失效项仍占位，后一题不压缩题号
+  const planned = input.plannedQuestionIds
+    .map((id, i) => ({ questionId: id, order: i + 1 }))
+    .filter((e) => valid.has(e.questionId));
+  if (planned.length > 0) {
+    await this.specialAnswersRepo.ensurePlannedQuestions(sessionId, planned);
   }
 }
 ```
