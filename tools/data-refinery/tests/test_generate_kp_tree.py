@@ -225,3 +225,22 @@ def test_fetch_kp_tree_raises_on_invalid_tree():
     llm = _StubLLM(json.dumps(bad, ensure_ascii=False))
     with pytest.raises(ValueError, match="一级"):
         fetch_kp_tree(llm, prompt_template="PROMPT", user_message="USER")
+
+
+def test_build_sql_custom_code_prefix():
+    """道法用 DF 前缀（M/P/C 已被数学/物理/语文占用）。"""
+    from generate_kp_tree import build_kp_seed_sql
+
+    tree = [{"name": "富强与创新", "children": [{"name": "创新驱动发展战略"}]}]
+    sql = build_kp_seed_sql(tree, subject_id=9, code_prefix="DF",
+                            subject_label="初中道德与法治")
+    assert "'DF01'" in sql and "'DF0101'" in sql
+    assert "初中道德与法治知识点两级树种子" in sql
+
+
+def test_parse_args_defaults_to_math():
+    from generate_kp_tree import parse_args
+
+    args = parse_args([])
+    assert args.subject == "math" and args.grade_band == "junior"
+    assert args.code_prefix is None and args.out is None

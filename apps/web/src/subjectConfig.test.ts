@@ -6,10 +6,10 @@ import {
 } from './subjectConfig';
 
 describe('TRAINING_SUBJECTS', () => {
-  it('六科按 1/2/3/4/5/9 排列，只有道法未开放', () => {
+  it('六科按 1/2/3/4/5/9 排列，全部开放', () => {
     expect(TRAINING_SUBJECTS.map((s) => s.id)).toEqual([1, 2, 3, 4, 5, 9]);
-    expect(TRAINING_SUBJECTS.filter((s) => !s.enabled).map((s) => s.id)).toEqual([9]);
-    expect(getTrainingSubject(9)?.badge).toBe('内容准备中');
+    expect(TRAINING_SUBJECTS.filter((s) => !s.enabled)).toEqual([]);
+    expect(getTrainingSubject(9)?.badge).toBeUndefined();
   });
 
   it('物理题型含计算，化学/道法不含', () => {

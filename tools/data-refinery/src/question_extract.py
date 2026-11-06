@@ -18,7 +18,10 @@ import pymysql
 from answer_merger import maybe_merge_answer_md
 from extract import _parse_json_object
 from question_splitter import is_junk_question, split_page, split_options
-from question_labeler import QuestionLabeler, LabeledQuestion, apply_true_false_exemption
+from question_labeler import (
+    QuestionLabeler, LabeledQuestion, apply_material_sections_exemption,
+    apply_material_subq_exemption, apply_true_false_exemption,
+)
 from section_analyzer import analyze_sections
 from qr_detect import strip_qr_images
 from subject_codes import subject_code_for_parts
@@ -289,6 +292,24 @@ def _apply_emphasis(questions: list, decorations: list) -> int:
     return applied
 
 
+def _split_inline_material(strategy, questions) -> None:
+    """题内材料切分（2026-11-02）：材料与小问同属一个题号时切出 material_text。
+
+    语文/英语没有 split_material（它们走跨题 material_policy），必须 getattr 判空，
+    否则重抽语文/英语卷直接 AttributeError。
+    """
+    splitter = getattr(strategy, "split_material", None)
+    if splitter is None:
+        return
+    for q in questions:
+        if q.material_text and q.material_text.strip():
+            continue
+        material, rest = splitter(q.content)
+        if material:
+            q.material_text = material
+            q.content = rest
+
+
 def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                                  subject_code: str, grade_band: str,
                                  source_year: int):
@@ -514,16 +535,10 @@ def extract_questions_file(source, config, llm, fb_llm,
     if not questions:
         return 0
 
-    # 题内材料切分（2026-11-02，物理/化学）：材料与小问在同一题号内
+    # 题内材料切分（2026-11-02，物理/化学/道法）：材料与小问在同一题号内
     # （`31. 阅读以下文字…` + 材料 + `(1)(2)(3)`），切成 material_text + content。
     # 已有跨题材料（语文/英语的 material_policy）不动；其他学科默认不切。
-    for q in questions:
-        if q.material_text and q.material_text.strip():
-            continue
-        material, rest = strategy.split_material(q.content)
-        if material:
-            q.material_text = material
-            q.content = rest
+    _split_inline_material(strategy, questions)
 
     # 题号缺号告警：MinerU 偶尔整题没转出来（大兴 2024 题18 只剩答案、正文缺失），
     # 切分器无法凭空补，只能显式告警让人核对 PDF。
@@ -612,6 +627,14 @@ def extract_questions_file(source, config, llm, fb_llm,
     exemption = apply_true_false_exemption(labeled)
     if exemption:
         print(f"[true_false] {exemption} 道判断题按陈述句放行（无设问不算缺陷）", flush=True)
+    subq = apply_material_subq_exemption(labeled)
+    if subq:
+        print(f"[material] {subq} 道材料题的「仅切到第(1)问」是误判（content 里有 (2)）",
+              flush=True)
+    sections_fp = apply_material_sections_exemption(labeled)
+    if sections_fp:
+        print(f"[material] {sections_fp} 道材料题的「缺素材①②③」是误判"
+              f"（材料已分 ≥3 段）", flush=True)
 
     # 6. 写 JSONL
     _write_exam_questions_jsonl(labeled, source, extracted_dir,

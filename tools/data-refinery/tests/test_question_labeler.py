@@ -772,3 +772,91 @@ def test_true_false_exemption_applies_after_section_typing():
     assert apply_true_false_exemption([lab]) == 1
     assert lab.is_complete is True
     assert lab.completeness_issues == []
+
+
+def test_material_subq_claim_is_checked_against_content():
+    """LLM 说「仅包含第(1)问」但 content 里有 (2) → 误判放行。
+
+    事故（2026-11-06 海淀道法题26，14 分）：材料 + 两个小问都在，
+    LLM 判「仅包含第(1)问的题干、缺失第(2)问」→ is_active=0，整题消失。
+    """
+    from question_labeler import apply_material_subq_exemption
+
+    lab = LabeledQuestion.from_raw(RawQuestion(
+        group_order=26, group_id=None,
+        content="(1) 任选两件展品完成推荐理由。(8 分)\n(2) 撰写观展心得。(6 分)"))
+    lab.material_text = "展馆研学材料……"
+    lab.is_complete = False
+    lab.completeness_issues = [
+        "题目切分不完整：仅包含第(1)问的题干，缺失第(2)问的题干及设问要求。"]
+    assert apply_material_subq_exemption([lab]) == 1
+    assert lab.is_complete is True and lab.completeness_issues == []
+
+
+def test_material_missing_source_is_not_exempted():
+    """材料里确实没有分段（真缺素材）时仍拦，不能因为「题型是材料题」就放过。"""
+    from question_labeler import apply_material_sections_exemption
+
+    lab = LabeledQuestion.from_raw(RawQuestion(
+        group_order=28, group_id=None,
+        content="(1) 请将三段视频素材排序。(4分)\n(2) 续写旁白。(6分)"))
+    lab.material_text = "同学们收集到关于文化篇的相关素材……"
+    lab.is_complete = False
+    lab.completeness_issues = ["题干中缺失具体的三段视频素材内容（通常以①②③列出）"]
+    assert apply_material_sections_exemption([lab]) == 0
+    assert lab.is_complete is False
+
+
+def test_material_three_sections_is_complete():
+    """材料已是三段文字（视频脚本），LLM 还要求 ①②③ 编号就是误判。
+
+    2026-11-06 海淀道法题 28：「今日答卷 / 昔日之问 / 思想领航」三段就是被排序的素材，
+    原文没有真正的视频，也没有 ①②③ 标号。
+    """
+    from question_labeler import apply_material_sections_exemption
+
+    lab = LabeledQuestion.from_raw(RawQuestion(
+        group_order=28, group_id=None,
+        content="(1) 请将三段视频素材排序。(4分)\n(2) 续写旁白。(6分)"))
+    lab.material_text = (
+        "## 今日答卷\n三大文化地标落成……\n"
+        "## 昔日之问\n戏迷小张：早年优秀的展览要远赴中心城区观看……\n"
+        "## 思想领航\n规划建设北京城市副中心……")
+    lab.is_complete = False
+    lab.completeness_issues = [
+        "题干中要求填写‘序号’，但材料部分未明确标出今日答卷、昔日之问、思想领航三段素材对应的具体序号"]
+    assert apply_material_sections_exemption([lab]) == 1
+    assert lab.is_complete is True and lab.completeness_issues == []
+
+
+def test_kp_only_issue_is_not_a_content_defect():
+    """「知识点列表为空」是配置状态，不能因此把整题隐藏（道法题26实测）。"""
+    from question_labeler import apply_kp_issue_exemption
+
+    lab = LabeledQuestion.from_raw(RawQuestion(
+        group_order=26, group_id=None, content="(1) 小问\n(2) 小问"))
+    lab.is_complete = False
+    lab.completeness_issues = ["知识点列表为空，无法匹配已有知识点 code"]
+    assert apply_kp_issue_exemption([lab]) == 1
+    assert lab.is_complete is True
+
+    lab2 = LabeledQuestion.from_raw(RawQuestion(
+        group_order=27, group_id=None, content="题干"))
+    lab2.is_complete = False
+    lab2.completeness_issues = ["知识点列表为空", "题干截断"]
+    assert apply_kp_issue_exemption([lab2]) == 0
+    assert lab2.is_complete is False
+
+
+def test_material_subq_exemption_does_not_clear_source_issues():
+    """「缺素材」不是「缺小问」，两条豁免各管各的，不能互相放过。"""
+    from question_labeler import apply_material_subq_exemption
+
+    lab = LabeledQuestion.from_raw(RawQuestion(
+        group_order=28, group_id=None,
+        content="(1) 请将三段视频素材排序。(4分)\n(2) 续写旁白。(6分)"))
+    lab.material_text = "同学们收集到关于文化篇的相关素材……"
+    lab.is_complete = False
+    lab.completeness_issues = ["题干中缺失具体的三段视频素材内容（通常以①②③列出）"]
+    assert apply_material_subq_exemption([lab]) == 0
+    assert lab.is_complete is False

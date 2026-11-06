@@ -96,6 +96,53 @@ def needs_llm(content: str) -> bool:
     return bool(_SUBQ1.search(content))
 
 
+# ── 末句设问（道法/历史材料题的常见形态）────────────────────────────────
+#
+#    27.（10分）……三双鞋……
+#    <三段材料，每段带小标题>
+#    结合材料，运用所学，谈谈“三双鞋”中蕴含的“变”与“不变”。
+#
+# 与物化的区别：**没有 (1)(2) 小问编号**，材料后面只跟一句设问。判据同样是结构：
+# 最后一行以「结合/根据/运用/请/谈谈…」起头，前面是一整段材料。
+
+_TAIL_LEAD = ("结合", "根据", "运用", "请", "谈谈", "说说", "简述",
+              "分析", "评析", "说明", "为")
+_TAIL_HINTS = ("结合材料", "运用所学", "谈谈你的", "说说你的")
+_MIN_TAIL_LEN, _MAX_TAIL_LEN = 8, 120
+_OPTION_LINE = re.compile(r"(?m)^[ \t]*[（(]?[A-D][)）]?[ \t]*[.．、][ \t]*\S")
+
+
+def split_tail_question_rule(content: str) -> tuple[str | None, str]:
+    """把「材料 + 末句设问」切成 `(material, 设问)`；切不动返回 `(None, content)`。
+
+    只在**没有小问编号**时使用（有 `(1)` 的走 `split_material_rule`）。
+    返回的 rest 从原文切片，`material + rest == content` 恒成立。
+    """
+    if not content or len(content) < MIN_CONTENT_LEN:
+        return (None, content)
+    if _SUBQ1.search(content):
+        return (None, content)
+
+    body = content.rstrip()          # 只用来定位最后一行，不改切片
+    cut = body.rfind("\n")
+    if cut <= 0:
+        return (None, content)
+    tail = body[cut + 1:].strip()
+    material = content[:cut + 1]     # 保留行尾换行，material + rest 才能拼回原文
+    rest = content[cut + 1:]
+
+    if not (_MIN_TAIL_LEN <= len(tail) <= _MAX_TAIL_LEN):
+        return (None, content)
+    if not (tail.startswith(_TAIL_LEAD) or any(h in tail for h in _TAIL_HINTS)):
+        return (None, content)
+    if len(material.strip()) < MIN_MATERIAL_LEN:
+        return (None, content)
+    # 材料里有两行以上 A–D 就是选择题，别把选项当材料
+    if len(_OPTION_LINE.findall(material)) >= 2:
+        return (None, content)
+    return (material, rest)
+
+
 # ── 题前共享材料（第二种形态）────────────────────────────────────────────
 #
 # 物化除了「题内材料」，还有**题号前**的科技阅读题：

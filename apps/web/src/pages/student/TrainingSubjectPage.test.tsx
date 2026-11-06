@@ -26,10 +26,12 @@ describe('TrainingSubjectPage', () => {
     }
   });
 
-  it('道法卡禁用且显示「内容准备中」', () => {
-    renderPage();
-    expect(screen.getByLabelText('道德与法治训练暂未开放')).toBeTruthy();
-    expect(screen.getByText('内容准备中')).toBeTruthy();
+  it('道法卡已开放，点击进入四卡页并带 subjectId=9', () => {
+    const { router } = renderPage();
+    expect(screen.queryByText('内容准备中')).toBeNull();
+    fireEvent.click(screen.getByLabelText('选择道德与法治训练'));
+    expect(router.state.location.pathname).toBe('/student/training/home');
+    expect(router.state.location.search).toBe('?subjectId=9');
   });
 
   it('点物理进入四卡页并带 subjectId=4', async () => {

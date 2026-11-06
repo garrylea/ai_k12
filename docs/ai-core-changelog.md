@@ -8,6 +8,34 @@
 
 ---
 
+## 2026-11-06 判断题作答：选项改成绿勾 / 红叉，不再重复写「对/错」
+
+**问题**（用户实测道法考试 `/student/training/exam/run/66`）：判断题只有「对/错」两项，`ChoiceOptionList` 既在圆形 label 里写「对」，又在选项正文再写一次「对」，两个视觉元素重复，且文字比图形难扫。
+
+**改动**：`ChoiceOptionList` 新增 `trueFalse` 分支——两个并排选项卡，只渲染线性 SVG（对勾 `--success` 绿 / 叉 `--error` 红），不出现「对/错」文字；`aria-label` / `title` 仍保留「对/错」供读屏与悬停。`QuestionRunner` 传 `trueFalse={q.type === 'true_false'}`。结果页 `AnswerResultList` 本来就是图标表示对错，未改。
+
+**测试**：新增 `ChoiceOptionList.test.tsx`（图标渲染、无重复文字、点选回报「对」、普通选择题不受影响）；web 全量 `1498 passed`，`tsc -b` 通过。
+
+---
+
+## 2026-11-06 道法卷收尾：材料题入库（60 分）+ 建 KP 树 + 打开训练入口
+
+**需求**：2026 海淀道法卷此前只入库 24/29 题，26–30（14/10/10/10/16 = 60 分）因被当选择题、拆不出选项而 `is_active=0`；道法 KP 树 0 条，专项/薄弱点/推荐全部抽不到题；训练入口 `enabled:false`。
+
+**改动**：
+1. **材料题**：`section_analyzer._EACH_SCORE_RE` 由「每小题」放宽为「每(小)题」——「二、选择题（共15题，每题2分，共30分）」不再铺到 30 题，26–30 归入 `short_answer` 推断区间。`politics` 实现 `split_material`：26/28/30 走物化的 `split_material_rule`，27/29 走新增 `split_tail_question_rule`（末行是「结合材料…」类设问、材料 ≥60 字、无 A–D 行）。**不给 politics 开跨题 `material_policy`**（`## 研学任务单` 会被当边界切碎 26）。
+2. **三条误判豁免**（都只认可核对的断言，不看 LLM 措辞）：`apply_material_subq_exemption`（说「仅包含第(1)问」但 content 里确有 `(2)`）、`apply_kp_issue_exemption`（issue 全是「知识点列表为空」= 我们没建 KP，不是题目缺陷）、`apply_material_sections_exemption`（说「缺三段视频素材/缺①②③序号」但 material_text 已有 ≥3 个 `## ` 分段——题 28 的「今日答卷/昔日之问/思想领航」三段文字就是被排序的素材，原文没有视频也没有编号，用户 2026-11-06 指出）。`_split_inline_material` 加 `getattr` 护栏（语文/英语无该钩子，重抽会 AttributeError）。
+3. **KP 树**：`generate_kp_tree.py` 泛化为 `--subject/--grade-band/--prompt/--code-prefix/--json-out/--from-json/--retries`（默认仍是数学 M 前缀）；新增 `prompts/kp_tree_politics.txt`（2022 课标 + 必覆盖高频考点清单，禁止用课/框标题当二级）；生成 `tools/db/migrations/2026-11-06_add_politics_knowledge_points.sql`（8 个一级 / 68 个二级，DF01/DF0101 编号，幂等），已执行，`backfill_question_kps.py --subject politics` 回填 29 题。
+4. **训练入口**：`subjectConfig.ts` politics `enabled:true`、去掉「内容准备中」角标；后端零改动（路由/积分/自评早已支持）。同步 `subjectConfig.test.ts` 与 `TrainingSubjectPage.test.tsx`。
+
+**实测**：道法 2026 海淀 `paper=433`，30/30 题全部 `is_active=1`（判断题 10、选择题 15、材料题 5），26–30 `type=short_answer` 且 `material_text` 非空（641/426/457/721/645 字）。第 11 题已由用户补录（paper.question_count 29 → 30），KP 回填后 30/30 有考点。
+
+**遗留**：26–30 无标准答案（学生版扫描件）——判断题/选择题缺标准答案时客观题无法判分，材料题按设计走自评；如需判分要继续找教师版或补答案文档。
+
+**测试**：data-refinery `1745 passed, 10 skipped`（新增 `tests/test_politics_material.py` 7 例、`test_section_analyzer.py` 每题分值边界、`test_question_labeler.py` 判断题/材料题/KP/分段四条豁免、`test_generate_kp_tree.py` 自定义前缀与默认参数）；web `1495 passed`（158 文件，含道法卡开放的两条断言）。
+
+---
+
 ## 2026-11-06 道法卷导入打通：学科别名 + 判断题完整性误判
 
 **需求**：导入 `2026北京海淀初三（上）期中道德与法治.pdf`。第一次跑 `import_cli --subject 道法 --file "2026 海淀"`，convert 成功，extract 直接失败；修好后能入库，但 10 道判断题里 8 道被隐藏。

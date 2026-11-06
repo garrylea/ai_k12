@@ -53,6 +53,80 @@ def apply_true_false_exemption(labeled) -> int:
             lab.completeness_issues = []
             cleared += 1
     return cleared
+
+
+# 「仅包含第(1)问」这类断言可以直接用 Python 核对：content 里若有 (2)(3) 就是误判。
+_SUBQ_NUM_RE = re.compile(r"(?m)^[ \t]*[（(](\d+)[）)]")
+_ONLY_SUBQ_CLAIM_RE = re.compile(r"仅.{0,8}第?\s*[（(]?\s*(\d+)\s*[）)]?\s*问")
+_KP_CLAIM_RE = re.compile(r"知识点|knowledge[_ ]?point|\bKP\b", re.IGNORECASE)
+
+
+def apply_kp_issue_exemption(labeled) -> int:
+    """「知识点列表为空、无法匹配 code」不是题目缺陷，是我们的配置状态。
+
+    学科还没有 KP 树时，标注模型会把「匹配不到知识点」写进 completeness.issues
+    → is_active=0，整题消失（2026-11-06 道法题 26 实测）。等 KP 建好这种误判自然消失，
+    但不能让它成为隐藏题目的理由：只清**全部 issue 都在讲知识点**的情况。
+    """
+    cleared = 0
+    for lab in labeled:
+        issues = lab.completeness_issues or []
+        if (not lab.is_complete and issues
+                and all(_KP_CLAIM_RE.search(str(i)) for i in issues)):
+            lab.is_complete = True
+            lab.completeness_issues = []
+            cleared += 1
+    return cleared
+
+
+# 「缺视频素材①②③」这类断言：材料是否真的分段，Python 可直接核对
+_SECTION_HEAD_RE = re.compile(r"(?m)^#{2,6}[ \t]*\S")
+_MISSING_SOURCE_CLAIM_RE = re.compile(
+    r"缺(?:少|失)?[^。；\n]{0,12}(?:素材|序号|视频|①②③)|"
+    r"未(?:明确)?标(?:出)?[^。；\n]{0,30}(?:序号|①②③)")
+
+
+def apply_material_sections_exemption(labeled) -> int:
+    """材料题「缺三段素材/缺①②③序号」的误判：材料里已有 ≥3 个分段标题就是完整。
+
+    2026-11-06 海淀道法题 28：材料是「今日答卷/昔日之问/思想领航」三段文字（视频脚本），
+    学生按这三段排序即可作答；LLM 却要求材料里出现 ①②③ 编号，判「缺视频素材」。
+    判据是结构（`## ` 分段数），不是 LLM 措辞。
+    """
+    cleared = 0
+    for lab in labeled:
+        material = getattr(lab, "material_text", None) or ""
+        if lab.is_complete or not material.strip():
+            continue
+        issues = " ".join(lab.completeness_issues or [])
+        if (_MISSING_SOURCE_CLAIM_RE.search(issues)
+                and len(_SECTION_HEAD_RE.findall(material)) >= 3):
+            lab.is_complete = True
+            lab.completeness_issues = []
+            cleared += 1
+    return cleared
+
+
+def apply_material_subq_exemption(labeled) -> int:
+    """材料题「只切到第(1)问」的误判：LLM 说只有第 1 问，但 content 里确有 (2)。
+
+    2026-11-06 海淀道法题 26：材料+两小问都在，LLM 却判「仅包含第(1)问、缺失第(2)问」
+    → is_active=0，14 分大题消失。这里只认**可核对的断言**（说了「仅…第N问」），
+    并且只在 content 里确实找到更多小问时放行；「缺素材/缺图」型缺陷不受影响
+    （题 28 缺三段视频素材，仍保持待复核）。
+    """
+    cleared = 0
+    for lab in labeled:
+        if lab.is_complete or not (getattr(lab, "material_text", None) or "").strip():
+            continue
+        issues = " ".join(lab.completeness_issues or [])
+        claims = {int(n) for n in _ONLY_SUBQ_CLAIM_RE.findall(issues)}
+        found = {int(n) for n in _SUBQ_NUM_RE.findall(lab.content or "")}
+        if claims and max(claims) < max(found or {0}):
+            lab.is_complete = True
+            lab.completeness_issues = []
+            cleared += 1
+    return cleared
 # 选择题选项标签（语文可能 3 项；label 已归一为 A-F）
 _VALID_LABELS = {"A", "B", "C", "D", "E", "F"}
 
@@ -501,6 +575,12 @@ class QuestionLabeler:
         # 判断题同理：陈述句没有「设问」是题型本身决定的，不是缺陷。
         # 只有题干为空或明显截断才保留缺陷（2026-11-06 海淀道法 8/10 误判）。
         apply_true_false_exemption([labeled])
+        # 材料题「只切到第(1)问」的断言可用 Python 直接核对（题 26 误判）
+        apply_material_subq_exemption([labeled])
+        # 「匹配不到知识点」是我们没建 KP，不是题目缺陷
+        apply_kp_issue_exemption([labeled])
+        # 「缺三段视频素材①②③」：材料里已有 3 个分段标题，是 LLM 要求编号的误判
+        apply_material_sections_exemption([labeled])
         regen = item.get("regenerated")
         if isinstance(regen, dict):
             # 原文无答案（Python 对齐 answer 为空）时清空 LLM 返回的答案：

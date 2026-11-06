@@ -107,7 +107,7 @@ export const TRAINING_SUBJECTS: readonly TrainingSubjectConfig[] = [
   },
   {
     id: SUBJECT_POLITICS, name: '道德与法治', desc: '考试 / 专项练习 / 错题练习',
-    enabled: false, badge: '内容准备中', homePath: '/student/training/home?subjectId=9',
+    enabled: true, homePath: '/student/training/home?subjectId=9',
     typeOptions: HUMANITIES_TYPE_OPTIONS, targetedTaskCode: 'politics_targeted', isMathLike: false,
   },
 ];

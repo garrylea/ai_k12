@@ -1,4 +1,4 @@
-"""LLM 生成初中数学两级知识点树 -> 种子 SQL（tools/db/migrations/）。
+"""LLM 生成某学科的两级知识点树 -> 种子 SQL（tools/db/migrations/）。
 
 流程（main）：
 1. LLM（prompts/kp_tree.txt）输出两级树 JSON -> 解析 + 校验（validate_kp_tree）。
@@ -12,7 +12,11 @@
 纯函数（可测，LLM 不参与）：validate_kp_tree / build_kp_seed_sql / filter_existing /
 parse_kp_tree。LLM 调用只出现在 fetch_kp_tree 与 main。
 
-用法：cd tools/data-refinery && python src/generate_kp_tree.py
+用法：
+    cd tools/data-refinery
+    python src/generate_kp_tree.py                      # 数学（旧行为，前缀 M）
+    python src/generate_kp_tree.py --subject politics --dry-run   # 先看树
+    python src/generate_kp_tree.py --subject politics             # 写迁移文件
 """
 
 import json
@@ -91,10 +95,13 @@ def _sql_str(value: str) -> str:
 
 
 def build_kp_seed_sql(tree: list[dict], subject_id: int = DEFAULT_SUBJECT_ID,
-                      grade_band: str = DEFAULT_GRADE_BAND) -> str:
+                      grade_band: str = DEFAULT_GRADE_BAND,
+                      code_prefix: str = "M",
+                      subject_label: str = "初中数学") -> str:
     """两级树 -> 幂等种子 SQL 文本（纯函数，不碰 DB/LLM）。
 
-    code 生成规则：一级 M{n:02d}（M01..M10），二级 M{n:02d}{m:02d}（每父内自增）。
+    code 生成规则：一级 {prefix}{n:02d}，二级 {prefix}{n:02d}{m:02d}（每父内自增）。
+    `code_prefix` 默认 M（数学），道法用 DF；同一学科内前缀必须唯一。
     幂等实现：knowledge_points 无唯一约束，每行用
     INSERT ... SELECT ... WHERE NOT EXISTS 防重——
     - 一级按 (subject_id, grade_band, parent IS NULL, name) 防重；
@@ -122,7 +129,7 @@ def build_kp_seed_sql(tree: list[dict], subject_id: int = DEFAULT_SUBJECT_ID,
             _check_name(child.get("name"), f"「{node.get('name')}」第 {j + 1} 个二级", seen)
 
     lines: list[str] = [
-        "-- 初中数学知识点两级树种子（subject_id="
+        f"-- {subject_label}知识点两级树种子（subject_id="
         f"{subject_id}, grade_band='{grade_band}'）。",
         "-- 由 tools/data-refinery/src/generate_kp_tree.py 生成，产出需人工过目后执行。",
         "-- 幂等：knowledge_points 无唯一约束，逐行 NOT EXISTS 防重，可重复执行。",
@@ -131,7 +138,7 @@ def build_kp_seed_sql(tree: list[dict], subject_id: int = DEFAULT_SUBJECT_ID,
 
     def _lvl1(node: dict, n: int) -> str:
         name = _sql_str(node["name"])
-        code = _sql_str(f"M{n:02d}")
+        code = _sql_str(f"{code_prefix}{n:02d}")
         return (
             f"INSERT INTO knowledge_points (subject_id, parent_kp_id, name, code, grade_band)\n"
             f"SELECT {subject_id}, NULL, {name}, {code}, {_sql_str(grade_band)} FROM DUAL\n"
@@ -145,7 +152,7 @@ def build_kp_seed_sql(tree: list[dict], subject_id: int = DEFAULT_SUBJECT_ID,
     def _lvl2(parent: dict, child: dict, n: int, m: int) -> str:
         pname = _sql_str(parent["name"])
         cname = _sql_str(child["name"])
-        code = _sql_str(f"M{n:02d}{m:02d}")
+        code = _sql_str(f"{code_prefix}{n:02d}{m:02d}")
         return (
             f"INSERT INTO knowledge_points (subject_id, parent_kp_id, name, code, grade_band)\n"
             f"SELECT {subject_id}, p.id, {cname}, {code}, {_sql_str(grade_band)}\n"
@@ -280,12 +287,57 @@ def _fetch_existing_names(conn, subject_id: int, grade_band: str) -> set[str]:
         return {row[0] for row in cur.fetchall()}
 
 
-def main() -> None:
+# 学科默认值：code 前缀决定知识点编号（M01 / P01 / DF01…），标签进 SQL 头注释
+_SUBJECT_DEFAULTS = {
+    "math": ("M", "初中数学", "kp_tree"),
+    "chinese": ("C", "初中语文", "kp_tree"),
+    "physics": ("P", "初中物理", "kp_tree"),
+    "politics": ("DF", "初中道德与法治", "kp_tree_politics"),
+}
+def parse_args(argv=None):
+    import argparse
+
+    parser = argparse.ArgumentParser(description="LLM 生成两级知识点树 -> 幂等种子 SQL")
+    parser.add_argument("--subject", default="math",
+                        help="学科 code 或中文名（默认 math）；决定 subject_id/prompt/前缀默认值")
+    parser.add_argument("--grade-band", default=DEFAULT_GRADE_BAND,
+                        help="学段 primary/junior/senior（默认 junior）")
+    parser.add_argument("--prompt", help="prompts/<name>.txt（默认按学科取 _SUBJECT_DEFAULTS）")
+    parser.add_argument("--code-prefix", help="知识点 code 前缀，如 M / P / DF")
+    parser.add_argument("--label", help="SQL 头注释里的学科名（如 初中道德与法治）")
+    parser.add_argument("--out", help="输出文件名（默认 {date}_add_{subject}_knowledge_points.sql）")
+    parser.add_argument("--dry-run", action="store_true", help="只生成并打印，不写迁移文件")
+    parser.add_argument("--retries", type=int, default=3,
+                        help="生成不合规时的重试次数（默认 3；LLM 输出形状会抖）")
+    parser.add_argument("--json-out", help="把校验通过的树另存为 JSON（便于先审后写 SQL）")
+    parser.add_argument("--from-json", help="从已审阅的 JSON 读取树，跳过 LLM")
+    return parser.parse_args(argv)
+
+
+def _resolve_subject(conn, subject: str) -> tuple[int, str]:
+    """--subject（code 或中文名）-> (subject_id, code)。"""
+    from subject_codes import SUBJECT_NAME_TO_CODE
+
+    code = SUBJECT_NAME_TO_CODE.get(subject, subject)
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM subjects WHERE code = %s", (code,))
+        row = cur.fetchone()
+        if row is None:
+            cur.execute("SELECT id, code FROM subjects WHERE name = %s", (subject,))
+            row = cur.fetchone()
+            if row is None:
+                raise SystemExit(f"[ERROR] subjects 表找不到学科：{subject}")
+            return int(row[0]), str(row[1])
+        return int(row[0]), code
+
+
+def main(argv=None) -> None:
     import pymysql
 
     from config import RefineryConfig
     from llm import create_llm_client
 
+    args = parse_args(argv)
     cfg = RefineryConfig.from_env()
     llm = create_llm_client(
         provider=cfg.llm_provider,
@@ -300,13 +352,6 @@ def main() -> None:
         enable_cache=cfg.llm_enable_cache,
     )
 
-    # 1. LLM 生成 + 解析 + 校验
-    tree = fetch_kp_tree(llm, _load_prompt("kp_tree"))
-    n_l1 = len(tree)
-    n_l2 = sum(len(n["children"]) for n in tree)
-    print(f"[ok] LLM 生成两级树：{n_l1} 个一级 / {n_l2} 个二级", flush=True)
-
-    # 2. SELECT-then-INSERT：DB 已有名称过滤
     conn = pymysql.connect(
         host=cfg.db_host,
         port=cfg.db_port,
@@ -316,7 +361,40 @@ def main() -> None:
         charset="utf8mb4",
     )
     try:
-        existing = _fetch_existing_names(conn, DEFAULT_SUBJECT_ID, DEFAULT_GRADE_BAND)
+        subject_id, code = _resolve_subject(conn, args.subject)
+        prefix, default_label, default_prompt = _SUBJECT_DEFAULTS.get(
+            code, (code.upper()[:2], code, f"kp_tree_{code}"))
+        prefix = args.code_prefix or prefix
+        label = args.label or default_label
+        prompt_name = args.prompt or default_prompt
+        prompt = _load_prompt(prompt_name)
+
+        # 1. LLM 生成 + 解析 + 校验（输出形状会抖：一级/二级数量越界、children 是字符串，
+        #    重试比放宽校验安全 —— 放宽后整棵树会带着畸形结构入库）
+        if args.from_json:
+            tree = validate_kp_tree(json.loads(Path(args.from_json).read_text(encoding="utf-8")))
+            print(f"[ok] 从 {args.from_json} 读取已审阅的树", flush=True)
+        else:
+            last_err: Exception | None = None
+            for attempt in range(1, args.retries + 1):
+                try:
+                    tree = fetch_kp_tree(llm, prompt, f"请输出{label}知识点两级树 JSON 数组。")
+                    break
+                except ValueError as exc:
+                    last_err = exc
+                    print(f"[WARN] 第 {attempt}/{args.retries} 次生成不合规：{exc}", flush=True)
+            else:
+                raise SystemExit(f"[ERROR] {args.retries} 次生成都不合规范：{last_err}")
+            if args.json_out:
+                Path(args.json_out).write_text(
+                    json.dumps(tree, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                print(f"[ok] 树已另存：{args.json_out}", flush=True)
+        n_l1 = len(tree)
+        n_l2 = sum(len(n["children"]) for n in tree)
+        print(f"[ok] 两级树就绪：{n_l1} 个一级 / {n_l2} 个二级", flush=True)
+
+        # 2. SELECT-then-INSERT：DB 已有名称过滤
+        existing = _fetch_existing_names(conn, subject_id, args.grade_band)
     finally:
         conn.close()
     kept = filter_existing(tree, existing)
@@ -327,16 +405,27 @@ def main() -> None:
         print("[done] 树已全部存在，无需生成 SQL", flush=True)
         return
 
+    if args.dry_run:
+        for node in kept:
+            print(f"- {node['name']}: {'、'.join(c['name'] for c in node['children'])}",
+                  flush=True)
+        print("[dry-run] 未写迁移文件", flush=True)
+        return
+
     # 3. 生成 SQL 写迁移文件（日期用执行日）
     # __file__ = tools/data-refinery/src/xxx.py：parents[2] 是 tools/，parents[3] 才是仓库根
     repo_root = Path(__file__).resolve().parents[3]
-    out_path = (repo_root / "tools" / "db" / "migrations"
-                / f"{date.today().isoformat()}_add_math_knowledge_points.sql")
+    out_name = args.out or f"{date.today().isoformat()}_add_{code}_knowledge_points.sql"
+    out_path = repo_root / "tools" / "db" / "migrations" / out_name
     header = (
         f"-- 生成于 {date.today().isoformat()}，模型：{cfg.llm_model}，"
         f"一级 {len(kept)} 个 / 二级 {sum(len(n['children']) for n in kept)} 个。\n"
     )
-    out_path.write_text(header + build_kp_seed_sql(kept), encoding="utf-8")
+    out_path.write_text(
+        header + build_kp_seed_sql(kept, subject_id=subject_id,
+                                   grade_band=args.grade_band,
+                                   code_prefix=prefix, subject_label=label),
+        encoding="utf-8")
     print(f"[done] 已写入 {out_path}（人工过目后执行：mysql ... < {out_path.name}）", flush=True)
 
 

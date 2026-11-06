@@ -623,6 +623,7 @@ export function QuestionRunner({
                 value={answer}
                 onChange={isMultiChoice ? toggleMulti : updateAnswer}
                 multiple={isMultiChoice}
+                trueFalse={q.type === 'true_false'}
               />
             </div>
           ) : latexInput ? (

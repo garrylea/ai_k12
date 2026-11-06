@@ -113,3 +113,42 @@ D. 4
 def test_other_subjects_not_touched():
     mapping, sections = analyze_sections(PHYSICS_MD, "chinese")
     assert mapping == {} and sections == []
+
+
+def test_politics_each_question_score_bounds_section():
+    """「每题 2 分」与「每小题 2 分」同义：选择题大题不能铺到后面的材料大题。
+
+    事故（2026-11-06 海淀道法）：「二、选择题（共15题，每题2分，共30分）」只覆盖
+    11–25；旧正则只认「每小题」，`_expected_count` 得 None，11–30 整段判 choice，
+    26–30（60 分材料题）被当选择题拆不出选项 → needs_review → is_active=0。
+    """
+    md = """## 一、判断题（共2题，每题1分，共2分）
+1. 陈述甲
+2. 陈述乙
+
+## 二、选择题（共2题，每题2分，共4分）
+3. 题干甲
+A. 1
+B. 2
+C. 3
+D. 4
+4. 题干乙
+A. 1
+B. 2
+C. 3
+D. 4
+
+## 第二部分
+本部分共 2 题，共 26 分。
+5. (14 分) 材料甲
+(1) 小问
+(2) 小问
+6. (12 分) 材料乙
+结合材料，谈谈你的看法。
+"""
+    mapping, sections = analyze_sections(md, "politics")
+    assert [(s.start_no, s.end_no, s.type) for s in sections] == [
+        (1, 2, "true_false"), (3, 4, "choice"), (5, 6, "short_answer"),
+    ]
+    assert mapping[4] == "choice"
+    assert mapping[5] == "short_answer" and mapping[6] == "short_answer"
