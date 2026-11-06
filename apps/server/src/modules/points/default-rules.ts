@@ -35,7 +35,7 @@ export const TASK_NAMES: Record<string, string> = {
  * 已 seed 过规则的学生**不会被这里的默认值覆盖**。改 `dailyLimit` / `points` 只能修新账号，
  * 不能回溯修正存量学生（要修存量得走家长配置页或单独的迁移）。
  *
- * `dailyLimit` 是**主要防刷手段**（spec §3.2）。数学专项四档**共用 5 次**：
+ * `dailyLimit` 是**主要防刷手段**（spec §3.2）。数学/物理专项五档**共用 5 次**：
  * 档位由学生自选、幂等键按 sessionId（每次开练都是新 key），若不限次，
  * 把题池缩到 1 题就能用 `10` 档（35 分）反复 complete 无限刷（spec 明确接受
  * 「开一个 N 题会话立刻 complete 就等于做完 N 题」，所以上限是唯一闸门）。
@@ -49,9 +49,10 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { taskCode: 'chemistry_paper',   taskName: '化学卷子一套', tierKey: 'default', tierLabel: '一套',   points: 50, dailyLimit: null, sortOrder: 27 },
   { taskCode: 'politics_paper',    taskName: '道法卷子一套', tierKey: 'default', tierLabel: '一套',   points: 50, dailyLimit: null, sortOrder: 28 },
   { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '1',       tierLabel: '1 题',   points: 2,  dailyLimit: 5,    sortOrder: 30 },
-  { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '3',       tierLabel: '3 题',   points: 8,  dailyLimit: 5,    sortOrder: 31 },
-  { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '5',       tierLabel: '5 题',   points: 15, dailyLimit: 5,    sortOrder: 32 },
-  { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '10',      tierLabel: '10 题',  points: 35, dailyLimit: 5,    sortOrder: 33 },
+  { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '2',       tierLabel: '2 题',   points: 5,  dailyLimit: 5,    sortOrder: 31 },
+  { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '3',       tierLabel: '3 题',   points: 8,  dailyLimit: 5,    sortOrder: 32 },
+  { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '5',       tierLabel: '5 题',   points: 15, dailyLimit: 5,    sortOrder: 33 },
+  { taskCode: 'math_targeted',     taskName: '数学专项',     tierKey: '10',      tierLabel: '10 题',  points: 35, dailyLimit: 5,    sortOrder: 34 },
   { taskCode: 'error_fix',         taskName: '错题订正',     tierKey: 'default', tierLabel: '一题',   points: 3,  dailyLimit: null, sortOrder: 40 },
   { taskCode: 'remediation_question', taskName: '相似题专项', tierKey: 'choice',     tierLabel: '选择题', points: 3, dailyLimit: null, sortOrder: 35 },
   { taskCode: 'remediation_question', taskName: '相似题专项', tierKey: 'fill_blank', tierLabel: '填空题', points: 4, dailyLimit: null, sortOrder: 36 },
@@ -69,9 +70,10 @@ export const DEFAULT_RULES: DefaultRule[] = [
   { taskCode: 'cn_targeted',       taskName: '语文专项',     tierKey: '5',       tierLabel: '5 题',   points: 15, dailyLimit: 5,    sortOrder: 92 },
   { taskCode: 'cn_targeted',       taskName: '语文专项',     tierKey: '10',      tierLabel: '10 题',  points: 35, dailyLimit: 5,    sortOrder: 93 },
   { taskCode: 'physics_targeted',   taskName: '物理专项',     tierKey: '1',       tierLabel: '1 题',   points: 2,  dailyLimit: 5,    sortOrder: 100 },
-  { taskCode: 'physics_targeted',   taskName: '物理专项',     tierKey: '3',       tierLabel: '3 题',   points: 8,  dailyLimit: 5,    sortOrder: 101 },
-  { taskCode: 'physics_targeted',   taskName: '物理专项',     tierKey: '5',       tierLabel: '5 题',   points: 15, dailyLimit: 5,    sortOrder: 102 },
-  { taskCode: 'physics_targeted',   taskName: '物理专项',     tierKey: '10',      tierLabel: '10 题',  points: 35, dailyLimit: 5,    sortOrder: 103 },
+  { taskCode: 'physics_targeted',   taskName: '物理专项',     tierKey: '2',       tierLabel: '2 题',   points: 5,  dailyLimit: 5,    sortOrder: 101 },
+  { taskCode: 'physics_targeted',   taskName: '物理专项',     tierKey: '3',       tierLabel: '3 题',   points: 8,  dailyLimit: 5,    sortOrder: 102 },
+  { taskCode: 'physics_targeted',   taskName: '物理专项',     tierKey: '5',       tierLabel: '5 题',   points: 15, dailyLimit: 5,    sortOrder: 103 },
+  { taskCode: 'physics_targeted',   taskName: '物理专项',     tierKey: '10',      tierLabel: '10 题',  points: 35, dailyLimit: 5,    sortOrder: 104 },
   { taskCode: 'chemistry_targeted', taskName: '化学专项',     tierKey: '1',       tierLabel: '1 题',   points: 2,  dailyLimit: 5,    sortOrder: 110 },
   { taskCode: 'chemistry_targeted', taskName: '化学专项',     tierKey: '3',       tierLabel: '3 题',   points: 8,  dailyLimit: 5,    sortOrder: 111 },
   { taskCode: 'chemistry_targeted', taskName: '化学专项',     tierKey: '5',       tierLabel: '5 题',   points: 15, dailyLimit: 5,    sortOrder: 112 },
