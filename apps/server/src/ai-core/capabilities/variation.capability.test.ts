@@ -59,9 +59,13 @@ describe('VariationCapability', () => {
     });
 
     function makeSpy() {
-      const calls: { messages: { role: string; content: string }[]; timeout?: number }[] = [];
+      const calls: {
+        messages: { role: string; content: string }[]; timeout?: number; maxRetries?: number;
+      }[] = [];
       const modelClient = {
-        chat: async (req: { messages: { role: string; content: string }[]; timeout?: number }): Promise<ChatResponse> => {
+        chat: async (req: {
+          messages: { role: string; content: string }[]; timeout?: number; maxRetries?: number;
+        }): Promise<ChatResponse> => {
           calls.push(req);
           return {
             id: 'r1', model: 'qwen3.8-max', content: mockContent,
@@ -96,6 +100,20 @@ describe('VariationCapability', () => {
       });
       expect(calls[0].messages[0].content).toContain('数学命题专家');
       expect(calls[0].timeout).toBe(timeoutConfig.timeout.variation ?? timeoutConfig.timeout.default);
+      // 不传 maxRetries -> 不下发，沿用模型客户端全局重试策略
+      expect(calls[0].maxRetries).toBeUndefined();
+    });
+
+    // 2026-11-06：同类型练习补题要求「失败即降级」，故按请求关闭重试。
+    it('maxRetries=0 透传到模型客户端', async () => {
+      const { calls, capability } = makeSpy();
+      await capability.generate({
+        originalQuestion: { content: '解方程 2x+3=7', answer: 'x=2', difficulty: 1 },
+        knowledgePoint: { id: 'kp1', name: '一元一次方程' },
+        count: 1,
+        maxRetries: 0,
+      });
+      expect(calls[0].maxRetries).toBe(0);
     });
   });
 });

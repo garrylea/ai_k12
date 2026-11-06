@@ -154,6 +154,12 @@ export interface ChatRequest {
   responseFormat?: 'text' | 'json_object';
   timeout?: number;
   stream?: boolean;
+  /**
+   * 本次调用的重试次数上限（覆盖 ModelClient 的全局 retryOptions）。
+   * 传 0 = 一次失败即抛，不重试（如「AI 补题失败就降级用题库」的路径）。
+   * 不传 = 沿用全局策略（callWithRetry 默认行为）。
+   */
+  maxRetries?: number;
   /** 是否启用模型 thinking；false 时请求体下发 enable_thinking:false（默认 true）。
    *  注意：这是 DashScope 系（qwen/kimi/deepseek 等云端 OpenAI 兼容端点）的开关；
    *  本地 llama.cpp 不认这个字段，它要靠 `extraBody` 传 chat_template_kwargs。 */
@@ -571,6 +577,8 @@ export interface VariationRequest {
   subject?: 'math' | 'physics';
   /** 2026-11-06：本次调用的硬上限（毫秒），不传走 retry.yaml 的 variation 超时。 */
   timeoutMs?: number;
+  /** 2026-11-06：本次调用的重试次数上限；不传沿用模型客户端全局策略。 */
+  maxRetries?: number;
 }
 
 export interface VariationQuestion {

@@ -103,4 +103,22 @@ describe('ModelClient', () => {
     await expect(withProvider(provider)
       .chat({ model: kimiModel, messages: [{ role: 'user', content: 'hi' }] })).rejects.toThrow(RateLimitError);
   });
+
+  // 2026-11-06：单次请求可覆盖重试次数（同类型练习补题用 0 = 失败即降级）。
+  it('chat() honors per-request maxRetries=0 (no retry) over the global policy', async () => {
+    let calls = 0;
+    const provider: ProviderAdapter = {
+      chat: vi.fn(),
+      streamChat: vi.fn((): AsyncIterable<StreamChunk> => ({
+        async *[Symbol.asyncIterator]() {
+          calls++;
+          throw new ServerError(ctx(500));
+        },
+      })),
+    };
+    await expect(withProvider(provider, { maxRetries: 2, baseDelayMs: 1, maxBackoffMs: 1 })
+      .chat({ model: kimiModel, messages: [{ role: 'user', content: 'hi' }], maxRetries: 0 }))
+      .rejects.toThrow();
+    expect(calls).toBe(1);
+  });
 });

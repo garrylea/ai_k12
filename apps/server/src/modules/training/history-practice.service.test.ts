@@ -380,18 +380,67 @@ describe('HistoryPracticeService.startSimilar — AI 补题', () => {
     expect(trainingSessionsRepo.create).not.toHaveBeenCalled();
   });
 
-  it('请求参数：subject 按学科映射、count=缺口、targetDifficulty=种子难度、20s 硬上限', async () => {
+  it('请求参数：subject 按学科映射、count=缺口、targetDifficulty=种子难度、20s 硬上限、关闭重试', async () => {
     const [mathCtx, physicsCtx] = [setup(), setup({ subjectId: 4 })];
     await mathCtx.svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 2 });
     await physicsCtx.svc.startSimilar({ studentId: 7, subjectId: 4, questionId: 100, count: 2 });
 
     expect(mathCtx.variation.generate).toHaveBeenCalledWith(expect.objectContaining({
-      subject: 'math', count: 2, timeoutMs: 20000,
+      subject: 'math', count: 2, timeoutMs: 20000, maxRetries: 0,
       targetDifficulty: 2,
       originalQuestion: { content: '题干', answer: 'A', difficulty: 2 },
       knowledgePoint: { id: '28', name: '反比例函数' },
     }));
     expect(physicsCtx.variation.generate).toHaveBeenCalledWith(expect.objectContaining({ subject: 'physics' }));
+  });
+
+  // 修复轮（2026-11-06）：AI 循环里的 DB 写失败不得把「题库已有题」的响应变成 500。
+  it('AI 入库失败 -> warn 后继续，保留题库题、不 500', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+    const { svc, questionsRepo, variation } = setup({
+      bank: [{ id: 201, content: '题库题', type: 'choice', options: null, material_text: null }],
+    });
+    variation.generate.mockResolvedValue({ variations: [aiChoice('AI题1'), aiChoice('AI题2', 'B')] });
+    questionsRepo.findOrCreate
+      .mockRejectedValueOnce(new Error('insert failed'))
+      .mockResolvedValueOnce({ id: 302, created: true });
+
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 });
+
+    expect(r.questions.map((q) => q.questionId)).toEqual([201, 302]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('insert failed'));
+    warn.mockRestore();
+  });
+
+  it('AI 题挂知识点失败 -> 跳过该题，保留其余 AI 题与题库题、不 500', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+    const { svc, questionsRepo, variation } = setup();
+    variation.generate.mockResolvedValue({ variations: [aiChoice('AI题1'), aiChoice('AI题2', 'B')] });
+    questionsRepo.findOrCreate
+      .mockResolvedValueOnce({ id: 301, created: true })
+      .mockResolvedValueOnce({ id: 302, created: true });
+    questionsRepo.bindKnowledgePoint
+      .mockRejectedValueOnce(new Error('bind failed'))
+      .mockResolvedValueOnce(undefined);
+
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 2 });
+
+    expect(r.questions.map((q) => q.questionId)).toEqual([302]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('bind failed'));
+    warn.mockRestore();
+  });
+
+  it('AI 返回原题（命中种子题 id）-> 跳过，不进入练习集', async () => {
+    const { svc, questionsRepo, variation } = setup();
+    variation.generate.mockResolvedValue({ variations: [aiChoice('题干'), aiChoice('AI题2', 'B')] });
+    // 第一道与种子题同文 -> findOrCreate 撞 hash 返回 100
+    questionsRepo.findOrCreate
+      .mockResolvedValueOnce({ id: 100, created: false })
+      .mockResolvedValueOnce({ id: 301, created: true });
+
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 2 });
+
+    expect(r.questions.map((q) => q.questionId)).toEqual([301]);
   });
 
   it('AI 超 20s 未返回 -> 走题库题；超时后迟到的结果不再入库', async () => {

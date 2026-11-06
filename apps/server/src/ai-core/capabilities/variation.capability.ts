@@ -69,6 +69,8 @@ export class VariationCapability {
       messages: promptResult.messages,
       responseFormat: 'json_object',
       timeout: request.timeoutMs ?? timeoutConfig.timeout.variation ?? timeoutConfig.timeout.default,
+      // 不传 = 沿用模型客户端全局重试策略（数学变式/补救的既有行为）
+      maxRetries: request.maxRetries,
     });
 
     const parseResult = this.responseParser.parse<{ variations: VariationQuestion[] }>({

@@ -130,7 +130,11 @@ export class ModelClient {
       }
     };
 
-    return callWithRetry(run, this.retryOptions);
+    return callWithRetry(run, {
+      ...this.retryOptions,
+      // 单次请求可覆盖重试次数（0 = 不重试）；不传则沿用全局策略。
+      maxRetries: request.maxRetries ?? this.retryOptions.maxRetries,
+    });
   }
 
   /**

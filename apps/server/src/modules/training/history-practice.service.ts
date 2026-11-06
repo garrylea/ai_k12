@@ -63,7 +63,8 @@ export class HistoryPracticeService {
    * 仍不满则由 AI 按原题生成（Task 7）。
    * 题库方法本身已排除「不再展示」、下架、空答案；这里只额外排除种子题与已选。
    *
-   * AI 补题：20s 硬上限（请求本身 + 竞速两道闸），失败/超时只保留题库题，绝不 500。
+   * AI 补题：20s 硬上限（请求本身 + 竞速两道闸）+ 关闭重试（失败即降级）；
+   * AI 调用失败、超时、单题入库失败都只保留题库题，绝不 500。
    * 入库 `source='history_practice'`，按 content_hash 去重；只有新入库的题才挂 primary 考点
    * （同题多 primary 会让取值随行序漂移）。
    *
@@ -129,6 +130,8 @@ export class HistoryPracticeService {
         count: shortfall,
         targetDifficulty: toDifficulty(seed.difficulty),
         timeoutMs: AI_FILL_TIMEOUT_MS,
+        // 关闭重试：补题是可选增强，一次失败就该降级用题库，不能靠重试把端点拖住
+        maxRetries: 0,
       }).catch((err) => {
         this.logger.warn(
           `history similar AI fill failed (student=${input.studentId}, kp=${kpId}): ${err instanceof Error ? err.message : String(err)}`,
@@ -149,7 +152,8 @@ export class HistoryPracticeService {
       }
 
       // 只对竞速结果里的题入库：超时后迟到的 AI 结果不会走到这里，故不会有「迟到写库」。
-      const seen = new Set<number>(selected.map((q) => q.questionId));
+      // 种子题也进 seen：AI 若把原题原样返回，findOrCreate 会命中种子 id，绝不能把原题塞进练习集。
+      const seen = new Set<number>([seed.id, ...selected.map((q) => q.questionId)]);
       for (const v of ai?.variations ?? []) {
         if (selected.length >= input.count) break;
         const reason = variationRejectionReason(v, seed.type);
@@ -157,30 +161,38 @@ export class HistoryPracticeService {
           this.logger.warn(`history similar variation rejected (kp=${kpId}): ${reason}`);
           continue;
         }
-        const options = v.options?.map(({ label, text }) => ({ label, text })) ?? null;
-        const { id, created } = await this.questionsRepo.findOrCreate({
-          subject_id: input.subjectId,
-          type: seed.type,
-          difficulty: seed.difficulty,
-          content: v.content,
-          // 选项只存 label/text，绝不存 isCorrect（防答案泄漏）
-          options: options ? JSON.stringify(options) : null,
-          answer: toStoredAnswer(v, seed.type),
-          explanation: v.explanation,
-          source: 'history_practice',
-          content_hash: computeContentHash(v.content),
-        });
-        if (seen.has(id)) continue;
-        // 撞 hash 复用已有题时不补挂 primary（同题多 primary 会让取值随行序漂移）
-        if (created) await this.questionsRepo.bindKnowledgePoint(id, kpId, 'primary');
-        seen.add(id);
-        selected.push({
-          questionId: id,
-          text: v.content,
-          type: seed.type,
-          options,
-          materialText: null,
-        });
+        // 单题入库失败只丢这一道：AI 补题是可选增强，绝不能连累题库已有题、更不能 500 掉端点。
+        try {
+          const options = v.options?.map(({ label, text }) => ({ label, text })) ?? null;
+          const { id, created } = await this.questionsRepo.findOrCreate({
+            subject_id: input.subjectId,
+            type: seed.type,
+            difficulty: seed.difficulty,
+            content: v.content,
+            // 选项只存 label/text，绝不存 isCorrect（防答案泄漏）
+            options: options ? JSON.stringify(options) : null,
+            answer: toStoredAnswer(v, seed.type),
+            explanation: v.explanation,
+            source: 'history_practice',
+            content_hash: computeContentHash(v.content),
+          });
+          if (seen.has(id)) continue;
+          // 撞 hash 复用已有题时不补挂 primary（同题多 primary 会让取值随行序漂移）
+          if (created) await this.questionsRepo.bindKnowledgePoint(id, kpId, 'primary');
+          seen.add(id);
+          selected.push({
+            questionId: id,
+            text: v.content,
+            type: seed.type,
+            options,
+            materialText: null,
+          });
+        } catch (err) {
+          this.logger.warn(
+            `history similar AI persist failed (student=${input.studentId}, kp=${kpId}): ${err instanceof Error ? err.message : String(err)}`,
+          );
+          continue;
+        }
       }
     }
 
