@@ -110,7 +110,11 @@ describe('StudentStayLayout 顶栏「回到开始页」', () => {
     // 个人中心不再提供登出：登出只在开始页（EntrySelectPage）右上角
     expect(screen.queryByRole('button', { name: '退出登录' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '回到开始页' }));
+    const homeButton = screen.getByRole('button', { name: '回到开始页' });
+    // 2026-11-06 用户要求：小房子换成全仓统一的退出图标（只换图标，行为仍是回开始页）
+    expect(homeButton.querySelector('[data-icon="exit"]')).toBeInTheDocument();
+
+    await user.click(homeButton);
 
     expect(router.state.location.pathname).toBe('/student/entry');
     expect(screen.getByText('入口选择页')).toBeInTheDocument();

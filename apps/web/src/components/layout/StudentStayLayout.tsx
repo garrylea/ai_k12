@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { BackButton } from '@/components/base';
+import { BackButton, ExitIcon } from '@/components/base';
 import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 
 /**
@@ -35,29 +35,15 @@ import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
  * 学生看完该回到登录后的主菜单继续学，而不是被踢回登录页 —— 游戏里进个人中心看完
  * 回主界面，不会直接退到登录界面。登出仍可在开始页右上角完成（`LogoutButton` 在
  * `EntrySelectPage` 保留），鉴权清理逻辑也仍在那一处。
+ *
+ * 图标用全仓统一的 `ExitIcon`（与 `LogoutButton` 同一个图标，2026-11-06 用户要求）：
+ * 小房子换成「离开」图标，行为仍是回开始页、不登出。
  */
 const stayItems = [
   { to: '/student/rewards', label: '奖励册' },
   { to: '/student/profile', label: '个人中心' },
   { to: '/student/practice-history', label: '练习记录' },
 ];
-
-const HomeIcon = ({ className = 'w-5 h-5' }: { className?: string }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    <path d="M3 10.5 12 3l9 7.5" />
-    <path d="M5 9.5V21h14V9.5" />
-    <path d="M9.5 21v-6h5v6" />
-  </svg>
-);
 
 export default function StudentStayLayout() {
   const location = useLocation();
@@ -107,7 +93,7 @@ export default function StudentStayLayout() {
           aria-label="回到开始页"
           className="p-2.5 rounded-full bg-[var(--bg-card)] border border-[var(--bg-subtle)] shadow-sm hover:bg-[var(--bg-base)] transition-colors text-[var(--text-secondary)]"
         >
-          <HomeIcon />
+          <ExitIcon />
         </button>
       </header>
 

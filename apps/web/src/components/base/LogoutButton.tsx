@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { isCurrentStudentLocked } from '@/kiosk/learningLock';
 import { releaseOnLogout } from '@/kiosk/desktopBridge';
 import { clearAuthSession } from '@/services/authStorage';
+import { ExitIcon } from './ExitIcon';
 import { toast } from './Toast';
 
 interface LogoutButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -18,29 +19,6 @@ interface LogoutButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const LOCKED_HINT = '本次学习时长未满，需家长解除后才能退出';
-
-/**
- * 退出图标：门框在右、箭头向左离开门框。
- *
- * 原先画的是「门框在左 + 箭头向右」，小尺寸下容易被读成「登录 / 进入」；
- * 2026-11-06 用户要求改成明确的退出方向。全仓只有这一处图标定义，
- * 入口页 / 学生端内页 / 家长端 / 管理端会一起生效，保持同一套退出图标。
- */
-const LogOutIcon = ({ className = 'w-5 h-5' }: { className?: string }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M15 21h4a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4" />
-    <polyline points="8 17 3 12 8 7" />
-    <line x1="3" y1="12" x2="15" y2="12" />
-  </svg>
-);
 
 /**
  * 统一的退出登录控件：集中清理 localStorage 鉴权信息并跳转登录页。
@@ -118,7 +96,7 @@ export function LogoutButton({
           {avatarText}
         </div>
         <span className="text-sm font-medium text-[var(--text-primary)]">{username}</span>
-        <LogOutIcon className="w-4 h-4 text-slate-400 group-hover:text-slate-600 transition-colors" />
+        <ExitIcon className="w-4 h-4 text-slate-400 group-hover:text-slate-600 transition-colors" />
       </button>
     );
   }
@@ -139,7 +117,7 @@ export function LogoutButton({
         className,
       )}
     >
-      <LogOutIcon />
+      <ExitIcon />
     </button>
   );
 }

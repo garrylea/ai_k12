@@ -2,6 +2,7 @@ export { Button } from './Button';
 export { BackButton } from './BackButton';
 export { PageHeader } from './PageHeader';
 export { LogoutButton } from './LogoutButton';
+export { ExitIcon } from './ExitIcon';
 export { Input } from './Input';
 export { Tag } from './Tag';
 export { Card } from './Card';
