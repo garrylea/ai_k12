@@ -258,6 +258,31 @@ describe('HistoryPracticeService.startSimilar — AI 补题', () => {
     return ctx;
   }
 
+  it('种子无标准答案：题库照样出题，不再 400', async () => {
+    const { svc, questionsRepo } = setup({
+      bank: [{ id: 201, content: '题库题', type: 'choice', options: null, material_text: null }],
+    });
+    questionsRepo.findById.mockResolvedValue(mkQ({ answer: '' }));
+
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 1 });
+
+    expect(r.questions.map((q) => q.questionId)).toEqual([201]);
+  });
+
+  it('种子无标准答案：AI 补题仍被调用，且 answer 传空串', async () => {
+    const { svc, questionsRepo, variation } = setup();
+    questionsRepo.findById.mockResolvedValue(mkQ({ answer: '' }));
+    variation.generate.mockResolvedValue({ variations: [aiChoice('AI题1')] });
+    questionsRepo.findOrCreate.mockResolvedValue({ id: 301, created: true });
+
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 1 });
+
+    expect(variation.generate).toHaveBeenCalledWith(expect.objectContaining({
+      originalQuestion: expect.objectContaining({ answer: '' }),
+    }));
+    expect(r.questions.map((q) => q.questionId)).toEqual([301]);
+  });
+
   it('入库行：subject/type/difficulty 取种子题，options 剥掉 isCorrect，content_hash 去重键', async () => {
     const { svc, questionsRepo, variation } = setup();
     variation.generate.mockResolvedValue({ variations: [aiChoice('AI题1', 'B')] });

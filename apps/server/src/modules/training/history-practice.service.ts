@@ -90,7 +90,8 @@ export class HistoryPracticeService {
     const seed = await this.questionsRepo.findById(input.questionId);
     if (!seed || seed.is_active !== 1) throw new BadRequestException('题目已下架');
     if (seed.subject_id !== input.subjectId) throw new BadRequestException('题目不属于该学科');
-    if (!seed.answer) throw new BadRequestException('题目没有标准答案');
+    // 种子没有标准答案也允许：题库抽题只依赖 KP/题型/难度；AI 补题时由 prompt 要求
+    // 模型先自行求解原题再生成（质量风险由题库优先 + 生成校验兜底）。
     const kpId = (await this.questionsRepo.findKpIdsByQuestionIds([seed.id])).get(seed.id);
     if (kpId == null) throw new BadRequestException('题目没有知识点');
     const kp = await this.kpRepo.findById(kpId);

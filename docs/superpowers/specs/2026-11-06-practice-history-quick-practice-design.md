@@ -152,7 +152,7 @@
 
 - 每题增加：
   - `canRedo: boolean`：`questionId != null` 且题目存在且 `is_active=1`；
-  - `canSimilar: boolean`：`canRedo` 且学科 ∈ {1,4} 且该题知识点存在且标准答案非空。
+  - `canSimilar: boolean`：`canRedo` 且学科 ∈ {1,4} 且该题知识点存在（**不要求原题有标准答案**：题库抽题只依赖 KP/题型/难度；AI 生成时由 prompt 先求解原题）。
 - 题量选项不写进详情接口：前端**详情加载后**按学科调用现有 `GET /api/points/me/rules`，取 `[1,2,3,5] ∩ 可用档位`（与 PRD §7.13「档位即可选项」一致）；交集为空则隐藏同类型按钮。
 - 实现：
   - exam 分支：`findAnswersWithQuestions` 增加 `is_active`、`answer` 的返回；批量查 `question_knowledge_points` 判断知识点存在。
@@ -181,7 +181,7 @@
   - 归属同上；
   - 学科 ∈ {1,4}；否则 400；
   - `count` ∈ {1,2,3,5} 且在该生 `listTierKeys` 白名单内；否则 400；
-  - 题目有知识点、标准答案非空；否则 400。
+  - 题目有知识点；否则 400。**不要求原题有标准答案**：题库按 KP/题型/难度抽题；AI 补题时 prompt 要求「标准答案为空则先自行求解原题，再生成变式」。
 - 抽题算法：
   1. 取 `kpId`：primary 中 id 最小；无 primary 取 secondary 中 id 最小。
   2. `type = seed.type`，`difficulty = seed.difficulty`（1..3）。
@@ -295,7 +295,7 @@
 
 ### 8.1 后端
 
-- 详情：exam/special 的 `canRedo`/`canSimilar`；无 KP/无答案/下架题/语文专项 → false；前端档位交集（1/2/3/5 ∩ 可用档位）另测。
+- 详情：exam/special 的 `canRedo`/`canSimilar`；无 KP/下架题/语文专项 → false；有 KP 但标准答案为空 → `canSimilar=true`（题库可抽，AI 先解题）；前端档位交集（1/2/3/5 ∩ 可用档位）另测。
 - 重做端点：归属 404、跨学生 404、下架题 400、返回白名单无答案；**不建任何会话**（断言 training_sessions/special_practice_sessions/special_answer_records 无新行）。
 - 重做判题：答错写错题本；答对清零；`suppressErrorFixPoints=true` 时 `pointsAwarded=0`，但清零事件仍记；自评对同口径。
 - 同类型：count 白名单；题库抽题难度阶梯/排除；AI 失败降级；0 题 → 无 session；实际 3 题请求 5 → tier_key='3'；落库去重/source/subject_id/KP 绑定。

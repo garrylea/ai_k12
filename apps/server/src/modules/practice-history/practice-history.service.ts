@@ -121,7 +121,6 @@ export class PracticeHistoryService {
           const hasKp = a.question_id != null && kpMap.has(a.question_id);
           const canSimilar = canRedo
             && (session.subject_id === 1 || session.subject_id === 4)
-            && !!a.answer
             && hasKp;
           return {
             questionId: a.question_id,
@@ -182,7 +181,6 @@ export class PracticeHistoryService {
       const hasKp = a.question_id != null && kpMap.has(a.question_id);
       const canSimilar = canRedo
         && (session.subject_id === 1 || session.subject_id === 4)
-        && !!a.question_answer
         && hasKp;
       return {
         questionId: a.question_id,

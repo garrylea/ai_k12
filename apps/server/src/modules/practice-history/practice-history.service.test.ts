@@ -208,6 +208,20 @@ describe('PracticeHistoryService.getDetail', () => {
     expect(r?.questions[0].canSimilar).toBe(true);
   });
 
+  it('标准答案为空但 has KP → canSimilar 仍为 true（题库优先，AI 可先解题）', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 1 }));
+    h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([{
+      question_id: 100, question_order: 1, answer_text: 'B', is_correct: 0, score: 0,
+      analysis: null, method: 'exact', judged_at: null, text: '题干', type: 'choice',
+      options: null, explanation: null, answer: '', material_text: null, is_active: 1,
+    }]);
+    h.questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
+
+    const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });
+    expect(r?.questions[0].canRedo).toBe(true);
+    expect(r?.questions[0].canSimilar).toBe(true);
+  });
+
   it('无 KP → canRedo=true / canSimilar=false', async () => {
     h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 1 }));
     h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([{
@@ -279,6 +293,21 @@ describe('PracticeHistoryService.getDetail', () => {
 
     const r = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
     expect(r?.questions[0].canRedo).toBe(true);
+    expect(r?.questions[0].canSimilar).toBe(true);
+  });
+
+  it('专项：标准答案为空但 has KP → canSimilar 仍为 true', async () => {
+    h.specialSessionsRepo.findByIdOwned.mockResolvedValue(mkSpecialSession({ subject_id: 4 }));
+    h.specialAnswersRepo.listBySession.mockResolvedValue([{
+      id: 1, session_id: 5, question_id: 200, ref_type: 'question', ref_id: null,
+      sentence_index: null, question_order: 1, answer_text: 'A',
+      is_correct: 0, score: '0.00', method: 'exact', analysis: null, judged_at: null,
+      question_content: '题干', question_answer: '', question_analysis: null,
+      question_is_active: 1,
+    }]);
+    h.questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[200, 9]]));
+
+    const r = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
     expect(r?.questions[0].canSimilar).toBe(true);
   });
 });
