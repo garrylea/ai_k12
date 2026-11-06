@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { Card, Skeleton } from '@/components/base';
+import { toast } from '@/components/base/Toast';
 import {
   markdownRemarkPlugins,
   markdownRehypePlugins,
@@ -10,21 +11,33 @@ import {
   preprocessMarkdown,
 } from '@/components/markdown';
 import {
+  getMyPointRules,
   getPracticeHistoryDetail,
+  redoPractice,
+  startSimilarPractice,
   type PracticeHistoryDetail,
   type PracticeHistoryQuestion,
 } from '@/services/api';
-import { TRAINING_SUBJECTS } from '@/subjectConfig';
+import {
+  SUBJECT_MATH,
+  SUBJECT_PHYSICS,
+  TRAINING_SUBJECTS,
+} from '@/subjectConfig';
 
 /**
  * 练习记录详情（2026-11-01）——逐题回放：题面 + 我的答案 + 正确答案 + 解析 + 对错。
  *
- * 只读，**不做「再做一遍」**（一期刻意不加，避免与错题本/训练轨入口混淆）。
+ * 回放是只读的；单题动作按后端下发的 `canRedo` / `canSimilar` 显示
+ * （2026-11-06）：重做不建记录、不发分；同类型等同一轮专项训练，走
+ * `/student/training/targeted/run` 并在收尾 complete 发档位分。
  * 语文三专项的 questionId 为 null：answerText 是 JSON，题面改为「篇名 + 句原文」。
  * Markdown 一律走 `@/components/markdown` 共享配置（图片 resolveAsset / HTML / 表格带线）。
  */
 
 const SUBJECT_NAME = new Map<number, string>(TRAINING_SUBJECTS.map((s) => [s.id, s.name]));
+
+/** 同类型练习的可选题量：与后端档位白名单一致（2 题档为新补）。 */
+const SIMILAR_COUNT_WHITELIST = [1, 2, 3, 5];
 
 /** 学生作答专用 components（大图）：手绘/拍照的电路图、装置图按题面小图会被压成细线。 */
 const answerComponents = makeAnswerComponents();
@@ -83,7 +96,15 @@ function parseStructured(answerText: string | null): Array<{ label: string; valu
   }
 }
 
-function StatusBadge({ isCorrect }: { isCorrect: boolean | null }) {
+/** 「未作答」优先于三态判定：未答的题 isCorrect 为 null，不能显示成「未判定」。 */
+function StatusBadge({ isCorrect, answered }: { isCorrect: boolean | null; answered: boolean }) {
+  if (!answered) {
+    return (
+      <span className="inline-flex items-center rounded-[var(--radius-pill)] bg-[var(--bg-subtle)] px-2 py-0.5 text-xs text-[var(--warning)]">
+        未作答
+      </span>
+    );
+  }
   if (isCorrect === true) {
     return (
       <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--bg-subtle)] px-2 py-0.5 text-xs text-[var(--success)]">
@@ -112,15 +133,80 @@ function StatusBadge({ isCorrect }: { isCorrect: boolean | null }) {
   );
 }
 
-function QuestionCard({ q }: { q: PracticeHistoryQuestion }) {
+function QuestionCard({
+  q,
+  similarCounts,
+  onRedo,
+  onSimilar,
+}: {
+  q: PracticeHistoryQuestion;
+  similarCounts: number[];
+  onRedo: (q: PracticeHistoryQuestion) => Promise<void>;
+  onSimilar: (q: PracticeHistoryQuestion, count: number) => Promise<void>;
+}) {
   const structured = parseStructured(q.answerText);
   const isChineseSpecial = q.questionId === null;
+  const answered = q.method !== 'unanswered' && q.answerText != null;
+  // 面板/loading 是逐题状态：切记录时卡片 key 可能复用，关掉上一条残留的面板
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setOpen(false);
+    setBusy(false);
+  }, [q]);
 
   return (
     <li className="rounded-[var(--radius-md)] border border-[var(--bg-subtle)] bg-[var(--bg-card)] p-4">
       <div className="mb-3 flex items-center gap-2">
         <span className="text-sm text-[var(--text-tertiary)]">{`第 ${q.questionOrder} 题`}</span>
-        <StatusBadge isCorrect={q.isCorrect} />
+        <StatusBadge isCorrect={q.isCorrect} answered={answered} />
+        {(q.canRedo || (q.canSimilar && similarCounts.length > 0)) && (
+          <div className="ml-auto flex items-center gap-1">
+            {q.canRedo && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => { setBusy(true); void onRedo(q).finally(() => setBusy(false)); }}
+                className="inline-flex h-8 items-center gap-1 rounded-[var(--radius-button)] px-2 text-sm font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] disabled:opacity-50"
+              >
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 9 8 9"/></svg>
+                重做
+              </button>
+            )}
+            {q.canSimilar && similarCounts.length > 0 && (
+              <div className="relative">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setOpen((v) => !v)}
+                  className="inline-flex h-8 items-center gap-1 rounded-[var(--radius-button)] px-2 text-sm font-semibold text-[var(--brand-500)] hover:bg-[var(--brand-100)] disabled:opacity-50"
+                >
+                  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                  同类型练习
+                </button>
+                {open && (
+                  <div className="absolute right-0 top-9 z-10 w-[236px] rounded-[var(--radius-md)] border border-[var(--bg-subtle)] bg-[var(--bg-card)] p-3 shadow-[var(--shadow-card)]">
+                    <p className="mb-2 text-xs text-[var(--text-tertiary)]">练几题</p>
+                    <div className="flex gap-1.5">
+                      {similarCounts.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => { setOpen(false); setBusy(true); void onSimilar(q, n).finally(() => setBusy(false)); }}
+                          className="h-8 flex-1 rounded-lg border border-[var(--bg-subtle)] text-sm font-semibold text-[var(--text-secondary)] hover:border-[var(--brand-500)] hover:text-[var(--brand-500)] disabled:opacity-50"
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 材料（语文/英语阅读材料、物化题内材料）：独立区块、可滚动，样式与结果页一致 */}
@@ -192,9 +278,12 @@ function QuestionCard({ q }: { q: PracticeHistoryQuestion }) {
 
 export default function PracticeHistoryDetailPage() {
   const { source, sessionId } = useParams<{ source: string; sessionId: string }>();
+  const navigate = useNavigate();
   const [data, setData] = useState<PracticeHistoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // 同类型题量 = 学生可用档位 ∩ [1,2,3,5]；空数组 → 不渲染同类型入口
+  const [similarCounts, setSimilarCounts] = useState<number[]>([]);
 
   useEffect(() => {
     if (source !== 'exam' && source !== 'special') {
@@ -211,6 +300,8 @@ export default function PracticeHistoryDetailPage() {
     let cancelled = false;
     setLoading(true);
     setNotFound(false);
+    // 切记录先清档位：否则新记录会拿上一条的题量闪一下同类型按钮
+    setSimilarCounts([]);
     getPracticeHistoryDetail(source, sid)
       .then((d) => {
         if (!cancelled) setData(d);
@@ -225,6 +316,36 @@ export default function PracticeHistoryDetailPage() {
       cancelled = true;
     };
   }, [source, sessionId]);
+
+  useEffect(() => {
+    if (!data) return;
+    const subjectId = data.session.subjectId;
+    // 同类型只开数学/物理（化学题库无知识点，等回填）；后端 canSimilar 已兜底，这里再挡一层
+    if (subjectId !== SUBJECT_MATH && subjectId !== SUBJECT_PHYSICS) {
+      setSimilarCounts([]);
+      return;
+    }
+    if (!data.questions.some((q) => q.canSimilar)) {
+      setSimilarCounts([]);
+      return;
+    }
+    let cancelled = false;
+    getMyPointRules()
+      .then((rules) => {
+        const code = subjectId === SUBJECT_PHYSICS ? 'physics_targeted' : 'math_targeted';
+        const tiers = rules.tasks.find((t) => t.taskCode === code)?.tiers ?? [];
+        const allowed = new Set(tiers.filter((t) => t.isActive).map((t) => t.tierKey));
+        if (!cancelled) {
+          setSimilarCounts(SIMILAR_COUNT_WHITELIST.filter((n) => allowed.has(String(n))));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSimilarCounts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [data]);
 
   if (loading) {
     return (
@@ -254,6 +375,41 @@ export default function PracticeHistoryDetailPage() {
 
   const { session, questions } = data;
   const inProgress = session.completedAt === null;
+
+  /** 重做：同一道原题再练一遍——交接体 sessionId 固定 null（不建记录、不发分）。 */
+  async function handleRedo(q: PracticeHistoryQuestion) {
+    if (!data || q.questionId == null) return;
+    try {
+      const res = await redoPractice(data.session.source, data.session.sessionId, q.questionId);
+      sessionStorage.setItem('training:targeted', JSON.stringify({
+        sessionId: null, questions: res.questions, title: res.title, mode: 'redo',
+      }));
+      const returnTo = `/student/practice-history/${data.session.source}/${data.session.sessionId}`;
+      navigate(`/student/training/targeted/run?subjectId=${data.session.subjectId}&returnTo=${encodeURIComponent(returnTo)}`);
+    } catch {
+      toast('error', '重做暂时不可用，请稍后再试');
+    }
+  }
+
+  /** 同类型：等同一轮专项训练——带 sessionId 交给答题页收尾发档位分。 */
+  async function handleSimilar(q: PracticeHistoryQuestion, count: number) {
+    if (!data || q.questionId == null) return;
+    try {
+      const res = await startSimilarPractice(data.session.source, data.session.sessionId, q.questionId, count);
+      // 0 题不是错误：留在详情页提示，不跳一个空答题页
+      if (res.questions.length === 0) {
+        toast('info', '暂时没有同类题');
+        return;
+      }
+      sessionStorage.setItem('training:targeted', JSON.stringify({
+        sessionId: res.sessionId, questions: res.questions, title: res.title, mode: 'similar',
+      }));
+      const returnTo = `/student/practice-history/${data.session.source}/${data.session.sessionId}`;
+      navigate(`/student/training/targeted/run?subjectId=${data.session.subjectId}&returnTo=${encodeURIComponent(returnTo)}`);
+    } catch {
+      toast('error', '暂时没有同类题，请稍后再试');
+    }
+  }
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-6 py-8">
@@ -304,7 +460,13 @@ export default function PracticeHistoryDetailPage() {
       ) : (
         <ol className="space-y-3">
           {questions.map((q) => (
-            <QuestionCard key={`${q.questionOrder}-${q.refType ?? 'q'}-${q.refId ?? q.questionId}`} q={q} />
+            <QuestionCard
+              key={`${q.questionOrder}-${q.refType ?? 'q'}-${q.refId ?? q.questionId}`}
+              q={q}
+              similarCounts={similarCounts}
+              onRedo={handleRedo}
+              onSimilar={handleSimilar}
+            />
           ))}
         </ol>
       )}

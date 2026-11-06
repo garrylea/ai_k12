@@ -3521,6 +3521,10 @@ export interface PracticeHistoryQuestion {
   sentenceIndex: number | null;
   passageTitle: string | null;
   passageSentence: string | null;
+  /** 题目仍在架且归属本会话 → 可单题重做（不建记录、不发分）。 */
+  canRedo: boolean;
+  /** canRedo + 学科数/理 + 有答案 + 有知识点 → 可同类型练习。 */
+  canSimilar: boolean;
 }
 
 export interface PracticeHistoryDetail {
@@ -3550,4 +3554,31 @@ export function getPracticeHistoryDetail(
   source: 'exam' | 'special', sessionId: number,
 ): Promise<PracticeHistoryDetail> {
   return fetchApi<PracticeHistoryDetail>(`/student/practice-history/${source}/${sessionId}`);
+}
+
+/**
+ * 单题重做（2026-11-06）：只回放这一道原题，**不建会话/不写作答/不发分**。
+ * 返回体是答题页题单 + 结果页标题；`sessionId` 由页面固定写 null。
+ */
+export function redoPractice(
+  source: 'exam' | 'special', sessionId: number, questionId: number,
+): Promise<{ questions: TargetedPracticeQuestion[]; title: string }> {
+  return fetchApi<{ questions: TargetedPracticeQuestion[]; title: string }>(
+    `/student/practice-history/${source}/${sessionId}/questions/${questionId}/redo`,
+    { method: 'POST' },
+  );
+}
+
+/**
+ * 同类型练习（2026-11-06）：按题目知识点出一份新题单，等同一轮专项训练。
+ * `count` 只允许 1/2/3/5 且必须是学生当前可用档位（页面先按 `getMyPointRules` 取交集）。
+ * `sessionId` 为 null = 本轮不发分（题目不足/建会话降级），答题照走。
+ */
+export function startSimilarPractice(
+  source: 'exam' | 'special', sessionId: number, questionId: number, count: number,
+): Promise<{ questions: TargetedPracticeQuestion[]; sessionId: number | null; title: string }> {
+  return fetchApi<{ questions: TargetedPracticeQuestion[]; sessionId: number | null; title: string }>(
+    `/student/practice-history/${source}/${sessionId}/questions/${questionId}/similar`,
+    { method: 'POST', body: JSON.stringify({ count }) },
+  );
 }

@@ -430,6 +430,7 @@ describe('路由表：积分相关页面', () => {
         questionContent: '第1题题面', questionAnswer: 'A', questionAnalysis: '解析',
         refType: 'question', refId: null, sentenceIndex: null,
         passageTitle: null, passageSentence: null,
+        canRedo: false, canSimilar: false,
       }],
     });
 
