@@ -269,6 +269,21 @@ python src/answer_importer_cli.py --list-papers 海淀                    # 标�
 >
 > 完整参数表、选择器 `--where` 全量取值、锚文档格式见 [使用手册 §4.8](../../docs/data-refinery-使用手册.md)；设计见 `docs/superpowers/specs/2026-09-10-question-content-importer-design.md`。
 
+**从 import_cli 一条命令导入（2026-11-05）**：`--answers PATH` 把答案文件交给第 6 步，不必单独跑本 CLI。
+
+```bash
+# 新卷：导入 + 答案一次走完（非 dry-run 自动 --apply --yes）
+python src/import_cli.py --subject 数学 --files "西城35中" \
+  --answers output/answers/西城35中期中练习1.md
+
+# 已有卷只补答案：只给 --answers，自动只跑这一步
+python src/import_cli.py --answers output/answers/西城35中期中练习1.md
+```
+
+**只给 `--answers`（不带 `--file/--files/--subject` 等范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入** —— 避免为了补答案把全库管线重跑一遍。想「新卷导入 + 答案一次走完」就同时给范围参数（`--subject/--files`）。
+
+`.md` 会用 `--file/--files` 的卷名子串反查 `exam_papers.id` 并显式传 `--paper-id`（避免重名卷按标题误定位）；没给范围时退回文档里的 `# 试卷：` 标题。`.jsonl` 直接透传 `--records`。`--answers` 不受 `--skip-load` 限制。
+
 ## 配置
 
 | 环境变量 | 说明 | 默认值 |

@@ -24,6 +24,23 @@
 
 ---
 
+## 2026-11-05 新增：`import_cli --answers`（一条命令导入答案/题解）+ 420 标题修正
+
+**需求**：为西城35中准备答案和题解，希望不单独跑 `answer_importer_cli`，而是在 `import_cli` 里加一个参数一次写库；同时把 `exam_papers` #420 的标题改成能一眼分辨的写法。
+
+**现状**：答案/题解导入程序是 `src/answer_importer_cli.py`：`--doc` 读 Markdown 按卷文档，`--records` 读 JSONL。Markdown 格式为 `# 试卷：<标题>` + `## <题号>` + `答案：`（必写）/ `思路：` / `解析：` / `题型：`，多行续写、围栏代码块原样保留；JSONL 定位键三选一（`question_id` / `paper_id`+`question_no` / `content_hash`），内容字段至少一个。
+
+**改动**：
+- `import_cli` 新增 `--answers PATH`：`.md` 走 `--doc`，`.jsonl` 走 `--records`；`.md` 且给了 `--file/--files` 时先按子串查 `exam_papers.id` 并显式 `--paper-id`（避免重名卷按标题误定位），查不到才退回文档标题；非 dry-run 自动 `--apply --yes`。`--answers` 替换第 6 步「答案回填」且不受 `--skip-load` 限制。
+- 修正 `exam_papers` #420 标题：`2026 西城 初三 期中` → `2026 西城·35中 初三 期中`，并同步 sidecar（`school=35中`、`merged.title`），避免下次重跑 db_loader 被旧 sidecar 覆盖回去。
+- 生成答案骨架 `output/answers/西城35中期中练习1.md`（21 题；题干摘要放在 `<!-- -->` 注释里，解析器会忽略）。
+
+**测试**：`tests/test_import_cli.py` 补 6 例（md + paper-id、dry-run 不加 `--apply`、jsonl 走 `--records`、文件不存在返回 2、`parse_args`、只给 `--answers` 的判定）；`tests/test_answer_doc.py` 补 5 例（字段名带 Markdown 强调、列表前缀、值剥强调、空答案接多行）；全量 pytest **1698 passed / 10 skipped**。
+
+**用法**：`python3 src/import_cli.py --answers output/answers/西城35中期中练习1.md`（只给 `--answers` 时自动只跑第 6 步，`_answers_only()` 判定；同时给 `--subject/--files` 才是完整导入 + 答案）
+
+---
+
 ## 2026-11-05 改进：试卷命名不再强制中点（`西城35中` 可直接识别）
 
 **需求**（用户）：手工拿到学校资料时常直接命名 `西城35中期中练习1`，旧的 `detect_school` 只认 `…中学|学校|附中|教育集团|小学`，`35中` 认不出 → title 退化成 `2026 西城 初三 期中`、学校名丢失；而强行写 `西城·35中` 的中点在中输入法里很难打。

@@ -12,6 +12,10 @@
 多行续接：字段行之后的行（含空行）接续到该字段；空行被保留，字段以
 「下一字段行 / `## 题号` / `---` 分隔线 / 文件结束」结束。围栏代码块
 （```）内的内容原样保留（含空行与缩进），用于内嵌 `<svg>` 图示。
+
+字段名允许 Markdown 强调（LLM 生成的答案文档常见）：`**答案：** A`、
+`**答案**：A`、`__答案：__ A`，以及列表项前缀 `- **答案：** A` 都能识别；
+值若整体被 `**…**` / `__…__` 包住会剥掉外层强调（答案按纯文本存库）。
 """
 
 import re
@@ -21,10 +25,23 @@ from answer_records import AnswerRecord, VALID_TYPES
 
 HEADING_PAPER_RE = re.compile(r"^#\s*试卷[:：]\s*(.+?)\s*$")
 HEADING_ITEM_RE = re.compile(r"^##\s*(\d+)\s*$")
-FIELD_RE = re.compile(r"^(答案|思路|解析|题型)[:：]\s*(.*)$")
+# 字段行容忍 Markdown 强调与列表前缀：`**答案：** A` / `**答案**：A` / `- **答案：** A`
+FIELD_RE = re.compile(
+    r"^(?:[-*+]\s+)?(?:\*\*|__)?\s*(答案|思路|解析|题型)\s*(?:\*\*|__)?\s*"
+    r"[:：]\s*(?:\*\*|__)?\s*(.*)$"
+)
 _HR_RE = re.compile(r"^(---|\*\*\*|___)\s*$")
 _FIELD_ATTR = {"答案": "answer", "思路": "approach", "解析": "explanation"}
 _MULTILINE_FIELDS = ("答案", "思路", "解析")
+
+
+def _strip_emphasis(value: str) -> str:
+    """把整体被 `**…**` / `__…__` 包住的值剥成纯文本；内部还有强调则原样保留。"""
+    for mark in ("**", "__"):
+        if value.startswith(mark) and value.endswith(mark) and value.count(mark) == 2:
+            return value[len(mark):-len(mark)].strip()
+    return value
+
 
 
 class AnswerDocError(ValueError):
@@ -92,7 +109,7 @@ def parse_answer_doc(text: str) -> AnswerDoc:
         m = FIELD_RE.match(line)
         if m:
             field_name = m.group(1)
-            value = m.group(2).strip()
+            value = _strip_emphasis(m.group(2).strip())
             pending_blanks = 0
             if field_name == "题型":
                 current.type_override = value or None

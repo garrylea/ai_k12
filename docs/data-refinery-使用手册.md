@@ -687,7 +687,7 @@ card 分析发现的、目录页没有的新小节（如 `26.1.1`）由 `toc_mer
 题型：calculation
 ```
 
-每题必写「答案」；「思路」「解析」「题型」可选；多行内容直接换行续写，空行保留；围栏 ``` 代码块（如内嵌 SVG）原样保留；公式用 `$...$`。
+每题必写「答案」；「思路」「解析」「题型」可选；多行内容直接换行续写，空行保留；围栏 ``` 代码块（如内嵌 SVG）原样保留；公式用 `$...$`。字段名允许 Markdown 强调与列表前缀（LLM 生成的文档常见）：`**答案：** A`、`**答案**：A`、`- **答案：** A` 均可识别，值整体被 `**…**` 包住会剥成纯文本。
 
 **常用命令**：
 
@@ -975,6 +975,19 @@ WHERE JSON_LENGTH(sentences) > 0
 python src/import_cli.py --subject 语文 --year 2025 --dry-run   # 先看范围
 python src/import_cli.py --subject 语文 --year 2025             # 正式导入
 ```
+
+**指定答案/解析文件（`--answers`，2026-11-05）**：把 §4.8 的按卷答案文档直接交给编排层，第 6 步写入，不用再单独跑 `answer_importer_cli`。
+
+```bash
+# 新卷：导入 + 答案一次走完
+python src/import_cli.py --subject 数学 --files "西城35中" \
+  --answers output/answers/西城35中期中练习1.md
+
+# 已有卷只补答案：只给 --answers，自动只跑这一步
+python src/import_cli.py --answers output/answers/西城35中期中练习1.md
+```
+
+**只给 `--answers`（不带范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入**；同时给 `--subject/--files` 才是「新卷导入 + 答案一次走完」。`.md` 会先用 `--file/--files` 的卷名子串反查 `exam_papers.id` 并显式 `--paper-id`（防重名卷按标题误定位），没给范围时退回文档 `# 试卷：` 标题；`.jsonl` 直接走 `--records`。非 dry-run 自动 `--apply --yes`。
 
 ### 4.12 emphasis_cli — 语文试卷着重号/下划线回填（2026-10-28）
 

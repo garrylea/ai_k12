@@ -449,3 +449,67 @@ def test_preview_log_written_with_records(tmp_path, monkeypatch, capsys):
     text = path.read_text(encoding="utf-8")
     assert "待写入 2 条" in text and "题27" in text and "题28" in text
     assert "清单已存到" in capsys.readouterr().out
+
+
+# ---------- --answers：指定答案/解析文件 ----------
+
+class TestAnswersFileEntry:
+    def _run(self, monkeypatch, tmp_path, name, content, *,
+             file_kw="西城35中", dry_run=False):
+        from types import SimpleNamespace
+
+        import answer_importer_cli
+
+        path = tmp_path / name
+        path.write_text(content, encoding="utf-8")
+        calls = []
+        monkeypatch.setattr(answer_importer_cli, "main",
+                            lambda argv: calls.append(argv) or 0)
+        monkeypatch.setattr(import_cli, "_lookup_paper_id", lambda cfg, kw: 420)
+        monkeypatch.setattr(import_cli.RefineryConfig, "from_env",
+                            staticmethod(lambda *a, **k: None))
+        args = SimpleNamespace(answers=str(path), file=file_kw, dry_run=dry_run)
+        rc = import_cli._answers_file_entry(args)()
+        return rc, calls
+
+    def test_md_uses_doc_with_resolved_paper_id(self, monkeypatch, tmp_path):
+        rc, calls = self._run(monkeypatch, tmp_path, "a.md", "# 试卷：x\n")
+        assert rc == 0
+        assert calls == [[
+            "--doc", str(tmp_path / "a.md"), "--paper-id", "420",
+            "--apply", "--yes",
+        ]]
+
+    def test_md_dry_run_does_not_apply(self, monkeypatch, tmp_path):
+        _, calls = self._run(monkeypatch, tmp_path, "a.md", "# 试卷：x\n", dry_run=True)
+        assert calls == [["--doc", str(tmp_path / "a.md"), "--paper-id", "420"]]
+
+    def test_jsonl_uses_records(self, monkeypatch, tmp_path):
+        _, calls = self._run(monkeypatch, tmp_path, "a.jsonl", "{}\n")
+        assert calls == [["--records", str(tmp_path / "a.jsonl"), "--apply", "--yes"]]
+
+    def test_missing_file_returns_2(self, monkeypatch, tmp_path):
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(import_cli.RefineryConfig, "from_env",
+                            staticmethod(lambda *a, **k: None))
+        args = SimpleNamespace(answers=str(tmp_path / "nope.md"),
+                               file="x", dry_run=False)
+        assert import_cli._answers_file_entry(args)() == 2
+
+
+def test_parse_args_accepts_answers():
+    assert parse_args(["--answers", "a.md"]).answers == "a.md"
+
+
+def test_answers_only_detection():
+    """只给 --answers 时只做答案导入；给了范围/重建参数才走完整管线。"""
+    assert import_cli._answers_only(parse_args(["--answers", "a.md"]))
+    assert import_cli._answers_only(parse_args(["--answers", "a.md", "--dry-run"]))
+    assert not import_cli._answers_only(
+        parse_args(["--answers", "a.md", "--subject", "数学"]))
+    assert not import_cli._answers_only(
+        parse_args(["--answers", "a.md", "--files", "西城35中"]))
+    assert not import_cli._answers_only(
+        parse_args(["--answers", "a.md", "--re-extract"]))
+    assert not import_cli._answers_only(parse_args(["--subject", "数学"]))

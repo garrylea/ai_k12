@@ -66,7 +66,11 @@ def parse_args(argv=None):
     parser.add_argument("--skip-meta", action="store_true",
                         help="跳过卷面元数据（output/meta sidecar），文件名缺区县时不再补")
     parser.add_argument("--skip-load", action="store_true", help="跳过 db_loader（只到 published）")
-    parser.add_argument("--skip-answers", action="store_true", help="跳过第 5 步答案回填")
+    parser.add_argument("--answers", metavar="PATH",
+                        help="指定答案/解析文件：.md 按卷答案文档（# 试卷：… + ## 题号 + "
+                             "答案/思路/解析）或 .jsonl 记录；第 6 步直接写入，"
+                             "非 dry-run 时自动 --apply --yes")
+    parser.add_argument("--skip-answers", action="store_true", help="跳过第 6 步答案回填")
     parser.add_argument("--skip-review", action="store_true",
                         help="发现缺题时不进入人工补题（只打印清单与补题命令）")
     parser.add_argument("--re-answer", action="store_true",
@@ -205,6 +209,52 @@ def _answers_entry(args):
     return run
 
 
+def _lookup_paper_id(cfg, keyword: str) -> int | None:
+    """按卷名/来源键子串在 exam_papers 里查 paper_id；唯一命中才返回。"""
+    import pymysql
+
+    conn = pymysql.connect(
+        host=cfg.db_host, port=cfg.db_port, user=cfg.db_user,
+        password=cfg.db_pass, database=cfg.db_name, charset="utf8mb4",
+        connect_timeout=5,
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM exam_papers WHERE title LIKE %s OR source_key LIKE %s",
+                (f"%{keyword}%", f"%{keyword}%"),
+            )
+            rows = cur.fetchall()
+        return int(rows[0][0]) if len(rows) == 1 else None
+    finally:
+        conn.close()
+
+
+def _answers_file_entry(args):
+    """第 6 步（--answers 指定文件）：.jsonl 走 --records，.md 走 --doc。
+
+    给了 --file/--files 就先查出 paper_id 显式传入，避免卷名重名时按文档标题
+    定位到别的卷；没给则依赖文档里的 `# 试卷：<标题>`。
+    """
+    def run(_argv=None) -> int:
+        from answer_importer_cli import main as importer_main
+
+        path = Path(args.answers).expanduser()
+        if not path.exists():
+            print(f"[ERROR] --answers 文件不存在：{path}", flush=True)
+            return 2
+        argv = (["--records", str(path)] if path.suffix.lower() == ".jsonl"
+                else ["--doc", str(path)])
+        if path.suffix.lower() != ".jsonl" and args.file:
+            pid = _lookup_paper_id(RefineryConfig.from_env(), args.file)
+            if pid is not None:
+                argv += ["--paper-id", str(pid)]
+        if not args.dry_run:
+            argv += ["--apply", "--yes"]
+        return importer_main(argv)
+    return run
+
+
 def _scan_entry(args):
     """识别问题扫描：按本次范围（学科 + 卷名子串）扫已提取的 jsonl。"""
     def _run(_argv) -> int:
@@ -251,8 +301,28 @@ def _fix_entry(args):
     return _run
 
 
+def _answers_only(args) -> bool:
+    """只给了 --answers、没给任何范围/重建参数 → 只做答案导入，不重跑整条管线。
+
+    否则 `import_cli --answers x.md` 会按全库范围跑 convert/extract/publish/入库，
+    还会进人工补题交互 —— 用户只是补答案时完全没必要，且代价很大。
+    """
+    if not args.answers:
+        return False
+    scope_keys = (args.file, args.files, args.subject, args.stage, args.term, args.year)
+    rebuild = args.reconvert or args.re_extract or args.re_publish or args.redo
+    return not any(scope_keys) and not rebuild
+
+
 def _execute(args) -> int:
     """按 args 里的范围跑完整管线（单卷/单批）。"""
+    answers_only = _answers_only(args)
+    if answers_only:
+        # 把前 5 步与 7/8/9 步关掉，只保留第 6 步
+        args.skip_convert = args.skip_extract = args.skip_publish = True
+        args.skip_meta = args.skip_load = args.skip_review = True
+        print("=== 只导入答案（未给 --file/--subject 等范围参数，跳过 convert~入库）===",
+              flush=True)
     scope = scope_from_args(args)
     print(f"=== import_cli：范围 {describe(scope)} "
           f"{'(dry-run)' if args.dry_run else ''} ===", flush=True)
@@ -286,13 +356,18 @@ def _execute(args) -> int:
                        paper_meta_main, meta_argv(args)))
     if not args.skip_load:
         stages.append(("5/9 db_loader（published → MySQL，增量）", db_loader_main, load_argv(args)))
-    # 答案回填必须在入库之后（要按 source_key 反查 paper_id）；--skip-load 时无从查起
-    if not args.skip_answers and not args.cards_only and not args.skip_load:
+    # 答案回填必须在入库之后（要按 source_key 反查 paper_id）；--skip-load 时无从查起。
+    # --answers 是用户显式给的答案/解析文件：不依赖 md 里的答案段，也不受 --skip-load 限制
+    if args.answers:
+        label = ("答案/解析导入（--answers 指定文件）" if answers_only
+                 else "6/9 答案/解析导入（--answers 指定文件）")
+        stages.append((label, _answers_file_entry(args), []))
+    elif not args.skip_answers and not args.cards_only and not args.skip_load:
         stages.append(("6/9 答案回填（试卷 md → questions.answer）", _answers_entry(args), []))
     # 识别问题扫描：缺号 / 被吞 / 内容不完整 / 前后题合并 / 卷首页脚被当题，
     # 落 output/recognition_issues.jsonl，供 src/fix_question_cli.py 逐条人工确认
     # （不阻塞入库，可随时补跑）
-    if not args.cards_only:
+    if not args.cards_only and not answers_only:
         stages.append(("7/9 识别问题扫描（缺号/被吞/内容不完整/前后题合并/噪声题）",
                        _scan_entry(args), []))
         # 扫完直接引导人工补题：交互终端下会逐条问，非交互（CI/管道）只打印命令，

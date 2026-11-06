@@ -101,6 +101,37 @@ class TestParseBasic:
         assert doc.items[0].answer == "(1) 甲\n\n(2) 乙"
         assert doc.items[0].type_override == "calculation"
 
+    def test_加粗字段名冒号在加粗内(self):
+        doc = parse_answer_doc(
+            "# 试卷:2026 西城·35中 初三 期中\n"
+            "## 1\n"
+            "**答案：** A\n"
+            "**思路：** 代入即可。\n"
+            "**解析：** 所以选 A。\n"
+        )
+        it = doc.items[0]
+        assert it.answer == "A"
+        assert it.approach == "代入即可。"
+        assert it.explanation == "所以选 A。"
+
+    def test_加粗字段名冒号在加粗外(self):
+        doc = parse_answer_doc("# 试卷：X\n## 2\n**答案**：D\n__思路：__ 看开口。\n")
+        assert doc.items[0].answer == "D"
+        assert doc.items[0].approach == "看开口。"
+
+    def test_列表前缀加粗字段(self):
+        doc = parse_answer_doc("# 试卷：X\n## 5\n- **答案：** ②③④\n")
+        assert doc.items[0].answer == "②③④"
+
+    def test_加粗值剥外层强调(self):
+        doc = parse_answer_doc("# 试卷：X\n## 6\n**答案：** **C**\n")
+        assert doc.items[0].answer == "C"
+
+    def test_加粗空答案接多行内容(self):
+        doc = parse_answer_doc("# 试卷：X\n## 7\n**答案：**\n\n- (1) 交点\n- (2) 见解析\n")
+        assert doc.items[0].answer == "- (1) 交点\n- (2) 见解析"
+
+
 
 class TestValidation:
     def test_缺答案报错(self):
