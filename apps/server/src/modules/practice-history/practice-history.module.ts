@@ -6,6 +6,7 @@ import {
   SpecialPracticeSessionsRepository,
   SpecialAnswerRecordsRepository,
   ChinesePassagesRepository,
+  QuestionsRepository,
 } from '../../database/repositories/index.js';
 
 /**
@@ -22,6 +23,7 @@ import {
     SpecialPracticeSessionsRepository,
     SpecialAnswerRecordsRepository,
     ChinesePassagesRepository,
+    QuestionsRepository,
   ],
 })
 export class PracticeHistoryModule {}

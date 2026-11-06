@@ -52,6 +52,8 @@ describe('SpecialAnswerRecordsRepository', () => {
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toContain('q.content AS question_content');
     expect(sql).not.toContain('q.text AS question_content');
+    // 详情判断 canRedo / canSimilar 需要题目的在架标记
+    expect(sql).toContain('q.is_active AS question_is_active');
     expect(sql).toContain('LEFT JOIN questions q');
     expect(sql).toContain('sar.session_id = ?');
     expect(params).toEqual([7]);

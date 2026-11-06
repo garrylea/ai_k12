@@ -47,6 +47,10 @@ export interface PracticeHistoryQuestion {
   /** 语文专项回放：篇名 + 该句原文（其他场景 null）。 */
   passageTitle: string | null;
   passageSentence: string | null;
+  /** 有题目 id 且在架 -> 可单题重做（语文/英语专项为 false）。 */
+  canRedo: boolean;
+  /** canRedo + 学科数/理 + 有答案 + 有知识点 -> 可同类型练习。 */
+  canSimilar: boolean;
 }
 
 export interface PracticeHistoryDetail {

@@ -206,4 +206,25 @@ export class QuestionsRepository {
     );
     return new Map(rows.map((r) => [Number(r.question_id), Number(r.knowledge_point_id)]));
   }
+
+  /** question_id -> 优先 primary 的最小知识点 id（详情判断 canSimilar / 同类型取种子 KP）。 */
+  async findKpIdsByQuestionIds(questionIds: number[]): Promise<Map<number, number>> {
+    if (questionIds.length === 0) return new Map();
+    const placeholders = questionIds.map(() => '?').join(',');
+    const [rows] = await this.pool.query<
+      (RowDataPacket & { question_id: number; knowledge_point_id: number })[]
+    >(
+      `SELECT question_id, knowledge_point_id
+       FROM question_knowledge_points
+       WHERE question_id IN (${placeholders})
+       ORDER BY question_id, (role = 'primary') DESC, knowledge_point_id`,
+      questionIds,
+    );
+    const map = new Map<number, number>();
+    for (const r of rows) {
+      const qid = Number(r.question_id);
+      if (!map.has(qid)) map.set(qid, Number(r.knowledge_point_id));
+    }
+    return map;
+  }
 }

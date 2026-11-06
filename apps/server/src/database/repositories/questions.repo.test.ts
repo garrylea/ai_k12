@@ -57,6 +57,32 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
   });
 });
 
+describe('QuestionsRepository.findKpIdsByQuestionIds', () => {
+  it('空入参直接返回空 Map，不查库', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    expect(await repo.findKpIdsByQuestionIds([])).toEqual(new Map());
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('SQL 按 primary 优先 + kp id 升序取每题首个 KP', async () => {
+    const pool = mockPool([
+      { question_id: 100, knowledge_point_id: 28 },
+      { question_id: 100, knowledge_point_id: 3 }, // 同题重复行只取首个
+      { question_id: 200, knowledge_point_id: 9 },
+    ]);
+    const repo = new QuestionsRepository(pool as any);
+    const map = await repo.findKpIdsByQuestionIds([100, 200]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('FROM question_knowledge_points');
+    expect(sql).toContain('(role = \'primary\') DESC');
+    expect(sql).toContain('ORDER BY question_id');
+    expect(params).toEqual([100, 200]);
+    expect(map.get(100)).toBe(28);
+    expect(map.get(200)).toBe(9);
+  });
+});
+
 describe('QuestionsRepository.updateExplanation', () => {
   it('执行 UPDATE questions SET explanation = ? WHERE id = ? 回写解析缓存', async () => {
     const pool = mockPool([]);

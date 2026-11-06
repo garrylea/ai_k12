@@ -35,11 +35,15 @@ function make() {
     countBySession: vi.fn().mockResolvedValue({ total: 0, correct: 0 }),
   };
   const passagesRepo = { findById: vi.fn().mockResolvedValue(null) };
+  const questionsRepo = {
+    findKpIdsByQuestionIds: vi.fn().mockResolvedValue(new Map<number, number>()),
+  };
   const service = new PracticeHistoryService(
     examSessionsRepo as never, specialSessionsRepo as never,
     specialAnswersRepo as never, passagesRepo as never,
+    questionsRepo as never,
   );
-  return { service, examSessionsRepo, specialSessionsRepo, specialAnswersRepo, passagesRepo };
+  return { service, examSessionsRepo, specialSessionsRepo, specialAnswersRepo, passagesRepo, questionsRepo };
 }
 
 describe('PracticeHistoryService.list', () => {
@@ -141,6 +145,7 @@ describe('PracticeHistoryService.getDetail', () => {
         analysis: null, method: 'exact', judged_at: new Date('2026-11-01T06:05:00Z'),
         text: '第1题题面', type: 'choice', options: '[]', explanation: '解析1', answer: 'C',
         material_text: '阅读下面的材料，完成第1-3题。',
+        is_active: 1,
       },
     ]);
     const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });
@@ -164,6 +169,7 @@ describe('PracticeHistoryService.getDetail', () => {
         is_correct: 0, score: '0.00', method: 'exact', analysis: null,
         judged_at: new Date('2026-10-31T11:35:00Z'),
         question_content: null, question_answer: null, question_analysis: null,
+        question_is_active: null,
       },
     ]);
     h.passagesRepo.findById.mockResolvedValue({
@@ -180,5 +186,94 @@ describe('PracticeHistoryService.getDetail', () => {
     });
     // 同篇只查一次
     expect(h.passagesRepo.findById).toHaveBeenCalledTimes(1);
+  });
+
+  it('考试详情：在架 + 有答案 + 有 KP → canRedo/canSimilar 为 true', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 1 }));
+    h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([{
+      question_id: 100, question_order: 1, answer_text: 'B', is_correct: 0, score: 0,
+      analysis: null, method: 'exact', judged_at: null, text: '题干', type: 'choice',
+      options: null, explanation: null, answer: 'A', material_text: null, is_active: 1,
+    }]);
+    h.examSessionsRepo.countAnswersBySession.mockResolvedValue({ total: 1, correct: 0 });
+    h.questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
+
+    const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });
+    expect(r?.questions[0].canRedo).toBe(true);
+    expect(r?.questions[0].canSimilar).toBe(true);
+  });
+
+  it('无 KP → canRedo=true / canSimilar=false', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 1 }));
+    h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([{
+      question_id: 100, question_order: 1, answer_text: 'B', is_correct: 0, score: 0,
+      analysis: null, method: 'exact', judged_at: null, text: '题干', type: 'choice',
+      options: null, explanation: null, answer: 'A', material_text: null, is_active: 1,
+    }]);
+    h.questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map());
+
+    const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });
+    expect(r?.questions[0].canRedo).toBe(true);
+    expect(r?.questions[0].canSimilar).toBe(false);
+  });
+
+  it('非数/理学科（化学 3）→ canRedo=true / canSimilar=false', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 3 }));
+    h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([{
+      question_id: 100, question_order: 1, answer_text: 'B', is_correct: 0, score: 0,
+      analysis: null, method: 'exact', judged_at: null, text: '题干', type: 'choice',
+      options: null, explanation: null, answer: 'A', material_text: null, is_active: 1,
+    }]);
+    h.questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
+
+    const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });
+    expect(r?.questions[0].canRedo).toBe(true);
+    expect(r?.questions[0].canSimilar).toBe(false);
+  });
+
+  it('下架题 → 两个都 false；语文专项（questionId=null）也一样', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 4 }));
+    h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([{
+      question_id: 100, question_order: 1, answer_text: null, is_correct: 0, score: 0,
+      analysis: null, method: 'unanswered', judged_at: null, text: '题干', type: 'choice',
+      options: null, explanation: null, answer: 'A', material_text: null, is_active: 0,
+    }]);
+    h.questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 1]]));
+
+    const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });
+    expect(r?.questions[0].canRedo).toBe(false);
+    expect(r?.questions[0].canSimilar).toBe(false);
+
+    // 语文专项：question_id 为 null（题是 passage+sentence），两个都 false
+    h.specialSessionsRepo.findByIdOwned.mockResolvedValue(mkSpecialSession());
+    h.specialAnswersRepo.listBySession.mockResolvedValue([{
+      id: 1, session_id: 5, question_id: null, ref_type: 'passage', ref_id: 42,
+      sentence_index: 1, question_order: 1, answer_text: '{"body":"床前明月光"}',
+      is_correct: 0, score: '0.00', method: 'exact', analysis: null, judged_at: null,
+      question_content: null, question_answer: null, question_analysis: null,
+      question_is_active: null,
+    }]);
+
+    const s = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
+    expect(s?.questions[0].canRedo).toBe(false);
+    expect(s?.questions[0].canSimilar).toBe(false);
+    // 无 questionId 时不必查 KP
+    expect(h.questionsRepo.findKpIdsByQuestionIds).toHaveBeenLastCalledWith([]);
+  });
+
+  it('物理专项：question_id 在架 + 有答案 + 有 KP → canSimilar=true', async () => {
+    h.specialSessionsRepo.findByIdOwned.mockResolvedValue(mkSpecialSession({ subject_id: 4 }));
+    h.specialAnswersRepo.listBySession.mockResolvedValue([{
+      id: 1, session_id: 5, question_id: 200, ref_type: 'question', ref_id: null,
+      sentence_index: null, question_order: 1, answer_text: 'A',
+      is_correct: 0, score: '0.00', method: 'exact', analysis: null, judged_at: null,
+      question_content: '题干', question_answer: 'B', question_analysis: null,
+      question_is_active: 1,
+    }]);
+    h.questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[200, 9]]));
+
+    const r = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
+    expect(r?.questions[0].canRedo).toBe(true);
+    expect(r?.questions[0].canSimilar).toBe(true);
   });
 });

@@ -91,9 +91,12 @@ export class SpecialAnswerRecordsRepository {
   /** 按 session 列出作答（含 JOIN questions 题面）。 */
   async listBySession(sessionId: number): Promise<Array<AnswerRow & {
     question_content: string | null; question_answer: string | null; question_analysis: string | null;
+    /** 题目在架标记（详情判断 canRedo / canSimilar）；题目无关联时为 null。 */
+    question_is_active: number | null;
   }>> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT sar.*, q.content AS question_content, q.answer AS question_answer, q.explanation AS question_analysis
+      `SELECT sar.*, q.content AS question_content, q.answer AS question_answer,
+              q.explanation AS question_analysis, q.is_active AS question_is_active
        FROM special_answer_records sar
        LEFT JOIN questions q ON sar.question_id = q.id
        WHERE sar.session_id = ?

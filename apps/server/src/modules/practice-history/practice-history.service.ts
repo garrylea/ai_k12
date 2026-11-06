@@ -3,6 +3,7 @@ import { ExamSessionsRepository } from '../../database/repositories/exam-session
 import { SpecialPracticeSessionsRepository } from '../../database/repositories/special-practice-sessions.repo.js';
 import { SpecialAnswerRecordsRepository } from '../../database/repositories/special-answer-records.repo.js';
 import { ChinesePassagesRepository, toSentences } from '../../database/repositories/chinese-passages.repo.js';
+import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import type {
   PracticeHistoryQueryDto,
   PracticeHistoryItem,
@@ -24,6 +25,7 @@ export class PracticeHistoryService {
     private readonly specialSessionsRepo: SpecialPracticeSessionsRepository,
     private readonly specialAnswersRepo: SpecialAnswerRecordsRepository,
     private readonly passagesRepo: ChinesePassagesRepository,
+    private readonly questionsRepo: QuestionsRepository,
   ) {}
 
   async list(query: PracticeHistoryQueryDto & { studentId: number }): Promise<PracticeHistoryListResult> {
@@ -101,31 +103,44 @@ export class PracticeHistoryService {
         this.examSessionsRepo.findAnswersWithQuestions(input.sessionId),
         this.examSessionsRepo.countAnswersBySession(input.sessionId),
       ]);
+      const kpMap = await this.questionsRepo.findKpIdsByQuestionIds(
+        answers.map((a) => a.question_id).filter((id): id is number => id != null),
+      );
       return {
         session: {
           source: 'exam', sessionId: session.id, subjectId: session.subject_id,
           title: session.title, module: null, startedAt: session.started_at,
           completedAt: session.submitted_at, totalCount: count.total, correctCount: count.correct,
         },
-        questions: answers.map((a): PracticeHistoryQuestion => ({
-          questionId: a.question_id,
-          questionOrder: a.question_order,
-          answerText: a.answer_text,
-          isCorrect: a.is_correct === null ? null : a.is_correct === 1,
-          score: a.score !== null ? Number(a.score) : null,
-          method: a.method,
-          analysis: a.analysis,
-          judgedAt: a.judged_at,
-          questionContent: a.text,
-          materialText: a.material_text,
-          questionAnswer: a.answer,
-          questionAnalysis: a.explanation,
-          refType: 'question',
-          refId: null,
-          sentenceIndex: null,
-          passageTitle: null,
-          passageSentence: null,
-        })),
+        questions: answers.map((a): PracticeHistoryQuestion => {
+          const canRedo = a.question_id != null && a.is_active === 1;
+          const hasKp = a.question_id != null && kpMap.has(a.question_id);
+          const canSimilar = canRedo
+            && (session.subject_id === 1 || session.subject_id === 4)
+            && !!a.answer
+            && hasKp;
+          return {
+            questionId: a.question_id,
+            questionOrder: a.question_order,
+            answerText: a.answer_text,
+            isCorrect: a.is_correct === null ? null : a.is_correct === 1,
+            score: a.score !== null ? Number(a.score) : null,
+            method: a.method,
+            analysis: a.analysis,
+            judgedAt: a.judged_at,
+            questionContent: a.text,
+            materialText: a.material_text,
+            questionAnswer: a.answer,
+            questionAnalysis: a.explanation,
+            refType: 'question',
+            refId: null,
+            sentenceIndex: null,
+            passageTitle: null,
+            passageSentence: null,
+            canRedo,
+            canSimilar,
+          };
+        }),
       };
     }
 
@@ -135,6 +150,9 @@ export class PracticeHistoryService {
       this.specialAnswersRepo.listBySession(input.sessionId),
       this.specialAnswersRepo.countBySession(input.sessionId),
     ]);
+    const kpMap = await this.questionsRepo.findKpIdsByQuestionIds(
+      answers.map((a) => a.question_id).filter((id): id is number => id != null),
+    );
 
     // 语文三专项的「题」是 passage+sentence：按需批量回放篇名与句原文（同篇只查一次）。
     const passageCache = new Map<number, { title: string; sentences: string[] }>();
@@ -156,6 +174,12 @@ export class PracticeHistoryService {
         passageTitle = p.title || null;
         passageSentence = a.sentence_index !== null ? (p.sentences[a.sentence_index] ?? null) : null;
       }
+      const canRedo = a.question_id != null && a.question_is_active === 1;
+      const hasKp = a.question_id != null && kpMap.has(a.question_id);
+      const canSimilar = canRedo
+        && (session.subject_id === 1 || session.subject_id === 4)
+        && !!a.question_answer
+        && hasKp;
       return {
         questionId: a.question_id,
         questionOrder: a.question_order,
@@ -175,6 +199,8 @@ export class PracticeHistoryService {
         sentenceIndex: a.sentence_index,
         passageTitle,
         passageSentence,
+        canRedo,
+        canSimilar,
       };
     }));
 
