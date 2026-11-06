@@ -455,7 +455,7 @@ def test_preview_log_written_with_records(tmp_path, monkeypatch, capsys):
 
 class TestAnswersFileEntry:
     def _run(self, monkeypatch, tmp_path, name, content, *,
-             file_kw="西城35中", dry_run=False):
+             file_kw="西城35中", dry_run=False, paper_id=None, lookup=420):
         from types import SimpleNamespace
 
         import answer_importer_cli
@@ -465,10 +465,11 @@ class TestAnswersFileEntry:
         calls = []
         monkeypatch.setattr(answer_importer_cli, "main",
                             lambda argv: calls.append(argv) or 0)
-        monkeypatch.setattr(import_cli, "_lookup_paper_id", lambda cfg, kw: 420)
+        monkeypatch.setattr(import_cli, "_lookup_paper_id", lambda cfg, kw: lookup)
         monkeypatch.setattr(import_cli.RefineryConfig, "from_env",
                             staticmethod(lambda *a, **k: None))
-        args = SimpleNamespace(answers=str(path), file=file_kw, dry_run=dry_run)
+        args = SimpleNamespace(answers=str(path), file=file_kw,
+                               dry_run=dry_run, paper_id=paper_id)
         rc = import_cli._answers_file_entry(args)()
         return rc, calls
 
@@ -494,12 +495,42 @@ class TestAnswersFileEntry:
         monkeypatch.setattr(import_cli.RefineryConfig, "from_env",
                             staticmethod(lambda *a, **k: None))
         args = SimpleNamespace(answers=str(tmp_path / "nope.md"),
-                               file="x", dry_run=False)
+                               file="x", dry_run=False, paper_id=None)
         assert import_cli._answers_file_entry(args)() == 2
+
+    def test_explicit_paper_id_wins_over_file_lookup(self, monkeypatch, tmp_path):
+        """卷名重名（昌平一中 = 语文卷 + 数学卷）时，--paper-id 必须原样透传。"""
+        # 反查桩返回 420：若实现走反查，argv 里就会是 420 而不是 362
+        _, calls = self._run(monkeypatch, tmp_path, "a.md", "# 试卷：昌平一中\n",
+                             paper_id=362, lookup=420)
+        assert calls == [["--doc", str(tmp_path / "a.md"), "--paper-id", "362",
+                          "--apply", "--yes"]]
+
+    def test_jsonl_ignores_paper_id(self, monkeypatch, tmp_path):
+        _, calls = self._run(monkeypatch, tmp_path, "a.jsonl", "{}\n", paper_id=362)
+        assert calls == [["--records", str(tmp_path / "a.jsonl"), "--apply", "--yes"]]
 
 
 def test_parse_args_accepts_answers():
     assert parse_args(["--answers", "a.md"]).answers == "a.md"
+
+
+def test_parse_args_accepts_paper_id():
+    assert parse_args(["--answers", "a.md", "--paper-id", "362"]).paper_id == 362
+
+
+def test_paper_id_requires_answers():
+    import pytest
+
+    with pytest.raises(SystemExit):
+        parse_args(["--paper-id", "362"])
+
+
+def test_paper_id_must_be_positive():
+    import pytest
+
+    with pytest.raises(SystemExit):
+        parse_args(["--answers", "a.md", "--paper-id", "0"])
 
 
 def test_answers_only_detection():

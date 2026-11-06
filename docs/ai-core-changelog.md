@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-11-06 修正：`import_cli --answers` 补 `--paper-id`（卷名重名没法消歧）
+
+**问题**（用户导入「昌平一中」题解时踩到）：「昌平一中」在 `exam_papers` 里同时命中 2024 语文卷 #26（23 题）与 2026 数学卷 #362（29 题），标题子串定位要求唯一命中 → 报「无法唯一定位」并推荐 `--paper-id`；但 `--paper-id` 只是内层 `answer_importer_cli` 的参数，`import_cli` 没有，照着提示加就 `unrecognized arguments`。外层唯一的消歧路径是 `--file` 反查，而它的 `_lookup_paper_id` 同样要求唯一命中，等于没有出口。
+
+**改动**：`import_cli` 新增 `--paper-id`（正整数），`--answers` 的 `.md` 分支按 **显式 `--paper-id` > `--file` 反查 > 文档 `# 试卷：` 标题** 择一定位；`.jsonl` 自带定位，给了 `--paper-id` 会打一行提示后忽略。`--paper-id` 只在给了 `--answers` 时合法（否则 `parser.error`），且不计入 `_answers_only()` 的范围键 —— 只给 `--answers --paper-id` 仍然只跑第 6 步。
+
+**坑（保留）**：argparse 默认允许前缀缩写，`--answer`（单数）会被静默当成 `--answers`，拼写错误不报错。**别用 `--file` 消歧**：给了 `--file` 后 `_answers_only()` 返回 False，前 5 步 convert~入库会一并跑。
+
+**测试**：`tests/test_import_cli.py` 补 4 例（显式 paper-id 优先于反查、jsonl 忽略、paper-id 必须配 --answers、非正整数拒绝）；该文件 47 passed。
+
+**用法**：`python3 src/import_cli.py --answers 题解.md --paper-id 362`
+
+---
+
 ## 2026-11-06 练习记录：单题重做与同类型练习
 
 - 练习记录详情每题右上角新增「重做」「同类型练习」；重做单题、不落记录、不发分（错题本仍更新，关闭订正分）；同类型按 KP+题型+难度±1 出 1/2/3/5 题，题库优先、AI 补缺，落专项记录并按实际题数发档位分。

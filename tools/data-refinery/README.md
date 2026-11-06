@@ -282,7 +282,13 @@ python src/import_cli.py --answers output/answers/西城35中期中练习1.md
 
 **只给 `--answers`（不带 `--file/--files/--subject` 等范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入** —— 避免为了补答案把全库管线重跑一遍。想「新卷导入 + 答案一次走完」就同时给范围参数（`--subject/--files`）。
 
-`.md` 会用 `--file/--files` 的卷名子串反查 `exam_papers.id` 并显式传 `--paper-id`（避免重名卷按标题误定位）；没给范围时退回文档里的 `# 试卷：` 标题。`.jsonl` 直接透传 `--records`。`--answers` 不受 `--skip-load` 限制。
+`.md` 定位优先级：**显式 `--paper-id` > `--file/--files` 卷名子串反查 > 文档里的 `# 试卷：` 标题**。卷名重名（如「昌平一中」同时命中语文卷和数学卷）时用 `--paper-id` 指定，不要用 `--file`（给了范围参数会连带跑前 5 步）：
+
+```bash
+python src/import_cli.py --answers 昌平一中题解.md --paper-id 362
+```
+
+`.jsonl` 直接透传 `--records`（记录自带定位，`--paper-id` 会被忽略）。`--answers` 不受 `--skip-load` 限制。
 
 ## 配置
 

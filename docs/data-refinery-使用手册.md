@@ -987,7 +987,13 @@ python src/import_cli.py --subject 数学 --files "西城35中" \
 python src/import_cli.py --answers output/answers/西城35中期中练习1.md
 ```
 
-**只给 `--answers`（不带范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入**；同时给 `--subject/--files` 才是「新卷导入 + 答案一次走完」。`.md` 会先用 `--file/--files` 的卷名子串反查 `exam_papers.id` 并显式 `--paper-id`（防重名卷按标题误定位），没给范围时退回文档 `# 试卷：` 标题；`.jsonl` 直接走 `--records`。非 dry-run 自动 `--apply --yes`。
+**只给 `--answers`（不带范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入**；同时给 `--subject/--files` 才是「新卷导入 + 答案一次走完」。`.md` 定位优先级：**显式 `--paper-id` > `--file/--files` 卷名子串反查 > 文档 `# 试卷：` 标题**；`.jsonl` 直接走 `--records`（自带定位，`--paper-id` 忽略）。非 dry-run 自动 `--apply --yes`。
+
+卷名重名时（例：「昌平一中」同时命中 2024 语文卷 #26 与 2026 数学卷 #362，报「无法唯一定位」）用 `--paper-id` 指定，**不要用 `--file`** —— 给了范围参数就不再是「只导答案」，前 5 步会一起跑：
+
+```bash
+python src/import_cli.py --answers 昌平一中题解.md --paper-id 362
+```
 
 ### 4.12 emphasis_cli — 语文试卷着重号/下划线回填（2026-10-28）
 

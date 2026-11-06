@@ -7,6 +7,7 @@
     python src/import_cli.py --subject 语文 --year 2025 --dry-run   # 先看范围
     python src/import_cli.py --subject 语文 --year 2025             # PDF → md → jsonl → 题库
     python src/import_cli.py --file "202507-海淀"                    # 单卷导入
+    python src/import_cli.py --answers 题解.md --paper-id 362         # 卷名重名时指定卷
 
 设计原则（与 db_loader 的 P0/P1 一致）：
 - **只碰指定范围**：每个子阶段都带同样的范围参数；未指定范围时才会全量。
@@ -70,6 +71,9 @@ def parse_args(argv=None):
                         help="指定答案/解析文件：.md 按卷答案文档（# 试卷：… + ## 题号 + "
                              "答案/思路/解析）或 .jsonl 记录；第 6 步直接写入，"
                              "非 dry-run 时自动 --apply --yes")
+    parser.add_argument("--paper-id", type=int, default=None,
+                        help="试卷 id：--answers 的 .md 卷名重名（如「昌平一中」命中多卷）时"
+                             "直接指定，优先于按 --file 反查")
     parser.add_argument("--skip-answers", action="store_true", help="跳过第 6 步答案回填")
     parser.add_argument("--skip-review", action="store_true",
                         help="发现缺题时不进入人工补题（只打印清单与补题命令）")
@@ -92,6 +96,12 @@ def parse_args(argv=None):
         parser.error("--questions-only 与 --cards-only 互斥")
     if args.files and args.file:
         parser.error("--files 与 --file 只能用一个（--files 就是多个 --file）")
+    if args.paper_id is not None:
+        if not args.answers:
+            parser.error("--paper-id 只用于 --answers 的 .md 答案文档；"
+                         "其它情况请用 --file/--subject 等范围参数")
+        if args.paper_id <= 0:
+            parser.error("--paper-id 必须是正整数")
     return args
 
 
@@ -233,8 +243,9 @@ def _lookup_paper_id(cfg, keyword: str) -> int | None:
 def _answers_file_entry(args):
     """第 6 步（--answers 指定文件）：.jsonl 走 --records，.md 走 --doc。
 
-    给了 --file/--files 就先查出 paper_id 显式传入，避免卷名重名时按文档标题
-    定位到别的卷；没给则依赖文档里的 `# 试卷：<标题>`。
+    定位优先级：显式 `--paper-id` > `--file` 反查 > 文档里的 `# 试卷：<标题>`。
+    前两者都是为了避免卷名重名（如「昌平一中」同时命中语文卷和数学卷）时
+    定位到别的卷。
     """
     def run(_argv=None) -> int:
         from answer_importer_cli import main as importer_main
@@ -243,9 +254,15 @@ def _answers_file_entry(args):
         if not path.exists():
             print(f"[ERROR] --answers 文件不存在：{path}", flush=True)
             return 2
-        argv = (["--records", str(path)] if path.suffix.lower() == ".jsonl"
-                else ["--doc", str(path)])
-        if path.suffix.lower() != ".jsonl" and args.file:
+        is_jsonl = path.suffix.lower() == ".jsonl"
+        argv = ["--records", str(path)] if is_jsonl else ["--doc", str(path)]
+        if is_jsonl:
+            if args.paper_id is not None:
+                print("[提示] .jsonl 记录自带定位（question_id / 试卷+题号），"
+                      f"--paper-id {args.paper_id} 已忽略", flush=True)
+        elif args.paper_id is not None:
+            argv += ["--paper-id", str(args.paper_id)]
+        elif args.file:
             pid = _lookup_paper_id(RefineryConfig.from_env(), args.file)
             if pid is not None:
                 argv += ["--paper-id", str(pid)]
