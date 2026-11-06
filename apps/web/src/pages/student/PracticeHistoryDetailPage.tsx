@@ -5,11 +5,13 @@ import { Card, Skeleton } from '@/components/base';
 import { toast } from '@/components/base/Toast';
 import {
   markdownRemarkPlugins,
+  markdownRemarkPluginsWithBreaks,
   markdownRehypePlugins,
   markdownComponents,
   makeAnswerComponents,
   preprocessMarkdown,
 } from '@/components/markdown';
+import { autoWrapMath } from '@/components/business/LatexPreview';
 import {
   getMyPointRules,
   getPracticeHistoryDetail,
@@ -52,15 +54,18 @@ function MarkdownBlock({
   text,
   className,
   components = markdownComponents,
+  breaks = false,
 }: {
   text: string;
   className?: string;
   components?: typeof markdownComponents;
+  /** 保留软换行（学生作答）：与考试结果页「你的答案」一致，否则多行步骤会挤成一段 */
+  breaks?: boolean;
 }) {
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={markdownRemarkPlugins}
+        remarkPlugins={breaks ? markdownRemarkPluginsWithBreaks : markdownRemarkPlugins}
         rehypePlugins={markdownRehypePlugins}
         components={components}
       >
@@ -242,9 +247,12 @@ function QuestionCard({
             ))}
           </div>
         ) : q.answerText ? (
+          // 学生作答是**裸 LaTeX**（输入框存原文，预览区 LatexPreview 也会自动补 $）；
+          // 不回填定界符就原样显示 \frac{1}{5}。口径与考试结果页 AnswerResultList 一致。
           <MarkdownBlock
-            text={q.answerText}
+            text={autoWrapMath(q.answerText)}
             components={answerComponents}
+            breaks
             className="mt-1 text-[var(--text-primary)]"
           />
         ) : (

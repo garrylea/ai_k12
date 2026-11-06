@@ -173,6 +173,27 @@ describe('PracticeHistoryDetailPage', () => {
     expect(screen.getByTestId('history-material')).toHaveTextContent('阅读下面的材料');
   });
 
+  it('我的答案是裸 LaTeX 时补 $ 后渲染成公式（不再显示字面 \\frac）', async () => {
+    // 2026-11-06 用户报告：exam/63 第 9 题作答存的是裸 \frac{1}{5}，
+    // 结果页会自动补 $ 而这里没有，公式退化成文本。
+    getDetailMock.mockResolvedValue({
+      session: EXAM_SESSION,
+      questions: [{
+        questionId: 100, questionOrder: 1, answerText: '\\frac{1}{5}', isCorrect: true, score: 1,
+        method: 'exact', analysis: null, judgedAt: null, materialText: null,
+        questionContent: '题面', questionAnswer: '$\\dfrac15$', questionAnalysis: null,
+        refType: 'question', refId: null, sentenceIndex: null,
+        passageTitle: null, passageSentence: null,
+        canRedo: false, canSimilar: false,
+      }],
+    });
+    const { container } = renderAt('exam', '1');
+    await waitFor(() => expect(screen.getByText('题面')).toBeInTheDocument());
+    // 我的答案 + 正确答案各一处 KaTeX
+    expect(container.querySelectorAll('.katex').length).toBeGreaterThanOrEqual(2);
+    expect(container.textContent).not.toContain('\\frac{1}{5}');
+  });
+
   it('语文专项：questionId=null 时按 JSON 渲染作者/朝代/正文', async () => {
     getDetailMock.mockResolvedValue({
       session: SPECIAL_SESSION,
