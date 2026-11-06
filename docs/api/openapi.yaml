@@ -7885,7 +7885,7 @@ paths:
                             type: array
                             items: { $ref: '#/components/schemas/HistoryRunQuestion' }
         '404': { description: 记录或题目不属于当前学生（code=1002） }
-        '400': { description: 题目已下架 }
+        '400': { description: questionId / sessionId 非整数（ParseIntPipe），或题目已下架 / 已删除 }
 
   /student/practice-history/{source}/{sessionId}/questions/{questionId}/similar:
     post:
@@ -7927,7 +7927,7 @@ paths:
                           questions:
                             type: array
                             items: { $ref: '#/components/schemas/HistoryRunQuestion' }
-        '400': { description: 题量非法 / 学科不支持 / 无知识点或无答案 }
+        '400': { description: questionId / sessionId 非整数（ParseIntPipe）/ 题量非法（非 1/2/3/5 或在家长可用档位外）/ 学科不支持 / 题目已下架 / 题目不属于该学科 / 无标准答案 / 无知识点 / 知识点不存在 }
         '404': { description: 记录或题目不属于当前学生（code=1002） }
 
 components:
@@ -10597,6 +10597,22 @@ components:
             可选：本轮训练会话 id（乙类会话页专用）。只用于累加
             training_sessions.judged_count 审计留痕，不传也能判题；会话不存在 /
             非本人 / 已完成都静默跳过，不报错
+        sessionUid:
+          type: string
+          description: >-
+            可选（2026-11-01）：唯一标识本轮专项练习会话，同 uid 多次判题复用同一行。
+            缺失时下列作答记录旁路写入整体不生效（不建会话、不写记录、不报错）；
+            plannedQuestionIds 亦仅在传本字段时生效
+        title:
+          type: string
+          nullable: true
+          description: 可选：会话标题（如「数学薄弱点训练」），缺省写 null；仅在传 sessionUid 时生效
+        questionCount:
+          type: integer
+          description: 可选：本轮题数，缺省写 0；仅在传 sessionUid 时生效
+        questionOrder:
+          type: integer
+          description: 可选：本题在本轮中的 1-based 序号，缺省写 1；仅在传 sessionUid 时生效
         plannedQuestionIds:
           type: array
           items:
@@ -10605,7 +10621,8 @@ components:
             可选（2026-11-06）：本轮整轮题单（有序，含已答与未答）。服务端只保留
             存在 / 在架 / 与 subjectId 同学的 id，按数组顺序给
             special_answer_records 写未作答占位行（question_order 取原数组下标 +1，
-            跳过失效题时不压缩，故可能不连续）。不传 = 旧客户端，不写占位行
+            跳过失效题时不压缩，故可能不连续）。**仅在同时传 sessionUid 时生效**，
+            只传本字段而不传 sessionUid 会被静默忽略（无会话可写，不报错）
         suppressErrorFixPoints:
           type: boolean
           description: >-

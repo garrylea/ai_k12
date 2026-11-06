@@ -471,7 +471,7 @@ describe('TrainingService.startTargetedPractice — 建会话（乙类整批发�
 
 describe('TrainingController.startTargetedPractice — 档位白名单（定案 7）', () => {
   const user = { sub: 7, role: 'student' } as any;
-  /** 家长已配的档位（默认档位 1/3/5/10）。 */
+  /** 家长已配的档位（默认档位 1/2/3/5/10）。 */
   const TIERS = ['1', '3', '5', '10'];
   const mkController = (service: any, tiers: string[] = TIERS) =>
     new TrainingController(

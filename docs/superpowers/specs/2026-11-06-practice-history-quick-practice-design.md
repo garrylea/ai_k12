@@ -152,7 +152,7 @@
 - 每题增加：
   - `canRedo: boolean`：`questionId != null` 且题目存在且 `is_active=1`；
   - `canSimilar: boolean`：`canRedo` 且学科 ∈ {1,4} 且该题知识点存在且标准答案非空。
-- 题量选项不写进详情接口：前端打开面板时按学科调用现有 `GET /api/points/me/rules`，取 `[1,2,3,5] ∩ 可用档位`（与 PRD §7.13「档位即可选项」一致）；交集为空则隐藏同类型按钮。
+- 题量选项不写进详情接口：前端**详情加载后**按学科调用现有 `GET /api/points/me/rules`，取 `[1,2,3,5] ∩ 可用档位`（与 PRD §7.13「档位即可选项」一致）；交集为空则隐藏同类型按钮。
 - 实现：
   - exam 分支：`findAnswersWithQuestions` 增加 `is_active`、`answer` 的返回；批量查 `question_knowledge_points` 判断知识点存在。
   - special 分支：`listBySession` 已 join `questions`，补 `is_active` 与答案非空判断；同样批量查知识点。

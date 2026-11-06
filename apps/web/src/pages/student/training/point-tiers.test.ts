@@ -159,7 +159,7 @@ describe('usePointTiers', () => {
 describe('pickPracticeCount', () => {
   const t = (tierKey: string) => ({ tierKey });
 
-  it('取 ≥3 的最小档（默认档位 1/3/5/10 → 3）', () => {
+  it('取 ≥3 的最小档（默认档位 1/2/3/5/10 → 3）', () => {
     expect(pickPracticeCount([t('1'), t('3'), t('5'), t('10')])).toBe(3);
   });
 
