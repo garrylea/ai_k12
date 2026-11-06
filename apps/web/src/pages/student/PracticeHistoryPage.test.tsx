@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import {
+  createMemoryRouter,
+  MemoryRouter,
+  RouterProvider,
+  useLocation,
+} from 'react-router-dom';
 import PracticeHistoryPage from './PracticeHistoryPage';
 import { getPracticeHistory } from '@/services/api';
+import type { StayReturnState } from '@/utils/stayReturn';
 
 /**
  * 练习记录列表（2026-11-01）。
@@ -87,5 +93,32 @@ describe('PracticeHistoryPage', () => {
     getPracticeHistoryMock.mockRejectedValue(new Error('network'));
     render(<MemoryRouter><PracticeHistoryPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText(/暂时加载失败/)).toBeInTheDocument());
+  });
+
+  it('进入详情时把来源 state 透传（详情页「退出本页」才能回最初来源）', async () => {
+    getPracticeHistoryMock.mockResolvedValue({ items: [EXAM_ITEM], total: 1, page: 1, pageSize: 20 });
+
+    function DetailProbe() {
+      const location = useLocation();
+      const state = location.state as StayReturnState | null;
+      return <span data-testid="detail-from">{state?.from ?? ''}</span>;
+    }
+
+    const router = createMemoryRouter(
+      [
+        { path: '/student/practice-history', element: <PracticeHistoryPage /> },
+        { path: '/student/practice-history/:source/:sessionId', element: <DetailProbe /> },
+      ],
+      {
+        initialEntries: [
+          { pathname: '/student/practice-history', state: { from: '/student/star-map' } },
+        ],
+      },
+    );
+    render(<RouterProvider router={router} />);
+
+    fireEvent.click(await screen.findByTestId('history-row-exam-1'));
+
+    expect(await screen.findByTestId('detail-from')).toHaveTextContent('/student/star-map');
   });
 });

@@ -6,19 +6,18 @@ import StudentStayLayout from './StudentStayLayout';
 import { buildStayReturnState, STAY_FALLBACK_PATH } from '@/utils/stayReturn';
 
 /**
- * 浅停留页（个人中心 / 奖励册）顶栏「返回」的落点回归。
+ * 浅停留页（个人中心 / 奖励册 / 练习记录）顶栏「退出本页」的落点回归。
  *
- * 背景：顶栏原用 `BackButton` 默认模式（`navigate(-1)` 回退浏览器历史）。2026-09-21 用户实测：
- * 从星图点段位面板「查看积分明细 →」进个人中心、点「奖励册」再切回「个人中心」后按「返回」，
- * 退回的是**奖励册**而不是进来的星图 —— 两页互跳把兄弟页压进了历史栈，**历史栈 ≠「从哪来」**。
- * 现改为显式来源页协议（`@/utils/stayReturn`），本文件钉住四件事：
- * 1. 互跳后「返回」仍回最初的来源页（承重用例，即用户实测的那个 bug）；
+ * 背景：顶栏原先还有左侧「返回」，它与「退出本页」同落点（都走来源页协议）；2026-11-06
+ * 用户裁决去掉左侧「返回」，只保留右上角「退出本页」，本文件钉住五件事：
+ * 1. 互跳后「退出本页」仍回最初的来源页（承重用例，即 2026-09-21 用户实测的那个 bug）；
  * 2. 来源页自己的 `location.state` 一起还给它（课程详情缺 subjectId/lessonId 会打不开）；
  * 3. 没有来源（直接输地址 / 老书签）→ 兜底回星图；
- * 4. 来源本身是兄弟页 → 不认，仍兜底星图（否则「返回」会在两页之间打转）。
+ * 4. 来源本身是兄弟页 → 不认，仍兜底星图（否则退出会在两页之间打转）；
+ * 5. 左侧「返回」已移除，页面上只有「退出本页」一个离开入口。
  *
  * 用 `createMemoryRouter` 挂真外壳 + 真路由断言（不是 mock `useNavigate`）：
- * 「返回」的语义就在路由落点上，mock 只能证明调用过 `navigate`。
+ * 「退出本页」的语义就在路由落点上，mock 只能证明调用过 `navigate`。
  */
 
 afterEach(() => cleanup());
@@ -46,8 +45,8 @@ function renderStay(initialEntry: { pathname: string; state?: unknown }) {
   return router;
 }
 
-describe('StudentStayLayout 顶栏「返回」', () => {
-  it('从星图进来、切到奖励册再切回个人中心，返回仍回星图（用户实测的 bug）', async () => {
+describe('StudentStayLayout 顶栏「退出本页」', () => {
+  it('从星图进来、切到奖励册再切回个人中心，退出仍回星图（用户实测的 bug）', async () => {
     const user = userEvent.setup();
     const router = renderStay({
       pathname: '/student/profile',
@@ -60,49 +59,13 @@ describe('StudentStayLayout 顶栏「返回」', () => {
     await user.click(screen.getByRole('link', { name: '个人中心' }));
     expect(router.state.location.pathname).toBe('/student/profile');
 
-    await user.click(screen.getByRole('button', { name: '返回' }));
+    await user.click(screen.getByRole('button', { name: '退出本页' }));
 
     expect(router.state.location.pathname).toBe('/student/star-map');
     expect(screen.getByText('知识星图')).toBeInTheDocument();
   });
 
-  it('来源页自己的 location.state 一起带回去（课程详情缺 state 打不开）', async () => {
-    const user = userEvent.setup();
-    const router = renderStay({
-      pathname: '/student/profile',
-      state: buildStayReturnState('/student/course-detail', { subjectId: 7, lessonId: 42 }),
-    });
-
-    await user.click(screen.getByRole('button', { name: '返回' }));
-
-    expect(router.state.location.pathname).toBe('/student/course-detail');
-    expect(router.state.location.state).toEqual({ subjectId: 7, lessonId: 42 });
-  });
-
-  it('直接输地址进来（没有来源）→ 返回兜底回星图', async () => {
-    const user = userEvent.setup();
-    const router = renderStay({ pathname: '/student/profile' });
-
-    await user.click(screen.getByRole('button', { name: '返回' }));
-
-    expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
-  });
-
-  it('来源本身是兄弟页（奖励册）→ 不认，兜底回星图', async () => {
-    const user = userEvent.setup();
-    const router = renderStay({
-      pathname: '/student/profile',
-      state: buildStayReturnState('/student/rewards', undefined),
-    });
-
-    await user.click(screen.getByRole('button', { name: '返回' }));
-
-    expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
-  });
-});
-
-describe('StudentStayLayout 顶栏「退出本页」', () => {
-  it('回进入本页之前的那一页，并把来源页的 state 一起带回去（不是登出）', async () => {
+  it('来源页自己的 location.state 一起带回去（课程详情缺 state 打不开），且不是登出', async () => {
     const user = userEvent.setup();
     localStorage.setItem('token', 'still-logged-in');
     const router = renderStay({
@@ -114,7 +77,7 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
     expect(screen.queryByRole('button', { name: '退出登录' })).not.toBeInTheDocument();
 
     const exitButton = screen.getByRole('button', { name: '退出本页' });
-    // 2026-11-06 用户要求：小房子换成全仓统一的退出图标
+    // 2026-11-06 用户要求：全仓统一的退出图标
     expect(exitButton.querySelector('[data-icon="exit"]')).toBeInTheDocument();
 
     await user.click(exitButton);
@@ -125,7 +88,7 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
     localStorage.removeItem('token');
   });
 
-  it('没有来源时兜底回星图（不是回入口选择页）', async () => {
+  it('直接输地址进来（没有来源）→ 兜底回星图，不是回入口选择页', async () => {
     const user = userEvent.setup();
     const router = renderStay({ pathname: '/student/profile' });
 
@@ -133,17 +96,37 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
 
     expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
   });
+
+  it('来源本身是兄弟页（奖励册）→ 不认，兜底回星图', async () => {
+    const user = userEvent.setup();
+    const router = renderStay({
+      pathname: '/student/profile',
+      state: buildStayReturnState('/student/rewards', undefined),
+    });
+
+    await user.click(screen.getByRole('button', { name: '退出本页' }));
+
+    expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
+  });
+
+  it('顶栏不再有左侧「返回」：只有「退出本页」一个离开入口', () => {
+    renderStay({ pathname: '/student/profile' });
+
+    expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '退出本页' })).toBeInTheDocument();
+  });
 });
 
 /**
- * 练习记录（2026-11-02 用户实测）：原本顶栏「返回」沿用来源页协议，
- * 「星图 → 个人中心 → 练习记录」按返回直接跳回星图（跳过个人中心）。
- * 练习记录是个人中心的下级页，改为**按层级固定返回**：列表→个人中心、详情→列表。
+ * 练习记录（2026-11-06 用户实测后修正）：2026-11-02 曾把它当个人中心的下级页、
+ * 按层级「列表→个人中心、详情→列表」；但那是给左侧「返回」定的。左侧按钮删除后，
+ * 唯一出口「退出本页」的语义是「从哪进回哪」—— 三个 tab 同权，练习记录也回最初来源。
  */
 function renderPracticeHistory(initialPath: string, state?: unknown) {
   const router = createMemoryRouter(
     [
       { path: '/student/star-map', element: <div>知识星图</div> },
+      { path: '/student/training/chinese/special', element: <div>语文专项页</div> },
       {
         path: '/student/profile',
         element: <StudentStayLayout />,
@@ -164,25 +147,39 @@ function renderPracticeHistory(initialPath: string, state?: unknown) {
   return router;
 }
 
-describe('练习记录顶栏「返回」按层级走', () => {
-  it('列表页：即使来源是星图，返回也先回个人中心（不跳级）', async () => {
+describe('练习记录顶栏「退出本页」也回最初来源', () => {
+  it('列表页：从星图进个人中心再切到练习记录，退出回星图（不按层级回个人中心）', async () => {
     const user = userEvent.setup();
     const router = renderPracticeHistory(
       '/student/practice-history',
       buildStayReturnState('/student/star-map', undefined),
     );
 
-    await user.click(screen.getByRole('button', { name: '返回' }));
+    await user.click(screen.getByRole('button', { name: '退出本页' }));
 
-    expect(router.state.location.pathname).toBe('/student/profile');
+    expect(router.state.location.pathname).toBe('/student/star-map');
+    expect(screen.getByText('知识星图')).toBeInTheDocument();
   });
 
-  it('详情页：返回回到练习记录列表', async () => {
+  it('详情页：从语文专项进个人中心、切到练习记录再进详情，退出仍回语文专项', async () => {
     const user = userEvent.setup();
-    const router = renderPracticeHistory('/student/practice-history/exam/44');
+    const router = renderPracticeHistory(
+      '/student/practice-history/exam/44',
+      buildStayReturnState('/student/training/chinese/special', undefined),
+    );
 
-    await user.click(screen.getByRole('button', { name: '返回' }));
+    await user.click(screen.getByRole('button', { name: '退出本页' }));
 
-    expect(router.state.location.pathname).toBe('/student/practice-history');
+    expect(router.state.location.pathname).toBe('/student/training/chinese/special');
+    expect(screen.getByText('语文专项页')).toBeInTheDocument();
+  });
+
+  it('列表页没有来源（直接输地址）→ 兜底回星图', async () => {
+    const user = userEvent.setup();
+    const router = renderPracticeHistory('/student/practice-history');
+
+    await user.click(screen.getByRole('button', { name: '退出本页' }));
+
+    expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
   });
 });

@@ -8,6 +8,21 @@
 
 ---
 
+## 2026-11-06 浅停留页去掉左侧「返回」；来源页补 search/hash
+
+**问题**：`574f62cb` 把个人中心/奖励册/练习记录右上角「退出本页」改成来源页协议后，与左侧「返回」落点完全相同，两个入口重复（用户指出）。另外来源只记 `location.pathname`，`/student/training/home?subjectId=5` 退出后丢掉 `subjectId`，物理/化学训练页被解析成默认数学（用户确认存在）。
+
+**改动**：
+- `StudentStayLayout` 删除左侧 `BackButton`，只保留右上角「退出本页」。
+- 顶栏从 `justify-between` 改三栏网格 `grid-cols-[1fr_auto_1fr]`（左占位 + 中间胶囊 + 右退出）：删掉左侧按钮后胶囊不能左移，必须保持原居中位置（用户指出）。
+- `LevelPanel` 进入个人中心时记 `pathname + search + hash`，退出原样带回。
+- **三个 tab 同权（2026-11-06 用户实测后修正）**：从个人中心切到「练习记录」后退出仍只回个人中心，是旧层级规则（2026-11-02「列表→个人中心、详情→列表」）在作怪；该规则原本服务左侧「返回」，按钮删除后已作废。`resolveStayReturn` 删除层级分支，练习记录列表与详情都按来源页协议回最初来源；列表→详情的 `Link` 与详情的「返回练习记录」`Link` 一并透传 `location.state`，来源不丢。
+- 同步 UX §5.5、CLAUDE.md、`stayReturn` / `StudentStayLayout` 注释。
+
+**测试**：`StudentStayLayout.test.tsx`（新增「不再有左侧返回」+ 练习记录列表/详情回最初来源）、`LevelPanel.test.tsx`（新增 query 用例）、`routeTable.test.tsx`（改为断言无「返回」）。
+
+---
+
 ## 2026-11-06 修正：`import_cli --answers` 补 `--paper-id`（卷名重名没法消歧）
 
 **问题**（用户导入「昌平一中」题解时踩到）：「昌平一中」在 `exam_papers` 里同时命中 2024 语文卷 #26（23 题）与 2026 数学卷 #362（29 题），标题子串定位要求唯一命中 → 报「无法唯一定位」并推荐 `--paper-id`；但 `--paper-id` 只是内层 `answer_importer_cli` 的参数，`import_cli` 没有，照着提示加就 `unrecognized arguments`。外层唯一的消歧路径是 `--file` 反查，而它的 `_lookup_paper_id` 同样要求唯一命中，等于没有出口。

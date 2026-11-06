@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { BackButton, ExitIcon } from '@/components/base';
+import { ExitIcon } from '@/components/base';
 import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 
 /**
@@ -25,15 +25,16 @@ import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
  * `border-[var(--bg-subtle)]` + `--radius-pill` 胶囊），但不复用任何布局组件 ——
  * 复用就意味着又要处理主题分支。
  *
- * 顶栏「返回」是学生从这两页离开的出口，落点是**进入本页之前的那一页**（来源页协议，
- * 见 `@/utils/stayReturn`）——**不是**回退浏览器历史：两页互跳会把兄弟页压进历史栈，
- * 学生从星图进来、切过奖励册再切回来按「返回」就会退回奖励册而不是星图（2026-09-21 用户实测反馈）。
- * 两页互跳时来源原样带过去，来源缺失时兜底回星图。
+ * 顶栏**左侧不再放「返回」**（2026-11-06 用户裁决）：它与右上角「退出本页」落点完全相同，
+ * 两个入口重复。离开本页统一走右上角「退出本页」。
  *
- * 顶栏右侧是「退出本页」：落点与左侧「返回」相同——**进入本页之前的那一页**（来源页协议），
- * **不是登出**（2026-11-04 用户裁决），也**不是**固定回 `/student/entry`（2026-11-06 用户要求）。
- * 学生从星图进来就回星图，从课程详情进来就回课程详情（连它的 `location.state` 一起还回去）；
- * 来源缺失时兜底回星图。登出仍只在开始页右上角完成（`LogoutButton` 在 `EntrySelectPage` 保留）。
+ * 顶栏右侧「退出本页」的落点是**进入本页之前的那一页**（来源页协议，见 `@/utils/stayReturn`）——
+ * **不是**回退浏览器历史，也**不是**登出（2026-11-04 用户裁决）、**不是**固定回 `/student/entry`：
+ * tab 互跳会把兄弟页压进历史栈，学生从星图进来、切过奖励册再切回来，仍要回星图而不是奖励册
+ * （2026-09-21 用户实测反馈）。学生从课程详情进来就回课程详情（连它的 `location.state` 一起还回去），
+ * 从带 query 的训练页进来也原样带回 query。**三个 tab 同权**：练习记录（含详情）也回最初来源，
+ * 不再按层级回个人中心（2026-11-06 用户实测修正）。来源缺失时兜底回星图。
+ * 登出仍只在开始页右上角完成（`LogoutButton` 在 `EntrySelectPage` 保留）。
  *
  * 图标用全仓统一的 `ExitIcon`（与 `LogoutButton` 同一个图标，2026-11-06 用户要求）。
  */
@@ -46,9 +47,9 @@ const stayItems = [
 export default function StudentStayLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  // 来源页 + 来源页自己的 location.state（课程详情缺 state 会被自己的「缺少课程信息」挡住）
-  // 练习记录按层级固定返回（列表→个人中心、详情→列表），故把当前 pathname 也传进去
-  const back = resolveStayReturn(location.state, location.pathname);
+  // 「退出本页」落点 + 来源页自己的 location.state（课程详情缺 state 会被自己的「缺少课程信息」挡住）
+  // 三个 tab 同权：不管当前在奖励册 / 个人中心 / 练习记录（含详情），都回进入浅停留页之前的那一页
+  const back = resolveStayReturn(location.state);
   // 两页互跳时把来源原样带过去，否则切一次 tab 来源就丢了
   const carriedReturnState = buildStayReturnState(back.to, back.state);
 
@@ -59,12 +60,14 @@ export default function StudentStayLayout() {
       className="flex h-screen flex-col overflow-hidden bg-[var(--bg-base)] text-[var(--text-primary)]"
     >
       {/* 顶部全局栏：学生端统一 token，但无日夜切换 */}
-      <header className="h-16 bg-[var(--bg-card)] border-b border-[var(--bg-subtle)] flex items-center justify-between gap-4 px-6 shrink-0">
-        {/* 统一返回控件：跳到进入本页之前的那一页（来源页协议），没有来源则回星图 */}
-        <BackButton to={back.to} state={back.state} />
+      {/* 三栏网格：左右各 1fr、中间胶囊 auto —— 左「返回」删除后胶囊仍停在原来的正中间，
+          不能退回 justify-between（那会让胶囊左移，2026-11-06 用户指出）。 */}
+      <header className="h-16 bg-[var(--bg-card)] border-b border-[var(--bg-subtle)] grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 shrink-0">
+        {/* 占位：与右侧「退出」对称，别删 */}
+        <div aria-hidden="true" />
 
         {/* 两页互跳入口（UX P5.1「入口：奖励册…」），当前页高亮 */}
-        <nav className="flex items-center gap-1 bg-[var(--bg-subtle)] rounded-[var(--radius-pill)] p-1">
+        <nav className="justify-self-center flex items-center gap-1 bg-[var(--bg-subtle)] rounded-[var(--radius-pill)] p-1">
           {stayItems.map((item) => (
             <NavLink
               key={item.to}
@@ -83,13 +86,13 @@ export default function StudentStayLayout() {
           ))}
         </nav>
 
-        {/* 退出本页：回到进入本页之前的那一页（与左侧「返回」同一落点），不是登出 */}
+        {/* 退出本页：回到进入本页之前的那一页（唯一的离开入口），不是登出 */}
         <button
           type="button"
           onClick={() => navigate(back.to, { state: back.state })}
           title="退出本页"
           aria-label="退出本页"
-          className="p-2.5 rounded-full bg-[var(--bg-card)] border border-[var(--bg-subtle)] shadow-sm hover:bg-[var(--bg-base)] transition-colors text-[var(--text-secondary)]"
+          className="justify-self-end p-2.5 rounded-full bg-[var(--bg-card)] border border-[var(--bg-subtle)] shadow-sm hover:bg-[var(--bg-base)] transition-colors text-[var(--text-secondary)]"
         >
           <ExitIcon />
         </button>

@@ -69,7 +69,7 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 
 - 三套主题经 CSS 变量 + 容器 `data-theme` 实现，token 真源 `apps/web/style.md` §2：`student-day`（默认）/ `student-night` / `parent`。
 - **主题作用域分两类**（**逐页归属以 `UX-UI设计文档.md` §1.5 为准，不要自行归类**）：① 学习沉浸页 → 包 `.student-theme-container`、18:00–06:00 自动切、允许**页内**手动切；② 非学习阶段学生页（登录/注册/学科选择/入口选择/星链图/个人中心/奖励册）→ **写死 `data-theme="student-day"`、不用容器、无手动切换**。家长端/管理端全程日间。
-- **`StudentStayLayout` = 个人中心 / 奖励册 / 练习记录专用**浅停留页外壳（写死日间、无侧栏、无日夜切换；顶栏「返回」与右上角「退出本页」都回来源页——**进入本页之前的那一页**，**不是登出**）——**不要把这几页合回任何共享 Layout**；训练轨页面全屏、硬编码 `data-theme="student-day"`、不在任何 Layout 下。
+- **`StudentStayLayout` = 个人中心 / 奖励册 / 练习记录专用**浅停留页外壳（写死日间、无侧栏、无日夜切换；顶栏**只有一个出口**——右上角「退出本页」，回来源页（**进入本页之前的那一页**，含 `search`/`hash`），**不是登出**；左侧「返回」已于 2026-11-06 删除，别再补回来）——**不要把这几页合回任何共享 Layout**；训练轨页面全屏、硬编码 `data-theme="student-day"`、不在任何 Layout 下。
 - **学生端没有独立设置页**（UX P5.3 已废止，2026-09-18）：护眼/日夜 = 自动 + 沉浸页内手动；字号由 `data-school` 决定（来自家长在「学习配置」选的年级）；行距定死 1.6–1.8（`style.md` §9）；音效 PRD 未定义；`themeStore.motionEnabled` 存在但**无 UI 入口**，本期不做。
 - `data-school`（`primary`/`junior`/`senior`）**只调字号**，颜色与圆角三学段一致。
 - 双轨区分靠**文字标签**（Tab 名、Tag 文案「主线」「辅线」），**不靠颜色**；物理隔离靠路由（入口选择页，无跨轨链接）。辅线用与主线同一套 brand orange，旧紫色 `Aux #8B5A8E` 已废弃。

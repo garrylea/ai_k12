@@ -49,7 +49,7 @@ function stubMatchMedia(desktop: boolean) {
 }
 
 /**
- * `/student/profile` 的探针：个人中心顶栏的「返回」要靠这里收到的导航 state
+ * `/student/profile` 的探针：个人中心顶栏的「退出本页」要靠这里收到的导航 state
  * 才知道该回哪一页（来源页协议，见 `@/utils/stayReturn`）。
  */
 function ProfileProbe() {
@@ -72,6 +72,7 @@ function renderPanel(
     <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/student/star-map" element={<LevelPanel open onClose={onClose} />} />
+        <Route path="/student/training/home" element={<LevelPanel open onClose={onClose} />} />
         <Route path="/student/profile" element={<ProfileProbe />} />
       </Routes>
     </MemoryRouter>,
@@ -147,7 +148,7 @@ describe('LevelPanel', () => {
     expect(await screen.findByText('个人中心页')).toBeInTheDocument();
   });
 
-  it('跳转时把来源页与它自己的 state 一起传过去（个人中心顶栏「返回」靠它回得来）', async () => {
+  it('跳转时把来源页与它自己的 state 一起传过去（个人中心「退出本页」靠它回得来）', async () => {
     getMyPointsMock.mockResolvedValue(BASE);
 
     renderPanel(vi.fn(), { pathname: '/student/star-map', state: { subjectId: 7 } });
@@ -155,6 +156,17 @@ describe('LevelPanel', () => {
 
     expect(await screen.findByTestId('profile-from')).toHaveTextContent('/student/star-map');
     expect(screen.getByTestId('profile-from-state')).toHaveTextContent('{"subjectId":7}');
+  });
+
+  it('来源页的 query 一起带走（只记 pathname 会把物理/化学训练页退回默认数学）', async () => {
+    getMyPointsMock.mockResolvedValue(BASE);
+
+    renderPanel(vi.fn(), '/student/training/home?subjectId=5');
+    fireEvent.click(await screen.findByRole('button', { name: '查看积分明细 →' }));
+
+    expect(await screen.findByTestId('profile-from')).toHaveTextContent(
+      '/student/training/home?subjectId=5',
+    );
   });
 
   it('Esc 关闭', async () => {

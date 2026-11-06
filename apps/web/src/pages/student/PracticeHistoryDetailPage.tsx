@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { Card, Skeleton } from '@/components/base';
 import { toast } from '@/components/base/Toast';
@@ -287,6 +287,7 @@ function QuestionCard({
 export default function PracticeHistoryDetailPage() {
   const { source, sessionId } = useParams<{ source: string; sessionId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState<PracticeHistoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -372,6 +373,7 @@ export default function PracticeHistoryDetailPage() {
           <p className="text-sm text-[var(--text-secondary)]">这条练习记录不存在，或不属于你。</p>
           <Link
             to="/student/practice-history"
+            state={location.state}
             className="mt-3 inline-block text-sm text-[var(--brand-500)] underline"
           >
             返回练习记录
@@ -424,6 +426,8 @@ export default function PracticeHistoryDetailPage() {
       <div>
         <Link
           to="/student/practice-history"
+          // 把来源页协议带回列表：否则从详情返回列表后，顶栏「退出本页」只能兜底回星图
+          state={location.state}
           className="inline-flex items-center gap-1 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
         >
           <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

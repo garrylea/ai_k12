@@ -226,9 +226,14 @@ export function LevelPanel({ open, onClose, anchorRef }: LevelPanelProps) {
         type="button"
         onClick={() => {
           onClose();
-          // 个人中心顶栏的「返回」要回得来：把当前页（含它自己的 state）记成来源页
+          // 个人中心顶栏的「退出本页」要回得来：把当前页（含它自己的 state）记成来源页。
+          // 必须带 search + hash —— 只记 pathname 会把 `?subjectId=5` 丢掉，
+          // 物理/化学训练页退出后会被解析成默认的数学。
           navigate('/student/profile', {
-            state: buildStayReturnState(location.pathname, location.state),
+            state: buildStayReturnState(
+              `${location.pathname}${location.search}${location.hash}`,
+              location.state,
+            ),
           });
         }}
         className="w-full rounded-[var(--radius-button)] border border-[var(--bg-subtle)] px-3 py-2 text-sm font-medium text-[var(--brand-600)] transition-colors hover:bg-[var(--bg-subtle)]"

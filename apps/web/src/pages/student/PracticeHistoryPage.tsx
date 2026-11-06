@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
 import { Card, Skeleton } from '@/components/base';
 import { getPracticeHistory, type PracticeHistoryItem } from '@/services/api';
@@ -21,12 +21,14 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function HistoryRow({ item }: { item: PracticeHistoryItem }) {
+function HistoryRow({ item, state }: { item: PracticeHistoryItem; state: unknown }) {
   const inProgress = item.completedAt === null;
   return (
     <li>
       <Link
         to={`/student/practice-history/${item.source}/${item.sessionId}`}
+        // 来源页协议要穿过详情页：详情页「退出本页」仍要回进入浅停留页之前的那一页
+        state={state}
         className={clsx(
           'block rounded-[var(--radius-md)] border border-[var(--bg-subtle)] bg-[var(--bg-card)] p-4 transition-colors hover:border-[var(--brand-300)]',
           inProgress && 'opacity-60',
@@ -63,6 +65,7 @@ function HistoryRow({ item }: { item: PracticeHistoryItem }) {
 }
 
 export default function PracticeHistoryPage() {
+  const location = useLocation();
   const [items, setItems] = useState<PracticeHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -153,7 +156,11 @@ export default function PracticeHistoryPage() {
         <>
           <ul className="space-y-3">
             {items.map((item) => (
-              <HistoryRow key={`${item.source}-${item.sessionId}`} item={item} />
+              <HistoryRow
+                key={`${item.source}-${item.sessionId}`}
+                item={item}
+                state={location.state}
+              />
             ))}
           </ul>
 
