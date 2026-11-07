@@ -999,6 +999,16 @@ python src/import_cli.py --answers output/answers/西城35中期中练习1.md
 python src/import_cli.py --answers 昌平一中题解.md --paper-id 362
 ```
 
+**只补题（`--fix-only`，2026-11-07）**：等价于手写 `--skip-convert --skip-extract --skip-publish --skip-meta --skip-load --skip-answers`，只保留第 7/8/9 步（扫描识别问题 → 人工补题 → 补题入库），**不会重跑 MinerU、切题、图片物化或 db_loader**：
+
+```bash
+python src/import_cli.py --subject 物理 --file "汇文" --fix-only
+# 题已补在 output/manual_fixes/、只想写库：加 --skip-review
+python src/import_cli.py --subject 物理 --file "汇文" --fix-only --skip-review
+```
+
+`--fix-only` 与 `--answers` / `--cards-only` / `--reconvert` / `--re-extract` / `--re-publish` / `--redo` 互斥，同给直接报错。
+
 ### 4.12 emphasis_cli — 语文试卷着重号/下划线回填（2026-10-28）
 
 **问题**：MinerU 输出 Markdown 没有下划线语义；着重号只能偶尔被识别成 `<sub>．．</sub>`。语文卷的「文段中加点词语」「画横线句」一旦丢标记，题目就无法作答。
@@ -1062,6 +1072,9 @@ python src/import_cli.py --subject 语文 --skip-convert --skip-extract
 
 # 只跳到入库就停（不跑答案回填）
 python src/import_cli.py --subject 语文 --skip-answers
+
+# 只补题（不重跑 MinerU/切题/入库）
+python src/import_cli.py --subject 物理 --file "汇文" --fix-only
 ```
 
 - `--redo` = 重转（MinerU）+ 重抽 + 重发布；`--reconvert`/`--re-extract`/`--re-publish` 可单独用。

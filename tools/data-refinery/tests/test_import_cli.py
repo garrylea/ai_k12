@@ -647,6 +647,56 @@ def test_answers_only_detection():
     assert not import_cli._answers_only(parse_args(["--subject", "数学"]))
 
 
+# ---------- --fix-only：只补题 ----------
+
+def _stub_review_stages(monkeypatch):
+    """把 1~6 步与 7/8/9 步都换成桩，返回调用序列。"""
+    calls = []
+    for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
+        monkeypatch.setattr(import_cli, name, lambda argv, n=name: calls.append(n))
+    monkeypatch.setattr(import_cli, "answers_backfill",
+                        lambda *a, **k: calls.append("answers"))
+
+    def entry(name):
+        return lambda args: (lambda argv: calls.append(name))
+
+    monkeypatch.setattr(import_cli, "_scan_entry", entry("scan"))
+    monkeypatch.setattr(import_cli, "_fix_entry", entry("fix"))
+    monkeypatch.setattr(import_cli, "_apply_entry", entry("apply"))
+    return calls
+
+
+def test_fix_only_runs_only_review_stages(monkeypatch):
+    """--fix-only 等价于手写那串 --skip-*：只跑扫描 → 补题 → 补题入库。"""
+    calls = _stub_review_stages(monkeypatch)
+
+    assert import_cli.main(["--subject", "物理", "--fix-only"]) == 0
+    assert calls == ["scan", "fix", "apply"]
+
+
+def test_fix_only_works_with_skip_review(monkeypatch):
+    """--skip-review 只关掉补题交互，补题入库（第 9 步）仍要跑。"""
+    calls = _stub_review_stages(monkeypatch)
+
+    assert import_cli.main(["--subject", "物理", "--fix-only", "--skip-review"]) == 0
+    assert calls == ["scan", "fix", "apply"]
+
+
+def test_fix_only_rejects_conflicting_flags():
+    """与 --answers / --cards-only / 重建参数同给时报错，别让人以为会顺带做那些事。"""
+    import pytest
+
+    for extra in (["--answers", "a.md"], ["--cards-only"], ["--reconvert"],
+                  ["--re-extract"], ["--re-publish"], ["--redo"]):
+        with pytest.raises(SystemExit):
+            parse_args(["--subject", "物理", "--fix-only"] + extra)
+
+
+def test_fix_only_parses_alone():
+    args = parse_args(["--subject", "物理", "--fix-only"])
+    assert args.fix_only is True
+
+
 # ---------- 候选收集（卷/书粒度去重） ----------
 
 def _touch(path: Path) -> None:

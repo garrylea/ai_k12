@@ -8,6 +8,7 @@
     python src/import_cli.py --subject 语文 --year 2025             # PDF → md → jsonl → 题库
     python src/import_cli.py --subject 道法 --file "2026 海淀"       # 关键词定位单卷
     python src/import_cli.py --answers 题解.md --paper-id 362         # 卷名重名时指定卷
+    python src/import_cli.py --subject 物理 --file "汇文" --fix-only   # 只补题，不重跑转换/切题/入库
 
 `--file` 是**关键词**不是文件路径，也不是一段连续子串：按空格等分隔符分词，
 所有词都出现在素材相对路径里才算命中（顺序无关）。入口会先解析一次：
@@ -89,6 +90,10 @@ def parse_args(argv=None):
     parser.add_argument("--skip-answers", action="store_true", help="跳过第 6 步答案回填")
     parser.add_argument("--skip-review", action="store_true",
                         help="发现缺题时不进入人工补题（只打印清单与补题命令）")
+    parser.add_argument("--fix-only", action="store_true",
+                        help="只补题：等价于 --skip-convert --skip-extract --skip-publish "
+                             "--skip-meta --skip-load --skip-answers，"
+                             "只跑「扫描识别问题 → 人工补题 → 补题入库」三步")
     parser.add_argument("--re-answer", action="store_true",
                         help="答案回填覆盖已有内容（默认只补空答案）")
     parser.add_argument("--reconvert", action="store_true", help="重跑 MinerU（删除已有 md 重新转换）")
@@ -114,6 +119,18 @@ def parse_args(argv=None):
                          "其它情况请用 --file/--subject 等范围参数")
         if args.paper_id <= 0:
             parser.error("--paper-id 必须是正整数")
+    if args.fix_only:
+        # 这些开关和「只补题」语义相反：同给会让用户以为会重建/导入，实际都被跳过
+        for given, flag in (
+            (args.answers, "--answers"),
+            (args.cards_only, "--cards-only"),
+            (args.reconvert, "--reconvert"),
+            (args.re_extract, "--re-extract"),
+            (args.re_publish, "--re-publish"),
+            (args.redo, "--redo"),
+        ):
+            if given:
+                parser.error(f"--fix-only 只补题，不能与 {flag} 同用")
     return args
 
 
@@ -465,6 +482,12 @@ def _answers_only(args) -> bool:
 def _execute(args) -> int:
     """按 args 里的范围跑完整管线（单卷/单批）。"""
     answers_only = _answers_only(args)
+    if args.fix_only:
+        # 只补题：把前 6 步全关掉（含 MinerU 转换、切题、入库），
+        # 只留第 7/8/9 步 —— 与手写那串 --skip-* 完全等价，没有额外分支逻辑。
+        args.skip_convert = args.skip_extract = args.skip_publish = True
+        args.skip_meta = args.skip_load = args.skip_answers = True
+        print("=== 只补题（跳过 convert/extract/publish/入库/答案回填）===", flush=True)
     if answers_only:
         # 把前 5 步与 7/8/9 步关掉，只保留第 6 步
         args.skip_convert = args.skip_extract = args.skip_publish = True

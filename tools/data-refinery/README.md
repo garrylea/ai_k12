@@ -297,6 +297,16 @@ python src/import_cli.py --answers 昌平一中题解.md --paper-id 362
 
 `.jsonl` 直接透传 `--records`（记录自带定位，`--paper-id` 会被忽略）。`--answers` 不受 `--skip-load` 限制。
 
+**只补题（`--fix-only`）**：等价于手写 `--skip-convert --skip-extract --skip-publish --skip-meta --skip-load --skip-answers`，只跑「扫描识别问题 → 人工补题 → 补题入库」，**不会重跑 MinerU、切题或入库**：
+
+```bash
+python src/import_cli.py --subject 物理 --file "汇文" --fix-only
+# 题已经补在 output/manual_fixes/ 里、只想写库：加 --skip-review
+python src/import_cli.py --subject 物理 --file "汇文" --fix-only --skip-review
+```
+
+`--fix-only` 与 `--answers` / `--cards-only` / `--reconvert` / `--re-extract` / `--re-publish` / `--redo` 互斥（同给会直接报错）。
+
 ## 配置
 
 | 环境变量 | 说明 | 默认值 |
