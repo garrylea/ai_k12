@@ -479,6 +479,86 @@ def test_menu_2_missing_image_reports_and_reprompts(tmp_path, monkeypatch, capsy
     assert "找不到文件" in capsys.readouterr().out
 
 
+# ---------- 剪贴板图片（⌘V / 菜单 4） ----------
+
+def _fake_clipboard(monkeypatch, tmp_path, suffix=".png", content=b"png"):
+    img = tmp_path / f"clip{suffix}"
+    img.write_bytes(content)
+    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: img)
+    return img
+
+
+def test_menu_4_reads_clipboard_image(tmp_path, monkeypatch):
+    img = _fake_clipboard(monkeypatch, tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO("4\n1\n\n"))
+    called = {}
+
+    def fake_convert(image, md_dir):
+        called["image"] = image
+        return "剪贴板题干"
+
+    monkeypatch.setattr(manual_fix, "_image_to_markdown", fake_convert)
+
+    assert manual_fix._collect_content(tmp_path) == "剪贴板题干"
+    assert called["image"] == img
+
+
+def test_empty_line_picks_up_clipboard_image(tmp_path, monkeypatch):
+    """⌘V 图片时终端送不出字符，用户接着按的回车（空行）要能落到剪贴板图片上。"""
+    _fake_clipboard(monkeypatch, tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n1\n\n"))
+    monkeypatch.setattr(manual_fix, "_image_to_markdown", lambda i, d: "剪贴板题干")
+
+    assert manual_fix._collect_content(tmp_path) == "剪贴板题干"
+
+
+def test_empty_line_without_clipboard_still_reads_pasted_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: None)
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n正文\nEOF\n1\n\n"))
+
+    assert manual_fix._collect_content(tmp_path) == "正文"
+
+
+def test_menu_4_without_clipboard_image_reprompts(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: None)
+    monkeypatch.setattr("sys.stdin", io.StringIO("4\n正文\nEOF\n1\n\n"))
+
+    assert manual_fix._collect_content(tmp_path) == "正文"
+    assert "剪贴板里没有图片" in capsys.readouterr().out
+
+
+def test_clipboard_copied_file_is_read_as_text(tmp_path, monkeypatch):
+    """Finder 里 ⌘C 一个 .md：剪贴板里是文件路径，按文件读，别当图片 OCR。"""
+    src = tmp_path / "q.md"
+    src.write_text("从剪贴板文件来的题干", encoding="utf-8")
+    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: src)
+
+    assert manual_fix._from_clipboard(tmp_path) == "从剪贴板文件来的题干"
+
+
+def test_clipboard_probe_none_when_osascript_missing(tmp_path, monkeypatch):
+    def boom(*a, **kw):
+        raise FileNotFoundError("osascript")
+
+    monkeypatch.setattr(manual_fix.subprocess, "run", boom)
+
+    assert manual_fix._clipboard_to_path(tmp_path) is None
+
+
+def test_clipboard_probe_parses_file_and_png(tmp_path, monkeypatch):
+    img = tmp_path / "clipboard.png"
+    img.write_bytes(b"png")
+    out = {"stdout": f"PNG:{img}"}
+    monkeypatch.setattr(manual_fix.subprocess, "run",
+                        lambda *a, **kw: type("R", (), out))
+    monkeypatch.setattr(manual_fix.sys, "platform", "darwin")
+
+    assert manual_fix._clipboard_to_path(tmp_path) == img
+
+    out["stdout"] = "NONE"
+    assert manual_fix._clipboard_to_path(tmp_path) is None
+
+
 def test_confirm_redo_discards_previous_text(tmp_path, monkeypatch):
     """粘错了按 3（重新粘贴）：上一版不能残留。"""
     monkeypatch.setattr("sys.stdin", io.StringIO(

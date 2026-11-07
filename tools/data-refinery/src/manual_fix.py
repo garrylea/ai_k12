@@ -5,7 +5,11 @@
     也可以单独跑 src/fix_question_cli.py（同一套逻辑）。
 
 一次交互的输入约定（2026-10-31 改为显式菜单）：
-- 先选方式：`1` 粘贴文本 / `2` 图片路径（走 MinerU）/ `3` 本地文件；直接粘贴正文也行；
+- 先选方式：`1` 粘贴文本 / `2` 图片路径（走 MinerU）/ `3` 本地文件 /
+  `4` 剪贴板图片；直接粘贴正文也行；
+- 截图后按 ⌘V/⌘C 出来的图贴不进来：终端只会往 stdin 送字符，图片在 PTY 里
+  没有通道 —— 所以图片只能由进程自己去问系统剪贴板（2026-11-07 起支持）。
+  在菜单处 ⌘V 后按回车，或直接选 `4`，都会去读剪贴板；
 - 粘贴时出现 `EOF` 即结束（大小写均可，也认 END / 结束）；
 - 录入后先预览，`回车` 确认 / `e` 用 $EDITOR 改 / `r` 重输 / `s` 跳过；
 - `q` 退出。
@@ -22,6 +26,7 @@ import getpass
 import json
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from datetime import datetime
@@ -301,6 +306,100 @@ def _from_file(paper_md_dir: Path, raw: str | None = None) -> str | None:
         return None
 
 
+# 剪贴板探测：优先「复制的文件」（Finder 里 ⌘C 一个 .md/.png），其次才是图片本身。
+# 为什么不这么做就会错：Finder 复制文件时，剪贴板同时带着文件 URL 和缩略图 TIFF，
+# 只读图像数据会把「文件图标」当成题目截图送去 OCR。
+_CLIPBOARD_APPLESCRIPT = r"""
+on run argv
+    set outDir to item 1 of argv
+    try
+        set f to the clipboard as «class furl»
+        return "FILE:" & (POSIX path of f)
+    end try
+    try
+        set d to the clipboard as «class PNGf»
+    on error
+        return "NONE"
+    end try
+    set p to outDir & "/clipboard.png"
+    set fh to open for access (POSIX file p) with write permission
+    set eof fh to 0
+    write d to fh
+    close access fh
+    return "PNG:" & p
+end run
+"""
+
+
+def _probe_macos_clipboard(tmp_dir: Path) -> str:
+    """→ "FILE:<路径>" / "PNG:<临时png>" / "NONE"。"""
+    res = subprocess.run(
+        ["osascript", "-e", _CLIPBOARD_APPLESCRIPT, str(tmp_dir)],
+        capture_output=True, text=True, timeout=10,
+    )
+    return (res.stdout or "").strip()
+
+
+def _probe_linux_clipboard(tmp_dir: Path) -> str:
+    if shutil.which("wl-paste"):
+        types = subprocess.run(
+            ["wl-paste", "--list-types"], capture_output=True, text=True, timeout=5,
+        ).stdout
+        if "image/png" not in types:
+            return "NONE"
+        data = subprocess.run(
+            ["wl-paste", "--type", "image/png"], capture_output=True, timeout=10,
+        ).stdout
+    elif shutil.which("xclip"):
+        data = subprocess.run(
+            ["xclip", "-selection", "clipboard", "-t", "image/png", "-o"],
+            capture_output=True, timeout=10,
+        ).stdout
+    else:
+        return "NONE"
+    if not data:
+        return "NONE"
+    p = tmp_dir / "clipboard.png"
+    p.write_bytes(data)
+    return f"PNG:{p}"
+
+
+def _clipboard_to_path(tmp_dir: Path) -> Path | None:
+    """从系统剪贴板取图片（落成临时 png）或复制的文件路径；没有则 None。
+
+    终端只往 stdin 送字符，图片在 PTY 里没有通道，所以补题时「截图 → ⌘V」
+    必须由进程自己去问系统剪贴板；这里只负责拿到本地文件，识别仍走 MinerU。
+    """
+    try:
+        raw = (_probe_macos_clipboard(tmp_dir) if sys.platform == "darwin"
+               else _probe_linux_clipboard(tmp_dir))
+    except (OSError, subprocess.SubprocessError):
+        return None          # 没 osascript / wl-paste / 超时：当作剪贴板里没图
+    if not raw or raw == "NONE":
+        return None
+    kind, _, value = raw.partition(":")
+    path = Path(value).expanduser()
+    if not path.exists() or (path.is_file() and path.stat().st_size == 0):
+        return None
+    return path
+
+
+def _from_clipboard(paper_md_dir: Path, *, silent: bool = False) -> str | None:
+    """剪贴板图片 → MinerU → Markdown；剪贴板是文件则按文件读。
+
+    ``silent=True``：剪贴板没图时不打扰用户（菜单处按回车顺带探测的场景）。
+    """
+    with tempfile.TemporaryDirectory(prefix="refinery-clip-") as tmp:
+        path = _clipboard_to_path(Path(tmp))
+        if path is None:
+            if not silent:
+                console().warn("剪贴板里没有图片：先截图 / ⌘C 复制，再回来选 4")
+            return None
+        if path.suffix.lower() in IMAGE_SUFFIXES:
+            return _from_image(paper_md_dir, path)
+        return _from_file(paper_md_dir, str(path))
+
+
 _EDIT_HINT = "d N 删第N行 · c N 内容 改第N行 · i N 内容 在第N行后插入 · p 重看 · w 完成 · q 放弃"
 
 
@@ -409,12 +508,14 @@ def _confirm_text(text: str) -> tuple[str, str]:
 def _collect_content(paper_md_dir: Path) -> str | None:
     """读人工输入；返回 Markdown 正文，跳过时返回 None。
 
-    先问用哪种方式（1 粘贴 / 2 图片 / 3 文件），再预览确认。
-    直接粘贴正文也认：首行不是 1/2/3/s/q 就当成正文的第一行。
+    先问用哪种方式（1 粘贴 / 2 图片路径 / 3 文件 / 4 剪贴板），再预览确认。
+    直接粘贴正文也认：首行不是这些命令就当成正文的第一行。
+    空行也认：截图后按 ⌘V 时终端送不出任何字符，用户接着按的回车就是这里读到的
+    空行 —— 此时先探一次剪贴板，有图就按图片处理，没图再走原来的「粘贴文本」。
     """
     c = console()
     while True:
-        c.prompt("选择方式 1/2/3（或直接粘贴正文）› ")
+        c.prompt("选择方式 1/2/3/4（或直接粘贴正文 / ⌘V 图片后回车）› ")
         first = _read_line()
         if first is None:
             return None
@@ -427,10 +528,15 @@ def _collect_content(paper_md_dir: Path) -> str | None:
 
         if first in ("e", "r"):
             # 还没录内容就想改：说清楚该按什么，别把这个字母吃进正文
-            c.warn("还没有可修改的内容；请按 1 粘贴正文 / 2 图片路径 / 3 文件路径")
+            c.warn("还没有可修改的内容；请按 1 粘贴正文 / 2 图片路径 / "
+                   "3 文件路径 / 4 剪贴板图片")
             continue
-        if low == "1" or first == "":
-            text = _read_block("")
+        if low == "4":
+            text = _from_clipboard(paper_md_dir)
+        elif low == "1" or first == "":
+            text = _from_clipboard(paper_md_dir, silent=True) if first == "" else None
+            if text is None:
+                text = _read_block("")
         elif low == "2":
             text = _from_image(paper_md_dir)
         elif low == "3":
@@ -538,7 +644,7 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
     c = console()
     c.step(index, total, f"录入第 {target_no} 题", note)
     c.legend([("1", "粘贴文本"), ("2", "图片路径"), ("3", "文件路径"),
-              ("s", "跳过本题"), ("q", "退出")])
+              ("4", "剪贴板图片"), ("s", "跳过本题"), ("q", "退出")])
 
     content = _collect_content(paper_md_dir)
     if content is None:
