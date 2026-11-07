@@ -77,6 +77,7 @@
 - **唯一写入口**：`StudentKnowledgeMasteryRepository.upsertOnJudge()`（`database/repositories/student-knowledge-mastery.repo.ts`）。
 - **语义**：`mastery_score = correct_count / (correct_count + error_count)`（**累计正确率**，非 IRT、非加权衰减）；`level = FLOOR(5 * score)`（0–5 档）。首次插入：答对 → `1.0 / 5`，答错 → `0.0 / 0`。
 - **调用链**：`JudgeCoreService.finishJudge()` → `void masteryService.recordFromJudge(...)`，**无 source 分支** → `practice`（卡中心）、`training`（`judgeTraining` → `judgeCore.judgeQuestion`）、`exams`、`remediation` **判题都回写**。
+  - **自评路径（2026-11-07 用户裁决）**：主观题自评也计入掌握度 —— `JudgeCoreService.recordSelfAssessment` / `PracticeService.selfAssess` / `VariationService.selfAssess` / `RemediationService.selfAssess` → `MasteryService.recordFromSelfAssessment(correct|incorrect)` → 复用同一个 `recordFromJudge`（`correct → true`、`incorrect → false`）。公式、KP 关联规则、失败容错仍只有一份实现。
   - ⚠️ **勘误**：2026-09-23 brainstorming 的调研摘要曾写「只有 practice 回写、training 不回写」，**该结论错误**（`training.service.ts:173-174` 即走 `judgeQuestion`）。本设计以本条为准。
   - 闭环因此成立：推荐 → 专项练习 → 判题 → 掌握度更新。
 

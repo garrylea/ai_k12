@@ -134,6 +134,9 @@ function harness() {
   const pointsService = {
     award: vi.fn().mockResolvedValue({ pointsAwarded: 3, balance: 100, totalEarned: 200, levelUp: null }),
   };
+  const masteryService = {
+    recordFromSelfAssessment: vi.fn().mockResolvedValue(undefined),
+  };
 
   const service = new RemediationService(
     remediationRepo as any,
@@ -144,11 +147,12 @@ function harness() {
     generator as any,
     judgeCore as any,
     pointsService as any,
+    masteryService as any,
   );
 
   return {
     service, remediationRepo, questionsRepo, mainErrorRepo,
-    examSessionsRepo, trainingSessionsRepo, generator, judgeCore, pointsService,
+    examSessionsRepo, trainingSessionsRepo, generator, judgeCore, pointsService, masteryService,
   };
 }
 
@@ -706,7 +710,7 @@ describe('submitAnswer', () => {
 
 describe('selfAssess', () => {
   it('自评「会做」→ 置 is_correct + 全对清套，且**不调用 judgeCore.judgeQuestion**（不入错题本/不清零/不发 error_fix）', async () => {
-    const { service, remediationRepo, judgeCore, pointsService, mainErrorRepo } = harness();
+    const { service, remediationRepo, judgeCore, pointsService, mainErrorRepo, masteryService } = harness();
     remediationRepo.findItemsBySet.mockResolvedValue([makeItem({ id: ITEM_ID, is_correct: 1 })]);
 
     const res = await service.selfAssess(STUDENT_ID, { questionId: QUESTION_ID, assessment: 'correct' });
@@ -717,11 +721,15 @@ describe('selfAssess', () => {
     expect(remediationRepo.deleteSet).toHaveBeenCalledWith(SET_ID);
     expect(pointsService.award).toHaveBeenCalledWith(expect.objectContaining({ taskCode: 'remediation_question' }));
     expect(mainErrorRepo.findUnclearedByStudentQuestionId).not.toHaveBeenCalled();
+    // 掌握度仍写（2026-11-07）：只碰 mastery，不碰错题本
+    expect(masteryService.recordFromSelfAssessment).toHaveBeenCalledWith({
+      studentId: STUDENT_ID, questionId: QUESTION_ID, assessment: 'correct',
+    });
     expect(res).toMatchObject({ isCorrect: true, method: 'self_assess', setCompleted: true, remainingCount: 0 });
   });
 
   it('自评「不会」→ 不置 is_correct、仍首答发分、不调 judgeCore', async () => {
-    const { service, remediationRepo, judgeCore, pointsService } = harness();
+    const { service, remediationRepo, judgeCore, pointsService, masteryService } = harness();
     remediationRepo.findItemsBySet.mockResolvedValue([makeItem({ id: ITEM_ID, is_correct: 0 })]);
 
     const res = await service.selfAssess(STUDENT_ID, { questionId: QUESTION_ID, assessment: 'incorrect' });
@@ -730,6 +738,9 @@ describe('selfAssess', () => {
     expect(remediationRepo.markItemCorrect).not.toHaveBeenCalled();
     expect(remediationRepo.deleteSet).not.toHaveBeenCalled();
     expect(pointsService.award).toHaveBeenCalledTimes(1);
+    expect(masteryService.recordFromSelfAssessment).toHaveBeenCalledWith({
+      studentId: STUDENT_ID, questionId: QUESTION_ID, assessment: 'incorrect',
+    });
     expect(res).toMatchObject({ isCorrect: false, method: 'self_assess', setCompleted: false, remainingCount: 1 });
   });
 

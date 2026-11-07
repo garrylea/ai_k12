@@ -65,3 +65,30 @@ describe('MasteryService.recordFromJudge', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe('MasteryService.recordFromSelfAssessment', () => {
+  it('correct → 按答对累加（复用 recordFromJudge 的同一公式）', async () => {
+    const d = mk();
+
+    await mkSvc(d).recordFromSelfAssessment({ studentId: 11, questionId: 330, assessment: 'correct' });
+
+    expect(d.masteryRepo.upsertOnJudge).toHaveBeenCalledWith(11, 42, true);
+  });
+
+  it('incorrect → 按答错累加', async () => {
+    const d = mk();
+
+    await mkSvc(d).recordFromSelfAssessment({ studentId: 11, questionId: 330, assessment: 'incorrect' });
+
+    expect(d.masteryRepo.upsertOnJudge).toHaveBeenCalledWith(11, 42, false);
+  });
+
+  it('questionId 为 null（孤儿题）→ 不查不写', async () => {
+    const d = mk();
+
+    await mkSvc(d).recordFromSelfAssessment({ studentId: 11, questionId: null, assessment: 'correct' });
+
+    expect(d.questionsRepo.findKnowledgePointIdsByQuestion).not.toHaveBeenCalled();
+    expect(d.masteryRepo.upsertOnJudge).not.toHaveBeenCalled();
+  });
+});

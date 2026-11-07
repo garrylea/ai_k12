@@ -46,7 +46,10 @@ const mk = (overrides: any = {}) => ({
     todayKey: vi.fn(() => '2026-09-17'),
   },
   // 埋点 Phase 1B：JudgeCoreService 第 8 参（掌握度回写，fire-and-forget）
-  masteryService: { recordFromJudge: vi.fn().mockResolvedValue(undefined) },
+  masteryService: {
+    recordFromJudge: vi.fn().mockResolvedValue(undefined),
+    recordFromSelfAssessment: vi.fn().mockResolvedValue(undefined),
+  },
   ...overrides,
 });
 
@@ -54,9 +57,10 @@ const mk = (overrides: any = {}) => ({
  *  第 11 参 judgeCore 为判题核心抽取新增依赖；explanationCache 注入判题核心内部
  *  （判错解析缓存生成，PracticeService 不经手）——机械注入调整，不改测试语义。
  *  judgeCore 第 6 参 selfAssessRepo 为判题体系重构（2026-09-09）新增（recordSelfAssessment 用）；
-  PracticeService 第 12 参 selfAssessRepo、第 13 参 explanationCache 为 POST /self-assess 新增。 */
+  PracticeService 第 12 参 selfAssessRepo、第 13 参 explanationCache 为 POST /self-assess 新增；
+  第 14 参 masteryService 为 2026-11-07「自评题也计入掌握度」新增。 */
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any, deps.pointsService as any, deps.masteryService as any), deps.selfAssessRepo as any, deps.explanationCache as any);
+  new PracticeService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.cardsRepo, deps.hint as any, deps.conversationsService as any, deps.practiceResultsRepo as any, deps.contentService as any, deps.progressRepo as any, new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any, deps.pointsService as any, deps.masteryService as any), deps.selfAssessRepo as any, deps.explanationCache as any, deps.masteryService as any);
 
 describe('PracticeService.judge', () => {
   it('客观题命中 -> exact 比对，答错入错题本（不插题）', async () => {
@@ -843,6 +847,7 @@ describe('PracticeService.selfAssess', () => {
       studentAnswer: '学生答', assessment: 'incorrect',
     });
     expect(deps.selfAssessRepo.create).toHaveBeenCalledWith({ studentId: 1, questionId: 99, assessment: 'incorrect', source: 'practice' });
+    expect(deps.masteryService.recordFromSelfAssessment).toHaveBeenCalledWith({ studentId: 1, questionId: 99, assessment: 'incorrect' });
     expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledTimes(1);
     expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledWith(expect.objectContaining({
       student_id: 1, subject_id: 2, card_id: 5, lesson_id: 9, question_id: 99,
@@ -866,6 +871,7 @@ describe('PracticeService.selfAssess', () => {
       studentAnswer: '学生答', assessment: 'correct',
     });
     expect(deps.selfAssessRepo.create).not.toHaveBeenCalled();
+    expect(deps.masteryService.recordFromSelfAssessment).not.toHaveBeenCalled();
     expect(deps.practiceResultsRepo.upsert).toHaveBeenCalledWith(expect.objectContaining({
       student_id: 1, subject_id: 2, card_id: 5, lesson_id: 9, question_id: null,
       question_n: '0-1', question_text: '未入库主观题', student_answer: '学生答',
@@ -902,6 +908,7 @@ describe('PracticeService.selfAssess', () => {
       studentAnswer: '学生答', assessment: 'correct',
     });
     expect(deps.mainErrorRepo.clearUnclearedByStudentQuestionId).toHaveBeenCalledWith(1, 99);
+    expect(deps.masteryService.recordFromSelfAssessment).toHaveBeenCalledWith({ studentId: 1, questionId: 99, assessment: 'correct' });
     expect(deps.pointsService.award).toHaveBeenCalledWith(expect.objectContaining({
       taskCode: 'error_fix',
       dedupeKey: 'err:1:99:2026-09-17',

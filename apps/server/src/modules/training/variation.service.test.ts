@@ -85,8 +85,11 @@ function harness(over: {
         : over.judged,
     ),
   };
-  const service = new VariationService(variationRepo as any, questionsRepo as any, judgeCore as any);
-  return { service, variationRepo, questionsRepo, judgeCore };
+  const masteryService = {
+    recordFromSelfAssessment: vi.fn().mockResolvedValue(undefined),
+  };
+  const service = new VariationService(variationRepo as any, questionsRepo as any, judgeCore as any, masteryService as any);
+  return { service, variationRepo, questionsRepo, judgeCore, masteryService };
 }
 
 describe('VariationService.listPending', () => {
@@ -187,6 +190,9 @@ describe('VariationService.selfAssess', () => {
     const r = await h.service.selfAssess(STUDENT_ID, { questionId: QUESTION_ID, assessment: 'correct' });
     expect(h.judgeCore.judgeQuestion).not.toHaveBeenCalled();
     expect(h.variationRepo.markAnswered).toHaveBeenCalledWith(VARIATION_ID, true);
+    expect(h.masteryService.recordFromSelfAssessment).toHaveBeenCalledWith({
+      studentId: STUDENT_ID, questionId: QUESTION_ID, assessment: 'correct',
+    });
     expect(r).toEqual({
       isCorrect: true, method: 'self_assess', errorType: null,
       needsSelfAssessment: false, referenceAnswer: null, explanation: null,
@@ -198,6 +204,9 @@ describe('VariationService.selfAssess', () => {
     const h = harness({ pendingList: [] });
     const r = await h.service.selfAssess(STUDENT_ID, { questionId: QUESTION_ID, assessment: 'incorrect' });
     expect(h.variationRepo.markAnswered).toHaveBeenCalledWith(VARIATION_ID, false);
+    expect(h.masteryService.recordFromSelfAssessment).toHaveBeenCalledWith({
+      studentId: STUDENT_ID, questionId: QUESTION_ID, assessment: 'incorrect',
+    });
     expect(r.isCorrect).toBe(false);
   });
 

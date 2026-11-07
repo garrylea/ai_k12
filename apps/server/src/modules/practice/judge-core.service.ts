@@ -751,7 +751,8 @@ export class JudgeCoreService {
 
   /**
    * 主观题自评落库（self_assess 模式，训练/考试/课堂练习自评端点共用）：
-   * 自评留痕（question_self_assessments）+ 错题本写入/清零——镜像判题的答错/答对路径，
+   * 自评留痕（question_self_assessments）+ **掌握度回写**（2026-11-07 起）+
+   * 错题本写入/清零——镜像判题的答错/答对路径，
    * 「错题清零」门禁因此零改动（主观题错题与客观题错题在 main_error_books 形态一致）。
    *
    * 自评对且**确实清掉未清错题**时按 `error_fix` 发分（走 `awardErrorFixOnClear` 同一判决）；
@@ -773,6 +774,13 @@ export class JudgeCoreService {
       questionId: input.questionId,
       assessment: input.assessment,
       source: input.source,
+    });
+    // 掌握度回写（2026-11-07 用户裁决：自评题也计入）。fire-and-forget，与 finishJudge 同口径：
+    // 自评是主链路、掌握度是派生数据，写失败只 warn，绝不让自评接口失败。
+    void this.masteryService.recordFromSelfAssessment({
+      studentId: input.studentId,
+      questionId: input.questionId,
+      assessment: input.assessment,
     });
     if (input.assessment === 'incorrect') {
       const errorBookId = await this.writeErrorBookOrReuse({

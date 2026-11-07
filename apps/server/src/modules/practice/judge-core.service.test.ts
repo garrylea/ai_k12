@@ -25,7 +25,10 @@ const mk = (overrides: any = {}) => ({
   // Task 10 新增第 7 参：错题订正发分（error_fix）
   pointsService: { award: vi.fn().mockResolvedValue({ pointsAwarded: 3 }), todayKey: vi.fn(() => '2026-09-17') },
   // 埋点 Phase 1B 新增第 8 参：掌握度回写（fire-and-forget）
-  masteryService: { recordFromJudge: vi.fn().mockResolvedValue(undefined) },
+  masteryService: {
+    recordFromJudge: vi.fn().mockResolvedValue(undefined),
+    recordFromSelfAssessment: vi.fn().mockResolvedValue(undefined),
+  },
   ...overrides,
 });
 
@@ -174,7 +177,10 @@ function makeService(overrides: Partial<Record<'questions' | 'mainError' | 'self
   };
   const selfAssess = overrides.selfAssess ?? { create: vi.fn(async () => 1) };
   const pointsService = overrides.points ?? { award: vi.fn(async () => ({ pointsAwarded: 3 })), todayKey: vi.fn(() => '2026-09-17') };
-  const masteryService = overrides.mastery ?? { recordFromJudge: vi.fn(async () => undefined) };
+  const masteryService = overrides.mastery ?? {
+    recordFromJudge: vi.fn(async () => undefined),
+    recordFromSelfAssessment: vi.fn(async () => undefined),
+  };
   // 埋点 Phase 2 新增第 9 参：行为事件流（fire-and-forget）
   const events = overrides.events ?? { track: vi.fn() };
   const explanationCache = overrides.explanationCache ?? { ensureExplanation: vi.fn() };
@@ -547,19 +553,21 @@ describe('judgeForPractice 空答案守卫', () => {
 });
 
 describe('recordSelfAssessment', () => {
-  it('incorrect：留痕 + find-or-create 错题本', async () => {
-    const { svc, selfAssess, mainError } = makeService();
+  it('incorrect：留痕 + find-or-create 错题本 + 掌握度记错', async () => {
+    const { svc, selfAssess, mainError, masteryService } = makeService();
     const out = await svc.recordSelfAssessment({ studentId: 7, subjectId: 1, questionId: 10, assessment: 'incorrect', source: 'targeted' });
     expect(selfAssess.create).toHaveBeenCalledWith({ studentId: 7, questionId: 10, assessment: 'incorrect', source: 'targeted' });
     expect(mainError.create).toHaveBeenCalledWith(expect.objectContaining({ student_id: 7, question_id: 10, source: 'targeted' }));
+    expect(masteryService.recordFromSelfAssessment).toHaveBeenCalledWith({ studentId: 7, questionId: 10, assessment: 'incorrect' });
     expect(out.errorBookId).toBe(101);
   });
 
-  it('correct：留痕 + 清零未清错题（best-effort）', async () => {
-    const { svc, mainError } = makeService();
+  it('correct：留痕 + 清零未清错题（best-effort）+ 掌握度记对', async () => {
+    const { svc, mainError, masteryService } = makeService();
     await svc.recordSelfAssessment({ studentId: 7, subjectId: 1, questionId: 10, assessment: 'correct', source: 'exam', sourceRefId: 55 });
     expect(mainError.clearUnclearedByStudentQuestionId).toHaveBeenCalledWith(7, 10);
     expect(mainError.create).not.toHaveBeenCalled();
+    expect(masteryService.recordFromSelfAssessment).toHaveBeenCalledWith({ studentId: 7, questionId: 10, assessment: 'correct' });
   });
 
   it('correct + 真正清掉未清错题（非 exam）-> 走同一 error_fix 判决发分', async () => {

@@ -452,7 +452,9 @@ apps/server/src/ai-core/infra/llm-call-log.ts   # LlmCallSink 单例（仿 model
 
 ### 6.4 掌握度写回
 
-新增 `MasteryService`，由 `PracticeModule` **只 provide 一次**并注入 `JudgeCoreService`——**勿在其它模块重复 provide**（会分裂状态，同 `ExplanationCacheService` 的教训）。挂载点：`judgeQuestion`（`:143`）、`judgeForPractice`（`:265`）、`recordSelfAssessment`（`:533`）。逻辑见 §4.8。
+新增 `MasteryService`，由 `PracticeModule` **只 provide 一次**并注入 `JudgeCoreService`——**勿在其它模块重复 provide**（会分裂状态，同 `ExplanationCacheService` 的教训）。挂载点：`judgeQuestion`、`judgeForPractice`、`recordSelfAssessment`。逻辑见 §4.8。
+
+> **2026-11-07 更新（用户裁决）**：`recordSelfAssessment` 的挂载从设计占位变为真实实现，并新增 `recordFromSelfAssessment(correct|incorrect)`（内部复用 `recordFromJudge`）。除 `JudgeCoreService` 外，`PracticeService.selfAssess` / `VariationService.selfAssess` / `RemediationService.selfAssess` 也各自调用（后两者刻意不经 JudgeCore）；**四条路径全部 fire-and-forget，失败只 warn**。语义：每条自评算一次，空白/无 KP 不写。
 
 必测用例：空答案不写 / 无 KP 不写 / 对错各累加 / repo 抛错不冒泡。
 

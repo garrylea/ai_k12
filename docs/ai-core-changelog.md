@@ -8,6 +8,46 @@
 
 ---
 
+## 2026-11-07 自评题计入掌握度（用户裁决）
+
+**需求**（用户）：主观题自评结果也必须进入薄弱点图谱，不能只算客观判题。
+
+**改动**：
+1. `MasteryService.recordFromSelfAssessment({studentId, questionId, assessment})`：把 `correct/incorrect` 映射成 `true/false` 后**复用 `recordFromJudge`**，公式、KP 关联规则、失败容错只有一份实现。
+2. 四条自评路径全部 fire-and-forget 调用（失败只 warn，不阻断自评）：
+   - `JudgeCoreService.recordSelfAssessment`（训练/考试结果页自评，`source=targeted|error_practice|exam`）
+   - `PracticeService.selfAssess`（课堂练习，`questionId != null` 时）
+   - `VariationService.selfAssess`（变式，CAS 落定成功后）
+   - `RemediationService.selfAssess`（补偿套题，`applyOutcome` 成功后）
+3. 语义：**每条自评算一次**（与客观题每次判题累加同口径）；空白/未作答/无 KP 关联仍不写。变式/补偿套题的自评不写 `question_self_assessments` 留痕，但掌握度照写。
+
+**历史回填**：新增 `tools/db/backfill_self_assess_mastery.py`（默认备份→写入→复查，`--dry-run` 预览，状态文件按 `question_self_assessments.id` 防重复）。已执行 49 条自评 / 2 个学生：学生 2 数学 38 个知识点 / 176 样本（9 个过门槛）、物理 16/62；学生 7 数学 56/375（33 个过门槛）、语文 12/25、物理 19/148。备份 `tools/db/backups/20261107-093230_mastery_before_self_assess.json`，幂等状态 `tools/db/backups/self_assess_mastery_backfill_state.json`。
+
+**测试**：`mastery/judge-core/practice/variation/remediation` 五个测试文件补断言，189 passed；`npm run build` 通过。
+
+**影响面**：家长端「真掌握度」卡读同一张 `student_knowledge_mastery`，因此也会包含自评数据（两卡仍并存不合并）。变式/补偿套题的历史自评无留痕表，无法回填，只保证今后写入。
+
+---
+
+## 2026-11-07 数学薄弱点图谱为空：历史套卷作答从未写入掌握度
+
+**现象**（用户报）：做了很多数学套卷和专项，进入训练轨「薄弱点图谱」仍几乎全灰；一级行全显示「未开始」。
+
+**根因（三条叠加，均为历史数据问题，不是页面 bug）**：
+1. **知识点断链**：2026-11-02/03 的数学套卷判题时，题目还没有 `question_knowledge_points` 关联（该入库链路 2026-11-05 才修好，见同日条目）。`MasteryService` 只查 `question_knowledge_points`，查不到就一条掌握度都不写。
+2. **标准答案晚到**：2026-11-05/06 的部分数学卷在作答时 `questions.answer` 仍为空（2026-11-06 18:21 才补入）。`judgeQuestion` 的空答案守卫会把已填的 A/B/C 也记成 `unanswered`，`isCorrect=null` 不写掌握度。
+3. **自评不计入**（**当时口径；2026-11-07 已改，见上一条「自评题计入掌握度」**）：数学解答题/证明题走 `self_assess`，当时的 `recordSelfAssessment` 只写错题本、不写掌握度。
+
+**数据对比**：学生 2（garry）数学历史上有 246 道真实判过对错的套卷作答，但掌握度表里只有 2 个知识点（3 题 / 1 题，均低于 5 题着色门槛）；物理卷在 11-01 前就同时具备知识点与答案，故物理有 14 个知识点 / 60 个样本，图谱正常。
+
+**修复**：新增一次性脚本 `tools/db/backfill_math_mastery.py`（默认备份→写入→复查，`--dry-run` 预览，状态文件防重复回填）。只回填 `subject_id=1` 且 `method IN ('exact','ai')` 的套卷作答，公式与 `upsertOnJudge` 一致；`unanswered`/`failed`/`self_assess` 一律排除。已执行：学生 2 → 34 个知识点 / 158 个样本 / 9 个过门槛；学生 7 → 55 个知识点 / 290 个样本 / 28 个过门槛。接口复查 `GET /api/knowledge-graph/students/2/mastery?subjectId=1` 返回 34 个有掌握度节点、9 个 `confidence=ok`；`weak-points` 推荐条恢复（`reason=ok`，首推「二次函数与一元二次方程」）。物理/语文掌握度行数与样本数前后不变。
+
+**备份**：`tools/db/backups/20261107-091331_math_mastery_before.json`；幂等状态 `tools/db/backups/math_mastery_backfill_state.json`。
+
+**遗留**：无（自评题已由同日「自评题计入掌握度」解决；历史自评另行回填）。
+
+---
+
 ## 2026-11-07 `--answers` 用素材原名定位不到卷：`load_papers` 只比 title
 
 **问题**（用户导入海淀道法答案实测）：文档首行 `# 试卷：2026北京海淀初三（上）期中道德与法治`（素材文件夹原名），库里这张卷的 title 被 paper_meta 归一化成 `2026 海淀 初三 期中`（#433，原名只存在 `source_key`）。`answer_importer_cli.load_papers()` 只查 `title LIKE`，命中 0 条；`locate_paper` 无候选返回 `(None, [])`，于是打出「候选如下」却一条都没列，用户完全无从下手（只能改用 `--paper-id 433`）。用户判定：拿原名识别不了说不过去。

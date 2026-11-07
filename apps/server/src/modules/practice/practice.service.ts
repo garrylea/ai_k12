@@ -7,6 +7,7 @@ import { ConversationsService } from '../conversations/conversations.service.js'
 import { ContentService } from '../content/content.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import { JudgeCoreService } from './judge-core.service.js';
+import { MasteryService } from './mastery.service.js';
 import { ExplanationCacheService } from './explanation-cache.service.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
@@ -91,6 +92,7 @@ export class PracticeService {
     private readonly judgeCore: JudgeCoreService,
     private readonly selfAssessRepo: QuestionSelfAssessmentsRepository,
     private readonly explanationCache: ExplanationCacheService,
+    private readonly masteryService: MasteryService,
   ) {}
 
   async judge(input: JudgeInput): Promise<JudgeOutput> {
@@ -177,6 +179,12 @@ export class PracticeService {
         questionId: input.questionId,
         assessment: input.assessment,
         source: 'practice',
+      });
+      // 掌握度回写（2026-11-07 用户裁决：自评题也计入）。fire-and-forget，失败只 warn。
+      void this.masteryService.recordFromSelfAssessment({
+        studentId: input.studentId,
+        questionId: input.questionId,
+        assessment: input.assessment,
       });
     }
     // practice_results 补行（best-effort，与 judge() 同款容错）

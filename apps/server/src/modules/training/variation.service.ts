@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { JudgeCoreService } from '../practice/judge-core.service.js';
+import { MasteryService } from '../practice/mastery.service.js';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import { VariationQuestionsRepository } from '../../database/repositories/variation-questions.repo.js';
 import type { VariationPendingRow, VariationQuestionRow } from '../../database/repositories/variation-questions.repo.js';
@@ -43,6 +44,8 @@ export interface VariationAnswerResult {
  *   → 纯加练完全隔离：不入错题本、不清零原错题、不发 error_fix（用户裁决）；
  * - **主观题自评** 走本类 `selfAssess`，**刻意不经 `judgeCore`**（镜像补偿套题 Task 4 裁决：
  *   `recordSelfAssessment` 没有 variation 分支且会碰错题本；自评只落定变式行本身）。
+ *   **掌握度照写**（2026-11-07）：直接调 `MasteryService.recordFromSelfAssessment`，
+ *   与客观题判题写掌握度同口径；它只碰 student_knowledge_mastery，不碰错题本。
  * - **一次作答即落定**（用户裁决 D1）：判对判错都写 is_correct + answered_at，答错不重出。
  */
 @Injectable()
@@ -53,6 +56,7 @@ export class VariationService {
     private readonly variationRepo: VariationQuestionsRepository,
     private readonly questionsRepo: QuestionsRepository,
     private readonly judgeCore: JudgeCoreService,
+    private readonly masteryService: MasteryService,
   ) {}
 
   /** pending 变式列表（错题本入口 + 结果页提示卡共用一个数据源）。 */
@@ -123,6 +127,12 @@ export class VariationService {
     const isCorrect = input.assessment === 'correct';
     const affected = await this.variationRepo.markAnswered(row.id, isCorrect);
     if (affected === 0) throw new BadRequestException('该变式题不在待练清单或已作答');
+    // 掌握度回写（2026-11-07 用户裁决：自评题也计入）。fire-and-forget，失败只 warn。
+    void this.masteryService.recordFromSelfAssessment({
+      studentId,
+      questionId: input.questionId,
+      assessment: input.assessment,
+    });
     return this.assemble(isCorrect, { method: 'self_assess' }, await this.remainingCount(studentId));
   }
 

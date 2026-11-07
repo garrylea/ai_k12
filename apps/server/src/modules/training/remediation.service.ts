@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import type { AwardResult } from '../points/points.service.js';
 import { PointsService } from '../points/points.service.js';
 import { JudgeCoreService } from '../practice/judge-core.service.js';
+import { MasteryService } from '../practice/mastery.service.js';
 import { RemediationRepository } from '../../database/repositories/remediation.repo.js';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
@@ -93,6 +94,7 @@ export class RemediationService {
     private readonly generator: RemediationGeneratorService,
     private readonly judgeCore: JudgeCoreService,
     private readonly pointsService: PointsService,
+    private readonly masteryService: MasteryService,
   ) {}
 
   /** 题型 -> 积分档位（spec §7）：choice/true_false -> choice；fill_blank -> fill_blank；其余 -> major。 */
@@ -249,13 +251,23 @@ export class RemediationService {
    * **刻意不经 `judgeCore`**（Task 4 复核遗留裁决）：`recordSelfAssessment` 没有 remediation
    * 分支，但本路径不需要它 —— 自评只做「套题自清零」（置 `is_correct` / 发分 / 全对清套），
    * 不入错题本、不清零原错题、不发 `error_fix`。有回归钉子用例钉着「不调 judgeQuestion」。
+   * **掌握度照写**（2026-11-07）：直接调 `MasteryService.recordFromSelfAssessment`，
+   * 与客观题判题写掌握度同口径；它只碰 student_knowledge_mastery，不碰错题本。
    */
   async selfAssess(
     studentId: number,
     input: { questionId: number; assessment: 'correct' | 'incorrect' },
   ): Promise<RemediationAnswerResult> {
     const ctx = await this.requireItem(studentId, input.questionId);
-    return this.applyOutcome(ctx, input.assessment === 'correct', { method: 'self_assess' });
+    const result = await this.applyOutcome(ctx, input.assessment === 'correct', { method: 'self_assess' });
+    // 掌握度回写（2026-11-07 用户裁决：自评题也计入）。放在落定成功之后，
+    // fire-and-forget；失败只 warn，绝不影响套题自清零。
+    void this.masteryService.recordFromSelfAssessment({
+      studentId,
+      questionId: input.questionId,
+      assessment: input.assessment,
+    });
+    return result;
   }
 
   /** 取「本人在 active 套题里且尚未答对」的条目；任一条件不满足即 400（不泄漏他人套题存在性）。 */
