@@ -42,6 +42,7 @@ from datetime import datetime
 from pathlib import Path
 
 from answer_backfill import backfill as answers_backfill
+from answer_merger import is_answer_pair
 from config import RefineryConfig
 from convert_cli import main as convert_main
 from db_loader_cli import main as db_loader_main
@@ -307,11 +308,29 @@ def _ask_candidate(hits: list[Path]) -> Path | None:
         print(f"请输入 1–{len(hits)} 之间的编号", flush=True)
 
 
+def _pick_paired_paper(hits: list[Path]) -> Path | None:
+    """多命中里若恰好是「一份试卷 + 它的答案文件」，返回试卷路径。
+
+    试卷与答案拆成两个 PDF 时，按卷名搜索必然同时命中两份；让人二选一既多余
+    又容易选错（选到答案那份 → 只转答案、不切题）。两份在管线里是一个整体：
+    convert 两份都转，extract 时试卷通过 maybe_merge_answer_md 吸收答案。
+    """
+    if len(hits) != 2:
+        return None
+    first, second = hits
+    if is_answer_pair(first, second):
+        return first
+    if is_answer_pair(second, first):
+        return second
+    return None
+
+
 def _resolve_file(args, cfg) -> int | None:
     """把用户写的 `--file` 关键词解析成唯一一份素材；返回非 None 表示要中止（值即 rc）。
 
     这是「一次导入只碰指定范围」的入口闸门：0 命中就说清没命中什么，
-    多命中就让人选一份，绝不猜、也不整批跑。
+    多命中就让人选一份，绝不猜、也不整批跑。唯独「试卷 + 配对答案」是同一份卷，
+    自动收敛到试卷（答案由切题阶段吸收），不再让人二选一。
     """
     raw = args.file
     if not raw:
@@ -330,27 +349,33 @@ def _resolve_file(args, cfg) -> int | None:
         _print_no_match(args, scope, candidates)
         return 2
 
+    paired_note = ""
     if len(hits) > 1:
-        print(f"[命中 {len(hits)} 份] 关键词 {raw} 需要收窄，先选一份：", flush=True)
-        for idx, rel in enumerate(hits, 1):
-            print(f"  {idx}. {rel.as_posix()}", flush=True)
-        if args.dry_run:
-            print("         [dry-run] 正式执行时会让你选一份；本次按全部候选预演", flush=True)
-            return None
-        if not sys.stdin.isatty():
-            print("[ERROR] 非交互终端无法选择，请把 --file 写得更精确"
-                  "（如再补区县/学校），或改用 --files 逐份指定", flush=True)
-            return 2
-        chosen = _ask_candidate(hits)
-        if chosen is None:
-            return 2
+        paired = _pick_paired_paper(hits)
+        if paired is not None:
+            chosen = paired
+            paired_note = "（含配对答案，切题时自动并入）"
+        else:
+            print(f"[命中 {len(hits)} 份] 关键词 {raw} 需要收窄，先选一份：", flush=True)
+            for idx, rel in enumerate(hits, 1):
+                print(f"  {idx}. {rel.as_posix()}", flush=True)
+            if args.dry_run:
+                print("         [dry-run] 正式执行时会让你选一份；本次按全部候选预演", flush=True)
+                return None
+            if not sys.stdin.isatty():
+                print("[ERROR] 非交互终端无法选择，请把 --file 写得更精确"
+                      "（如再补区县/学校），或改用 --files 逐份指定", flush=True)
+                return 2
+            chosen = _ask_candidate(hits)
+            if chosen is None:
+                return 2
     else:
         chosen = hits[0]
 
     args.file = chosen.name                     # 卷名/书名：第 7/8/9 步与 paper_id 反查用
     args._resolved_rel = chosen.as_posix()      # 精确相对路径：五个路径阶段用
     args._resolved_subject = chosen.parts[0] if chosen.parts else None
-    print(f"[解析] {raw} → {args._resolved_rel}", flush=True)
+    print(f"[解析] {raw} → {args._resolved_rel}{paired_note}", flush=True)
     return None
 
 

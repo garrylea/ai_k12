@@ -700,9 +700,27 @@ def _strip_main_stem_prefix(line: str) -> str:
     return _STEM_PREFIX_RE.sub('', line, count=1).strip()
 
 
+# 答案区单行里的前缀标记：「答案：」「答案示例 2：」「答案要点：」/「解：」。
+# 语文答案 PDF 常见 `1.答案：D（2 分）`，题号被切走之后还剩「答案：D（2 分）」，
+# 不剥前缀/分值，选择题答案就永远对不上选项 label（'答案: C (2 分)' ≠ 'C'）。
+_ANSWER_MARK_RE = re.compile(
+    r'^\s*(?:答案(?:示例|要点)?\s*\d*\s*[:：]\s*|(?:解|证明|原式|原不等式组)[：:]\s*)'
+)
+# 答案末尾的纯分值括号（'（2 分）'/'（共 2分）'）——是评分说明，不是答案正文
+_TRAILING_SCORE_RE = re.compile(r'[（(]\s*(?:共)?\s*\d+(?:\.\d+)?\s*分\s*[）)]\s*$')
+
+
 def _strip_answer_prefix(text: str) -> str:
-    """剥离答案文本开头的'解：'/'证明：'等前缀，只留内容。"""
-    return re.sub(r'^\s*(解|证明|原式|原不等式组)[：:]\s*', '', text.strip())
+    """剥离答案文本开头的标记与末尾纯分值，只留内容。
+
+    '答案：D（2 分）' -> 'D'；'解：x=2' -> 'x=2'；'答案示例：…（2分）' -> '…'。
+    """
+    text = _ANSWER_MARK_RE.sub('', text.strip(), count=1)
+    while True:
+        stripped = _TRAILING_SCORE_RE.sub('', text).rstrip()
+        if stripped == text:
+            return text
+        text = stripped
 
 
 def split_inline_group_header(text: str) -> tuple[str, str | None]:

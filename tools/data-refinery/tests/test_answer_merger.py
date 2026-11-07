@@ -247,3 +247,108 @@ def test_real_fengtai_case3(tmp_path):
     result = maybe_merge_answer_md(paper, paper_text)
     assert result == paper_text  # 丰台 case 3：留试卷文件
     assert "# 数学试卷" not in result  # 答案文件被丢弃
+
+
+# === 手工素材命名（非爬虫「-试卷/-答案」约定） ===
+
+def test_has_answer_section_head_marker_pure_answer():
+    """独立答案文件：答案标题在第 1 行、尾部没有关键字，仍须判为「含答案」。
+
+    回归：旧实现只看末尾 500 字符 + 「解：」次数。海淀九年级语文期中答案
+    （2026）标题在开头、全篇无「解：」，被判成无答案 → 配对后仍被丢弃。
+    """
+    text = (
+        "# 海淀区2026年九年级\n\n# 语文试卷答案及评分参考\n\n"
+        "1.答案：略（1 分）\n2.答案：D（2 分）\n"
+    )
+    assert _has_answer_section(text)
+    assert _is_pure_answer(text)
+
+
+def test_has_answer_section_head_marker_with_options_is_paper():
+    """首屏有「参考答案」但整篇有完整选项序列 → 仍是试卷，不能当独立答案。"""
+    body = "\n".join(
+        f"{i}. 题干文字足够长以超过尾部窗口 (A) 甲 (B) 乙 (C) 丙 (D) 丁"
+        for i in range(1, 12)
+    )
+    text = "# 某卷 参考答案\n" + body + "\n" + ("题干续行" * 100)
+    assert not _has_answer_section(text)
+
+
+def test_derive_answer_path_underscore_suffix_same_dir(tmp_path):
+    """手工卷命名 `X.md` + `X_答案.md`（同目录）也能配对。"""
+    paper = tmp_path / "海淀九年级语文（上）期中语文试题.md"
+    answer = tmp_path / "海淀九年级语文（上）期中语文试题_答案.md"
+    paper.write_text("1. 题干", encoding="utf-8")
+    answer.write_text("1.答案：B", encoding="utf-8")
+    assert _derive_answer_path(paper) == answer
+
+
+def test_derive_answer_path_underscore_suffix_sibling_dir(tmp_path):
+    """手工卷的兄弟目录布局 `X/X.md` + `X_答案/X_答案.md`。
+
+    回归：旧实现 replace('-试卷','-答案') 是空操作，返回试卷自身
+    → 合并时拿自己和自己比，答案静默丢弃（海淀九年级语文期中 2026）。
+    """
+    stem = "海淀九年级语文（上）期中语文试题"
+    paper_dir = tmp_path / stem
+    answer_dir = tmp_path / f"{stem}_答案"
+    paper_dir.mkdir()
+    answer_dir.mkdir()
+    paper = paper_dir / f"{stem}.md"
+    paper.write_text("1. 题干", encoding="utf-8")
+    answer = answer_dir / f"{stem}_答案.md"
+    answer.write_text("# 语文试卷答案及评分参考\n1.答案：B", encoding="utf-8")
+
+    derived = _derive_answer_path(paper)
+    assert derived == answer
+    assert derived != paper
+
+
+def test_case4a_underscore_sibling_dir_merged(tmp_path):
+    """端到端：`X/X.md` + `X_答案/X_答案.md` 的纯答案必须合并进试卷。"""
+    stem = "海淀九年级语文（上）期中语文试题"
+    paper_dir = tmp_path / stem
+    answer_dir = tmp_path / f"{stem}_答案"
+    paper_dir.mkdir()
+    answer_dir.mkdir()
+    paper_text = "1. 题干一\n2. 题干二"
+    paper = paper_dir / f"{stem}.md"
+    paper.write_text(paper_text, encoding="utf-8")
+    (answer_dir / f"{stem}_答案.md").write_text(
+        "# 语文试卷答案及评分参考\n\n1.答案：B（2 分）\n2.答案：D（2 分）\n",
+        encoding="utf-8",
+    )
+
+    merged = maybe_merge_answer_md(paper, paper_text)
+    assert merged != paper_text
+    assert "1.答案：B" in merged
+    assert "2.答案：D" in merged
+
+
+def test_merged_answer_strips_answer_marker_and_score(tmp_path):
+    """合并后单行答案 `1.答案：D（2 分）` 入库前要变成 `D`。
+
+    回归：切题器的答案对齐只剥「解：」，不剥「答案：」和末尾纯分值；
+    选择题答案成了 `答案：D（2 分）`，永远对不上选项 label。
+    """
+    stem = "语文-初三(上)-202611-海淀-期中"
+    paper_dir = tmp_path / f"{stem}-试卷"
+    answer_dir = tmp_path / f"{stem}-答案"
+    paper_dir.mkdir()
+    answer_dir.mkdir()
+    paper_text = (
+        "1. 第一题 (A) 甲 (B) 乙 (C) 丙 (D) 丁\n"
+        "2. 第二题"
+    )
+    paper = paper_dir / f"{stem}-试卷.md"
+    paper.write_text(paper_text, encoding="utf-8")
+    (answer_dir / f"{stem}-答案.md").write_text(
+        "# 语文试卷答案及评分参考\n\n1.答案：D（2 分）\n2.答案：略（1 分）\n",
+        encoding="utf-8",
+    )
+
+    merged = maybe_merge_answer_md(paper, paper_text)
+    by_no = {q.group_order: q for q in split_page(merged, paper)}
+    assert by_no[1].answer == "D"
+    assert by_no[2].answer == "略"

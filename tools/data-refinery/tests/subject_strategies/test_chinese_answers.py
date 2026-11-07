@@ -174,3 +174,57 @@ def test_scoring_table_moved_to_explanation():
     assert answers[1].answer == "评分参考"
     assert "<table" in answers[1].explanation
     assert "字数不足" in answers[1].explanation
+
+
+def test_inline_answer_prefix_is_stripped():
+    """答案 PDF 常见行内写法 `1.答案：略` / `6.答案示例：…`：
+    「答案：」是标记不是正文，写入 questions.answer 前剥掉。
+
+    回归：海淀九年级语文期中 2026 的答案 md 是 `N.答案：X（2 分）` 单行格式，
+    不剥前缀会把「答案：」一起入库，前端直接显示「答案：答案：D」。
+    """
+    text = """# 卷
+
+1. 第一题
+2. 第二题
+3. 第三题
+
+# 语文试卷答案及评分参考
+
+1.答案：略（1 分）
+
+2.答案：D（2 分）
+
+3.答案示例：集知识性、创新性、趣味性于一体。（2分。有其他答法，视其合理程度给分）
+"""
+    answers = {a.no: a for a in _case(text)}
+    assert answers[1].answer == "略"
+    assert answers[2].answer == "D"
+    assert answers[3].answer.startswith("集知识性")
+    assert "答案" not in answers[3].answer
+
+
+def test_markdown_section_heading_not_appended_to_previous_answer():
+    """不带数字序号的小节标题（'## 名著阅读（5分）'）不能拼进上一题答案。
+
+    回归：海淀 2026 九年级语文期中答案，题15 末尾被拼上「名著阅读」（前端
+    答案解析里会多出一行莫名的小节名）。
+    """
+    text = """# 卷
+
+1. 第一题
+
+# 参考答案
+
+15.答案：
+①甲
+②乙
+
+## 名著阅读（5分）
+
+16.答案示例：简·爱离开桑菲尔德庄园。
+"""
+    answers = {a.no: a for a in _case(text)}
+    assert answers[15].answer == "①甲\n②乙"
+    assert "名著阅读" not in answers[15].answer
+    assert answers[16].answer.startswith("简·爱")

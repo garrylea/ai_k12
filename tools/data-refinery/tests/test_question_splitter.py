@@ -690,7 +690,8 @@ def test_split_page_fullwidth_dot_answers():
     )
     result = split_page(text, Path("test.md"))
     by_order = {q.group_order: q for q in result}
-    assert by_order[1].answer == "C（2 分）"
+    # 末尾纯分值「（2 分）」是评分说明，不进答案正文（与语文策略口径一致）
+    assert by_order[1].answer == "C"
     assert by_order[2].answer.startswith("示例：集知识性")
     assert "一、基础" not in by_order[2].answer
 
@@ -708,8 +709,8 @@ def test_split_page_mixed_half_and_fullwidth_dots():
     )
     result = split_page(text, Path("test.md"))
     by_order = {q.group_order: q for q in result}
-    assert by_order[1].answer == "A（2 分）"
-    assert by_order[2].answer == "B（2 分）"
+    assert by_order[1].answer == "A"
+    assert by_order[2].answer == "B"
     assert by_order[3].answer == "C"
 
 

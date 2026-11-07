@@ -229,6 +229,9 @@ _FULLWIDTH_TO_HALF = str.maketrans({
 
 # 归一化后的题号前缀（消费 'N.' / 'N:'）
 _PREFIX_RE = re.compile(r"^\s*\d{1,2}[.:]")
+# 题号后紧跟的答案标记（'1.答案：略' / '6.答案示例：…' / '23.答案要点：…'）。
+# 答案 PDF 常见这种行内写法，不剥掉会把「答案：」一起写进 questions.answer。
+_ANSWER_PREFIX_RE = re.compile(r"^答案(?:示例|要点)?\s*\d*\s*[:：]\s*")
 # 光秃题号行（'1.'/'1．'，行尾即结束）：题号存在但答案缺失
 _BARE_STEM_RE = re.compile(r"^\s*(\d{1,2})[.:]\s*$")
 # 小节标题：（一）（共 6 分）/ ## （二）（共 10 分）
@@ -343,6 +346,10 @@ def _align_by_number(lines: list[str]) -> list[tuple[int, list[str]]]:
             bare = _BARE_STEM_RE.match(norm[offset:])
             if bare:
                 ok, n, bare_stem = True, int(bare.group(1)), True
+        if not ok and _HEADING_RE.match(norm):
+            # 小节标题（'## 名著阅读（5分）' 这类不带数字序号的）：不是答案正文，
+            # 也不能当上一题的续行（否则会拼进上一题答案，海淀 2026 题15 实测）。
+            continue
         if ok and n > last_no:
             flush()
             if bare_stem:
@@ -350,6 +357,8 @@ def _align_by_number(lines: list[str]) -> list[tuple[int, list[str]]]:
             else:
                 m = _PREFIX_RE.match(norm[offset:])
                 rest = line[offset + m.end():].strip() if m else line[offset:].strip()
+                # '1.答案：略' → '略'（题号与答案标记都不是答案正文）
+                rest = _ANSWER_PREFIX_RE.sub("", rest).strip()
             current_no = n
             current_lines = [rest] if rest else []
         elif current_no is not None:

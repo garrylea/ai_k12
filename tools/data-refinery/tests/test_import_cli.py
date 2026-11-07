@@ -771,3 +771,28 @@ def test_files_batch_resolves_each_keyword(monkeypatch):
     monkeypatch.setattr(import_cli, "_collect_candidates", fake_collect)
     import_cli.main(["--subject", "物理", "--files", "一零一中学,人大附中", "--skip-review"])
     assert len(stub_calls) == 2
+
+
+def test_file_matching_paper_and_answer_pair_resolves_to_paper(monkeypatch, capsys):
+    """试卷/答案两个 PDF 时按卷名搜索会命中两份：自动收敛到试卷，不让人二选一。
+
+    回归：旧行为提示「命中 2 份，先选一份」，选到答案那份就只转答案、不切题
+    （海淀九年级语文期中 2026，答案没进库）。
+    """
+    seen = []
+    for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
+        monkeypatch.setattr(import_cli, name, lambda argv, n=name: seen.append((n, argv)))
+    monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("语文/初中/second/2026/海淀九年级语文（上）期中语文试题"),
+        Path("语文/初中/second/2026/海淀九年级语文（上）期中语文试题_答案"),
+    ], []))
+
+    rc = import_cli.main(["--file", "海淀九年级语文（上）期中语文试题", "--skip-review"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "含配对答案" in out
+    assert "先选一份" not in out
+    for name, argv in seen:
+        flag = "--materials" if name == "convert_main" else ("--book" if name == "publish_main" else "--file")
+        assert argv[argv.index(flag) + 1] == "语文/初中/second/2026/海淀九年级语文（上）期中语文试题"
