@@ -10,6 +10,7 @@ import {
   markdownComponents,
   makeAnswerComponents,
   preprocessMarkdown,
+  preprocessMaterialMarkdown,
 } from '@/components/markdown';
 import { autoWrapMath } from '@/components/business/LatexPreview';
 import {
@@ -55,12 +56,15 @@ function MarkdownBlock({
   className,
   components = markdownComponents,
   breaks = false,
+  material = false,
 }: {
   text: string;
   className?: string;
   components?: typeof markdownComponents;
   /** 保留软换行（学生作答）：与考试结果页「你的答案」一致，否则多行步骤会挤成一段 */
   breaks?: boolean;
+  /** 材料：单个换行按自然段处理（管线一行一段），见 preprocessMaterialMarkdown */
+  material?: boolean;
 }) {
   return (
     <div className={className}>
@@ -69,7 +73,7 @@ function MarkdownBlock({
         rehypePlugins={markdownRehypePlugins}
         components={components}
       >
-        {preprocessMarkdown(text)}
+        {material ? preprocessMaterialMarkdown(text) : preprocessMarkdown(text)}
       </ReactMarkdown>
     </div>
   );
@@ -220,7 +224,7 @@ function QuestionCard({
           data-testid="history-material"
           className="md-prose mb-3 max-h-[32vh] overflow-y-auto rounded-lg border border-[var(--bg-subtle)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] leading-[1.7]"
         >
-          <MarkdownBlock text={q.materialText} />
+          <MarkdownBlock text={q.materialText} material />
         </div>
       )}
 

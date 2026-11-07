@@ -9,6 +9,7 @@ import {
   markdownComponents,
   makeAnswerComponents,
   preprocessMarkdown,
+  preprocessMaterialMarkdown,
 } from '@/components/markdown';
 import type { PracticeQuestion } from './AnswerModal';
 
@@ -223,7 +224,7 @@ export function AnswerResultList({
                           className="md-prose mb-2 max-h-[32vh] overflow-y-auto rounded-lg border border-[var(--bg-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[13px] text-[var(--text-primary)] leading-[1.7]"
                         >
                           <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
-                            {preprocessMarkdown(q.material)}
+                            {preprocessMaterialMarkdown(q.material)}
                           </ReactMarkdown>
                         </div>
                       )}

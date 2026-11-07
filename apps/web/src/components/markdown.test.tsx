@@ -11,6 +11,7 @@ import ReactMarkdown from 'react-markdown';
 import { describe, expect, it } from 'vitest';
 import {
   preprocessMarkdown,
+  preprocessMaterialMarkdown,
   markdownRemarkPlugins,
   markdownRemarkPluginsWithBreaks,
   markdownRehypePlugins,
@@ -342,5 +343,100 @@ describe('repairHtml：只修真正缺 > 的标签，不吞不等式链', () => 
     expect(preprocessMarkdown('<table<tbody<tr<td>1</td></tr></tbody></table>')).toContain(
       '<table><tbody><tr><td>1</td></tr>',
     );
+  });
+});
+
+describe('材料段落化（preprocessMaterialMarkdown）', () => {
+  it('单个换行是自然段分界：补空行，让每段各自成 <p>', () => {
+    const out = preprocessMaterialMarkdown('①第一段。\n②第二段。\n③第三段。');
+    expect(out).toBe('①第一段。\n\n②第二段。\n\n③第三段。');
+
+    const html = renderToStaticMarkup(
+      createElement(
+        ReactMarkdown,
+        { remarkPlugins: markdownRemarkPlugins, rehypePlugins: markdownRehypePlugins, components: markdownComponents },
+        out,
+      ),
+    );
+    expect((html.match(/<p>/g) ?? []).length).toBe(3);
+  });
+
+  it('行尾两个空格的硬换行不拆（古诗分行仍是一段）', () => {
+    const out = preprocessMaterialMarkdown('李白\n金樽清酒斗十千，  \n玉盘珍羞直万钱。  \n长风破浪会有时。');
+    // 作者行单独成段
+    expect(out).toContain('李白\n\n金樽清酒斗十千，');
+    // 诗句之间（行尾两空格）保持硬换行，不补空行
+    expect(out).toContain('金樽清酒斗十千，  \n玉盘珍羞直万钱。  \n长风破浪会有时。');
+  });
+
+  it('图片行、连续图片与图注不拆开（保留图注分组）', () => {
+    const out = preprocessMaterialMarkdown('正文。\n![](a.jpg)\n![](b.jpg)\n图20\n下一段。');
+    expect(out).toContain('![](a.jpg)\n![](b.jpg)\n图20');
+    expect(out).toContain('图20\n\n下一段。');
+  });
+
+  it('图片后的长图注 / 分格标签 / 多行来源仍与图同段', () => {
+    const longCaption = preprocessMaterialMarkdown(
+      '![](a.jpg)\n图1 不同远红外材料含量的面料升温情况\n正文。',
+    );
+    expect(longCaption).toContain('![](a.jpg)\n图1 不同远红外材料含量的面料升温情况');
+    expect(longCaption).toContain('面料升温情况\n\n正文。');
+
+    const panels = preprocessMaterialMarkdown('![](a.jpg)\n烧杯\n胶头滴管\n![](b.jpg)');
+    expect(panels).toContain('![](a.jpg)\n烧杯\n胶头滴管\n![](b.jpg)');
+
+    const source = preprocessMaterialMarkdown('![](a.jpg)\n资料来源：IDC\n图1');
+    expect(source).toContain('![](a.jpg)\n资料来源：IDC\n图1');
+  });
+
+  it('图片后的 ①②③ 段落不能被当成图注（真实语文材料以 ④… 开段）', () => {
+    const out = preprocessMaterialMarkdown('③第三段。\n![](a.jpg)\n④第四段。\n⑤第五段。');
+    expect(out).toContain('![](a.jpg)\n\n④第四段。');
+    expect(out).toContain('④第四段。\n\n⑤第五段。');
+  });
+
+  it('图片后的节标题 / 完整说明段落仍另起一段', () => {
+    const section = preprocessMaterialMarkdown('![](a.jpg)\n材料二\n正文。');
+    expect(section).toContain('![](a.jpg)\n\n材料二');
+
+    const paragraph = preprocessMaterialMarkdown('![](a.jpg)\n这是一段完整的说明文字，以句号结尾。');
+    expect(paragraph).toContain('![](a.jpg)\n\n这是一段完整的说明文字');
+  });
+
+  it('真实物理材料（6047）：多图 + 图20 + 后续图仍同段，图注进 figcaption', () => {
+    const src = '小明在用伏安法测量电阻。\n![](a.jpg)\n![](b.jpg)\n图20\n![](c.jpg)';
+    const out = preprocessMaterialMarkdown(src);
+    expect(out).toContain('![](a.jpg)\n![](b.jpg)\n图20\n![](c.jpg)');
+
+    const html = renderToStaticMarkup(
+      createElement(
+        ReactMarkdown,
+        { remarkPlugins: markdownRemarkPlugins, rehypePlugins: markdownRehypePlugins, components: markdownComponents },
+        out,
+      ),
+    );
+    expect(html).toContain('<figcaption');
+    expect(html).toContain('图20');
+    expect(html.indexOf('<figcaption')).toBeLessThan(html.indexOf('图20'));
+  });
+
+  it('表格行内部不拆，表格与正文之间拆', () => {
+    const out = preprocessMaterialMarkdown('| 甲 | 乙 |\n|---|---|\n| 1 | 2 |\n说明。');
+    expect(out).toContain('| 甲 | 乙 |\n|---|---|\n| 1 | 2 |');
+    expect(out).toContain('| 1 | 2 |\n\n说明。');
+  });
+
+  it('围栏代码与 $$ 公式块内部不拆', () => {
+    const code = preprocessMaterialMarkdown('说明。\n```\nline1\nline2\n```\n后记。');
+    expect(code).toContain('```\nline1\nline2\n```');
+    expect(code).toContain('```\n\n后记。');
+
+    const src = '前言。\n$$\nM = 1\n$$\n后记。';
+    // preprocessMarkdown 已把 $$ 规整到独占行；段落化不能再往公式块内部插空行
+    expect(preprocessMaterialMarkdown(src)).toBe(preprocessMarkdown(src));
+  });
+
+  it('已有空行不重复添加', () => {
+    expect(preprocessMaterialMarkdown('甲。\n\n乙。')).toBe('甲。\n\n乙。');
   });
 });

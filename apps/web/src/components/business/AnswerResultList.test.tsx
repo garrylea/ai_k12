@@ -37,10 +37,10 @@ describe('AnswerResultList 学生答案图片', () => {
 });
 
 describe('AnswerResultList 材料排版', () => {
-  it('材料块挂 md-prose，Markdown 标题按标题渲染（不当成普通正文）', () => {
+  it('材料块挂 md-prose，Markdown 标题按标题渲染、单换行分成自然段', () => {
     render(
       <AnswerResultList
-        questions={[{ n: '1', text: '题一', material: '## 发言稿三\n\n正文段落' }]}
+        questions={[{ n: '1', text: '题一', material: '## 发言稿三\n①第一段。\n②第二段。' }]}
         answers={{ '1': { isCorrect: true, method: 'exact', studentAnswer: 'A' } }}
         onClose={() => {}}
       />,
@@ -48,6 +48,9 @@ describe('AnswerResultList 材料排版', () => {
     const block = screen.getByTestId('result-material');
     expect(block.className).toContain('md-prose');
     expect(block.querySelector('h2')?.textContent).toBe('发言稿三');
+    // 管线材料一行一段：单换行必须拆成两个 <p>，不能挤成一段
+    const paragraphs = [...block.querySelectorAll('p')];
+    expect(paragraphs.map((p) => p.textContent)).toEqual(['①第一段。', '②第二段。']);
   });
 });
 

@@ -158,6 +158,100 @@ export const preprocessMarkdown = (s: string | undefined | null): string => {
   );
 };
 
+// ── 材料段落化 ──
+// 题库/管线产出的 material_text 用**单个换行**分隔自然段（MinerU 一行一段；
+// 764 份材料里 664 份只有单换行），而 CommonMark 把单个换行当软换行，渲染时
+// 所有段落挤成一段（2026-11-07 用户报告第 20 题《只此眉山》）。这里在渲染前
+// 把「段间换行」补成空行，但保留以下不能拆的情况：
+//   - 行尾 ≥2 空格 / 反斜杠：Markdown 硬换行（古诗分行，见题 12《行路难》）；
+//   - 图片行与紧随其后的图注：MarkdownParagraph 靠同一段的 children 认图注；
+//   - 表格行之间、列表项之间；
+//   - 围栏代码块与 $$ 公式块内部；
+//   - 原生 HTML 块内部（完整块级闭合标签之后才允许断开）。
+const HARD_BREAK_END_RE = /(?:\s{2,}|\\)$/;
+const IMAGE_LINE_RE = /^\s*!\[/;
+const HTML_LINE_RE = /^\s*</;
+const TABLE_LINE_RE = /^\s*\|/;
+const LIST_ITEM_LINE_RE = /^\s*(?:[-*+]|\d+[.)])\s+/;
+const FENCE_LINE_RE = /^\s*(?:```|~~~)/;
+const MATH_FENCE_LINE_RE = /^\s*\$\$\s*$/;
+/** 图注/资料来源等固定前缀（可长于 10 字，如「图1 不同材料含量…」）。 */
+const CAPTION_PREFIX_RE =
+  /^(?:图\s*[0-9一二三四五六七八九十]|图注|图片|表\s*[0-9一二三四五六七八九十]|资料来源|数据来源|注\s*[:：]|[甲乙丙丁]\s*$)/;
+/** 分格编号必须**单独一行**才算图注：正文段落也常以 ①…⑩ 开头（2026-11-07 实测）。 */
+const PANEL_MARKER_RE = /^[①②③④⑤⑥⑦⑧⑨⑩]\s*$/;
+/** 「材料二」「【材料三】」「## 材料…」是节标题，不能当图注并进图片段。 */
+const MATERIAL_HEADING_RE = /^(?:#{1,6}\s|[【\[]?材\s*料\s*[一二三四五六七八九十])/;
+
+/**
+ * 是否是「图片的注解」：图注、资料来源、分格标签（烧杯/实验1/①）等。
+ * 判据：固定前缀，或短行且无句末标点（不是完整句子）。真实材料里图注常超过
+ * 10 字（「图1 不同远红外材料含量的面料升温情况」），不能只按长度判断。
+ */
+function isCaptionLike(line: string): boolean {
+  const s = line.trim();
+  if (!s) return false;
+  if (/^#{1,6}\s/.test(s)) return false;
+  if (MATERIAL_HEADING_RE.test(s)) return false;
+  if (PANEL_MARKER_RE.test(s)) return true;
+  if (CAPTION_PREFIX_RE.test(s)) return true;
+  return s.length <= 30 && !/[。！？；]/.test(s);
+}
+
+function shouldSplitMaterialLine(prev: string, cur: string): boolean {
+  if (!prev.trim() || !cur.trim()) return false;
+  if (HARD_BREAK_END_RE.test(prev)) return false;
+  const prevHtml = HTML_LINE_RE.test(prev);
+  const curHtml = HTML_LINE_RE.test(cur);
+  if (prevHtml || curHtml) {
+    // HTML 块内部保持不动；完整块级闭合标签之后允许另起一段。
+    return prevHtml && !curHtml && BLOCK_HTML_CLOSE_END_RE.test(prev);
+  }
+  const prevTable = TABLE_LINE_RE.test(prev);
+  const curTable = TABLE_LINE_RE.test(cur);
+  if (prevTable !== curTable) return true; // 表格与正文之间要空行
+  if (prevTable && curTable) return false; // 表格行之间不拆
+  if (LIST_ITEM_LINE_RE.test(prev) && LIST_ITEM_LINE_RE.test(cur)) return false; // 同一列表
+  return true;
+}
+
+export const preprocessMaterialMarkdown = (s: string | undefined | null): string => {
+  const prepared = preprocessMarkdown(s);
+  if (!prepared.includes('\n')) return prepared;
+  const out: string[] = [];
+  let inFence = false;
+  let inMath = false;
+  // 处于「图片的注解块」：图片行之后的连续图注/分格标签（可多行）不再补空行。
+  let captionBlock = false;
+  for (const line of prepared.split('\n')) {
+    const fence = FENCE_LINE_RE.test(line);
+    const mathFence = MATH_FENCE_LINE_RE.test(line);
+    const insideBlock = inFence || inMath;
+    const blank = !line.trim();
+    const image = IMAGE_LINE_RE.test(line);
+
+    if (insideBlock) {
+      out.push(line);
+    } else if (blank) {
+      out.push(line);
+      captionBlock = false;
+    } else if (image) {
+      out.push(line);
+      captionBlock = true;
+    } else if (captionBlock && !fence && !mathFence && isCaptionLike(line)) {
+      out.push(line); // 多行图注（资料来源 → 图1）/ 分格标签（烧杯、胶头滴管）
+    } else {
+      const prev = out.length > 0 ? out[out.length - 1] : '';
+      if (!fence && !mathFence && shouldSplitMaterialLine(prev, line)) out.push('');
+      out.push(line);
+      captionBlock = false;
+    }
+    if (fence) inFence = !inFence;
+    if (mathFence) inMath = !inMath;
+  }
+  return out.join('\n');
+};
+
 // ── CommonMark HTML 块吞并修复（remarkSplitHtmlBlocks）──
 // CommonMark 规则：行首为块级 HTML 标签（<table> 等）时会进入「HTML 块」解析，一直吃到
 // 下一个空行。LLM 抽取/生成的题面常在 </table> 等闭合标签后直接接 markdown 段落（无空行），

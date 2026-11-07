@@ -12,6 +12,7 @@ import {
   markdownRehypePlugins,
   markdownComponents,
   preprocessMarkdown,
+  preprocessMaterialMarkdown,
   MarkdownImg,
   ANSWER_IMG_CLASS,
 } from '@/components/markdown';
@@ -546,7 +547,7 @@ export function QuestionRunner({
               }`}
             >
               <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={draggableQuestionMarkdownComponents}>
-                {preprocessMarkdown(q.material)}
+                {preprocessMaterialMarkdown(q.material)}
               </ReactMarkdown>
             </div>
           )}

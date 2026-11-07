@@ -375,6 +375,31 @@ describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
     );
     expect(screen.queryByTestId('question-material')).toBeNull();
   });
+
+  it('材料里单个换行按自然段拆分（管线一行一段，不能挤成一段）', () => {
+    render(
+      <QuestionRunner
+        questions={[{
+          n: '20',
+          text: '根据材料回答',
+          type: 'choice',
+          options: [{ label: 'A', text: '选项A' }],
+          material: '## 只此眉山\n①高铁一路向西。\n②眉山越来越近。\n③次日一早。',
+        }]}
+        subjectId={2}
+        draftKeyPrefix="mat-paragraphs"
+        variant="embedded"
+        onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' })}
+        onFinish={async () => {}}
+      />,
+    );
+    const block = screen.getByTestId('question-material');
+    expect([...block.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
+      '①高铁一路向西。',
+      '②眉山越来越近。',
+      '③次日一早。',
+    ]);
+  });
 });
 
 describe('QuestionRunner 题面高度比例（非理科 2/3 / 理科 1/3）', () => {
