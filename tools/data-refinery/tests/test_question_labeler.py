@@ -848,6 +848,94 @@ def test_kp_only_issue_is_not_a_content_defect():
     assert lab2.is_complete is False
 
 
+def test_lost_mark_choice_exemption_when_options_name_the_target():
+    """选择题的加点/画线标记丢失，但选项已点名考点 → 放行（海淀 2026 题2）。"""
+    from question_labeler import apply_lost_mark_choice_exemption
+
+    lab = LabeledQuestion.from_raw(RawQuestion(
+        group_order=2, group_id="一",
+        content=(
+            "你检查文段中标注的加点字的字音和加点词语的字形。下列说法不正确的一项是(2分)\n"
+            "A. 因为表达的是“紧急赶往”的意思，所以“奔赴”中“奔”的读音正确。\n"
+            "B. 因为表达的是“承重运送”的意思，所以“驮载”中“载”的读音正确。\n"
+            "C. 因为表达的是“来回较量，相机进退”的意思，所以“周旋”中无错字。\n"
+            "D. 因为表达的是“声音震荡、往复萦绕”的意思，所以“回想”中无错字。")))
+    lab.material_text = (
+        "平西地下交通线是抗日战争时期的一条重要秘密交通线……护送志士奔（bēn）赴"
+        "各个根据地……与敌周旋，多次用自行车驮载（zài）药品……至今犹在耳畔回想。")
+    lab.type = "choice"
+    lab.is_complete = False
+    lab.completeness_issues = [
+        "题干要求检查‘文段中标注的加点字’，但 PDF 转文字后丢失了具体的加点标记，"
+        "无法确定哪些字是考察对象，属于不可修复缺陷。"]
+    assert apply_lost_mark_choice_exemption([lab], "chinese") == 1
+    assert lab.is_complete is True and lab.completeness_issues == []
+
+
+def test_lost_mark_choice_exemption_for_circled_sentence_options():
+    """「第①句/第②句」型选项：材料里确有 ①②③④ 才放行（海淀 2026 题4）。"""
+    from question_labeler import apply_lost_mark_choice_exemption
+
+    lab = LabeledQuestion.from_raw(RawQuestion(
+        group_order=4, group_id="一",
+        content=(
+            "你从修辞角度判断，文段中画线句运用比喻不恰当的一项是(2分)\n"
+            "A. 第①句\nB. 第②句\nC. 第③句\nD. 第④句")))
+    lab.material_text = (
+        "①北斗导航是“超级领航员”，负责准确定位。②传感器是农田灵敏的“喉舌”。"
+        "③大模型是会思考的“大脑”。④无人农机则是勤快的“手脚”。")
+    lab.type = "choice"
+    lab.is_complete = False
+    lab.completeness_issues = ["题干中提到的“画线句”具体指代哪一句在材料中无法确定，"
+                               "属于 PDF 转换丢失的下划线标记信息。"]
+    assert apply_lost_mark_choice_exemption([lab], "chinese") == 1
+    assert lab.is_complete is True
+
+
+def test_lost_mark_exemption_skips_short_answer_and_unverifiable_options():
+    """简答题没有选项可自证；选择题选项也没点名原文时，仍保持待复核。"""
+    from question_labeler import apply_lost_mark_choice_exemption
+
+    short = LabeledQuestion.from_raw(RawQuestion(
+        group_order=21, group_id="四",
+        content="结合文意，分析文章第⑥段画线句的表达效果。(3分)"))
+    short.material_text = "①高铁一路向西……⑥来到瑞莲池畔，苏轼的盘陀坐像赫然在目。"
+    short.type = "short_answer"
+    short.is_complete = False
+    short.completeness_issues = ["题干提到分析第⑥段「画线句」，但丢失了具体哪一句被画线。"]
+
+    vague = LabeledQuestion.from_raw(RawQuestion(
+        group_order=5, group_id="一",
+        content=("下列对画线句赏析不正确的一项是(2分)\n"
+                 "A. 运用比喻，生动形象\nB. 运用拟人，亲切自然\n"
+                 "C. 运用排比，气势磅礴\nD. 运用反问，加强语气")))
+    vague.material_text = "这段文字描写了春天的景色。"
+    vague.type = "choice"
+    vague.is_complete = False
+    vague.completeness_issues = ["题干中的画线句具体指哪一句不确定。"]
+
+    assert apply_lost_mark_choice_exemption([short, vague], "chinese") == 0
+    assert short.is_complete is False and vague.is_complete is False
+
+
+def test_lost_mark_exemption_does_not_clear_other_defects():
+    """issue 里同时有「截断/缺图」等真缺陷时不能放行。"""
+    from question_labeler import apply_lost_mark_choice_exemption
+
+    lab = LabeledQuestion.from_raw(RawQuestion(
+        group_order=2, group_id="一",
+        content=("下列说法不正确的一项是(2分)\n"
+                 "A. 因为“奔赴”中“奔”的读音正确。\n"
+                 "B. 因为“驮载”中“载”的读音正确。\n"
+                 "C. “周旋”中无错字。\nD. “回想”中无错字。")))
+    lab.material_text = "护送志士奔（bēn）赴各个根据地……与敌周旋……驮载（zài）药品。"
+    lab.type = "choice"
+    lab.is_complete = False
+    lab.completeness_issues = ["加点标记丢失", "题干截断"]
+    assert apply_lost_mark_choice_exemption([lab], "chinese") == 0
+    assert lab.is_complete is False
+
+
 def test_material_subq_exemption_does_not_clear_source_issues():
     """「缺素材」不是「缺小问」，两条豁免各管各的，不能互相放过。"""
     from question_labeler import apply_material_subq_exemption

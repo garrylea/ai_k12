@@ -127,6 +127,75 @@ def apply_material_subq_exemption(labeled) -> int:
             lab.completeness_issues = []
             cleared += 1
     return cleared
+# 语文「加点字 / 画线句」在 PDF 转文字时会丢标记。选择题只要选项自己点名了
+# 考点（引号里的词、原文片段、第①②句），缺视觉标记不影响作答；简答题没有
+# 选项可自证，仍保持待复核。
+_LOST_MARK_RE = re.compile(r"加点|画线|画波浪线|波浪线|下划线|着重号")
+_LOST_MARK_BLOCKER_RE = re.compile(r"截断|缺图|缺表格|缺少选项|选项不足|选项残缺|材料缺失")
+_CIRCLED_OPTION_ONLY_RE = re.compile(r"^第?([①②③④⑤⑥])[句项]?$")
+
+
+def _options_identify_mark_target(lab, strategy) -> bool:
+    """选择题的选项是否自己点名了「加点/画线」的考点。
+
+    两种确定性形态：
+    - 选项引用原文/题干里的字词（引号内短语，或 ≥4 字连续片段能在原文找到）；
+    - 选项是「第①句/第②项」，且题干或材料里确有对应圈号。
+    """
+    stem, opts = strategy.split_options(lab.content or "")
+    if not opts:
+        return False
+    low, _ = strategy.choice_bounds()
+    texts = [o["text"].strip() for o in opts]
+    if len(texts) < low or not all(texts):
+        return False
+    source = f"{lab.material_text or ''}\n{stem}"
+    if not source.strip():
+        return False
+
+    circled = [_CIRCLED_OPTION_ONLY_RE.match(t) for t in texts]
+    if all(circled):
+        return all(m.group(1) in source for m in circled)
+
+    for text in texts:
+        for quoted in re.findall(r'[“"]([^”"]{2,})[”"]', text):
+            if quoted in source:
+                return True
+        for run in re.findall(r"[\u4e00-\u9fff]{4,}", text):
+            if run in source:
+                return True
+    return False
+
+
+def apply_lost_mark_choice_exemption(labeled, subject: str = "") -> int:
+    """选择题的「加点/画线标记丢失」不是缺陷：选项已点名考点，照常进池。
+
+    海淀 2026 语文题2/题4/题13：材料与选项都在，只是 PDF 没转出加点/下划线，
+    LLM 判「无法确定考点」→ is_active=0。这里只放行**可核对**的情况：题型是
+    选择题、所有 issue 都在说加点/画线、且选项能自证考点。简答题（题6/12/21）
+    没有选项可自证，继续拦。
+    """
+    if not subject:
+        return 0
+    from subject_strategies import get_strategy
+
+    strategy = get_strategy(subject)
+    cleared = 0
+    for lab in labeled:
+        if lab.is_complete or lab.type != "choice":
+            continue
+        issues = [str(i) for i in (lab.completeness_issues or [])]
+        if not issues or not all(_LOST_MARK_RE.search(i) for i in issues):
+            continue
+        if any(_LOST_MARK_BLOCKER_RE.search(i) for i in issues):
+            continue
+        if _options_identify_mark_target(lab, strategy):
+            lab.is_complete = True
+            lab.completeness_issues = []
+            cleared += 1
+    return cleared
+
+
 # 选择题选项标签（语文可能 3 项；label 已归一为 A-F）
 _VALID_LABELS = {"A", "B", "C", "D", "E", "F"}
 

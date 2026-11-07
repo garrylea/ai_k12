@@ -19,7 +19,10 @@ class TestMineruRunner:
         runner._run = fake_run
         runner.run(input_paths, output_dir)
 
-        assert calls[0][0] == ["mineru", "extract", str(tmp_path / "a.pdf"), "-o", str(output_dir)]
+        assert calls[0][0] == [
+            "mineru", "extract", str(tmp_path / "a.pdf"), "-o", str(output_dir),
+            "-f", "md,json",
+        ]
 
     def test_builds_extract_command_for_docx(self, tmp_path):
         """Word 文件名原样进 MinerU extract，不做扩展名过滤。"""
@@ -31,7 +34,9 @@ class TestMineruRunner:
         runner._run = lambda cmd: calls.append(cmd)
         runner.run([docx], output_dir)
 
-        assert calls[0] == ["mineru", "extract", str(docx), "-o", str(output_dir)]
+        assert calls[0] == [
+            "mineru", "extract", str(docx), "-o", str(output_dir), "-f", "md,json",
+        ]
 
     def test_is_document_accepts_office_suffixes(self):
         for suffix in (".pdf", ".doc", ".docx", ".ppt", ".pptx", ".DOCX"):

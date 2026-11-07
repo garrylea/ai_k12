@@ -879,6 +879,46 @@ def test_material_title_between_questions_moves_block():
     assert "【甲】" in q5.material_text and "【乙】" in q5.material_text
 
 
+def test_series_material_title_and_shared_untitled_block():
+    """海淀 2026 期中：题1 只是书写题，其后「发言稿一…」是题2/3 的材料；
+    题3 与题4 之间无标题的「奇稷农场」文段应同时挂给题4、题5。"""
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "## 一、基础·运用（共13分）\n\n"
+        "学校举办“海淀大课堂·多彩乡村行”研学活动，目前进入总结汇报阶段。"
+        "初三年级要在学校总结会上交流发言，请你协助完成相关工作。\n\n"
+        "1. 在年级发言稿的首页用正楷字书写活动主题：海淀大课堂·多彩乡村行。(1分)\n\n"
+        "发言稿一 烽火古道 赤诚抗日\n\n"
+        "平西地下交通线是抗日战争时期平西抗日根据地与北平之间的一条重要秘密交通线，"
+        "它从西直门起，经海淀镇、西北旺、温泉、北安河，终至妙峰山。\n\n"
+        "2. 你检查文段中标注的加点字的字音和加点词语的字形。根据词义判断，下列说法"
+        "不正确的一项是(2分)\n"
+        "A. 因为表达的是“紧急赶往”的意思，所以“奔赴”中“奔”的读音正确。\n"
+        "B. 因为表达的是“承重运送”的意思，所以“驮载”中“载”的读音正确。\n"
+        "C. 因为表达的是“来回较量，相机进退”的意思，所以“周旋”中无错字。\n"
+        "D. 因为表达的是“声音震荡、往复萦绕”的意思，所以“回想”中无错字。\n\n"
+        "3. 文段横线处需用上一个成语。你根据语境，帮助选择恰当的一项。(2分)\n"
+        "A. 惊天动地\nB. 有惊无险\nC. 惊心动魄\nD. 惊涛骇浪\n\n"
+        "在海淀温泉镇太舟坞村，你会看到这样的奇景：八十亩露地菜田里，一台台无人驾驶的"
+        "农机往来穿梭，精准作业。你知道吗？它可是全国首个生产型大白菜无人农场——奇稷农场。\n\n"
+        "4. 你从修辞角度判断，文段中画线句运用比喻不恰当的一项是(2分)\n"
+        "A. 第①句\nB. 第②句\nC. 第③句\nD. 第④句\n\n"
+        "5. 你对文段中“奇稷农场”的命名产生了兴趣。你根据释义与文段内容，"
+        "解说这个命名的妙处。(2分)\n"
+    )
+    questions = split_page(text, _Path("x.md"), strategy=get_strategy("chinese"))
+    q = {x.group_order: x for x in questions}
+    assert "平西地下交通线" not in q[1].content
+    assert "平西地下交通线" in q[2].material_text
+    assert "平西地下交通线" in q[3].material_text
+    assert "奇稷农场" in q[4].material_text
+    assert "奇稷农场" in q[5].material_text
+    assert "平西地下交通线" not in q[4].material_text
+
+
 def test_part_header_starts_new_material_scope():
     """「第一部分 北京城市发展史上的水源问题」是材料分区，不是题型分区：
     其后正文必须归下一题材料，不能沿用上一部分的「前言」。

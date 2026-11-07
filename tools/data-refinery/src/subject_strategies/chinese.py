@@ -43,6 +43,13 @@ _CN_OPTION_RES = (
 _CIRCLED_OPTION_RE = re.compile(r'(?m)^[ \t]*([①②③④])')
 _LATIN_FLEX_RE = re.compile(r'(?<![A-Za-z0-9])([A-F])\s*[.．、](?=\s*\S)')
 
+# 带序号的栏目/活动标题：`发言稿一 烽火古道 赤诚抗日`。这类标题常超过 12 字，
+# 旧的长度上限会把标题连同下面的文段一起并进上一题题干（海淀 2026 期中
+# 题1 吞掉了题2/题3 的「平西地下交通线」文段）。
+_SERIES_TITLE_RE = re.compile(
+    r'^(发言稿|活动|栏目|板块|专题|任务|单元|篇目|展板|展品|项目|环节)[一二三四五六七八九十\d]+'
+)
+
 
 def _consecutive_run(matches, labels: str) -> list[tuple[int, int, str]]:
     """从一组匹配里取最长的连续标签序列（A→B→C / 甲→乙→丙 / ①②③）。"""
@@ -161,11 +168,16 @@ class ChineseMaterialPolicy(MaterialPolicy):
     def is_material_title(self, lines: list[str], index: int, line: str) -> bool:
         """语文文段标题：短、纯中文、后面紧跟长段落（如「绿绸叠翠」「流光溢彩」）。
 
+        也认带序号的栏目/活动标题（「发言稿一 烽火古道 赤诚抗日」），这类标题
+        常有 13–24 字，旧长度上限会让标题和文段一起并进上一题正文（海淀 2026
+        期中题1 吞掉题2/题3 的「平西地下交通线」文段）。
+
         这类标题出现在两题之间时，表示下一题换了一段材料；旧逻辑会把整段材料
         并进上一题正文（大兴 2024 题4 吞掉题5 的【甲】【乙】文段）。
         """
         text = line.strip()
-        if not (2 <= len(text) <= 12):
+        is_series = bool(_SERIES_TITLE_RE.match(text)) and len(text) <= 24
+        if not ((2 <= len(text) <= 12) or is_series):
             return False
         if re.search(r'[。！？；：:，,、0-9A-Za-z]', text):
             return False
@@ -193,6 +205,11 @@ class ChineseMaterialPolicy(MaterialPolicy):
         if len(text) < 40:
             return False
         if text.startswith(("#", "![", "<table", "材料")):
+            return False
+        # 选项行不能当材料：分段落排版的 A./B./C./D.（或甲乙丙 / ①②③）选项，
+        # 前一题拆出 3 项后，下一行 D 会被误判成「下一题的材料」，整段语段反而
+        # 丢掉（人大附中 2024 题5 的 D 选项实测）。
+        if re.match(r'^[A-F甲乙丙丁]\s*[.．、]\s*\S|^【\s*[甲乙丙丁]\s*】|^[①②③④]', text):
             return False
         _, opts = _STRATEGY.split_options(current_content)
         return bool(opts) and len(opts) >= 3 and all(o["text"].strip() for o in opts)

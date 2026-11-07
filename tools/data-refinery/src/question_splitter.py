@@ -1111,7 +1111,10 @@ def split_page(text: str, md_path: Path,
             material = _material_for_new_stem() if policy.attach else None
             if policy.attach and between_material:
                 extra = "\n".join(between_material).strip()
-                material = (f"{material}\n\n{extra}".strip() if material else extra)
+                # 两题之间的文段是**新的材料域**：本题和本节后续题都挂它，且不能
+                # 再叠加上一题的材料（否则题5 会拿到题2/题3 的「发言稿一」）。
+                scope_materials[scope_id] = extra
+                material = extra
                 between_material = []
             # 行尾粘连的下一节标题：题干去掉标题，后续题归新分组
             content, inline_gid = split_inline_group_header(content)

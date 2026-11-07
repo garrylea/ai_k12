@@ -824,6 +824,32 @@ class TestLoadQuestionsPaperGrouping:
         upd = [a for sql, a in queries if "UPDATE exam_papers SET question_count" in sql]
         assert upd == [(2, 9)]
 
+    def test_material_only_change_updates_existing_row(self):
+        """只改 material_text 时 content_hash 不变，也必须原址更新材料。
+
+        海淀 2026 语文题2/题3：切题器把「发言稿一」挂到了 JSONL，但本题干没变，
+        旧逻辑只同步 type/difficulty/is_active，库里的 material_text 一直停在
+        旧的小节导语。
+        """
+        from db_loader import content_hash
+
+        q = {"subject_id": "math", "content": "题干一", "type": "choice",
+             "group_id": "一", "group_order": 1,
+             "options": [{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"}],
+             "material_text": "新文段", "needs_review": False}
+        chash = content_hash(q["content"], q["options"])
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],
+            "FROM paper_questions pq JOIN questions q": [
+                [(501, chash, 0, "choice", 2, 1, "旧文段")]
+            ],
+        })
+        loader.load_questions([q], paper=(_paper_meta(), 9))
+        upd = [a for sql, a in queries if sql.startswith("UPDATE questions SET type=")]
+        assert len(upd) == 1
+        assert upd[0][-2] == "新文段"  # material_text 参数
+        assert upd[0][-1] == 501
+
     def test_writes_knowledge_points_from_extracted(self):
         """extract 已标的 knowledge_points 必须落 question_knowledge_points。
 

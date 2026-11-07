@@ -19,8 +19,9 @@ from answer_merger import maybe_merge_answer_md
 from extract import _parse_json_object
 from question_splitter import is_junk_question, split_page, split_options
 from question_labeler import (
-    QuestionLabeler, LabeledQuestion, apply_material_sections_exemption,
-    apply_material_subq_exemption, apply_true_false_exemption,
+    QuestionLabeler, LabeledQuestion, apply_lost_mark_choice_exemption,
+    apply_material_sections_exemption, apply_material_subq_exemption,
+    apply_true_false_exemption,
 )
 from section_analyzer import analyze_sections
 from qr_detect import strip_qr_images
@@ -248,47 +249,124 @@ def _safe_regenerated(regen: dict, q, md_dir=None) -> tuple[str, object, str | N
     return content, options, material, answer
 
 
-def _pdf_decorations(source, config) -> list:
-    """定位试卷 PDF 并检测下划线/着重号；扫描件或找不到返回 []。
+# 只有题干明确提到这些标记，才值得对材料做加点/画线识别（用户裁决 2026-11-07）：
+# 没有标记诉求的材料题（如《只此眉山》问答）不跑扫描/OCR，省资源。
+_MARK_STEM_RE = re.compile(
+    r"加点|画线|画横线|画波浪线|波浪线|下划线|着重号|划线")
+_OCR_SINGLETON = None
 
-    只读 PDF 的字体坐标与图形层，不跑 OCR：扫描件（无文字层）必然为空。
+
+def _get_ocr():
+    """PaddleOCR 只加载一次（模型加载 ~10s）；同一 extract 批次多份卷复用。"""
+    global _OCR_SINGLETON
+    if _OCR_SINGLETON is None:
+        from scanned_emphasis import _load_ocr
+        _OCR_SINGLETON = _load_ocr()
+    return _OCR_SINGLETON
+
+
+def _apply_material_emphasis(source, config, questions) -> int:
+    """只对「材料块」识别并注入加点/下划线；返回注入处数。
+
+    口径（2026-11-07 用户确认）：
+    - 入口是材料题：`material_text` 非空且题干命中 `_MARK_STEM_RE`；
+    - 定位是材料块：用 MinerU JSON 的 page_idx + bbox，只裁这块；
+    - 识别按 PDF 类型分派：有文字层 → `pdf_emphasis`；扫描件 → PaddleOCR 只 OCR 裁剪块；
+    - 注入只写 `material_text`，不再扫 `content`（题干里的「不正确」不是题目要考的点）。
+
+    这是 extract 阶段、LLM 标注之前的步骤；检测失败只告警，绝不阻断主流程。
     """
-    from pdf_emphasis import detect_decorations
+    from material_bbox import load_blocks, match_material, to_points
+    from pdf_emphasis import decorate_text, is_option_line
 
     pdf = Path(config.input_dir) / f"{source.rel_path}.pdf"
     if not pdf.exists():
-        return []
-    try:
-        return detect_decorations(pdf)
-    except Exception as e:  # 检测失败不能阻断主流程
-        print(f"[WARN] 着重号检测失败（{pdf.name}）：{type(e).__name__}: {e}", flush=True)
-        return []
-
-
-def _apply_emphasis(questions: list, decorations: list) -> int:
-    """把 PDF 的下划线/着重号注入题干与材料（幂等，返回注入处数）。
-
-    必须在标注之前：MinerU 的 Markdown 不表达下划线、着重号、波浪线，模型看不到
-    标记，就会把「赏析画线句」「加点词语」判成原文缺失（东直门 2024 题2/4/7/11/20/24）。
-    文字版 PDF 能从字体坐标 + 图形层还原（大兴 36 处、五中 14 处）；扫描件没有
-    文字层，检测为空，这部分缺口只能留待复核。
-    """
-    if not decorations:
+        print(f"[emphasis] {source.md_path.stem}: PDF 不存在，跳过：{pdf}", flush=True)
         return 0
-    from pdf_emphasis import decorate_text, is_option_line
 
-    prose = [d for d in decorations if not is_option_line(d.line)]
-    applied = 0
+    blocks = load_blocks(source.md_path)
+    pending: list[tuple[object, list]] = []
     for q in questions:
-        if q.material_text:
+        if not q.material_text or not _MARK_STEM_RE.search(q.content or ""):
+            continue
+        regions = match_material(q.material_text, blocks) if blocks else []
+        pending.append((q, regions))
+    if not pending:
+        print(f"[emphasis] {source.md_path.stem}: 无材料题需要标记识别", flush=True)
+        return 0
+
+    import fitz
+
+    doc = fitz.open(pdf)
+    try:
+        text_pages = {i for i in range(doc.page_count)
+                      if len(doc[i].get_text("text").strip()) > 30}
+        page_sizes = {i: (doc[i].rect.width, doc[i].rect.height)
+                      for i in range(doc.page_count)}
+    finally:
+        doc.close()
+
+    if blocks is None:
+        # 存量电子版没有 JSON：整份检测成本很低（无 OCR），仍只注入材料；
+        # 扫描件没有 bbox 就无法定位材料，明确跳过、要求重新 convert。
+        if not text_pages:
+            print(f"[emphasis] {source.md_path.stem}: 缺少 MinerU JSON sidecar 且为扫描件，"
+                  f"跳过材料块识别（重新 convert 生成 .json）", flush=True)
+            return 0
+        from pdf_emphasis import detect_decorations
+        decs = detect_decorations(pdf)
+        prose = [d for d in decs if not is_option_line(d.line)]
+        applied = 0
+        for q, _ in pending:
             new, log = decorate_text(q.material_text, prose)
             if new != q.material_text:
                 q.material_text = new
                 applied += sum(1 for _, s in log if s == "applied")
-        new, log = decorate_text(q.content, decorations)
-        if new != q.content:
-            q.content = new
+        print(f"[emphasis] {source.md_path.stem}: 无 JSON sidecar，按整份电子版检测，"
+              f"{len(pending)} 道材料题注入 {applied} 处", flush=True)
+        return applied
+
+    ocr = None
+    cache: dict[tuple, list] = {}
+    applied = 0
+    detected = 0
+    for q, regions in pending:
+        if not regions:
+            continue
+        key = tuple(sorted((r.page, r.bbox) for r in regions))
+        if key not in cache:
+            electronic: dict[int, list[tuple]] = {}
+            scanned: dict[int, list[tuple]] = {}
+            for r in regions:
+                if r.page in text_pages:
+                    electronic.setdefault(r.page, []).append(
+                        to_points(r.bbox, *page_sizes[r.page]))
+                else:
+                    scanned.setdefault(r.page, []).append(r.bbox)
+            decs: list = []
+            try:
+                if electronic:
+                    from pdf_emphasis import detect_decorations
+                    decs.extend(detect_decorations(pdf, regions=electronic))
+                if scanned:
+                    from scanned_emphasis import detect_material_marks
+                    if ocr is None:
+                        ocr = _get_ocr()
+                    decs.extend(detect_material_marks(pdf, scanned, ocr=ocr))
+            except Exception as e:  # 检测失败不能阻断主流程
+                print(f"[WARN] 材料块标记识别失败（{pdf.name}）："
+                      f"{type(e).__name__}: {e}", flush=True)
+            cache[key] = decs
+        decs = cache[key]
+        detected += len(decs)
+        prose = [d for d in decs if not is_option_line(d.line)]
+        new, log = decorate_text(q.material_text, prose)
+        if new != q.material_text:
+            q.material_text = new
             applied += sum(1 for _, s in log if s == "applied")
+
+    print(f"[emphasis] {source.md_path.stem}: {len(pending)} 道材料题，"
+          f"{detected} 处标记，注入 {applied} 处", flush=True)
     return applied
 
 
@@ -548,17 +626,10 @@ def extract_questions_file(source, config, llm, fb_llm,
         print(f"[WARN] {md_path.stem}: 题号不连续，缺 {missing}"
               f"（原文可能未转换出这些题，请核对 PDF）", flush=True)
 
-    # 切题后、标注前：把文字版 PDF 的下划线/着重号注入题干与材料。
+    # 切题后、标注前：只对材料块识别并注入加点/下划线。
     # 顺序不能反 —— 标注时看不到标记，模型会把「画线句」判成原文缺失。
     if subject_code == "chinese":
-        decorations = _pdf_decorations(source, config)
-        injected = _apply_emphasis(questions, decorations)
-        if decorations:
-            print(f"[emphasis] {source.md_path.stem}: {len(decorations)} 处标记，"
-                  f"注入 {injected} 处", flush=True)
-        else:
-            print(f"[emphasis] {source.md_path.stem}: 无文字层或未检出标记（扫描件），跳过",
-                  flush=True)
+        _apply_material_emphasis(source, config, questions)
 
     # 5. 查真实 KP 列表 + LLM 标注 + 双模型确认
     kps = _query_knowledge_points(config, subject_code)
@@ -635,6 +706,12 @@ def extract_questions_file(source, config, llm, fb_llm,
     if sections_fp:
         print(f"[material] {sections_fp} 道材料题的「缺素材①②③」是误判"
               f"（材料已分 ≥3 段）", flush=True)
+    # 选择题的「加点/画线标记丢失」：选项已点名考点，缺视觉标记不影响作答。
+    # 必须放在按大题定型之后：LLM 可能把这类题标成 short_answer。
+    lost_marks = apply_lost_mark_choice_exemption(labeled, subject_code)
+    if lost_marks:
+        print(f"[marks] {lost_marks} 道选择题的「加点/画线标记丢失」不影响作答"
+              f"（选项已点名考点），放行", flush=True)
 
     # 6. 写 JSONL
     _write_exam_questions_jsonl(labeled, source, extracted_dir,

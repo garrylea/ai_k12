@@ -8,6 +8,56 @@
 
 ---
 
+## 2026-11-07 语文标记识别改为「材料块级」
+
+**口径**（用户确认）：只有 `material_text` 非空且题干命中 `加点|画线|下划线|波浪线|着重号` 的材料题才做识别；用 MinerU JSON 的 `page_idx + bbox` 只裁材料块；注入只写 `material_text`，不再扫题干。
+
+**改动**：
+- `convert.py`：整份文档调用改为 `-f md,json`，JSON sidecar 与 md 同目录（同一次 MinerU 调用，不增加 API 次数）。
+- `material_bbox.py`：读 JSON、按 `material_text` 匹配文本块（精确子串，或 LCS≥24 且覆盖块文本≥60%），0–1000 bbox → 页点坐标。
+- `pdf_emphasis.detect_decorations(pdf, regions=...)`：只处理材料区域，不再整份扫描。
+- `scanned_emphasis.detect_material_marks(pdf, regions)`：只渲染/OCR 材料 crop；下划线改为行级检测（字框底部 15%、允许 2px 空隙、连续覆盖 ≥3 字），避免把字底横/表格线当画线。
+- `question_extract._apply_material_emphasis`：统一入口，按题缓存共享材料；电子版有文字层走 `pdf_emphasis`，扫描件走 PaddleOCR；旧电子版无 JSON 时回退整份检测但仍只注入材料，扫描件无 JSON 跳过并提示重新 convert。
+- 删除 `_pdf_decorations` / `_apply_emphasis` 对 `content` 的全量扫描（题干「不正确」不再被加点）。
+
+**验证**（海淀 2026 期中）：6 道材料题；题2 注入「奔/周/旋/载/回/想」；题4 注入「奇稷农场」+ 画线句；题6/12/21 画线句下划线；题13 注入「绝/一/强」（「是」漏检，待查）。全量 1772 passed / 10 skipped。
+
+---
+
+## 2026-11-07 扫描件语文卷加点/下划线 dry-run 检测
+
+**背景**（用户问）：第2题的加点字能否识别？实测该 PDF 是扫描件——每页一张整页图，文字层只有水印「易水小寒转发」，`pdf_emphasis` 读字体/矢量层，检出的 15 处全是水印，真实加点 0 处。但点确实在图片里，用 OCR 逐字框 + 图像连通域可以找到。
+
+**新增**：`src/scanned_emphasis.py`（**只检测、只出清单**，不改库、不改 `output/md`/`published`）。默认 PaddleOCR mobile 模型 + 150 DPI（实测约 17s/页，10 页约 2.5 分钟）；支持 `--pdf/--subject/--file/--limit/--pages/--server-ocr`；JSONL 每条含 `paper/page/kind/chars/line/question_no/ambiguous/confidence/boxes`。
+
+**实测**（海淀 2026 期中，10 页）：43 处检出；题2 命中「奔、载、周旋、回想」+ 题干「不正确」；题13 命中文言加点字「绝、是、一、强」；题4/6/11/20 的画线句下划线也检出。已知误报：统计表表头边框（题17）、单字下划线（标 `confidence=low`）。
+
+**未接管线**：PaddleOCR 不在 `requirements.txt`（本机 3.6.0 + mobile 模型已缓存）；先人工复核清单准确率，确认后再决定是否写 `content/material_text`。测试见 `tests/test_scanned_emphasis.py`（8 例，不跑 OCR），全量 1765 passed / 10 skipped。
+
+---
+
+## 2026-11-07 语文切题：栏目标题 / 题间材料 / 选项末行
+
+**现象**（用户报）：海淀 2026 期中卷（`crawler/data/语文/初中/second/2026/海淀九年级语文（上）期中语文试题.pdf`）题1 只是「用正楷字书写活动主题」，却吞掉了题2/题3 的「发言稿一 烽火古道 赤诚抗日」文段；题2/题3 因此缺文段，被 `labeling_issues` 判不完整。另发现题4/题5 共用的「奇稷农场」文段只挂到题4，题5 仍只拿到小节导语。
+
+**根因**（三处，均在切题器，不在 MinerU；MD 行序是正确的）：
+1. `ChineseMaterialPolicy.is_material_title` 只认 2–12 字纯中文标题；「发言稿一 烽火古道 赤诚抗日」14 字被拒，标题与其后文段一起走 `current.content +=` 并进题1。
+2. `looks_like_between_material` 只在上一题能拆出 ≥3 个完整选项时触发，且材料只挂「下一题」：题3 是选择题所以题4 拿到「奇稷农场」，题5 拿不到；若直接叠加旧材料，题5 还会拿到题2/题3 的「发言稿一」。
+3. 选项分段落排版（A/B/C/D 各占一段、中间空行）时，前一题拆出 3 项后，末行 D 会被当成「下一题材料」，导致该题少一个选项、下一题材料里混入选项（人大附中 2024 题5 实测）。
+
+**改动**：
+- `subject_strategies/chinese.py`：`is_material_title` 增加带序号栏目/活动标题（`发言稿/活动/栏目/板块/专题/任务/单元/篇目/展板/展品/项目/环节` + 中文序号，13–24 字）；`looks_like_between_material` 排除选项行（`A./B./甲乙/①②`）。
+- `question_splitter.py`：题间文段改为**新的材料域**——替换 `scope_materials[scope_id]`，本题与同节后续题都挂它，不再叠加/沿袭上一题材料。
+- `db_loader.py`：`material_text` 不在 `content_hash` 里，旧逻辑在「题干哈希没变」时只同步 type/difficulty/is_active，**只改材料归属时库里永远不更新**（本次重跑 JSONL 已挂「发言稿一」，题库仍是小节导语）。现在同卷原址更新同时比较并写入 `material_text`。
+- `question_labeler.py`：新增 `apply_lost_mark_choice_exemption`——**选择题**的「加点/画线标记丢失」，只要选项能自证考点（引号内词/≥4 字原文片段/「第①②句」且材料有圈号）就放行；简答题没有选项可自证，仍 `is_active=0`。判据是结构，不看 LLM 措辞。
+- 回归用例：`tests/test_question_splitter.py::test_series_material_title_and_shared_untitled_block`、`tests/test_db_loader.py::TestLoadQuestionsPaperGrouping::test_material_only_change_updates_existing_row`、`tests/test_question_labeler.py::test_lost_mark_choice_exemption_*`。
+
+**验证**：目标卷题1–7 材料归属正确（题1=导语；题2/3=发言稿一；题4/5=奇稷农场；题6=发言稿三；题7=汇报总结）。全量 367 份语文卷前后对比：17 份受影响，11 处题干内容变化全部是「补回被吞的 D 选项」（已逐条核对 `new.startswith(old)` 且新增行以选项标签开头），无题目材料由有变空。`split_snapshot --check` 的 20 处存量差异（基线陈旧，数学/物理/抽样集）之外的 3 处新增差异均为上述 D 选项修复。重跑本卷 extract/publish/db_loader 后：题2/4/13 放行（is_active=1），题6/12/21（简答题画线句）仍待复核；全卷 24 题在池 / 3 题待复核。`pytest` 1753 passed / 10 skipped。
+
+**待办**：`output/extracted/` 与库里的该卷仍是旧切分，重跑 `extract` 才会生效（需调 LLM 标注，未擅自执行）。
+
+---
+
 ## 2026-11-07 自评题计入掌握度（用户裁决）
 
 **需求**（用户）：主观题自评结果也必须进入薄弱点图谱，不能只算客观判题。

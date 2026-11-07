@@ -1335,7 +1335,7 @@ class DbLoader:
                 if go is not None:
                     exist = self._query(
                         "SELECT q.id, q.content_hash, q.answer_verified, q.type, "
-                        "q.difficulty, q.is_active FROM paper_questions pq "
+                        "q.difficulty, q.is_active, q.material_text FROM paper_questions pq "
                         "JOIN questions q ON q.id = pq.question_id "
                         "WHERE pq.paper_id=%s AND pq.group_order=%s",
                         (paper[1], go),
@@ -1343,7 +1343,7 @@ class DbLoader:
                 else:
                     exist = self._query(
                         "SELECT q.id, q.content_hash, q.answer_verified, q.type, "
-                        "q.difficulty, q.is_active FROM paper_questions pq "
+                        "q.difficulty, q.is_active, q.material_text FROM paper_questions pq "
                         "JOIN questions q ON q.id = pq.question_id "
                         "WHERE pq.paper_id=%s AND pq.question_no=%s",
                         (paper[1], i),
@@ -1355,21 +1355,29 @@ class DbLoader:
                     old_type = exist[0][3]
                     old_difficulty = exist[0][4]
                     old_active = int(exist[0][5] or 0)
+                    old_material = exist[0][6]
                     new_active = 0 if q.get("needs_review") else 1
+                    # material_text 不在 content_hash 里：切题逻辑只改材料归属时
+                    # hash 不变，旧逻辑会静默保留旧材料（2026-11-07 海淀语文
+                    # 题2/题3：JSONL 已挂「发言稿一」，库里仍是小节导语）。
+                    material_changed = (old_material or "") != (q.get("material_text") or "")
                     if old_hash == chash and (
                         old_type != q.get("type")
                         or old_difficulty != q.get("difficulty")
                         or old_active != new_active
+                        or material_changed
                     ):
-                        # 内容没变、但 type/difficulty/is_active 变了（重抽纠正
-                        # metadata、needs_review 状态变化如缺图题从兜底
-                        # needs_review=False 改为只报告 needs_review=True）。
-                        # 旧逻辑只在 type 变时更 type，difficulty/is_active 变了
-                        # 不更新（2026-11-03 汇文题21：difficulty 2→3、
-                        # is_active 1→0 都没写进库）。
+                        # 内容没变、但 type/difficulty/is_active/material_text 变了
+                        # （重抽纠正 metadata、needs_review 状态变化如缺图题从兜底
+                        # needs_review=False 改为只报告 needs_review=True；或切题
+                        # 只调整材料归属）。旧逻辑只在 type 变时更 type，
+                        # difficulty/is_active/material 变了不更新（2026-11-03 汇文
+                        # 题21：difficulty 2→3、is_active 1→0 都没写进库）。
                         self._exec(
-                            "UPDATE questions SET type=%s, difficulty=%s, is_active=%s WHERE id=%s",
-                            (q.get("type"), q.get("difficulty"), new_active, qid))
+                            "UPDATE questions SET type=%s, difficulty=%s, is_active=%s, "
+                            "material_text=%s WHERE id=%s",
+                            (q.get("type"), q.get("difficulty"), new_active,
+                             q.get("material_text"), qid))
                         updated += 1
                     if old_hash != chash:
                         other = self._reusable_question(chash, opts, exclude_id=qid)

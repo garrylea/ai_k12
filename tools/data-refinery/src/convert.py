@@ -99,6 +99,10 @@ class MineruRunner:
                 *[str(p) for p in batch],
                 "-o", str(output_dir),
             ]
+            if is_document:
+                # 同一次调用顺手产出 JSON（块级 page_idx + bbox）：语文加点/画线
+                # 只识别「材料块」而不是整页，必须先有块坐标。不增加 API 次数。
+                cmd += ["-f", "md,json"]
             self._run(cmd)
             if is_document:
                 # 文档按份提交，一份一个任务；不再假装是「第 1-1/1 页」

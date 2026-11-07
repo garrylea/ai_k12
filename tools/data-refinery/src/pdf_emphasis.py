@@ -270,8 +270,43 @@ def _detect_dots(page, lines: list[_Line], underlined: set[tuple[int, int]], zoo
 # ── 对外：整份 PDF ────────────────────────────────────────────
 
 
-def detect_decorations(pdf_path: str | Path) -> list[Decoration]:
-    """检测整份 PDF 的下划线与着重号（按页、按行顺序）。"""
+def _bbox_intersects(a: tuple[float, float, float, float],
+                     b: tuple[float, float, float, float],
+                     margin: float = 0.0) -> bool:
+    return not (a[2] < b[0] - margin or a[0] > b[2] + margin
+                or a[3] < b[1] - margin or a[1] > b[3] + margin)
+
+
+def _filter_lines_by_regions(lines: list[_Line],
+                             regions: list[tuple[float, float, float, float]]
+                             ) -> list[_Line]:
+    """只保留与材料区域相交的行；重建 line_id/index，供后续按行分组。"""
+    kept: list[_Line] = []
+    for line in lines:
+        x0 = min(c.bbox[0] for c in line.chars)
+        y0 = min(c.bbox[1] for c in line.chars)
+        x1 = max(c.bbox[2] for c in line.chars)
+        y1 = max(c.bbox[3] for c in line.chars)
+        if any(_bbox_intersects((x0, y0, x1, y1), r, margin=1.0) for r in regions):
+            kept.append(line)
+    for i, line in enumerate(kept):
+        line.line_id = i
+        for j, c in enumerate(line.chars):
+            c.line_id = i
+            c.index = j
+    return kept
+
+
+def detect_decorations(
+    pdf_path: str | Path,
+    regions: dict[int, list[tuple[float, float, float, float]]] | None = None,
+) -> list[Decoration]:
+    """检测 PDF 的下划线与着重号（按页、按行顺序）。
+
+    `regions` 非 None 时只处理给定材料块：`{page_idx(0 基): [bbox(点坐标)]}`。
+    这是 2026-11-07 用户裁决的默认路径——语文只对切出的 material_text 做识别，
+    不扫整页/整份 PDF；找不到材料时调用方不应传 None 退回全量扫描。
+    """
     import fitz  # 延迟导入：只有真正跑检测时才依赖 PyMuPDF
 
     # 部分试卷 PDF 缺 ExtGState 资源（`cannot find ExtGState 'KSPE109'`），
@@ -284,9 +319,16 @@ def detect_decorations(pdf_path: str | Path) -> list[Decoration]:
     try:
         decorations: list[Decoration] = []
         for page in doc:
+            page_regions = None if regions is None else regions.get(page.number)
+            if regions is not None and not page_regions:
+                continue
             lines = _build_lines(page)
             if not lines:
                 continue
+            if page_regions:
+                lines = _filter_lines_by_regions(lines, page_regions)
+                if not lines:
+                    continue
             underlines, underlined = _detect_underlines(page, lines)
             dots = _detect_dots(page, lines, underlined)
             decorations.extend(underlines)
