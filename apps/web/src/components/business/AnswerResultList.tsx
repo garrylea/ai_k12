@@ -220,7 +220,7 @@ export function AnswerResultList({
                       {q.material && (
                         <div
                           data-testid="result-material"
-                          className="mb-2 max-h-[32vh] overflow-y-auto rounded-lg border border-[var(--bg-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[13px] text-[var(--text-primary)] leading-[1.7]"
+                          className="md-prose mb-2 max-h-[32vh] overflow-y-auto rounded-lg border border-[var(--bg-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[13px] text-[var(--text-primary)] leading-[1.7]"
                         >
                           <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
                             {preprocessMarkdown(q.material)}

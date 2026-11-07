@@ -357,6 +357,10 @@ describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
     const block = screen.getByTestId('question-material');
     expect(block.textContent).toContain('这是阅读材料');
     expect(block.querySelector('img')?.getAttribute('src')).toContain('/assets/chinese/paper/fig1.png');
+    // 材料块是 Markdown 正文容器：必须挂 md-prose，恢复被 Tailwind preflight
+    // 重置掉的一/二级标题字号与字重（2026-11-07 用户报告「## 标题」像普通正文）。
+    expect(block.className).toContain('md-prose');
+    expect(block.querySelector('h2')?.textContent).toBe('材料一');
     unmount();
 
     render(

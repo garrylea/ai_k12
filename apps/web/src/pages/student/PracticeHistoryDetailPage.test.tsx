@@ -170,7 +170,10 @@ describe('PracticeHistoryDetailPage', () => {
     expect(screen.getByText('解析一')).toBeInTheDocument();
     expect(screen.getByText('题库解析二')).toBeInTheDocument();
     // 材料独立区块渲染（2026-11-02 用户要求：语文/英语阅读、物化题内材料）
-    expect(screen.getByTestId('history-material')).toHaveTextContent('阅读下面的材料');
+    const material = screen.getByTestId('history-material');
+    expect(material).toHaveTextContent('阅读下面的材料');
+    // Markdown 正文容器：挂 md-prose 恢复标题/列表等语义排版（2026-11-07）
+    expect(material.className).toContain('md-prose');
   });
 
   it('我的答案是裸 LaTeX 时补 $ 后渲染成公式（不再显示字面 \\frac）', async () => {

@@ -36,6 +36,21 @@ describe('AnswerResultList 学生答案图片', () => {
   });
 });
 
+describe('AnswerResultList 材料排版', () => {
+  it('材料块挂 md-prose，Markdown 标题按标题渲染（不当成普通正文）', () => {
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '题一', material: '## 发言稿三\n\n正文段落' }]}
+        answers={{ '1': { isCorrect: true, method: 'exact', studentAnswer: 'A' } }}
+        onClose={() => {}}
+      />,
+    );
+    const block = screen.getByTestId('result-material');
+    expect(block.className).toContain('md-prose');
+    expect(block.querySelector('h2')?.textContent).toBe('发言稿三');
+  });
+});
+
 describe('AnswerResultList 题号', () => {
   it('每道题在状态图标左侧显示题号（2026-11-01 用户要求）', () => {
     render(

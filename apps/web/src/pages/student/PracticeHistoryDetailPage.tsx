@@ -218,7 +218,7 @@ function QuestionCard({
       {q.materialText && (
         <div
           data-testid="history-material"
-          className="mb-3 max-h-[32vh] overflow-y-auto rounded-lg border border-[var(--bg-subtle)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] leading-[1.7]"
+          className="md-prose mb-3 max-h-[32vh] overflow-y-auto rounded-lg border border-[var(--bg-subtle)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] leading-[1.7]"
         >
           <MarkdownBlock text={q.materialText} />
         </div>

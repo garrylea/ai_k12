@@ -264,6 +264,83 @@ body {
 .textbook-prose ol { list-style-type: decimal; }
 .textbook-prose .katex { font-size: 1.05em; }
 
+/* ===== Markdown 正文块（题面/材料/解析的紧凑 Markdown 排版） =====
+   Tailwind preflight 把 h1–h6 重置为 font-size/font-weight: inherit，又把
+   ul/ol 的 list-style 清零——ReactMarkdown 渲染出来的 `## 标题`、`1. 列表`
+   因此和普通段落长得一模一样（2026-11-07 用户报告：语文材料「## 发言稿三」
+   没有按标题显示）。这里用**相对 em**补回标题/列表/引用/分隔线的语义层次：
+   套在任何字号容器上都不会改变正文大小，只让上面的元素恢复可辨识的层级。
+
+   不复用 .learn-prose：那套带装饰竖条和固定 --fs-learn-* 字号，是课程正文
+   的规格；材料区是 13–14px 的紧凑内嵌块，套上去会过大且出现竖条。 */
+.md-prose > :first-child { margin-top: 0; }
+.md-prose > :last-child { margin-bottom: 0; }
+.md-prose h1,
+.md-prose h2,
+.md-prose h3,
+.md-prose h4,
+.md-prose h5,
+.md-prose h6 {
+  color: var(--text-primary);
+  font-weight: 700;
+  line-height: 1.45;
+  margin: 1em 0 0.4em;
+}
+.md-prose h1 { font-size: 1.4em; }
+.md-prose h2 { font-size: 1.3em; }
+.md-prose h3 { font-size: 1.15em; }
+.md-prose h4,
+.md-prose h5,
+.md-prose h6 { font-size: 1em; }
+.md-prose p { margin: 0; }
+.md-prose p + p { margin-top: 0.6em; }
+.md-prose strong { font-weight: 700; }
+.md-prose em { font-style: italic; }
+.md-prose ul,
+.md-prose ol {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+  list-style-position: outside;
+}
+.md-prose ul { list-style-type: disc; }
+.md-prose ol { list-style-type: decimal; }
+.md-prose li { margin: 0.15em 0; }
+.md-prose li > ul,
+.md-prose li > ol { margin: 0.15em 0; }
+.md-prose li > p { margin: 0; }
+.md-prose blockquote {
+  margin: 0.6em 0;
+  padding-left: 0.75em;
+  border-left: 3px solid var(--bg-subtle);
+  color: var(--text-secondary);
+}
+.md-prose hr {
+  margin: 0.8em 0;
+  border: 0;
+  border-top: 1px solid var(--bg-subtle);
+}
+.md-prose a {
+  color: var(--brand-500);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md-prose code {
+  padding: 0.1em 0.3em;
+  border-radius: 0.25em;
+  background: var(--bg-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+.md-prose pre {
+  margin: 0.6em 0;
+  padding: 0.6em 0.75em;
+  border-radius: 0.5em;
+  background: var(--bg-subtle);
+  overflow-x: auto;
+}
+.md-prose pre code { padding: 0; background: transparent; }
+.md-prose .katex { font-size: 1.05em; }
+
 /* ===== Learn Page Prose (reference page styles) ===== */
 .learn-prose {
   color: var(--learn-text-primary);

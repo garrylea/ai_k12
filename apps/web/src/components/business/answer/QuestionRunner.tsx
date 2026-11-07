@@ -541,7 +541,7 @@ export function QuestionRunner({
           {q.material && (
             <div
               data-testid="question-material"
-              className={`mb-3 rounded-lg border border-[var(--learn-card-border)] bg-[var(--bg-base)] px-3 py-2.5 text-sm text-[var(--text-primary)] leading-[1.7] ${
+              className={`md-prose mb-3 rounded-lg border border-[var(--learn-card-border)] bg-[var(--bg-base)] px-3 py-2.5 text-sm text-[var(--text-primary)] leading-[1.7] ${
                 nonScienceSubject ? '' : 'max-h-[38vh] overflow-y-auto'
               }`}
             >
