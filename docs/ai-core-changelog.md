@@ -8,7 +8,33 @@
 
 ---
 
-## 2026-11-08 选科页六学科图标按学科区分
+## 2026-11-08 做题入口（自由做题 / freeform）
+
+**入口**：入口选择页第 4 张卡「做题」→ `/student/solve`（`apps/web/src/pages/student/SolvePage.tsx`）。学生上传 1–6 张题目照片 → 识别候选 → 选题 + 多选配图 → 作答页（草稿白板 / 手写 / LaTeX 预览）→ 【答疑】或【提交】。
+
+**链路**：
+- 识别 `POST /api/freeform/recognize`：MinerU 转 Markdown → **本地切题**（`freeform_split` 路由：`local` 主、`qwen3.8-max` 兜底）→ 返回候选（题干 / 配图 / 分值）。
+- 判题 `POST /api/freeform/judge/stream`（SSE）：`freeform_judge` 路由**直连 `qwen3.8-max`、不设兜底**（判题要准）；流式输出分步得分，尾部 JSON 落库后发 `result`。
+- 答疑复用 `POST /api/ai/tutor/stream`，会话场景新增 `aux_freeform`。
+
+**数据口径（刻意设计，勿改）**：
+- 题库写入 `questions.source='freeform'`，**无知识点行**，**不进任何自动抽题池**（专项 / 同类型 / 考试 / 错题练习都不出现）。
+- `main_error_books` **只在不满分时写**（`source='freeform'`），满分重提走清零；错题练习页**显示但不可勾选**，`judgeQuestion` 对 `source='freeform'` 直接 400/`code=1001` 堵直连 `POST /training/judge` 的口子。
+- **不发积分、不写 `practice_results`、不更新掌握度**；判题服务因此不注入 Points / Mastery / PracticeResults 依赖。
+- 家长端错题轨道：`freeform` 归 **training**（与 `auxiliary` 同档，见 `parent-insights.repo.ts` 的 `TRACK_SOURCES`）。
+
+**交付物**：
+- 后端模块 `apps/server/src/modules/freeform/`（controller / recognize / judge / MinerU runner / 配图提取）。
+- ai-core 能力 `freeform-split` / `freeform-judge` 与两套路由场景 `freeform_split` / `freeform_judge`（`model-routes.yaml`）。
+- 迁移 `tools/db/migrations/2026-11-08_freeform_routes.sql`（两条 `llm_routes` + `uploaded_files` 的 `idx_uf_uploader_url`，幂等）。
+- 一条命令交付 `bash tools/freeform/setup.sh`：加载 `.env` → 应用迁移 → `schema_reconcile.py` 对账（有差异即停）→ MinerU 预检（仅告警）。
+- 文件上传新增 `freeform` 来源，且**不自动触发 refinery**；`uploaded_files` 按 `(uploader_id, url)` 反查归属。
+
+**提交范围**：`8fbd1086..8169015f`（47 个提交，分支 `feat/freeform-solve`）。
+
+**验证**：`apps/server` 189 文件 / 2549 用例全通过；`apps/web` 168 文件 / 1610 用例全通过；`apps/web` `tsc -b` 与 `apps/server` `tsc --noEmit` 均 0 错误。
+
+**真环境冒烟（MinerU + 千问 + DB 迁移）待用户批准后执行** —— 本次只跑单测与类型检查，**未**应用迁移、未起服务、未调用真实 MinerU/千问，因此识别准确率、SSE 端到端与 iPad 拖图/粘贴/白板行为**尚未实测**。
 
 **背景**（用户发现）：`/student/training` 六张卡全部是同一枚哑铃，学生只能靠文字分辨学科。查证该页自 2026-09 建立以来从未按学科区分图标；2026-10-31 六卡计划里也明确写了「本计划不新增图标」「DumbbellIcon 不变」——不是某次调整没生效。
 
