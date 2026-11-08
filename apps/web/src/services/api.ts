@@ -1042,6 +1042,11 @@ export interface TrainingErrorBookEntry {
   kpIds: number[];
   /** 选择题选项（JSON 数组：字符串选项或 {label,text}），非选择题/无选项为 null。 */
   options: unknown[] | null;
+  /**
+   * 题目来源（2026-11-08，Task 12 起后端返回）：`'freeform'` = 做题记录（自由提问）产生的题，
+   * 只能查看、不能进错题练习；其余/null 为普通错题。
+   */
+  source: string | null;
 }
 
 export function getTrainingErrorBook(params: {

@@ -11,6 +11,9 @@ import ErrorPracticePage from './ErrorPracticePage';
  * 2026-10-11 增补：错题升级变式入口——条目上「N 道变式待练」按钮，
  * 点击 stopPropagation（不触发条目勾选）并带 ?errorBookId= 进作答页。
  *
+ * 2026-11-08 增补：freeform（做题记录）条目显示但不可勾选——
+ * 不进已选、不进题单；全为 freeform 时「开始练习」禁用。
+ *
  * vitest globals:false —— 必须显式 import + 自己写 afterEach(cleanup)。
  */
 
@@ -79,6 +82,37 @@ describe('ErrorPracticePage ?kpId= 预填', () => {
         expect.objectContaining({ kpId: undefined }),
       ),
     );
+  });
+});
+
+describe('ErrorPracticePage freeform 条目（2026-11-08）', () => {
+  it('freeform 条目显示但不可勾选，不计入已选', async () => {
+    getTrainingErrorBook.mockResolvedValue([
+      { errorBookId: 1, questionId: 1, questionText: '普通题', type: 'choice', level: 1, createdAt: '', source: 'practice' },
+      { errorBookId: 2, questionId: 2, questionText: '做题记录', type: 'short_answer', level: 1, createdAt: '', source: 'freeform' },
+    ]);
+
+    renderAt('/student/training/errors');
+
+    const checks = (await screen.findAllByRole('checkbox')) as HTMLInputElement[];
+    expect(checks[0]).not.toBeDisabled();
+    expect(checks[1]).toBeDisabled();
+    expect(screen.getByText('做题')).toBeTruthy();
+    // 分母只算可选条目（2 条里 1 条是 freeform）
+    expect(screen.getByText(/已选 0 \/ 1 题/)).toBeTruthy();
+  });
+
+  it('全为 freeform 时「开始练习」禁用并提示', async () => {
+    getTrainingErrorBook.mockResolvedValue([
+      { errorBookId: 2, questionId: 2, questionText: '做题记录', type: 'short_answer', level: 1, createdAt: '', source: 'freeform' },
+    ]);
+
+    renderAt('/student/training/errors');
+
+    const checks = (await screen.findAllByRole('checkbox')) as HTMLInputElement[];
+    expect(checks[0]).toBeDisabled();
+    expect(screen.getByRole('button', { name: /开始练习/ })).toBeDisabled();
+    expect(screen.getAllByText('做题记录的题目暂不支持错题练习').length).toBeGreaterThan(0);
   });
 });
 

@@ -73,6 +73,11 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/** freeform（做题记录）条目只展示、不参与错题练习（2026-11-08）。 */
+function isSelectable(entry: TrainingErrorBookEntry): boolean {
+  return entry.source !== 'freeform';
+}
+
 export default function ErrorPracticePage() {
   const navigate = useNavigate();
 
@@ -172,6 +177,7 @@ export default function ErrorPracticePage() {
 
   const toggle = (entry: TrainingErrorBookEntry) => {
     if (entry.questionId == null) return; // 孤儿题禁选
+    if (!isSelectable(entry)) return; // 做题记录禁选
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(entry.errorBookId)) next.delete(entry.errorBookId);
@@ -180,14 +186,20 @@ export default function ErrorPracticePage() {
     });
   };
 
+  // 可选条目数（freeform 不进分母）：底部「已选 0 / N」的 N
+  const selectableCount = useMemo(
+    () => entries.filter(isSelectable).length,
+    [entries],
+  );
+
   const selectedCount = useMemo(
-    () => entries.filter((e) => selected.has(e.errorBookId)).length,
+    () => entries.filter((e) => isSelectable(e) && selected.has(e.errorBookId)).length,
     [entries, selected],
   );
 
   const startPractice = () => {
     if (selectedCount === 0) return;
-    const chosen = entries.filter((e) => selected.has(e.errorBookId));
+    const chosen = entries.filter((e) => isSelectable(e) && selected.has(e.errorBookId));
     // 题单交给 run 页（读后即删），避免 URL 超长
     sessionStorage.setItem('training:errors', JSON.stringify(chosen));
     navigate(`/student/training/errors/run${subjectQuery}`);
@@ -289,26 +301,34 @@ export default function ErrorPracticePage() {
               entries.map((entry) => {
                 const isSelected = selected.has(entry.errorBookId);
                 const isOrphan = entry.questionId == null;
+                const isFreeform = !isSelectable(entry);
                 const varCount = pendingVarCount.get(entry.errorBookId) ?? 0;
                 return (
                   <Card
                     key={entry.errorBookId}
-                    className={isOrphan ? 'opacity-70 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]' : 'cursor-pointer hover:shadow-[var(--shadow-elevated)] bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]'}
-                    onClick={isOrphan ? undefined : () => toggle(entry)}
+                    className={isOrphan || isFreeform ? 'bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)] opacity-70' : 'cursor-pointer hover:shadow-[var(--shadow-elevated)] bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]'}
+                    onClick={isOrphan || isFreeform ? undefined : () => toggle(entry)}
                   >
                     <div className="flex items-start gap-4">
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        disabled={isOrphan}
+                        disabled={isOrphan || isFreeform}
                         onChange={() => toggle(entry)}
                         onClick={(e) => e.stopPropagation()}
-                        aria-label={isOrphan ? '该题未入库，不可选择' : `选择错题 ${entry.errorBookId}`}
+                        aria-label={
+                          isOrphan
+                            ? '该题未入库，不可选择'
+                            : isFreeform
+                              ? '做题记录的题目不可选择'
+                              : `选择错题 ${entry.errorBookId}`
+                        }
                         className="mt-1 w-5 h-5 shrink-0 accent-[var(--brand-500)] cursor-pointer disabled:cursor-not-allowed"
                       />
                       <div className="flex-1 min-w-0 space-y-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Tag variant="knowledge" className="!bg-[var(--learn-btn-primary)] !text-white">{entry.type ? (typeLabelMap[entry.type] ?? entry.type) : '未分类'}</Tag>
+                          {entry.source === 'freeform' && <Tag variant="neutral">做题</Tag>}
                           {entry.level >= 1 && entry.level <= 5 && (
                             <span
                               className="inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-[10px] font-bold"
@@ -342,6 +362,11 @@ export default function ErrorPracticePage() {
                         {isOrphan && (
                           <p className="text-xs text-[var(--learn-text-tertiary)]">
                             该题未入库，暂不支持线上重做
+                          </p>
+                        )}
+                        {isFreeform && (
+                          <p className="text-xs text-[var(--learn-text-tertiary)]">
+                            做题记录的题目暂不支持错题练习
                           </p>
                         )}
                         {/* 错题升级变式入口（2026-10-11）：整块是按钮，stopPropagation 防触发条目勾选 */}
@@ -384,7 +409,9 @@ export default function ErrorPracticePage() {
           <div className="fixed bottom-0 left-0 right-0 border-t border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] shadow-[var(--shadow-card)]">
             <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 py-4 flex items-center justify-between">
               <span className="text-sm text-[var(--learn-text-secondary)]">
-                已选 {selectedCount} / {entries.length} 题
+                {selectableCount === 0
+                  ? '做题记录的题目暂不支持错题练习'
+                  : `已选 ${selectedCount} / ${selectableCount} 题`}
               </span>
               <Button
                 variant="primary"
