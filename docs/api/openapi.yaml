@@ -7927,7 +7927,7 @@ paths:
                           questions:
                             type: array
                             items: { $ref: '#/components/schemas/HistoryRunQuestion' }
-        '400': { description: questionId / sessionId 非整数（ParseIntPipe）/ 题量非法（非 1/2/3/5 或在家长可用档位外）/ 学科不支持 / 题目已下架 / 题目不属于该学科 / 无标准答案 / 无知识点 / 知识点不存在 }
+        '400': { description: 学科不支持（语文仅 C01/C02 知识点）/ 语文种子题不在 C01/C02 / 题目已下架 / 题目不属于该学科 / 无语义知识点 / 知识点不存在 / 题量不在可用档位 }
         '404': { description: 记录或题目不属于当前学生（code=1002） }
 
 components:
