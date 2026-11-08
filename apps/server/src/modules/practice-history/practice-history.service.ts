@@ -4,6 +4,8 @@ import { SpecialPracticeSessionsRepository } from '../../database/repositories/s
 import { SpecialAnswerRecordsRepository } from '../../database/repositories/special-answer-records.repo.js';
 import { ChinesePassagesRepository, toSentences } from '../../database/repositories/chinese-passages.repo.js';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
+import { SUBJECT_CHINESE, SUBJECT_MATH, SUBJECT_PHYSICS } from '../../common/subject-config.js';
+import { chineseSimilarKpId } from '../../common/chinese-similar.util.js';
 import type { HistoryRunQuestion, SimilarPracticeResult } from '../training/history-practice.service.js';
 import { HistoryPracticeService } from '../training/history-practice.service.js';
 import type {
@@ -107,9 +109,17 @@ export class PracticeHistoryService {
         this.examSessionsRepo.findAnswersWithQuestions(input.sessionId),
         this.examSessionsRepo.countAnswersBySession(input.sessionId),
       ]);
-      const kpMap = await this.questionsRepo.findKpIdsByQuestionIds(
-        answers.map((a) => a.question_id).filter((id): id is number => id != null),
-      );
+      const questionIds = answers
+        .map((a) => a.question_id)
+        .filter((id): id is number => id != null);
+      // 语文按「知识点顶层模块」判定（阅读/写作不开放）；数学/物理仍按「有知识点」。
+      const isChinese = session.subject_id === SUBJECT_CHINESE;
+      const kpMap = isChinese
+        ? new Map<number, number>()
+        : await this.questionsRepo.findKpIdsByQuestionIds(questionIds);
+      const kpRefs = isChinese
+        ? await this.questionsRepo.findKpRefsByQuestionIds(questionIds)
+        : null;
       return {
         session: {
           source: 'exam', sessionId: session.id, subjectId: session.subject_id,
@@ -117,11 +127,14 @@ export class PracticeHistoryService {
           completedAt: session.submitted_at, totalCount: count.total, correctCount: count.correct,
         },
         questions: answers.map((a): PracticeHistoryQuestion => {
-          const canRedo = a.question_id != null && a.is_active === 1;
-          const hasKp = a.question_id != null && kpMap.has(a.question_id);
-          const canSimilar = canRedo
-            && (session.subject_id === 1 || session.subject_id === 4)
-            && hasKp;
+          const qid = a.question_id;
+          const canRedo = qid != null && a.is_active === 1;
+          const canSimilar = canRedo && (
+            isChinese
+              ? chineseSimilarKpId(kpRefs?.get(qid as number) ?? []) != null
+              : (session.subject_id === SUBJECT_MATH || session.subject_id === SUBJECT_PHYSICS)
+                && kpMap.has(qid as number)
+          );
           return {
             questionId: a.question_id,
             questionOrder: a.question_order,
@@ -153,9 +166,16 @@ export class PracticeHistoryService {
       this.specialAnswersRepo.listBySession(input.sessionId),
       this.specialAnswersRepo.countBySession(input.sessionId),
     ]);
-    const kpMap = await this.questionsRepo.findKpIdsByQuestionIds(
-      answers.map((a) => a.question_id).filter((id): id is number => id != null),
-    );
+    const questionIds = answers
+      .map((a) => a.question_id)
+      .filter((id): id is number => id != null);
+    const isChinese = session.subject_id === SUBJECT_CHINESE;
+    const kpMap = isChinese
+      ? new Map<number, number>()
+      : await this.questionsRepo.findKpIdsByQuestionIds(questionIds);
+    const kpRefs = isChinese
+      ? await this.questionsRepo.findKpRefsByQuestionIds(questionIds)
+      : null;
 
     // 语文三专项的「题」是 passage+sentence：按需批量回放篇名与句原文（同篇只查一次）。
     const passageCache = new Map<number, { title: string; sentences: string[] }>();
@@ -177,11 +197,14 @@ export class PracticeHistoryService {
         passageTitle = p.title || null;
         passageSentence = a.sentence_index !== null ? (p.sentences[a.sentence_index] ?? null) : null;
       }
-      const canRedo = a.question_id != null && a.question_is_active === 1;
-      const hasKp = a.question_id != null && kpMap.has(a.question_id);
-      const canSimilar = canRedo
-        && (session.subject_id === 1 || session.subject_id === 4)
-        && hasKp;
+      const qid = a.question_id;
+      const canRedo = qid != null && a.question_is_active === 1;
+      const canSimilar = canRedo && (
+        isChinese
+          ? chineseSimilarKpId(kpRefs?.get(qid as number) ?? []) != null
+          : (session.subject_id === SUBJECT_MATH || session.subject_id === SUBJECT_PHYSICS)
+            && kpMap.has(qid as number)
+      );
       return {
         questionId: a.question_id,
         questionOrder: a.question_order,
