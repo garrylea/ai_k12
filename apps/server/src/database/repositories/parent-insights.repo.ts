@@ -124,7 +124,8 @@ export const TRACK_SOURCES: Record<ParentErrorTrack, readonly string[]> = {
   // 主线：课堂练习 / 卡片讨论 / 考试（PRD §6.1，错题进主线错题本）
   main: ['practice', 'discuss', 'exam'],
   // 训练：训练轨自身产生的错题 + 辅线答疑里孩子问过的题 + 做题入口的错题
-  //（freeform 与 auxiliary 同档：家长能看到，但不进自动练习池）
+  //（freeform 与 auxiliary 同档：家长可见；auxiliary 可进训练错题练习池，
+  //  freeform 由 judgeQuestion 守卫排除）
   training: ['targeted', 'error_practice', 'auxiliary', 'freeform'],
 };
 
