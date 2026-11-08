@@ -993,6 +993,19 @@ describe('TrainingService.judgeTraining — special_answer_records 旁路写入'
     }));
   });
 
+  it('语文 subjectId=2 映射 module=cn_targeted', async () => {
+    const deps = mk({
+      judgeCore: { judgeQuestion: vi.fn().mockResolvedValue(judgeResult) },
+    });
+    await mkSvc(deps).judgeTraining({
+      studentId: 7, questionId: 100, subjectId: 2, studentAnswer: 'A', source: 'targeted',
+      sessionUid: 'abc-cn', questionOrder: 1,
+    });
+    expect(deps.specialSessionsRepo.upsertSession).toHaveBeenCalledWith(expect.objectContaining({
+      module: 'cn_targeted', subjectId: 2,
+    }));
+  });
+
   // 未作答占位行（2026-11-06）：前端 Task 9 起在首题判题时带上整轮题单。
   describe('plannedQuestionIds — 整轮题单落库', () => {
     const mkJudge = (over: any = {}) => mk({

@@ -23,7 +23,7 @@ import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictatio
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-practice.util.js';
-import { targetedTaskCode, subjectCodeOf } from '../../common/subject-config.js';
+import { targetedTaskCode, subjectCodeOf, SUBJECT_CHINESE } from '../../common/subject-config.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
 import type { SpecialPracticeVerdict } from '../../database/repositories/special-practice-logs.repo.js';
 import { SpecialPracticeSessionsRepository } from '../../database/repositories/special-practice-sessions.repo.js';
@@ -183,8 +183,8 @@ export class TrainingService {
   }
 
   /** 训练判题：JudgeCore 题中心变体的薄封装（source 由端点语义决定，不透传客户端任意值）。
-   *  带 sessionUid 时旁路写作答记录（Task 3，2026-11-01）：数学/物理/化学 → math_targeted /
-   *  physics_targeted / chemistry_targeted；写入失败只 warn、不阻断判题（与 special_practice_logs
+   *  带 sessionUid 时旁路写作答记录（Task 3，2026-11-01）：语文/数学/物理/化学 → cn_targeted /
+   *  math_targeted / physics_targeted / chemistry_targeted；写入失败只 warn、不阻断判题（与 special_practice_logs
    *  同口径）。
    *  带 plannedQuestionIds 时（2026-11-06）再把整轮题单里**未作答**的题写成空行，
    *  历史详情才显示得出「未作答」。 */
@@ -202,7 +202,8 @@ export class TrainingService {
     // 旁路写作答记录：判题结果算出后、返回前。sessionUid 缺失 = 旧客户端，不写、不报错。
     if (input.sessionUid && this.specialSessionsRepo && this.specialAnswersRepo) {
       const module: SpecialSessionModule =
-        input.subjectId === 4 ? 'physics_targeted'
+        input.subjectId === SUBJECT_CHINESE ? 'cn_targeted'
+        : input.subjectId === 4 ? 'physics_targeted'
         : input.subjectId === 5 ? 'chemistry_targeted'
         : 'math_targeted';
       try {
