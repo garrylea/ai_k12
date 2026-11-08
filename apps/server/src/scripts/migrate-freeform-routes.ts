@@ -1,6 +1,7 @@
 /**
  * 做题入口（freeform）路由迁移：`freeform_split` / `freeform_judge` 两条 llm_routes。
- * 与 tools/db/migrations/2026-11-08_freeform_routes.sql 等价，供 CI / 管理端复用（不依赖 mysql 客户端）。
+ * 权威源是 tools/db/migrations/2026-11-08_freeform_routes.sql —— 本脚本只是它的等价镜像，
+ * 供 CI / 管理端复用（不依赖 mysql 客户端）；改 SQL 时两边必须同步。
  * 幂等：路由走 ON DUPLICATE KEY UPDATE；索引先查 information_schema 再建。
  *
  * 运行：cd apps/server && npx tsx src/scripts/migrate-freeform-routes.ts
@@ -30,14 +31,15 @@ async function main() {
   });
 
   try {
+    // 行别名 `AS new` 而非已弃用的 `VALUES()`（MySQL 8.0.20 起后者打弃用告警）
     await conn.execute(
       `INSERT INTO llm_routes (scene, subject, primary_model_key, fallback_model_key)
        VALUES
          ('freeform_split', '*', 'local', 'qwen3.8-max'),
-         ('freeform_judge', '*', 'qwen3.8-max', NULL)
+         ('freeform_judge', '*', 'qwen3.8-max', NULL) AS new
        ON DUPLICATE KEY UPDATE
-         primary_model_key = VALUES(primary_model_key),
-         fallback_model_key = VALUES(fallback_model_key)`,
+         primary_model_key = new.primary_model_key,
+         fallback_model_key = new.fallback_model_key`,
     );
     for (const r of ROUTES) {
       console.log(`[freeform] 路由 ${r.scene}/* -> ${r.primary} / ${r.fallback ?? '-'}`);
