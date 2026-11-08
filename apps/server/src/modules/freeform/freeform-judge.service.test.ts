@@ -617,6 +617,22 @@ describe('FreeformJudgeService —— 图片解析', () => {
     expect(deps.capability.stream).not.toHaveBeenCalled();
   });
 
+  it('配图非法（作答目录下的图）→ 400/1001，且不建会话（先解析图片再建会话）', async () => {
+    const deps = mkDeps({
+      files: { findByIdAndOwner: vi.fn(), findByUrlAndOwner: vi.fn().mockResolvedValue(JPEG) },
+    });
+    const svc = mkService(deps);
+
+    await expect(
+      collect(svc.judgeStream({ ...baseDto(), figureUrls: ['/uploads/answer/x.png'] }, 9)),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+    // 图片校验失败必须在会话落库之前中止：不留下空的 ai_dialogues 行 + 题干锚。
+    expect(deps.conversations.create).not.toHaveBeenCalled();
+    expect(deps.conversations.get).not.toHaveBeenCalled();
+    expect(deps.files.findByUrlAndOwner).not.toHaveBeenCalled();
+    expect(deps.capability.stream).not.toHaveBeenCalled();
+  });
+
   it('单张图 >5MB → 400/1001（上传 20MB 不能直接变 base64 撑爆 prompt）', async () => {
     const deps = mkDeps({
       files: {

@@ -115,9 +115,10 @@ export class FreeformJudgeService {
     const providedQuestion = dto.questionId != null ? await this.questions.findById(dto.questionId) : null;
     if (dto.questionId != null && !providedQuestion) throw badRequest('题目不存在');
 
-    // 顺序按 brief/plan：先建会话（或校验已有会话），再把图片读成 data URL。
-    const dialogueId = await this.resolveDialogue(dto, studentId, subjectId, questionContent);
+    // 顺序按 spec §5.3：图片先全部解析/校验完（失败不留会话），再建会话或复用已有会话。
+    const existingDialogueId = dto.dialogueId ? await this.validateDialogue(dto, studentId) : null;
     const images = await this.resolveImages(dto, studentId);
+    const dialogueId = existingDialogueId ?? (await this.createDialogue(studentId, subjectId, questionContent));
     yield { type: 'start', dialogueId, questionId: dto.questionId ?? null };
 
     let content = '';
@@ -215,18 +216,19 @@ export class FreeformJudgeService {
     if (dto.dialogueId != null && !/^\d+$/.test(dto.dialogueId)) throw badRequest('dialogueId 必须为正整数');
   }
 
+  /** 已传 dialogueId：校验归属 + 场景，**不写库**（写在图片全部校验通过之后才发生）。 */
+  private async validateDialogue(dto: FreeformJudgeDto, studentId: number): Promise<string> {
+    const dlg = await this.conversations.get(Number(dto.dialogueId), studentId);
+    if (dlg.scene !== 'aux_freeform') throw badRequest('对话场景不匹配');
+    return String(dlg.id);
+  }
+
   /** 无 dialogueId 则新建 aux_freeform 会话（题干作 assistant 锚消息，供后续追问带上下文）。 */
-  private async resolveDialogue(
-    dto: FreeformJudgeDto,
+  private async createDialogue(
     studentId: number,
     subjectId: number,
     questionContent: string,
   ): Promise<string> {
-    if (dto.dialogueId) {
-      const dlg = await this.conversations.get(Number(dto.dialogueId), studentId);
-      if (dlg.scene !== 'aux_freeform') throw badRequest('对话场景不匹配');
-      return String(dlg.id);
-    }
     const dlg = await this.conversations.create(studentId, {
       track: 'auxiliary',
       scene: 'aux_freeform',
