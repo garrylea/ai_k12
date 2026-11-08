@@ -1,4 +1,4 @@
-import { useRef, useState, type ClipboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'react';
 import { uploadFile, type AttachmentRequest } from '@/services/api';
 import { ensureJpeg } from '@/utils/image-convert';
 import { toast } from '@/components/base/Toast';
@@ -27,70 +27,123 @@ interface Props {
   }) => void;
 }
 
+function makeLocalId() {
+  return crypto.randomUUID?.() ?? `img-${Date.now()}-${Math.random()}`;
+}
+
+/** 只回收本组件自己造的 blob URL，外部传入的 data:/http: 不动。 */
+function revokePreview(url: string) {
+  if (url.startsWith('blob:') && typeof URL.revokeObjectURL === 'function') {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }: Props) {
   const [text, setText] = useState('');
   const [images, setImages] = useState<SourceImage[]>([]);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const addFiles = async (files: File[]) => {
+  // 权威副本：选图 / 拖拽 / 粘贴三个入口可能在上一次 HEIC 转换还没结束时并发进入，
+  // 若按 render 闭包里的 images.length 算余量，第二批会按旧长度再次占位而突破 6 张。
+  // 所有写入都先改 ref 再 setState，读取余量一律取 ref。
+  const imagesRef = useRef<SourceImage[]>([]);
+
+  const commitImages = useCallback((next: SourceImage[]) => {
+    imagesRef.current = next;
+    setImages(next);
+  }, []);
+
+  const updateImages = useCallback(
+    (updater: (prev: SourceImage[]) => SourceImage[]) => {
+      commitImages(updater(imagesRef.current));
+    },
+    [commitImages],
+  );
+
+  // 卸载时回收全部预览 URL（含已被转换结果替换下来的 HEIC URL）。
+  useEffect(
+    () => () => {
+      imagesRef.current.forEach((img) => revokePreview(img.previewUrl));
+    },
+    [],
+  );
+
+  const uploadOne = async (file: File, localId: string) => {
+    try {
+      const jpeg = await ensureJpeg(file);
+      const current = imagesRef.current.find((x) => x.localId === localId);
+      // 转换期间被用户移除：不再上传，也不复活占位。
+      if (!current) return;
+      const previewUrl = jpeg === file ? current.previewUrl : URL.createObjectURL(jpeg);
+      if (previewUrl !== current.previewUrl) revokePreview(current.previewUrl);
+
+      updateImages((prev) =>
+        prev.map((x) =>
+          x.localId === localId
+            ? {
+                ...x,
+                status: 'uploading',
+                fileName: jpeg.name,
+                // 浏览器（Safari 除外）不能直接渲染 HEIC，转换完成后换用 JPEG 预览。
+                previewUrl,
+              }
+            : x,
+        ),
+      );
+
+      const { fileId, url } = await uploadFile(jpeg, undefined, 'freeform');
+      updateImages((prev) =>
+        prev.map((x) =>
+          x.localId === localId ? { ...x, status: 'ready', fileId: String(fileId), url } : x,
+        ),
+      );
+    } catch {
+      updateImages((prev) =>
+        prev.map((x) =>
+          x.localId === localId ? { ...x, status: 'error', error: '上传失败' } : x,
+        ),
+      );
+    }
+  };
+
+  const addFiles = (files: File[]) => {
+    // 先按类型与大小剔除，再抢名额：否则被拒的文件会白占一格，合法文件反而进不来。
     const imageFiles = files.filter((f) => f.type.startsWith('image/'));
-    const room = MAX_IMAGES - images.length;
+    if (imageFiles.length === 0) return;
+    if (imageFiles.length < files.length) toast('error', '仅支持图片文件');
+
+    const withinSize = imageFiles.filter((f) => f.size <= MAX_IMAGE_BYTES);
+    if (withinSize.length < imageFiles.length) toast('error', '图片过大（最大 5MB）');
+
+    const room = MAX_IMAGES - imagesRef.current.length;
     if (room <= 0) {
       toast('error', '最多 6 张题图');
       return;
     }
-    const picked = imageFiles.slice(0, room);
-    if (picked.length < imageFiles.length) toast('error', '最多 6 张题图');
+    const accepted = withinSize.slice(0, room);
+    if (accepted.length < withinSize.length) toast('error', '最多 6 张题图');
+    if (accepted.length === 0) return;
 
-    for (const file of picked) {
-      if (file.size > MAX_IMAGE_BYTES) {
-        toast('error', '图片过大（最大 5MB）');
-        continue;
-      }
-      const localId = crypto.randomUUID?.() ?? `img-${Date.now()}-${Math.random()}`;
-      setImages((prev) => [
-        ...prev,
-        {
-          localId,
-          fileName: file.name,
-          previewUrl: URL.createObjectURL(file),
-          status: 'converting',
-        },
-      ]);
-      try {
-        const jpeg = await ensureJpeg(file);
-        setImages((prev) =>
-          prev.map((x) =>
-            x.localId === localId
-              ? {
-                  ...x,
-                  status: 'uploading',
-                  fileName: jpeg.name,
-                  // 浏览器（Safari 除外）不能直接渲染 HEIC，转换完成后换用 JPEG 预览。
-                  previewUrl: jpeg === file ? x.previewUrl : URL.createObjectURL(jpeg),
-                }
-              : x,
-          ),
-        );
-        const { fileId, url } = await uploadFile(jpeg, undefined, 'freeform');
-        setImages((prev) =>
-          prev.map((x) =>
-            x.localId === localId ? { ...x, status: 'ready', fileId: String(fileId), url } : x,
-          ),
-        );
-      } catch {
-        setImages((prev) =>
-          prev.map((x) =>
-            x.localId === localId ? { ...x, status: 'error', error: '上传失败' } : x,
-          ),
-        );
-      }
-    }
+    // 同步一次性占满本批名额（在任何 await 之前），并发批次的余量读数因此总是最新。
+    const placeholders: SourceImage[] = accepted.map((file) => ({
+      localId: makeLocalId(),
+      fileName: file.name,
+      previewUrl: URL.createObjectURL(file),
+      status: 'converting',
+    }));
+    updateImages((prev) => [...prev, ...placeholders]);
+
+    placeholders.forEach((placeholder, index) => {
+      void uploadOne(accepted[index], placeholder.localId);
+    });
   };
 
-  const remove = (localId: string) =>
-    setImages((prev) => prev.filter((x) => x.localId !== localId));
+  const remove = (localId: string) => {
+    const target = imagesRef.current.find((x) => x.localId === localId);
+    if (target) revokePreview(target.previewUrl);
+    updateImages((prev) => prev.filter((x) => x.localId !== localId));
+  };
 
   const allReady = images.every((x) => x.status === 'ready');
   const canSend = !busy && allReady && (text.trim().length > 0 || images.length > 0);
@@ -111,7 +164,7 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
       .filter((file): file is File => file !== null);
     if (files.length > 0) {
       e.preventDefault();
-      void addFiles(files);
+      addFiles(files);
     }
   };
 
@@ -130,7 +183,7 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          void addFiles(Array.from(e.dataTransfer.files));
+          addFiles(Array.from(e.dataTransfer.files));
         }}
       >
         {images.length > 0 && (
@@ -142,8 +195,8 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
                 className="relative w-16 h-16 rounded-lg overflow-hidden border border-[#E5E5E5]"
               >
                 <img src={img.previewUrl} alt={img.fileName} className="w-full h-full object-cover" />
-                <span className="absolute left-0.5 top-0.5 px-1 rounded bg-black/60 text-white text-[10px]">
-                  {index + 1}
+                <span className="absolute left-0.5 top-0.5 px-1 rounded bg-black/60 text-white text-[10px] whitespace-nowrap">
+                  第 {index + 1} 页
                 </span>
                 <button
                   type="button"
@@ -177,7 +230,7 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={handlePaste}
-          placeholder="输入题目文字，或拖入/粘贴题目图片（HEIC、JPG、PNG）"
+          placeholder="输入题目文字，或拖入/粘贴题目图片（HEIC、JPG、PNG、WebP、GIF）"
           className="w-full bg-transparent outline-none resize-none text-[#1D1D1F] placeholder-[#86868B]"
         />
 
@@ -204,10 +257,10 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
             data-testid="source-file-input"
             type="file"
             multiple
-            accept="image/png,image/jpeg,image/heic,.heic"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif,.heic,.heif"
             className="hidden"
             onChange={(e) => {
-              void addFiles(Array.from(e.target.files ?? []));
+              addFiles(Array.from(e.target.files ?? []));
               e.target.value = '';
             }}
           />
@@ -225,12 +278,16 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
       {error && (
         <div className="mt-3 text-sm text-[#C44A3F]">
           {error}
-          <button onClick={onRetry} className="ml-2 underline">
-            重试
-          </button>
-          <button onClick={onManual} className="ml-2 underline">
-            手动输入题目
-          </button>
+          {onRetry && (
+            <button onClick={onRetry} disabled={busy} className="ml-2 underline disabled:opacity-50">
+              重试
+            </button>
+          )}
+          {onManual && (
+            <button onClick={onManual} disabled={busy} className="ml-2 underline disabled:opacity-50">
+              手动输入题目
+            </button>
+          )}
         </div>
       )}
     </div>
