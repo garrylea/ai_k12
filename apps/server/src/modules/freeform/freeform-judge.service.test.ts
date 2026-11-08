@@ -19,7 +19,7 @@ const baseDto = (over: Partial<FreeformJudgeDto> = {}): FreeformJudgeDto => ({
   ...over,
 });
 
-function REPORT_WITH_JSON(total: number, max: number) {
+function REPORT_WITH_JSON(total: number, max: number, questionOver: Record<string, unknown> = {}) {
   const json = {
     verdict: total >= max ? 'correct' : total <= 0 ? 'incorrect' : 'partial',
     totalScore: total,
@@ -33,9 +33,16 @@ function REPORT_WITH_JSON(total: number, max: number) {
       answer: 'x=1',
       explanation: '移项',
       approach: null,
+      ...questionOver,
     },
   };
   return `## 判题结果\n\n**得分：${total} / ${max}**\n\n\`\`\`json\n${JSON.stringify(json)}\n\`\`\``;
+}
+
+/** 只有 JSON 块、没有报告正文（用来验证清洗为空时回落到原始 content）。 */
+function JSON_ONLY(total: number, max: number) {
+  const report = REPORT_WITH_JSON(total, max);
+  return report.slice(report.indexOf('```json'));
 }
 
 /**
@@ -272,7 +279,7 @@ describe('FreeformJudgeService —— 落库口径', () => {
 });
 
 describe('FreeformJudgeService —— 解析与报告清洗', () => {
-  it('JSON 坏 + 二次提取仍失败 → error 5502，且一行都不写', async () => {
+  it('JSON 坏 + 二次提取仍失败 → error 5502；不写题/错题本/判题消息（会话仍按 spec 先建好）', async () => {
     const deps = mkDeps({
       capability: {
         stream: streamOnce('没有 json'),
@@ -286,6 +293,8 @@ describe('FreeformJudgeService —— 解析与报告清洗', () => {
     expect(deps.capability.extractStructured).toHaveBeenCalledTimes(1);
     expect(events.some((e) => e.type === 'error' && e.code === 5502 && e.retryable)).toBe(true);
     expect(events.some((e) => e.type === 'result')).toBe(false);
+    // 会话在解析之前就建好了（spec 处理步骤：先建会话，带上题干锚），所以这里**是**有写入的。
+    expect(deps.conversations.create).toHaveBeenCalledTimes(1);
     expect(deps.questions.createFreeform).not.toHaveBeenCalled();
     expect(deps.questions.updateFreeform).not.toHaveBeenCalled();
     expect(deps.errorBooks.create).not.toHaveBeenCalled();
@@ -328,6 +337,49 @@ describe('FreeformJudgeService —— 解析与报告清洗', () => {
     expect(deps.messages.create).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'assistant', type: 'freeform_judge', content: cleaned!.delta, model: 'qwen3.8-max' }),
     );
+  });
+
+  it('清洗后为空（正文只有 JSON 块）→ 回落到原始 content，别把气泡清空', async () => {
+    const raw = JSON_ONLY(7, 10);
+    const deps = mkDeps({ capability: { stream: streamOnce(raw), extractStructured: vi.fn() } });
+    const svc = mkService(deps);
+
+    const events = await collect(svc.judgeStream(baseDto(), 9));
+
+    const cleaned = events.find(
+      (e) => e.type === 'content' && (e as { replace?: boolean }).replace === true,
+    ) as { delta: string } | undefined;
+    expect(cleaned!.delta).toBe(raw);
+    expect(deps.messages.create).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'assistant', type: 'freeform_judge', content: raw }),
+    );
+    expect(events.find((e) => e.type === 'result')).toMatchObject({ totalScore: 7 });
+  });
+
+  it('多个 JSON 块：只用最后一块判分', async () => {
+    const report = `${REPORT_WITH_JSON(0, 10)}\n\n补充说明\n\n${REPORT_WITH_JSON(7, 10)}`;
+    const deps = mkDeps({ capability: { stream: streamOnce(report), extractStructured: vi.fn() } });
+    const svc = mkService(deps);
+
+    const events = await collect(svc.judgeStream(baseDto(), 9));
+
+    expect(events.find((e) => e.type === 'result')).toMatchObject({ totalScore: 7, verdict: 'partial' });
+    expect(deps.capability.extractStructured).not.toHaveBeenCalled();
+  });
+
+  it('模型给了集合外的 type / difficulty → 规范化成 short_answer / 2，不整份判失败', async () => {
+    const deps = mkDeps({
+      capability: { stream: streamOnce(REPORT_WITH_JSON(7, 10, { type: 'essay', difficulty: 9 })), extractStructured: vi.fn() },
+    });
+    const svc = mkService(deps);
+
+    const events = await collect(svc.judgeStream(baseDto(), 9));
+
+    expect(deps.capability.extractStructured).not.toHaveBeenCalled();
+    expect(deps.questions.createFreeform).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'short_answer', difficulty: 2 }),
+    );
+    expect(events.find((e) => e.type === 'result')).toMatchObject({ totalScore: 7 });
   });
 
   it('模型调用失败 → error 5502（可重试），不写库', async () => {
@@ -376,6 +428,7 @@ describe('FreeformJudgeService —— 对话', () => {
       scene: 'aux_freeform',
       subjectId: 1,
       questionText: '已知 x+1=2',
+      title: '做题 · 已知 x+1=2',
     });
     expect(events[0]).toMatchObject({ type: 'start', dialogueId: '33' });
 
@@ -435,7 +488,14 @@ describe('FreeformJudgeService —— 参数校验', () => {
     ['满分 > 100', { maxScore: 101 }],
     ['题干为空', { questionContent: '   ' }],
     ['题干超 30000 字', { questionContent: 'a'.repeat(30001) }],
+    ['作答超 30000 字', { answer: 'a'.repeat(30001) }],
     ['无作答且无草稿', { answer: '   ' }],
+    ['题干非字符串', { questionContent: 123 }],
+    ['作答非字符串', { answer: 123 }],
+    ['题图非数组', { questionImages: 'x' }],
+    ['配图非数组', { figureUrls: '/uploads/freeform/x.jpg' }],
+    ['题图超过 6 张', { questionImages: Array.from({ length: 7 }, () => ({ type: 'image', fileId: '1' })) }],
+    ['配图超过 6 张', { figureUrls: Array.from({ length: 7 }, (_, i) => `/uploads/freeform/x/${i}.jpg`) }],
   ])('%s → 400/1001', async (_label, over) => {
     const deps = mkDeps();
     const svc = mkService(deps);
@@ -541,5 +601,65 @@ describe('FreeformJudgeService —— 图片解析', () => {
       collect(svc.judgeStream({ ...baseDto(), figureUrls: ['/uploads/freeform/x/gone.jpg'] }, 9)),
     ).rejects.toMatchObject({ response: { code: 1001 } });
     expect(deps.capability.stream).not.toHaveBeenCalled();
+  });
+
+  it('figureUrls 不是 /uploads/freeform/ 前缀 → 400/1001，不查库不读文件', async () => {
+    const deps = mkDeps({
+      files: { findByIdAndOwner: vi.fn(), findByUrlAndOwner: vi.fn().mockResolvedValue(JPEG) },
+    });
+    const svc = mkService(deps);
+
+    await expect(
+      collect(svc.judgeStream({ ...baseDto(), figureUrls: ['/uploads/a.jpg'] }, 9)),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+    expect(deps.files.findByUrlAndOwner).not.toHaveBeenCalled();
+    expect(fsMock.readFile).not.toHaveBeenCalled();
+    expect(deps.capability.stream).not.toHaveBeenCalled();
+  });
+
+  it('单张图 >5MB → 400/1001（上传 20MB 不能直接变 base64 撑爆 prompt）', async () => {
+    const deps = mkDeps({
+      files: {
+        findByIdAndOwner: vi.fn().mockResolvedValue({ ...JPEG, size_bytes: 5 * 1024 * 1024 + 1 }),
+        findByUrlAndOwner: vi.fn(),
+      },
+    });
+    const svc = mkService(deps);
+
+    await expect(
+      collect(svc.judgeStream({ ...baseDto(), questionImages: [{ type: 'image', fileId: '1' }] }, 9)),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+    expect(fsMock.readFile).not.toHaveBeenCalled();
+    expect(deps.capability.stream).not.toHaveBeenCalled();
+  });
+
+  it('非图片 MIME → 400/1001', async () => {
+    const deps = mkDeps({
+      files: {
+        findByIdAndOwner: vi.fn().mockResolvedValue({ url: '/uploads/a.pdf', mime_type: 'application/pdf', size_bytes: 10 }),
+        findByUrlAndOwner: vi.fn(),
+      },
+    });
+    const svc = mkService(deps);
+
+    await expect(
+      collect(svc.judgeStream({ ...baseDto(), questionImages: [{ type: 'image', fileId: '1' }] }, 9)),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+    expect(fsMock.readFile).not.toHaveBeenCalled();
+  });
+
+  it('文件 url 解析后越出 UPLOAD_DIR → 400/1001，不读文件', async () => {
+    const deps = mkDeps({
+      files: {
+        findByIdAndOwner: vi.fn().mockResolvedValue({ url: '/uploads/../secret.jpg', mime_type: 'image/jpeg', size_bytes: 10 }),
+        findByUrlAndOwner: vi.fn(),
+      },
+    });
+    const svc = mkService(deps);
+
+    await expect(
+      collect(svc.judgeStream({ ...baseDto(), questionImages: [{ type: 'image', fileId: '1' }] }, 9)),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+    expect(fsMock.readFile).not.toHaveBeenCalled();
   });
 });

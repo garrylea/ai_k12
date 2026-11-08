@@ -14,4 +14,6 @@ export interface CreateConversationDto {
   // 题面锚消息：新建（非复用）会话时把题面作为一条 assistant 消息写入历史，
   // 让 AI 每轮靠对话历史带题面，学生消息保持干净。复用旧会话时不补写。
   questionText?: string;
+  // 自定义标题（≤100 字，会 trim）；缺省按 track 取「主线讨论」/「辅线答疑」。
+  title?: string;
 }

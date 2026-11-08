@@ -70,6 +70,24 @@ describe('ConversationsService (scene 分型 + 训练讲一讲按题锚定)', ()
     expect(b!.id).not.toBe(a!.id);  // 自由问答不复用
   });
 
+  it('自定义 title：trim 后落库；不传时按 track 兜底', async () => {
+    const custom = await svc.create(1, { track: 'auxiliary', title: '  做题 · 已知 x+1=2  ' });
+    expect(custom!.title).toBe('做题 · 已知 x+1=2');
+
+    const plainAux = await svc.create(1, { track: 'auxiliary' });
+    expect(plainAux!.title).toBe('辅线答疑');
+
+    const plainMain = await svc.create(1, { track: 'mainline' });
+    expect(plainMain!.title).toBe('主线讨论');
+  });
+
+  it('自定义 title 超过 100 字 → 400', async () => {
+    await expect(svc.create(1, { track: 'auxiliary', title: 'a'.repeat(101) })).rejects.toThrow(BadRequestException);
+    // 边界：正好 100 字可用。
+    const ok = await svc.create(1, { track: 'auxiliary', title: 'a'.repeat(100) });
+    expect(ok!.title).toHaveLength(100);
+  });
+
   it('aux_training：同一道题复用既有会话，不重复写题面锚', async () => {
     const first = await svc.create(1, {
       track: 'auxiliary',

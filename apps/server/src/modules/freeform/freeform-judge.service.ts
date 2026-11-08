@@ -48,8 +48,10 @@ const JsonSchema = z.object({
     .default([]),
   suggestions: z.array(z.string()).default([]),
   question: z.object({
-    type: z.enum(QUESTION_TYPES),
-    difficulty: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    // 模型偶尔会给集合外的 type/difficulty；这里只要求形状可读，规范化在 extractResult 里做，
+    // 避免一个越界的枚举值把整份报告打成 5502。
+    type: z.string(),
+    difficulty: z.number(),
     options: z.array(z.object({ label: z.string(), text: z.string(), isCorrect: z.boolean() })).nullable().default(null),
     answer: z.string().min(1),
     explanation: z.string().nullable().default(null),
@@ -61,8 +63,13 @@ type ParsedResult = z.infer<typeof JsonSchema>;
 
 const MAX_IMAGES = 6;
 const MAX_QUESTION_COUNT = 30000;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const FREEFORM_FIGURE_PREFIX = '/uploads/freeform/';
 const ASSISTANT_MODEL = 'qwen3.8-max';
 const UPLOADED_IMAGE_RE = /!\[[^\]]*\]\((\/uploads\/[^)\s]+)\)/g;
+
+const DEFAULT_QUESTION_TYPE = 'short_answer';
+const DEFAULT_DIFFICULTY = 2;
 
 /** 送给模型的图片（label + dataUrl）+ 落库消息里要记的 URL。 */
 type ResolvedImage = FreeformJudgeImage & { url: string };
@@ -97,8 +104,10 @@ export class FreeformJudgeService {
   async *judgeStream(dto: FreeformJudgeDto, studentId: number, signal?: AbortSignal): AsyncIterable<FreeformJudgeEvent> {
     const subjectId = Number(dto.subjectId);
     const maxScore = Number(dto.maxScore);
-    const questionContent = dto.questionContent ?? '';
-    const answer = (dto.answer ?? '').trim();
+    // 非字符串入参先降级为空串，交给 validate() 统一报 400，
+    // 不让 `.trim()` / `.entries()` 抛 TypeError 变成 500。
+    const questionContent = typeof dto.questionContent === 'string' ? dto.questionContent : '';
+    const answer = typeof dto.answer === 'string' ? dto.answer.trim() : '';
 
     this.validate(dto, subjectId, maxScore, questionContent, answer);
 
@@ -106,10 +115,9 @@ export class FreeformJudgeService {
     const providedQuestion = dto.questionId != null ? await this.questions.findById(dto.questionId) : null;
     if (dto.questionId != null && !providedQuestion) throw badRequest('题目不存在');
 
-    // 先把图片全部读成 data URL：任何一张取不到都应在「开始判题 / 建会话」之前 400。
-    const images = await this.resolveImages(dto, studentId);
-
+    // 顺序按 brief/plan：先建会话（或校验已有会话），再把图片读成 data URL。
     const dialogueId = await this.resolveDialogue(dto, studentId, subjectId, questionContent);
+    const images = await this.resolveImages(dto, studentId);
     yield { type: 'start', dialogueId, questionId: dto.questionId ?? null };
 
     let content = '';
@@ -142,12 +150,13 @@ export class FreeformJudgeService {
 
     const parsed = await this.extractResult(content, questionContent, answer, maxScore);
     if (!parsed) {
-      // 没有结构化结果 = 没有可落库的东西；一行都不写。
+      // 没有结构化结果 = 不写题/错题本/判题消息（会话已在前面按 spec 建好，供重试复用）。
       yield { type: 'error', code: 5502, message: '判题结果解析失败，请重试', retryable: true };
       return;
     }
 
-    const cleaned = stripJsonBlock(content);
+    // 清洗后为空（模型把整份报告都塞进 JSON 块）→ 用原始 content，别把对话气泡清空。
+    const cleaned = stripJsonBlock(content) || content;
     yield { type: 'content', delta: cleaned, replace: true };
 
     try {
@@ -188,11 +197,18 @@ export class FreeformJudgeService {
   ): void {
     if (![1, 4, 5].includes(subjectId)) throw badRequest('学科仅支持数学/物理/化学');
     if (!Number.isInteger(maxScore) || maxScore < 1 || maxScore > 100) throw badRequest('满分必须为 1–100 的整数');
+    if (typeof dto.questionContent !== 'string') throw badRequest('题干必须是字符串');
     if (!questionContent.trim() || questionContent.length > MAX_QUESTION_COUNT) {
       throw badRequest('题干不能为空且不超过 30000 字');
     }
+    if (typeof dto.answer !== 'string') throw badRequest('作答必须是字符串');
     if (answer.length > MAX_QUESTION_COUNT) throw badRequest('作答不超过 30000 字');
     if (!answer && !dto.draftFileId) throw badRequest('请先写答案或在草稿上作答');
+    if (dto.questionImages != null && !Array.isArray(dto.questionImages)) throw badRequest('题图参数格式错误');
+    if (dto.figureUrls != null && !Array.isArray(dto.figureUrls)) throw badRequest('配图参数格式错误');
+    // 张数属于纯参数校验：放在建会话之前，坏入参不留下空会话。
+    if ((dto.questionImages?.length ?? 0) > MAX_IMAGES) throw badRequest('最多 6 张题图');
+    if ((dto.figureUrls?.length ?? 0) > MAX_IMAGES) throw badRequest('最多 6 张配图');
     if (dto.questionId != null && (!Number.isInteger(dto.questionId) || dto.questionId <= 0)) {
       throw badRequest('questionId 必须为正整数');
     }
@@ -216,6 +232,7 @@ export class FreeformJudgeService {
       scene: 'aux_freeform',
       subjectId,
       questionText: questionContent.slice(0, 4000),
+      title: `做题 · ${questionContent.slice(0, 20)}`,
     });
     if (!dlg) throw new HttpException({ code: 5000, message: '创建会话失败' }, 500);
     return String(dlg.id);
@@ -232,8 +249,6 @@ export class FreeformJudgeService {
   private async resolveImages(dto: FreeformJudgeDto, studentId: number): Promise<ResolvedImage[]> {
     const questionImages = dto.questionImages ?? [];
     const figureUrls = dto.figureUrls ?? [];
-    if (questionImages.length > MAX_IMAGES) throw badRequest('最多 6 张题图');
-    if (figureUrls.length > MAX_IMAGES) throw badRequest('最多 6 张配图');
 
     const out: ResolvedImage[] = [];
     for (const [i, img] of questionImages.entries()) {
@@ -241,6 +256,9 @@ export class FreeformJudgeService {
       out.push({ label: `原题图${i + 1}`, url: row.url, dataUrl: await this.toDataUrl(row) });
     }
     for (const [i, url] of figureUrls.entries()) {
+      if (typeof url !== 'string' || !url.startsWith(FREEFORM_FIGURE_PREFIX)) {
+        throw badRequest('配图地址不合法');
+      }
       const row = await this.files.findByUrlAndOwner(url, studentId);
       if (!row) throw badRequest('配图不存在或无权访问');
       out.push({ label: `配图${i + 1}`, url, dataUrl: await this.toDataUrl(row) });
@@ -265,9 +283,17 @@ export class FreeformJudgeService {
     return row;
   }
 
+  /**
+   * 读文件统一出口（四类图都走这里）：
+   * - 非图片 → 400；
+   * - 单张 >5MB → 400（上传端点允许 20MB，直接转 base64 会把 prompt 撑到 27MB）；
+   * - 解析后的绝对路径必须仍在 `UPLOAD_DIR` 内（防 `../` 越界读任意文件）。
+   */
   private async toDataUrl(row: UploadedFileRow): Promise<string> {
     if (!row.mime_type.startsWith('image/')) throw badRequest('附件必须是图片');
-    const abs = path.join(this.uploadDir, row.url.replace(/^\/uploads\//, ''));
+    if (row.size_bytes > MAX_IMAGE_BYTES) throw badRequest('图片过大（最大 5MB）');
+    const abs = path.resolve(this.uploadDir, row.url.replace(/^\/uploads\//, ''));
+    if (!abs.startsWith(path.resolve(this.uploadDir) + path.sep)) throw badRequest('图片路径非法');
     let buf: Buffer;
     try {
       buf = await fs.readFile(abs);
@@ -299,7 +325,14 @@ export class FreeformJudgeService {
     // 分数以学生选的满分为准：模型自报的 maxScore 只当报告内容，不采信。
     const total = Math.max(0, Math.min(maxScore, data.data.totalScore));
     const verdict = total >= maxScore ? 'correct' : total <= 0 ? 'incorrect' : 'partial';
-    return { ...data.data, totalScore: total, maxScore, verdict };
+    // type/difficulty 在 schema 里已放宽为 string/number，这里收敛到库里允许的取值。
+    const q = data.data.question;
+    const question = {
+      ...q,
+      type: (QUESTION_TYPES as readonly string[]).includes(q.type) ? q.type : DEFAULT_QUESTION_TYPE,
+      difficulty: [1, 2, 3].includes(q.difficulty) ? q.difficulty : DEFAULT_DIFFICULTY,
+    };
+    return { ...data.data, question, totalScore: total, maxScore, verdict };
   }
 
   /**
