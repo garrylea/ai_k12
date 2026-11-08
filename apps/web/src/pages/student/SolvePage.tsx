@@ -7,6 +7,8 @@
 // - 作答 / AI 答疑两个 tab 同时挂载、用 hidden 切换（spec §8.8）：编辑器、草稿、
 //   滚动位置与白板快照出口都靠「不卸载」活下来；
 // - 草稿面板的 JPEG 快照经 DraftPanel 透传的 snapshotRef 取（全页只挂一个白板）。
+// - 整页复用 `AuxiliaryLayout`（不传 sidebar）：与答疑页同一张 max-w-6xl / 85vh 的卡，
+//   尺寸只有那一处真源，别再在本页另写全屏布局。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BackButton } from '@/components/base';
 import { StudentAccountActions } from '@/components/business';
@@ -15,6 +17,7 @@ import { uploadFile, type AttachmentRequest } from '@/services/api';
 import { useChatStore } from '@/store/chatStore';
 import AuxChatPanel from '@/components/business/AuxChatPanel';
 import AuxInputBar from '@/components/business/AuxInputBar';
+import AuxiliaryLayout from '@/components/business/AuxiliaryLayout';
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
 import { SolveSourceInput } from './solve/SolveSourceInput';
 import { SolveCandidatePicker } from './solve/SolveCandidatePicker';
@@ -232,9 +235,9 @@ export default function SolvePage() {
     (noCandidate ? '没有识别到题目，请换一张更清晰的图片，或手动输入题目' : null);
 
   return (
-    <div className="student-theme-container" data-theme="student-day" data-school="junior">
-      <div className="relative flex h-screen flex-col p-5 sm:p-7 lg:p-8 bg-[var(--bg-page)] text-[var(--text-primary)]">
-        <header className="flex shrink-0 min-h-[44px] items-center justify-between border-b border-[var(--bg-subtle)] pb-4">
+    <AuxiliaryLayout>
+      <div className="relative flex flex-1 min-h-0 flex-col p-4 sm:p-5 text-[var(--text-primary)]">
+        <header className="flex shrink-0 min-h-[44px] items-center justify-between border-b border-[var(--bg-subtle)] pb-3">
           <div className="flex items-center gap-3">
             <BackButton to="/student/entry" label="返回入口" />
             <h1 className="text-lg font-bold">做题</h1>
@@ -272,7 +275,7 @@ export default function SolvePage() {
         )}
 
         {stage === 'select' && recognize.result && hasCandidates && (
-          <main className="flex-1 overflow-auto py-6 flex justify-center">
+          <main className="flex-1 min-h-0 overflow-auto py-6 flex justify-center">
             <SolveCandidatePicker
               candidates={recognize.result.candidates}
               figures={recognize.result.figures}
@@ -287,7 +290,7 @@ export default function SolvePage() {
 
         {/* 识别失败改手动：没有 candidates，用录入文字造一条单候选（空则让学生就地编辑题干） */}
         {stage === 'select' && !hasCandidates && picked && (
-          <main className="flex-1 overflow-auto py-6 flex justify-center">
+          <main className="flex-1 min-h-0 overflow-auto py-6 flex justify-center">
             <SolveCandidatePicker
               candidates={[
                 {
@@ -419,6 +422,6 @@ export default function SolvePage() {
           </main>
         )}
       </div>
-    </div>
+    </AuxiliaryLayout>
   );
 }

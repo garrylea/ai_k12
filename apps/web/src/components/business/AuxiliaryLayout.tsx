@@ -1,7 +1,8 @@
 import { type ReactNode } from 'react';
 
 interface Props {
-  sidebar: ReactNode;
+  /** 左侧栏；不传则整卡只有内容区（做题页复用同一外壳尺寸） */
+  sidebar?: ReactNode;
   children: ReactNode;
 }
 
@@ -17,10 +18,12 @@ export default function AuxiliaryLayout({ sidebar, children }: Props) {
         className="w-full max-w-6xl h-[85vh] min-h-[600px] flex rounded-3xl overflow-hidden bg-white border border-[#E5E5E5]"
         style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)' }}
       >
-        <aside className="w-64 sm:w-72 flex flex-col border-r border-[#E5E5E5] bg-white">
-          {sidebar}
-        </aside>
-        <main className="flex-1 flex flex-col bg-white">
+        {sidebar && (
+          <aside className="w-64 sm:w-72 flex flex-col border-r border-[#E5E5E5] bg-white">
+            {sidebar}
+          </aside>
+        )}
+        <main className="flex-1 min-w-0 flex flex-col bg-white">
           {children}
         </main>
       </div>

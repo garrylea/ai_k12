@@ -208,6 +208,17 @@ describe('SolvePage 状态机', () => {
     expect(screen.getByLabelText('退出登录')).toBeInTheDocument();
   });
 
+  it('整页复用答疑外壳：内容在 max-w-6xl / h-[85vh] 的同一张卡里', () => {
+    renderPage();
+    const shell = document.querySelector('.max-w-6xl');
+    expect(shell).not.toBeNull();
+    expect(shell?.className).toContain('h-[85vh]');
+    // 做题页没有侧栏，卡片里只有内容区
+    expect(shell?.querySelector('aside')).toBeNull();
+    // 页面内容确实嵌在这张卡里，而不是另起全屏布局
+    expect(shell?.contains(screen.getByPlaceholderText('输入题目，或拖入图片'))).toBe(true);
+  });
+
   it('识别成功 → 选题；确认后进入作答，且 tab 条在未答疑/提交前隐藏', async () => {
     renderPage();
     await goToAnswerStage();
