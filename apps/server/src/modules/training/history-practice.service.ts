@@ -6,7 +6,10 @@ import { VariationCapability } from '../../ai-core/capabilities/variation.capabi
 import { PointRulesService } from '../points/point-rules.service.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
-import { targetedTaskCode } from '../../common/subject-config.js';
+import {
+  CN_SIMILAR_KP_ROOTS, SIMILAR_PRACTICE_SUBJECTS, SUBJECT_CHINESE, targetedTaskCode,
+} from '../../common/subject-config.js';
+import { chineseSimilarKpId } from '../../common/chinese-similar.util.js';
 import {
   toDifficulty, toStoredAnswer, variationRejectionReason,
 } from './variation-question.util.js';
@@ -75,7 +78,7 @@ export class HistoryPracticeService {
   async startSimilar(input: {
     studentId: number; subjectId: number; questionId: number; count: number;
   }): Promise<SimilarPracticeResult> {
-    if (input.subjectId !== 1 && input.subjectId !== 4) {
+    if (!SIMILAR_PRACTICE_SUBJECTS.has(input.subjectId)) {
       throw new BadRequestException('该学科暂不支持同类型练习');
     }
     if (![1, 2, 3, 5].includes(input.count)) {
@@ -92,14 +95,29 @@ export class HistoryPracticeService {
     if (seed.subject_id !== input.subjectId) throw new BadRequestException('题目不属于该学科');
     // 种子没有标准答案也允许：题库抽题只依赖 KP/题型/难度；AI 补题时由 prompt 要求
     // 模型先自行求解原题再生成（质量风险由题库优先 + 生成校验兜底）。
-    const kpId = (await this.questionsRepo.findKpIdsByQuestionIds([seed.id])).get(seed.id);
-    if (kpId == null) throw new BadRequestException('题目没有知识点');
+    let kpId: number;
+    if (input.subjectId === SUBJECT_CHINESE) {
+      const refs = (await this.questionsRepo.findKpRefsByQuestionIds([seed.id])).get(seed.id) ?? [];
+      const allowedKpId = chineseSimilarKpId(refs);
+      if (allowedKpId == null) {
+        throw new BadRequestException('该题不在同类型练习范围（仅基础运用与古诗文）');
+      }
+      kpId = allowedKpId;
+    } else {
+      const found = (await this.questionsRepo.findKpIdsByQuestionIds([seed.id])).get(seed.id);
+      if (found == null) throw new BadRequestException('题目没有知识点');
+      kpId = found;
+    }
     const kp = await this.kpRepo.findById(kpId);
     if (!kp) throw new BadRequestException('知识点不存在');
 
+    const poolOpts = input.subjectId === SUBJECT_CHINESE
+      ? { requireAllKpRootCodes: [...CN_SIMILAR_KP_ROOTS] }
+      : undefined;
+
     const picked = await this.questionsRepo.findRandomByKpTypeDifficulty(
       input.studentId, input.subjectId, kpId, seed.type,
-      [toDifficulty(seed.difficulty)], input.count, [seed.id],
+      [toDifficulty(seed.difficulty)], input.count, [seed.id], poolOpts,
     );
     let selected: HistoryRunQuestion[] = picked.map((q) => this.toRunQuestion(q));
 
@@ -112,12 +130,12 @@ export class HistoryPracticeService {
       const more = await this.questionsRepo.findRandomByKpTypeDifficulty(
         input.studentId, input.subjectId, kpId, seed.type, ladder,
         input.count - selected.length,
-        [seed.id, ...picked.map((q) => q.id)],
+        [seed.id, ...picked.map((q) => q.id)], poolOpts,
       );
       selected = [...selected, ...more.map((q) => this.toRunQuestion(q))];
     }
 
-    if (selected.length < input.count) {
+    if (input.subjectId !== SUBJECT_CHINESE && selected.length < input.count) {
       const shortfall = input.count - selected.length;
       const subject = input.subjectId === 4 ? 'physics' as const : 'math' as const;
       const aiPromise = this.variation.generate({

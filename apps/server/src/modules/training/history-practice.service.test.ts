@@ -13,6 +13,7 @@ function make() {
   const questionsRepo = {
     findById: vi.fn().mockResolvedValue(mkQ()),
     findKpIdsByQuestionIds: vi.fn().mockResolvedValue(new Map()),
+    findKpRefsByQuestionIds: vi.fn().mockResolvedValue(new Map()),
     findRandomByKpTypeDifficulty: vi.fn().mockResolvedValue([]),
     findOrCreate: vi.fn(),
     bindKnowledgePoint: vi.fn(),
@@ -146,10 +147,10 @@ describe('HistoryPracticeService.startSimilar', () => {
     await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 });
 
     expect(questionsRepo.findRandomByKpTypeDifficulty).toHaveBeenNthCalledWith(
-      1, 7, 1, 28, 'choice', [2], 3, [100],
+      1, 7, 1, 28, 'choice', [2], 3, [100], undefined,
     );
     expect(questionsRepo.findRandomByKpTypeDifficulty).toHaveBeenNthCalledWith(
-      2, 7, 1, 28, 'choice', [1, 2, 3], 2, [100, 201],
+      2, 7, 1, 28, 'choice', [1, 2, 3], 2, [100, 201], undefined,
     );
   });
 
@@ -165,7 +166,7 @@ describe('HistoryPracticeService.startSimilar', () => {
     await svc.startSimilar({ studentId: 7, subjectId: 1, questionId: 100, count: 3 });
 
     expect(questionsRepo.findRandomByKpTypeDifficulty).toHaveBeenNthCalledWith(
-      2, 7, 1, 28, 'choice', [3], 2, [100, 201],
+      2, 7, 1, 28, 'choice', [3], 2, [100, 201], undefined,
     );
   });
 
@@ -221,6 +222,80 @@ describe('HistoryPracticeService.startSimilar', () => {
     expect(r.sessionId).toBeNull();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('db down'));
     warn.mockRestore();
+  });
+
+  it('语文：合法种子只抽题库，不触发 AI；3 题 -> tier_key=3', async () => {
+    const { svc, questionsRepo, kpRepo, variation, trainingSessionsRepo, pointRules } = make();
+    questionsRepo.findById.mockResolvedValue(mkQ({ subject_id: 2, type: 'choice' }));
+    questionsRepo.findKpRefsByQuestionIds.mockResolvedValue(new Map([
+      [100, [{ id: 104, rootCode: 'C02' }]],
+    ]));
+    kpRepo.findById.mockResolvedValue({ id: 104, name: '文言实词与虚词' });
+    pointRules.listTierKeys.mockResolvedValue(['1', '3', '5', '10']);
+    questionsRepo.findRandomByKpTypeDifficulty.mockResolvedValueOnce([
+      { id: 201, content: '题1', type: 'choice', options: null, material_text: null },
+      { id: 202, content: '题2', type: 'choice', options: null, material_text: null },
+      { id: 203, content: '题3', type: 'choice', options: null, material_text: null },
+    ]);
+
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 2, questionId: 100, count: 3 });
+
+    expect(r.questions).toHaveLength(3);
+    expect(variation.generate).not.toHaveBeenCalled();
+    expect(questionsRepo.findRandomByKpTypeDifficulty).toHaveBeenCalledWith(
+      7, 2, 104, 'choice', [2], 3, [100],
+      { requireAllKpRootCodes: ['C01', 'C02'] },
+    );
+    expect(trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      task_code: 'cn_targeted', subject_id: 2, tier_key: '3', expected_count: 3,
+    }));
+  });
+
+  it('语文：种子混入阅读知识点 -> 400，不抽题', async () => {
+    const { svc, questionsRepo } = make();
+    questionsRepo.findById.mockResolvedValue(mkQ({ subject_id: 2 }));
+    questionsRepo.findKpRefsByQuestionIds.mockResolvedValue(new Map([
+      [100, [{ id: 88, rootCode: 'C01' }, { id: 109, rootCode: 'C03' }]],
+    ]));
+
+    await expect(
+      svc.startSimilar({ studentId: 7, subjectId: 2, questionId: 100, count: 3 }),
+    ).rejects.toThrow('该题不在同类型练习范围');
+    expect(questionsRepo.findRandomByKpTypeDifficulty).not.toHaveBeenCalled();
+  });
+
+  it('语文：只抽到 2 题 -> 按 1 题档发分', async () => {
+    const { svc, questionsRepo, kpRepo, trainingSessionsRepo, pointRules } = make();
+    questionsRepo.findById.mockResolvedValue(mkQ({ subject_id: 2 }));
+    questionsRepo.findKpRefsByQuestionIds.mockResolvedValue(new Map([
+      [100, [{ id: 102, rootCode: 'C02' }]],
+    ]));
+    kpRepo.findById.mockResolvedValue({ id: 102, name: '古诗文默写' });
+    pointRules.listTierKeys.mockResolvedValue(['1', '3', '5', '10']);
+    questionsRepo.findRandomByKpTypeDifficulty
+      .mockResolvedValueOnce([{ id: 201, content: '题1', type: 'choice', options: null, material_text: null }])
+      .mockResolvedValueOnce([{ id: 202, content: '题2', type: 'choice', options: null, material_text: null }]);
+
+    const r = await svc.startSimilar({ studentId: 7, subjectId: 2, questionId: 100, count: 5 });
+
+    expect(r.questions).toHaveLength(2);
+    expect(trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      tier_key: '1', expected_count: 2,
+    }));
+  });
+
+  it('语文：count=2 不在该生档位 -> 400', async () => {
+    const { svc, questionsRepo, kpRepo, pointRules } = make();
+    questionsRepo.findById.mockResolvedValue(mkQ({ subject_id: 2 }));
+    questionsRepo.findKpRefsByQuestionIds.mockResolvedValue(new Map([
+      [100, [{ id: 102, rootCode: 'C02' }]],
+    ]));
+    kpRepo.findById.mockResolvedValue({ id: 102, name: '古诗文默写' });
+    pointRules.listTierKeys.mockResolvedValue(['1', '3', '5', '10']);
+
+    await expect(
+      svc.startSimilar({ studentId: 7, subjectId: 2, questionId: 100, count: 2 }),
+    ).rejects.toThrow('题量仅允许');
   });
 });
 
