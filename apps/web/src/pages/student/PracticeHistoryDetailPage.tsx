@@ -22,8 +22,8 @@ import {
   type PracticeHistoryQuestion,
 } from '@/services/api';
 import {
-  SUBJECT_MATH,
-  SUBJECT_PHYSICS,
+  getTrainingSubject,
+  SIMILAR_PRACTICE_SUBJECTS,
   TRAINING_SUBJECTS,
 } from '@/subjectConfig';
 
@@ -333,8 +333,13 @@ export default function PracticeHistoryDetailPage() {
   useEffect(() => {
     if (!data) return;
     const subjectId = data.session.subjectId;
-    // 同类型只开数学/物理（化学题库无知识点，等回填）；后端 canSimilar 已兜底，这里再挡一层
-    if (subjectId !== SUBJECT_MATH && subjectId !== SUBJECT_PHYSICS) {
+    // 同类型只开数学/物理/语文（语文仅基础运用与古诗文）；后端 canSimilar 已兜底，这里再挡一层
+    if (!SIMILAR_PRACTICE_SUBJECTS.has(subjectId)) {
+      setSimilarCounts([]);
+      return;
+    }
+    const taskCode = getTrainingSubject(subjectId)?.targetedTaskCode;
+    if (!taskCode) {
       setSimilarCounts([]);
       return;
     }
@@ -345,8 +350,7 @@ export default function PracticeHistoryDetailPage() {
     let cancelled = false;
     getMyPointRules()
       .then((rules) => {
-        const code = subjectId === SUBJECT_PHYSICS ? 'physics_targeted' : 'math_targeted';
-        const tiers = rules.tasks.find((t) => t.taskCode === code)?.tiers ?? [];
+        const tiers = rules.tasks.find((t) => t.taskCode === taskCode)?.tiers ?? [];
         const allowed = new Set(tiers.filter((t) => t.isActive).map((t) => t.tierKey));
         if (!cancelled) {
           setSimilarCounts(SIMILAR_COUNT_WHITELIST.filter((n) => allowed.has(String(n))));

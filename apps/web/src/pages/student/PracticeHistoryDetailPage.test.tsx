@@ -91,6 +91,19 @@ const MATH_RULES = {
   }],
 };
 
+/** 语文专项只有 1/3/5 档（无 2 题档）。 */
+const CN_RULES = {
+  tasks: [{
+    taskCode: 'cn_targeted',
+    taskName: '语文专项',
+    tiers: [
+      { tierKey: '1', tierLabel: '1 题', points: 2, dailyLimit: 5, isActive: true, completedToday: 0, remainingToday: 5 },
+      { tierKey: '3', tierLabel: '3 题', points: 8, dailyLimit: 5, isActive: true, completedToday: 0, remainingToday: 5 },
+      { tierKey: '5', tierLabel: '5 题', points: 15, dailyLimit: 5, isActive: true, completedToday: 0, remainingToday: 5 },
+    ],
+  }],
+};
+
 /** 答题页占位：把 pathname+search 打出来，用来断言跳转参数。 */
 function RunStub() {
   const location = useLocation();
@@ -347,5 +360,40 @@ describe('PracticeHistoryDetailPage', () => {
     const stub = await screen.findByTestId('run-stub');
     expect(stub).toHaveTextContent('subjectId=1');
     expect(stub).toHaveTextContent(`returnTo=${RETURN_TO}`);
+  });
+
+  it('语文详情：显示同类型按钮，面板只有 1/3/5，按 cn_targeted 取档', async () => {
+    getDetailMock.mockResolvedValue({
+      session: { ...EXAM_SESSION, subjectId: 2, title: '语文期中卷' },
+      questions: [{ ...UNANSWERED_QUESTION }],
+    });
+    getPointRulesMock.mockResolvedValue(CN_RULES);
+    const user = userEvent.setup();
+    renderAt('exam', '1');
+
+    await user.click(await screen.findByRole('button', { name: '同类型练习' }));
+    expect(screen.getByRole('button', { name: '1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '3' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '5' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '2' })).toBeNull();
+  });
+
+  it('语文详情：点题量请求同类型 + 跳转带 subjectId=2', async () => {
+    getDetailMock.mockResolvedValue({
+      session: { ...EXAM_SESSION, subjectId: 2, title: '语文期中卷' },
+      questions: [{ ...UNANSWERED_QUESTION }],
+    });
+    getPointRulesMock.mockResolvedValue(CN_RULES);
+    const questions = [{ questionId: 7001, text: '文言题', type: 'choice', options: ['A', 'B'], materialText: null }];
+    startSimilarMock.mockResolvedValue({ questions, sessionId: 88, title: '同类练习：文言实词与虚词 · 3 题' });
+    const user = userEvent.setup();
+    renderAt('exam', '1');
+
+    await user.click(await screen.findByRole('button', { name: '同类型练习' }));
+    await user.click(screen.getByRole('button', { name: '3' }));
+
+    await waitFor(() => expect(startSimilarMock).toHaveBeenCalledWith('exam', 1, 100, 3));
+    const stub = await screen.findByTestId('run-stub');
+    expect(stub).toHaveTextContent('subjectId=2');
   });
 });
