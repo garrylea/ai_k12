@@ -30,11 +30,16 @@
 - 一条命令交付 `bash tools/freeform/setup.sh`：加载 `.env` → 应用迁移 → `schema_reconcile.py` 对账（有差异即停）→ MinerU 预检（仅告警）。
 - 文件上传新增 `freeform` 来源，且**不自动触发 refinery**；`uploaded_files` 按 `(uploader_id, url)` 反查归属。
 
-**提交范围**：`8fbd1086..6b2676d9`（分支 `feat/freeform-solve`）。
+**提交范围**：`8fbd1086..3812467b`（分支 `feat/freeform-solve`）。
 
-**验证**：`apps/server` 189 文件 / 2549 用例全通过；`apps/web` 168 文件 / 1610 用例全通过；`apps/web` `tsc -b` 与 `apps/server` `tsc --noEmit` 均 0 错误。
+**验证**：`apps/server` 全量 2561 用例、`apps/web` 全量 1615 用例通过；`tsc -b` / `tsc --noEmit` 均 0 错误。
 
-**真环境冒烟（MinerU + 千问 + DB 迁移）待用户批准后执行** —— 本次只跑单测与类型检查，**未**应用迁移、未起服务、未调用真实 MinerU/千问，因此识别准确率、SSE 端到端与 iPad 拖图/粘贴/白板行为**尚未实测**。
+**真环境冒烟（2026-11-08 已执行部分）**：
+- `bash tools/freeform/setup.sh` 已应用 `llm_routes` ×2 + `uploaded_files.idx_uf_uploader_url`；schema 对账 78 张表无差异。
+- 对账曾把 7 张表「列集合相同、仅 `information_schema` 返回顺序不同」误报为结构差异；已在 `tools/db/schema_reconcile.py` 跳过 order-only 差异（`3812467b`），重跑通过。
+- MinerU 用**现有 token**（shell / `tools/data-refinery/.env`，无需在 `apps/server/.env` 另配）实测成功：`page_019.jpg` → `page_019.md` + 共享 `images/`（flat 布局，识别服务的按页发现 + 共享图去重覆盖）；Markdown 含 `## 26.2…` 标题，验证了 `PromptBuilder` 保留 `##` 的修复。
+- `:3001` 后端与 `:5173` 前端已用新构建重启；`/api/content/subjects` 200、`POST /api/freeform/recognize` 未登录 401（守卫生效）。
+- **仍待人工点击**：学生登录后的图片识题 → 选题 → 千问流式判题 → 错题本/家长 track 端到端，以及 iPad 拖图/粘贴/白板手感。未验证前不要认为识别准确率与 SSE 端到端已通过。
 
 ---
 
