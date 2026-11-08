@@ -237,7 +237,7 @@ describe('PracticeHistoryService.getDetail', () => {
     expect(r?.questions[0].canSimilar).toBe(false);
   });
 
-  it('非数/理学科（化学 3）→ canRedo=true / canSimilar=false', async () => {
+  it('非数/理/语学科（英语 3）→ canRedo=true / canSimilar=false', async () => {
     h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 3 }));
     h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([{
       question_id: 100, question_order: 1, answer_text: 'B', is_correct: 0, score: 0,

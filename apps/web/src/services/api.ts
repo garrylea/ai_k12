@@ -3655,7 +3655,7 @@ export interface PracticeHistoryQuestion {
   passageSentence: string | null;
   /** 题目仍在架且归属本会话 → 可单题重做（不建记录、不发分）。 */
   canRedo: boolean;
-  /** canRedo + 学科数/理 + 有答案 + 有知识点 → 可同类型练习。 */
+  /** canRedo + 可练学科（数学/物理：有知识点；语文：全部知识点在积累与运用/古诗文）+ 不要求原题有答案 → 可同类型练习。 */
   canSimilar: boolean;
 }
 
