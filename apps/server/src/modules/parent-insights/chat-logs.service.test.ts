@@ -67,6 +67,16 @@ describe('ChatLogsService：列表', () => {
 });
 
 describe('ChatLogsService：详情', () => {
+  it('aux_freeform 会话按不存在处理（1002），不读消息', async () => {
+    const d = mk();
+    d.dialoguesRepo.findById.mockResolvedValue({ ...dialogueRow, scene: 'aux_freeform' });
+
+    await expect(mkSvc(d).getChatLog(11, 55)).rejects.toMatchObject({
+      response: { code: 1002, message: '对话不存在' },
+    });
+    expect(d.messagesRepo.findByDialogue).not.toHaveBeenCalled();
+  });
+
   it('返回逐句消息（含 reasoning 与 safetyFlag）', async () => {
     const d = mk();
     d.messagesRepo.findByDialogue.mockResolvedValue([

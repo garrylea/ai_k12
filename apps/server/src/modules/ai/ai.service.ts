@@ -40,6 +40,9 @@ export class AIService {
   async tutor(dto: TutorDto, userId: number) {
     this.validateDto(dto);
     const dialogueId = await this.resolveDialogue(dto, userId);
+    // 做题入口的答疑/追问只答疑：不把模型顺带产出的结构化题写进题库与错题本
+    // （追问不是练习，题库与错题本只收真正的提交判题）。
+    const isFreeform = await this.isFreeformDialogue(dialogueId);
 
     // 辅线答疑：学生已来回 ≥N 轮且明确索要详细解析时——
     //   命中题库 -> 直接输出答案+思路+解析（不调模型）；
@@ -69,7 +72,7 @@ export class AIService {
 
     try {
       const response = await this.tutoring.tutor(request);
-      if (response.structuredQuestion) {
+      if (!isFreeform && response.structuredQuestion) {
         const qid = await this.ingestStructuredQuestion(userId, dto, dialogueId, attachments, response.structuredQuestion);
         await this.linkDialogueQuestion(dialogueId, dto, qid);
       }
@@ -126,11 +129,13 @@ export class AIService {
    *  existing streaming path. */
   private async *tutorStage(dto: TutorDto, userId: number, request: TutoringRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
     const dialogueId = request.dialogueId!;
+    // 一次流里只查一次场景；做题入口的追问同样不写题库 / 错题本。
+    const isFreeform = await this.isFreeformDialogue(dialogueId);
     let assistantContent = '';
     for await (const event of this.tutoring.tutorStream(request, signal)) {
       if (event.type === 'content') {
         assistantContent = event.replace ? (event.delta ?? '') : assistantContent + (event.delta ?? '');
-      } else if (event.type === 'done' && event.structuredQuestion) {
+      } else if (event.type === 'done' && event.structuredQuestion && !isFreeform) {
         const qid = await this.ingestStructuredQuestion(userId, dto, dialogueId, request.attachments ?? [], event.structuredQuestion);
         await this.linkDialogueQuestion(dialogueId, dto, qid);
       }
@@ -140,6 +145,12 @@ export class AIService {
   }
 
   // ---------- shared helpers ----------
+
+  /** 做题入口的会话（scene='aux_freeform'）：答疑/追问只答疑，不入题库、不入错题本。 */
+  private async isFreeformDialogue(dialogueId: string): Promise<boolean> {
+    const dialogue = await this.dialoguesRepo.findById(Number(dialogueId));
+    return dialogue?.scene === 'aux_freeform';
+  }
 
   private validateDto(dto: TutorDto) {
     // 图片-only 发送允许空 message；其余必须有 message。

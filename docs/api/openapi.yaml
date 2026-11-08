@@ -2788,8 +2788,8 @@ paths:
           required: false
           schema:
             type: string
-            enum: [aux_qna, aux_training, aux_freeform, mainline_question, mainline_card]
-          description: 不传 = 全部。
+            enum: [aux_qna, aux_training, mainline_question, mainline_card]
+          description: 不传 = 全部。做题入口的 `aux_freeform` 会话不进入家长端回放（列表与详情均不可见）。
         - name: from
           in: query
           required: false
@@ -9388,7 +9388,8 @@ components:
           maxLength: 100
           description: >-
             可选自定义标题（trim 后 ≤100 字，超长 400/1001）；缺省按 track 取
-            「辅线答疑」/「主线讨论」。做题入口传「做题 · <题干前 20 字>」。
+            「辅线答疑」/「主线讨论」。`scene=aux_freeform` 且未传时服务端按题干
+            前 20 字生成「做题 · …」（无题干为「做题」）。
         cardId:
           type: string
         questionId:
@@ -10149,7 +10150,7 @@ components:
 
     ChatLogItem:
       type: object
-      description: 会话列表一行。
+      description: 会话列表一行。做题入口的 `aux_freeform` 会话不会出现在这里。
       properties:
         id:
           type: integer
@@ -10158,7 +10159,7 @@ components:
           enum: [mainline, auxiliary]
         scene:
           type: string
-          enum: [aux_qna, aux_training, aux_freeform, mainline_question, mainline_card]
+          enum: [aux_qna, aux_training, mainline_question, mainline_card]
         title:
           type: string
           nullable: true

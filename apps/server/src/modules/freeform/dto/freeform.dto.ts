@@ -4,7 +4,7 @@ export interface FreeformRecognizeDto {
   fileIds?: string[];
 }
 
-/** POST /api/freeform/judge 请求体（Task 10 起使用）。 */
+/** POST /api/freeform/judge/stream 请求体（SSE）。 */
 export interface FreeformJudgeDto {
   dialogueId?: string;
   subjectId: number;

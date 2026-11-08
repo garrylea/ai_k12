@@ -25,7 +25,10 @@ function mkDeps(over: any = {}) {
       updateFailCount: vi.fn().mockResolvedValue(undefined),
       completeDialogue: vi.fn().mockResolvedValue(undefined),
     },
-    dialoguesRepo: { updateQuestionId: vi.fn().mockResolvedValue(undefined) },
+    dialoguesRepo: {
+      findById: vi.fn().mockResolvedValue({ id: 7, scene: 'aux_qna' }),
+      updateQuestionId: vi.fn().mockResolvedValue(undefined),
+    },
     mainErrorRepo: {
       existsByStudentAndQuestionId: vi.fn().mockResolvedValue(false),
       create: vi.fn().mockResolvedValue(1),
@@ -251,5 +254,58 @@ describe('AIService structured-question ingestion (dedup + 错题本)', () => {
     expect(d.questionsRepo.findOrCreate).toHaveBeenCalledWith(expect.objectContaining({ approach: '思路' }));
     expect(d.dialoguesRepo.updateQuestionId).toHaveBeenCalledWith(7, 99);
     expect(d.mainErrorRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('aux_freeform：结构化题不入题库、不写错题本、不锚会话（tutor）', async () => {
+    const d = withTutor(sq, {
+      dialoguesRepo: {
+        findById: vi.fn().mockResolvedValue({ id: 7, scene: 'aux_freeform' }),
+        updateQuestionId: vi.fn(),
+      },
+    });
+    await mkService(d).tutor({ mode: 'auxiliary', message: '这题怎么做', dialogueId: DIALOGUE_ID } as any, 7);
+
+    expect(d.questionsRepo.findByContentHash).not.toHaveBeenCalled();
+    expect(d.questionsRepo.findOrCreate).not.toHaveBeenCalled();
+    expect(d.mainErrorRepo.create).not.toHaveBeenCalled();
+    expect(d.dialoguesRepo.updateQuestionId).not.toHaveBeenCalled();
+  });
+
+  it('aux_freeform：结构化题不入题库、不写错题本（tutorStream）', async () => {
+    const d = mkDeps({
+      dialoguesRepo: {
+        findById: vi.fn().mockResolvedValue({ id: 7, scene: 'aux_freeform' }),
+        updateQuestionId: vi.fn(),
+      },
+      tutoring: {
+        tutor: vi.fn(),
+        tutorStream: vi.fn().mockImplementation(async function* () {
+          yield { type: 'content', delta: '一起看条件' };
+          yield { type: 'done', structuredQuestion: sq };
+        }),
+        generateTitle: vi.fn().mockResolvedValue(null),
+      },
+    });
+    const events = await collect(mkService(d).tutorStream(
+      { mode: 'auxiliary', message: '这题怎么做', dialogueId: DIALOGUE_ID } as any, 7,
+    ));
+
+    expect(events.map((e) => e.type)).toEqual(['content', 'done']);
+    expect(d.questionsRepo.findOrCreate).not.toHaveBeenCalled();
+    expect(d.mainErrorRepo.create).not.toHaveBeenCalled();
+    expect(d.dialoguesRepo.updateQuestionId).not.toHaveBeenCalled();
+  });
+
+  it('aux_qna：结构化题仍照常入库（不受 freeform 豁免影响）', async () => {
+    const d = withTutor(sq, {
+      dialoguesRepo: {
+        findById: vi.fn().mockResolvedValue({ id: 7, scene: 'aux_qna' }),
+        updateQuestionId: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    await mkService(d).tutor({ mode: 'auxiliary', message: '这题怎么做', dialogueId: DIALOGUE_ID } as any, 7);
+
+    expect(d.questionsRepo.findOrCreate).toHaveBeenCalledTimes(1);
+    expect(d.mainErrorRepo.create).toHaveBeenCalledTimes(1);
   });
 });

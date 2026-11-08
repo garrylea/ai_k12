@@ -67,3 +67,4 @@ fi
 
 echo
 echo "完成。请重启后端（在 apps/server 下）：node dist/main.js"
+echo "若 dist 是旧产物（刚拉代码或改过源码），先执行：cd apps/server && npm run build"

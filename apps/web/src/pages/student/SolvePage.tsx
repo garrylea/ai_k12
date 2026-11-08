@@ -142,7 +142,8 @@ export default function SolvePage() {
         ? `我这题不太会，我的尝试是：\n${answer}\n请引导我思考，不要直接给答案。`
         : '这题怎么做？请引导我思考，不要直接给答案。',
       source?.attachments ?? [],
-      [],
+      // 气泡展示题图照片：问「这题怎么做」时学生需要看到自己上传的题面。
+      source?.imageUrls ?? [],
     );
   };
 

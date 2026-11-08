@@ -528,6 +528,21 @@ describe('ParentInsightsRepository：会话列表', () => {
     expect(listSql).toContain('d.id DESC');
   });
 
+  it('无条件排除 aux_freeform（列表与 count 同一份 WHERE，不占参数位）', async () => {
+    const pool = mockPool([]);
+    pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);
+    pool.query.mockResolvedValueOnce([[], []]);
+    const repo = new ParentInsightsRepository(pool as any);
+
+    await repo.listParentChatLogs(9, { track: 'auxiliary' }, 20, 0);
+
+    const countSql = pool.execute.mock.calls[0][0] as string;
+    const listSql = pool.query.mock.calls[0][0] as string;
+    expect(countSql).toContain("d.scene <> 'aux_freeform'");
+    expect(listSql).toContain("d.scene <> 'aux_freeform'");
+    expect(pool.execute.mock.calls[0][1]).toEqual([9, 'auxiliary']);
+  });
+
   it('筛选下推：轨道 / 场景 / 时间窗（按最后一条消息时间）/ 标题关键词', async () => {
     const pool = mockPool([]);
     pool.execute.mockResolvedValueOnce([[{ count: 0 }], []]);

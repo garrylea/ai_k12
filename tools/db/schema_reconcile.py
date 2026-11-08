@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path("/Users/lichao/Downloads/claude/imooc/ai_k12")
+REPO = Path(__file__).resolve().parents[2]
 env_file = REPO / "apps/server/.env"
 ENV = dict(
     line.strip().split("=", 1)
@@ -19,13 +19,17 @@ ENV = dict(
     if line.strip() and not line.startswith("#") and "=" in line
 )
 DB, USER, PW = ENV["DB_NAME"], ENV["DB_USER"], ENV["DB_PASS"]
+HOST = ENV.get("DB_HOST") or "localhost"
+PORT = str(ENV.get("DB_PORT") or "3306")
 PREFIX = "__schema_check_"
+# 与 setup.sh 同口径：显式带 host/port，避免 .env 指向非本机库时静默连到 localhost。
+CONN = ["-h", HOST, "-P", PORT, f"-u{USER}", f"-p{PW}"]
 
 
 def sql(query, db=DB):
     """mysql -N -B 执行，返回行列表（tab 分列，\\N→None）。"""
     r = subprocess.run(
-        ["mysql", f"-u{USER}", f"-p{PW}", "-N", "-B", db, "-e", query],
+        ["mysql", *CONN, "-N", "-B", db, "-e", query],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
@@ -39,7 +43,7 @@ def sql(query, db=DB):
 
 def run(stmt, db=DB):
     r = subprocess.run(
-        ["mysql", f"-u{USER}", f"-p{PW}", db, "-e", stmt],
+        ["mysql", *CONN, db, "-e", stmt],
         capture_output=True, text=True,
     )
     if r.returncode != 0:

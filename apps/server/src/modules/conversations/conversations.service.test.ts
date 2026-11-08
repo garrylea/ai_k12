@@ -145,6 +145,27 @@ describe('ConversationsService (scene 分型 + 训练讲一讲按题锚定)', ()
     expect(d!.scene).toBe('aux_freeform');
   });
 
+  it('aux_freeform 未传 title：按题干前 20 字生成「做题 · …」', async () => {
+    const questionText = '已知 x+1=2，求 x 的值以及它的相反数';
+    const d = await svc.create(1, {
+      track: 'auxiliary',
+      scene: 'aux_freeform',
+      subjectId: 1,
+      questionText,
+    });
+    expect(d!.title).toBe(`做题 · ${questionText.slice(0, 20)}`);
+  });
+
+  it('aux_freeform 无题干：标题兜底为「做题」', async () => {
+    const d = await svc.create(1, { track: 'auxiliary', scene: 'aux_freeform', subjectId: 1 });
+    expect(d!.title).toBe('做题');
+  });
+
+  it('aux_qna 有题干也不改标题（仍是「辅线答疑」）', async () => {
+    const d = await svc.create(1, { track: 'auxiliary', questionText: '已知 x+1=2' });
+    expect(d!.title).toBe('辅线答疑');
+  });
+
   it('scene 与 track 不匹配仍拒绝（mainline + aux_freeform）', async () => {
     await expect(svc.create(1, { track: 'mainline', scene: 'aux_freeform' })).rejects.toThrow(/不匹配/);
   });

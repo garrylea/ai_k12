@@ -189,6 +189,24 @@ describe('SolveSourceInput', () => {
     expect(toastMock).toHaveBeenCalledWith('error', '仅支持图片文件');
   });
 
+  it('GIF 被客户端拒绝（accept 与筛选都不收），不占缩略图也不上传', async () => {
+    render(<SolveSourceInput busy={false} onRecognize={vi.fn()} />);
+
+    const input = screen.getByTestId('source-file-input') as HTMLInputElement;
+    expect(input.accept).not.toContain('gif');
+
+    pickFiles([new File(['x'], 'a.gif', { type: 'image/gif' })]);
+
+    // 全批都不是允许的图片类型：既不上传也不占格（与其它非图片文件同一处理）。
+    expect(screen.queryAllByTestId('source-thumb')).toHaveLength(0);
+    expect(uploadFileMock).not.toHaveBeenCalled();
+  });
+
+  it('展示个人信息提示', () => {
+    render(<SolveSourceInput busy={false} onRecognize={vi.fn()} />);
+    expect(screen.getByText('请勿上传含姓名、学校等个人信息的照片')).toBeInTheDocument();
+  });
+
   it('转换与上传期间禁止提交', async () => {
     const convertGate = deferred<File>();
     const uploadGate = deferred<{ fileId: number; url: string }>();

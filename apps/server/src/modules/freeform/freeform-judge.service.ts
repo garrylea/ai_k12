@@ -116,9 +116,18 @@ export class FreeformJudgeService {
     if (dto.questionId != null && !providedQuestion) throw badRequest('题目不存在');
 
     // 顺序按 spec §5.3：图片先全部解析/校验完（失败不留会话），再建会话或复用已有会话。
-    const existingDialogueId = dto.dialogueId ? await this.validateDialogue(dto, studentId) : null;
+    const existingDialogue = dto.dialogueId ? await this.validateDialogue(dto, studentId) : null;
+    // 重判只能写自己的题：freeform 题允许「本会话已锚定此 questionId」或「自己的错题本里有这题」。
+    // 否则学生 B 可以带 A 的 questionId 覆写 A 的题（题干/答案/解析全被改）。
+    if (dto.questionId != null && providedQuestion?.source === 'freeform') {
+      const anchored = existingDialogue?.question_id === dto.questionId;
+      const owned =
+        anchored || (await this.errorBooks.existsByStudentAndQuestionId(studentId, dto.questionId));
+      if (!owned) throw badRequest('题目不存在或无权访问');
+    }
     const images = await this.resolveImages(dto, studentId);
-    const dialogueId = existingDialogueId ?? (await this.createDialogue(studentId, subjectId, questionContent));
+    const dialogueId = existingDialogue ? String(existingDialogue.id) : await this.createDialogue(studentId, subjectId, questionContent);
+
     yield { type: 'start', dialogueId, questionId: dto.questionId ?? null };
 
     let content = '';
@@ -217,7 +226,10 @@ export class FreeformJudgeService {
   }
 
   /** 已传 dialogueId：校验归属 + 场景，**不写库**（写在图片全部校验通过之后才发生）。 */
-  private async validateDialogue(dto: FreeformJudgeDto, studentId: number): Promise<string> {
+  private async validateDialogue(
+    dto: FreeformJudgeDto,
+    studentId: number,
+  ): Promise<Awaited<ReturnType<ConversationsService['get']>>> {
     let dlg: Awaited<ReturnType<ConversationsService['get']>>;
     try {
       dlg = await this.conversations.get(Number(dto.dialogueId), studentId);
@@ -230,7 +242,7 @@ export class FreeformJudgeService {
       throw err;
     }
     if (dlg.scene !== 'aux_freeform') throw badRequest('对话场景不匹配');
-    return String(dlg.id);
+    return dlg;
   }
 
   /** 无 dialogueId 则新建 aux_freeform 会话（题干作 assistant 锚消息，供后续追问带上下文）。 */
@@ -264,7 +276,11 @@ export class FreeformJudgeService {
 
     const out: ResolvedImage[] = [];
     for (const [i, img] of questionImages.entries()) {
-      const row = await this.loadOwnedFile(img.fileId, studentId, '文件不存在或无权访问');
+      // 运行时不信任入参形状：`[null]` / 缺 fileId 直接 400，
+      // 否则 `img.fileId` 会抛 TypeError 变成 500。
+      const fileId = (img as { fileId?: unknown } | null)?.fileId;
+      if (typeof fileId !== 'string') throw badRequest('题图参数格式错误');
+      const row = await this.loadOwnedFile(fileId, studentId, '文件不存在或无权访问');
       out.push({ label: `原题图${i + 1}`, url: row.url, dataUrl: await this.toDataUrl(row) });
     }
     for (const [i, url] of figureUrls.entries()) {

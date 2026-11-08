@@ -67,7 +67,7 @@ import { FreeformModule } from './modules/freeform/freeform.module.js';
     DevModule,
     // 专项练习作答历史（2026-11-01）—— 学生端「练习记录」两条只读端点（考试 + 专项 UNION）
     PracticeHistoryModule,
-    // 自由输入做题（2026-11-08）—— 题图/文字识别成候选题（judge 流见 Task 10）
+    // 自由输入做题（2026-11-08）—— 题图/文字识别成候选题 + 判题 SSE
     FreeformModule,
   ],
   providers: [

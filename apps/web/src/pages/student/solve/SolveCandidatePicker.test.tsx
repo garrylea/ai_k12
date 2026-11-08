@@ -170,4 +170,21 @@ describe('SolveCandidatePicker', () => {
     const { content } = onConfirm.mock.calls[0][0];
     expect(content.match(/!\[[^\]]*\]\(\/uploads\/freeform\/a\.jpg\)/g)).toHaveLength(1);
   });
+
+  it('无配图时不显示「配图（多选）」区块', () => {
+    renderPicker(CANDIDATES, []);
+    expect(screen.queryByText('配图（多选）')).toBeNull();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('满分不是整数时不能提交', () => {
+    renderPicker();
+    const submit = screen.getByRole('button', { name: '开始作答' }) as HTMLButtonElement;
+
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '10.5' } });
+    expect(submit.disabled).toBe(true);
+
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '10' } });
+    expect(submit.disabled).toBe(false);
+  });
 });

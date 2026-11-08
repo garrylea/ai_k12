@@ -49,7 +49,10 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
   // 提交内容与 disabled 判定必须同源：只看原始 content 会漏掉「唯一内容是未勾选的图」。
   const out = buildContent(content, figures, checked);
   const canConfirm =
-    Boolean(out) && Number.isFinite(maxScore) && maxScore >= 1 && maxScore <= 100;
+    Boolean(out) &&
+    Number.isInteger(maxScore) &&
+    maxScore >= 1 &&
+    maxScore <= 100;
 
   const confirm = () => {
     onConfirm({
@@ -87,33 +90,35 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
         ))}
       </div>
 
-      <div className="mt-4">
-        <div className="text-sm font-medium mb-2">配图（多选）</div>
-        <div className="flex flex-wrap gap-3">
-          {figures.map((f) => (
-            <label key={f.url} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={checked.has(f.url)}
-                onChange={(e) => {
-                  setChecked((prev) => {
-                    const next = new Set(prev);
-                    if (e.target.checked) next.add(f.url);
-                    else next.delete(f.url);
-                    return next;
-                  });
-                }}
-                aria-label={f.name}
-              />
-              <img
-                src={f.url}
-                alt={f.name}
-                className="w-12 h-12 object-cover rounded border border-[#E5E5E5]"
-              />
-            </label>
-          ))}
+      {figures.length > 0 && (
+        <div className="mt-4">
+          <div className="text-sm font-medium mb-2">配图（多选）</div>
+          <div className="flex flex-wrap gap-3">
+            {figures.map((f) => (
+              <label key={f.url} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={checked.has(f.url)}
+                  onChange={(e) => {
+                    setChecked((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(f.url);
+                      else next.delete(f.url);
+                      return next;
+                    });
+                  }}
+                  aria-label={f.name}
+                />
+                <img
+                  src={f.url}
+                  alt={f.name}
+                  className="w-12 h-12 object-cover rounded border border-[#E5E5E5]"
+                />
+              </label>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="mt-4 flex flex-wrap items-end gap-4">
         <div>

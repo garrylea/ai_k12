@@ -38,7 +38,17 @@ export class ConversationsService {
     if (customTitle && customTitle.length > 100) {
       throw new BadRequestException({ code: 1001, message: 'title 过长（≤100 字）' });
     }
-    const title = customTitle || (dto.track === 'auxiliary' ? '辅线答疑' : '主线讨论');
+    // 做题入口的会话由客户端先建、且不传 title：不能让标题停在「辅线答疑」，
+    // 否则家长端/会话列表无法区分做题会话。取题干前 20 字（'做题 · ' + 20 字 ≈ 25 字，
+    // 天然满足 ≤100 的规则）。
+    const questionText = typeof dto.questionText === 'string' ? dto.questionText.trim() : '';
+    const derivedTitle =
+      scene === 'aux_freeform'
+        ? questionText
+          ? `做题 · ${questionText.slice(0, 20)}`
+          : '做题'
+        : undefined;
+    const title = customTitle || derivedTitle || (dto.track === 'auxiliary' ? '辅线答疑' : '主线讨论');
 
     // 训练讲一讲：按题 find-or-create，命中复用（跨刷新/跨设备续接同一讨论线）。
     if (scene === 'aux_training' && dto.questionId) {

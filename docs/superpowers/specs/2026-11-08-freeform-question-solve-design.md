@@ -956,8 +956,8 @@ routes:
 
 新增 `tools/freeform/setup.sh`，内部串起：
 
-1. 检查 `mineru-open-api` 是否存在（否则打印安装命令并退出非 0）；
-2. 检查 `MINERU_TOKEN` 是否配置（否则打印获取地址并退出非 0）；
+1. 检查 `mineru-open-api` 是否存在（缺失只打印安装命令并告警，**不中断**）；
+2. 检查 `MINERU_TOKEN` 是否配置（缺失只打印获取地址并告警，**不中断**）；
 3. 应用路由迁移（`mysql < tools/db/migrations/2026-11-08_freeform_routes.sql`，幂等）；
 4. 跑 `python3 tools/db/schema_reconcile.py` 健康检查；
 5. 打印「重启后端：node dist/main.js」（不自动杀进程）。

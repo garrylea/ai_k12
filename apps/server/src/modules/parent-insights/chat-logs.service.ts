@@ -90,6 +90,11 @@ export class ChatLogsService {
     if (!dialogue || dialogue.student_id !== studentId) {
       throw new NotFoundException({ code: 1002, message: '对话不存在' });
     }
+    // 做题入口的答疑会话不进家长端回放（列表已排除；详情必须同样拦，
+    // 否则家长拿着 id 直查就能绕过列表看到做题会话）。
+    if (dialogue.scene === 'aux_freeform') {
+      throw new NotFoundException({ code: 1002, message: '对话不存在' });
+    }
 
     const messages = await this.messagesRepo.findByDialogue(dialogueId);
     // 与列表同口径：`updatedAt` 是「最后一条消息时间」，不是 `dialogue.updated_at`

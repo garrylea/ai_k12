@@ -30,7 +30,7 @@
 - 一条命令交付 `bash tools/freeform/setup.sh`：加载 `.env` → 应用迁移 → `schema_reconcile.py` 对账（有差异即停）→ MinerU 预检（仅告警）。
 - 文件上传新增 `freeform` 来源，且**不自动触发 refinery**；`uploaded_files` 按 `(uploader_id, url)` 反查归属。
 
-**提交范围**：`8fbd1086..8169015f`（分支 `feat/freeform-solve`）。
+**提交范围**：`8fbd1086..6b2676d9`（分支 `feat/freeform-solve`）。
 
 **验证**：`apps/server` 189 文件 / 2549 用例全通过；`apps/web` 168 文件 / 1610 用例全通过；`apps/web` `tsc -b` 与 `apps/server` `tsc --noEmit` 均 0 错误。
 

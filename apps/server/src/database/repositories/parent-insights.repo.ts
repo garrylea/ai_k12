@@ -711,7 +711,7 @@ ${windowed.sql}
     studentId: number,
     filters: ParentChatLogFilters,
   ): { where: string; params: (number | string)[] } {
-    const conditions = ['d.student_id = ?', 'd.deleted_at IS NULL'];
+    const conditions = ['d.student_id = ?', 'd.deleted_at IS NULL', "d.scene <> 'aux_freeform'"];
     const params: (number | string)[] = [studentId];
 
     if (filters.track) {

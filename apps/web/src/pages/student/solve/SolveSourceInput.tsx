@@ -14,6 +14,14 @@ import type { SourceImage } from './types';
 
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** 与后端识别/判题链路支持的格式一致：GIF 等动图不收（识题无收益且体积大）。 */
+const ALLOWED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
 
 interface Props {
   busy: boolean;
@@ -109,7 +117,7 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
 
   const addFiles = (files: File[]) => {
     // 先按类型与大小剔除，再抢名额：否则被拒的文件会白占一格，合法文件反而进不来。
-    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+    const imageFiles = files.filter((f) => ALLOWED_IMAGE_TYPES.has(f.type));
     if (imageFiles.length === 0) return;
     if (imageFiles.length < files.length) toast('error', '仅支持图片文件');
 
@@ -230,9 +238,11 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={handlePaste}
-          placeholder="输入题目文字，或拖入/粘贴题目图片（HEIC、JPG、PNG、WebP、GIF）"
+          placeholder="输入题目文字，或拖入/粘贴题目图片（HEIC、JPG、PNG、WebP）"
           className="w-full bg-transparent outline-none resize-none text-[#1D1D1F] placeholder-[#86868B]"
         />
+
+        <p className="text-xs text-[#86868B]">请勿上传含姓名、学校等个人信息的照片</p>
 
         <div className="flex items-center justify-between">
           <button
@@ -257,7 +267,7 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
             data-testid="source-file-input"
             type="file"
             multiple
-            accept="image/png,image/jpeg,image/webp,image/gif,image/heic,image/heif,.heic,.heif"
+            accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif"
             className="hidden"
             onChange={(e) => {
               addFiles(Array.from(e.target.files ?? []));

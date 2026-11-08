@@ -63,6 +63,7 @@ const mkDeps = (over: any = {}) => ({
     create: vi.fn().mockResolvedValue(22),
     updateDialogueId: vi.fn().mockResolvedValue(undefined),
     clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(1),
+    existsByStudentAndQuestionId: vi.fn().mockResolvedValue(true),
   },
   dialogues: { updateQuestionId: vi.fn().mockResolvedValue(undefined) },
   messages: { create: vi.fn().mockResolvedValue(1) },
@@ -541,6 +542,84 @@ describe('FreeformJudgeService —— 参数校验', () => {
     });
     expect(deps.capability.stream).not.toHaveBeenCalled();
   });
+
+  it('questionId 属于别人（无锚定会话、错题本也没有）→ 400/1001，不更新、不调模型', async () => {
+    const deps = mkDeps({
+      capability: { stream: vi.fn(), extractStructured: vi.fn() },
+      errorBooks: {
+        findUnclearedByStudentQuestionId: vi.fn(),
+        create: vi.fn(),
+        updateDialogueId: vi.fn(),
+        clearUnclearedByStudentQuestionId: vi.fn(),
+        existsByStudentAndQuestionId: vi.fn().mockResolvedValue(false),
+      },
+    });
+    const svc = mkService(deps);
+
+    await expect(
+      collect(svc.judgeStream({ ...baseDto(), questionId: 5 }, 9)),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+
+    expect(deps.errorBooks.existsByStudentAndQuestionId).toHaveBeenCalledWith(9, 5);
+    expect(deps.questions.updateFreeform).not.toHaveBeenCalled();
+    expect(deps.capability.stream).not.toHaveBeenCalled();
+    expect(deps.conversations.create).not.toHaveBeenCalled();
+  });
+
+  it('questionId 属于别人且会话锚的是别的题 → 400/1001（差一个 id 也不能写）', async () => {
+    const deps = mkDeps({
+      capability: { stream: vi.fn(), extractStructured: vi.fn() },
+      conversations: {
+        get: vi.fn().mockResolvedValue({ id: 44, student_id: 9, scene: 'aux_freeform', question_id: 7 }),
+        create: vi.fn(),
+      },
+      errorBooks: {
+        findUnclearedByStudentQuestionId: vi.fn(),
+        create: vi.fn(),
+        updateDialogueId: vi.fn(),
+        clearUnclearedByStudentQuestionId: vi.fn(),
+        existsByStudentAndQuestionId: vi.fn().mockResolvedValue(false),
+      },
+    });
+    const svc = mkService(deps);
+
+    await expect(
+      collect(svc.judgeStream({ ...baseDto(), dialogueId: '44', questionId: 5 }, 9)),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+
+    expect(deps.questions.updateFreeform).not.toHaveBeenCalled();
+    expect(deps.capability.stream).not.toHaveBeenCalled();
+  });
+
+  it('自己的会话锚定该题 → 允许重判并更新', async () => {
+    const deps = mkDeps({
+      capability: { stream: streamOnce(REPORT_WITH_JSON(7, 10)), extractStructured: vi.fn() },
+      conversations: {
+        get: vi.fn().mockResolvedValue({ id: 44, student_id: 9, scene: 'aux_freeform', question_id: 5 }),
+        create: vi.fn(),
+      },
+      // 只靠会话锚定放行，错题本判定不参与。
+      errorBooks: {
+        findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(22),
+        updateDialogueId: vi.fn().mockResolvedValue(undefined),
+        clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(1),
+        existsByStudentAndQuestionId: vi.fn().mockResolvedValue(false),
+      },
+    });
+    const svc = mkService(deps);
+
+    const events = await collect(
+      svc.judgeStream({ ...baseDto(), dialogueId: '44', questionId: 5 }, 9),
+    );
+
+    expect(deps.errorBooks.existsByStudentAndQuestionId).not.toHaveBeenCalled();
+    expect(deps.questions.updateFreeform).toHaveBeenCalledWith(
+      5,
+      expect.objectContaining({ full_score: 10 }),
+    );
+    expect(events.find((e) => e.type === 'result')).toMatchObject({ questionId: 5 });
+  });
 });
 
 describe('FreeformJudgeService —— 图片解析', () => {
@@ -605,6 +684,21 @@ describe('FreeformJudgeService —— 图片解析', () => {
     await expect(
       collect(svc.judgeStream({ ...baseDto(), questionImages: [{ type: 'image', fileId: '7' }] }, 9)),
     ).rejects.toMatchObject({ response: { code: 1001 } });
+    expect(deps.capability.stream).not.toHaveBeenCalled();
+  });
+
+  it('questionImages 元素为 null / fileId 不是字符串 → 400/1001（不是 TypeError 500）', async () => {
+    const deps = mkDeps();
+    const svc = mkService(deps);
+
+    await expect(
+      collect(svc.judgeStream({ ...baseDto(), questionImages: [null] as any }, 9)),
+    ).rejects.toMatchObject({ response: { code: 1001, message: '题图参数格式错误' } });
+
+    await expect(
+      collect(svc.judgeStream({ ...baseDto(), questionImages: [{ type: 'image', fileId: 7 }] as any }, 9)),
+    ).rejects.toMatchObject({ response: { code: 1001, message: '题图参数格式错误' } });
+
     expect(deps.capability.stream).not.toHaveBeenCalled();
   });
 

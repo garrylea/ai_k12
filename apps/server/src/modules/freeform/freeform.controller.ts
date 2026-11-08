@@ -28,7 +28,6 @@ import type { FreeformJudgeDto, FreeformRecognizeDto } from './dto/freeform.dto.
 export class FreeformController {
   constructor(
     private readonly recognizeService: FreeformRecognizeService,
-    // Task 10 才用到；先注入占位实现，避免模块装配时缺 provider。
     private readonly judgeService: FreeformJudgeService,
   ) {}
 

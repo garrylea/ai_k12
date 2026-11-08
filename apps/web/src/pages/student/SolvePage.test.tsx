@@ -126,6 +126,13 @@ beforeEach(() => {
     value: () => {},
     configurable: true,
   });
+  // jsdom 也未实现 createObjectURL：录入页的题图预览要用（仅「答疑带图」用例会触发）。
+  if (typeof URL.createObjectURL !== 'function') {
+    (URL as unknown as Record<string, unknown>).createObjectURL = vi.fn(() => 'blob:preview');
+  }
+  if (typeof URL.revokeObjectURL !== 'function') {
+    (URL as unknown as Record<string, unknown>).revokeObjectURL = vi.fn();
+  }
   useChatStore.getState().reset();
   draftStub.receivedRef = null;
   draftStub.snapshotValue = null;
@@ -302,6 +309,30 @@ describe('SolvePage 状态机', () => {
     // tab 条出现且默认落在 AI 态
     expect(await screen.findByRole('button', { name: 'AI 答疑' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/输入问题或粘贴/)).toBeInTheDocument();
+  });
+
+  it('答疑首问的气泡展示上传的题图（source.imageUrls 透传）', async () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {
+      target: { value: '求 1+1' },
+    });
+    fireEvent.change(screen.getByTestId('source-file-input'), {
+      target: { files: [new File(['x'], 'q.jpg', { type: 'image/jpeg' })] },
+    });
+    await waitFor(() => expect(screen.getAllByTestId('source-thumb')).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '开始识题' })).not.toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
+    await screen.findByText('识别到 1 道题');
+    fireEvent.click(screen.getByRole('button', { name: '开始作答' }));
+    await screen.findByLabelText('作答输入');
+
+    fireEvent.click(screen.getByRole('button', { name: '答疑' }));
+    await waitFor(() => expect(tutorStreamMock).toHaveBeenCalledTimes(1));
+
+    const userMsg = useChatStore.getState().messages.find((m) => m.role === 'user');
+    expect(userMsg?.images).toEqual(['/uploads/draft.jpg']);
   });
 
   it('提交：带 dialogueId / questionContent / figureUrls / answer；再次提交带 questionId', async () => {
