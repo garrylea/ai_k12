@@ -142,12 +142,34 @@ describe('QuestionsRepository.createFreeform', () => {
     expect(sql).toContain('full_score');
     expect(sql).toContain('answer_verified');
     expect(sql).toContain('is_active');
+    // 字面量值断言：answer_verified=0、is_active=1（列名存在但值改成 1/0 要被抓住）
+    expect(sql).toMatch(/,\s*0,\s*1\)\s*$/);
     expect(params).toContain(10);
     // 列数 = 占位符数：11 个 ? + 字面量 0/1
     expect((sql.match(/\?/g) ?? []).length).toBe(params.length);
     expect(params).toEqual([
       1, 'solution', 3, 10, row.content, null, 'x=1', null, null, 'freeform', 'abc123',
     ]);
+  });
+
+  it('并发相同 content_hash 撞 UNIQUE：捕获 ER_DUP_ENTRY 并返回既有行 id', async () => {
+    const dup = Object.assign(new Error('Duplicate entry'), {
+      code: 'ER_DUP_ENTRY',
+      errno: 1062,
+    });
+    const pool = {
+      // 第 1 次是 INSERT（撞唯一键），第 2 次是 findByContentHash 的 SELECT
+      execute: vi
+        .fn()
+        .mockRejectedValueOnce(dup)
+        .mockResolvedValueOnce([[{ id: 99, content_hash: 'abc123' }], []]),
+      query: vi.fn(),
+    };
+    const repo = new QuestionsRepository(pool as any);
+    await expect(repo.createFreeform(row)).resolves.toBe(99);
+    const [selectSql, selectParams] = pool.execute.mock.calls[1];
+    expect(selectSql).toContain('FROM questions WHERE content_hash = ?');
+    expect(selectParams).toEqual(['abc123']);
   });
 });
 

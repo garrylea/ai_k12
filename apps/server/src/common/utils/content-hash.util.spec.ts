@@ -39,6 +39,15 @@ describe('content-hash freeform（先剥 Markdown 图片再哈希）', () => {
   it('stripMarkdownImages 同时去掉图片与 <!-- page N --> 页码标记', () => {
     expect(stripMarkdownImages('![图](/uploads/a.png)\n<!-- page 3 -->\n求 x')).toBe('求 x');
   });
+  it('stripMarkdownImages 去掉任意 HTML 注释（不限于 page 标记）', () => {
+    expect(stripMarkdownImages('求 x <!-- 内部备注：勿删 -->')).toBe('求 x');
+  });
+  it('纯图片内容（仅图片 URL 不同）hash 不同，不塌缩成 sha256("")', () => {
+    const a = computeFreeformContentHash('![图](https://x/a.jpg)');
+    const b = computeFreeformContentHash('![图](https://x/b.jpg)');
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(computeContentHash(''));
+  });
 });
 
 describe('content-hash NFKC alignment', () => {

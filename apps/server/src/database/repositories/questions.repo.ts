@@ -104,14 +104,24 @@ export class QuestionsRepository {
     approach: string | null; explanation: string | null; source: 'freeform';
     content_hash: string;
   }): Promise<number> {
-    const [r] = await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO questions
-        (subject_id, type, difficulty, full_score, content, options, answer, approach, explanation, source, content_hash, answer_verified, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)`,
-      [row.subject_id, row.type, row.difficulty, row.full_score, row.content, row.options,
-       row.answer, row.approach, row.explanation, row.source, row.content_hash],
-    );
-    return r.insertId;
+    try {
+      const [r] = await this.pool.execute<ResultSetHeader>(
+        `INSERT INTO questions
+          (subject_id, type, difficulty, full_score, content, options, answer, approach, explanation, source, content_hash, answer_verified, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)`,
+        [row.subject_id, row.type, row.difficulty, row.full_score, row.content, row.options,
+         row.answer, row.approach, row.explanation, row.source, row.content_hash],
+      );
+      return r.insertId;
+    } catch (err: any) {
+      // ER_DUP_ENTRY：并发提交同一道题（content_hash UNIQUE）—— 另一路已插入，
+      // 回读既有行返回其 id，避免第二次请求在 LLM 花费之后报错。
+      if (err.code === 'ER_DUP_ENTRY' || err.errno === 1062) {
+        const existing = await this.findByContentHash(row.content_hash);
+        if (existing) return existing.id;
+      }
+      throw err;
+    }
   }
 
   /** 只允许改 freeform 行：题库题（source 非 freeform）绝不被 AI 侧覆写。 */
