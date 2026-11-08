@@ -38,6 +38,7 @@ function make() {
   const passagesRepo = { findById: vi.fn().mockResolvedValue(null) };
   const questionsRepo = {
     findKpIdsByQuestionIds: vi.fn().mockResolvedValue(new Map<number, number>()),
+    findKpRefsByQuestionIds: vi.fn().mockResolvedValue(new Map()),
   };
   const historyPractice = {
     loadRedoQuestion: vi.fn().mockResolvedValue(null),
@@ -276,8 +277,8 @@ describe('PracticeHistoryService.getDetail', () => {
     const s = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
     expect(s?.questions[0].canRedo).toBe(false);
     expect(s?.questions[0].canSimilar).toBe(false);
-    // 无 questionId 时不必查 KP
-    expect(h.questionsRepo.findKpIdsByQuestionIds).toHaveBeenLastCalledWith([]);
+    // 无 questionId 时不必查 KP（语文走 kpRefs 通道，数学/物理走 kpMap 通道）
+    expect(h.questionsRepo.findKpRefsByQuestionIds).toHaveBeenLastCalledWith([]);
   });
 
   it('物理专项：question_id 在架 + 有答案 + 有 KP → canSimilar=true', async () => {
@@ -306,6 +307,55 @@ describe('PracticeHistoryService.getDetail', () => {
       question_is_active: 1,
     }]);
     h.questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[200, 9]]));
+
+    const r = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
+    expect(r?.questions[0].canSimilar).toBe(true);
+  });
+
+  it('语文：所有知识点都在 C01/C02 → canSimilar=true', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 2 }));
+    h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([{
+      question_id: 6950, question_order: 1, answer_text: 'A', is_correct: 1, score: 1,
+      analysis: null, method: 'exact', judged_at: null, text: '文言实词题', type: 'choice',
+      options: null, explanation: null, answer: 'A', material_text: null, is_active: 1,
+    }]);
+    h.questionsRepo.findKpRefsByQuestionIds.mockResolvedValue(new Map([
+      [6950, [{ id: 88, rootCode: 'C01' }, { id: 104, rootCode: 'C02' }]],
+    ]));
+
+    const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });
+    expect(r?.questions[0].canRedo).toBe(true);
+    expect(r?.questions[0].canSimilar).toBe(true);
+  });
+
+  it('语文：混入现代文阅读知识点（C03）→ canSimilar=false', async () => {
+    h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 2 }));
+    h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([{
+      question_id: 5230, question_order: 1, answer_text: 'A', is_correct: 0, score: 0,
+      analysis: null, method: 'exact', judged_at: null, text: '阅读题', type: 'short_answer',
+      options: null, explanation: null, answer: '参考答案', material_text: '阅读材料', is_active: 1,
+    }]);
+    h.questionsRepo.findKpRefsByQuestionIds.mockResolvedValue(new Map([
+      [5230, [{ id: 88, rootCode: 'C01' }, { id: 109, rootCode: 'C03' }]],
+    ]));
+
+    const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });
+    expect(r?.questions[0].canRedo).toBe(true);
+    expect(r?.questions[0].canSimilar).toBe(false);
+  });
+
+  it('语文专项：题在架 + 全 C01/C02 → canSimilar=true', async () => {
+    h.specialSessionsRepo.findByIdOwned.mockResolvedValue(mkSpecialSession({ subject_id: 2 }));
+    h.specialAnswersRepo.listBySession.mockResolvedValue([{
+      id: 1, session_id: 5, question_id: 6942, ref_type: 'question', ref_id: null,
+      sentence_index: null, question_order: 1, answer_text: 'A',
+      is_correct: 1, score: '1.00', method: 'exact', analysis: null, judged_at: null,
+      question_content: '古诗默写', question_answer: 'A', question_analysis: null,
+      question_is_active: 1,
+    }]);
+    h.questionsRepo.findKpRefsByQuestionIds.mockResolvedValue(new Map([
+      [6942, [{ id: 102, rootCode: 'C02' }]],
+    ]));
 
     const r = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
     expect(r?.questions[0].canSimilar).toBe(true);
