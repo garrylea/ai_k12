@@ -10,7 +10,7 @@
 
 ## 2026-11-08 做题入口（自由做题 / freeform）
 
-**入口**：入口选择页第 4 张卡「做题」→ `/student/solve`（`apps/web/src/pages/student/SolvePage.tsx`）。学生上传 1–6 张题目照片 → 识别候选 → 选题 + 多选配图 → 作答页（草稿白板 / 手写 / LaTeX 预览）→ 【答疑】或【提交】。
+**入口**：入口选择页第 4 张卡「做题」→ `/student/solve`（`apps/web/src/pages/student/SolvePage.tsx`）。学生上传 1–6 张题目照片或一段题面文字 → 识别候选 → 选题 + 多选配图 → 作答页（草稿白板 / 手写 / LaTeX 预览）→ 【答疑】或【提交】。
 
 **链路**：
 - 识别 `POST /api/freeform/recognize`：MinerU 转 Markdown → **本地切题**（`freeform_split` 路由：`local` 主、`qwen3.8-max` 兜底）→ 返回候选（题干 / 配图 / 分值）。
@@ -30,11 +30,15 @@
 - 一条命令交付 `bash tools/freeform/setup.sh`：加载 `.env` → 应用迁移 → `schema_reconcile.py` 对账（有差异即停）→ MinerU 预检（仅告警）。
 - 文件上传新增 `freeform` 来源，且**不自动触发 refinery**；`uploaded_files` 按 `(uploader_id, url)` 反查归属。
 
-**提交范围**：`8fbd1086..8169015f`（47 个提交，分支 `feat/freeform-solve`）。
+**提交范围**：`8fbd1086..8169015f`（分支 `feat/freeform-solve`）。
 
 **验证**：`apps/server` 189 文件 / 2549 用例全通过；`apps/web` 168 文件 / 1610 用例全通过；`apps/web` `tsc -b` 与 `apps/server` `tsc --noEmit` 均 0 错误。
 
 **真环境冒烟（MinerU + 千问 + DB 迁移）待用户批准后执行** —— 本次只跑单测与类型检查，**未**应用迁移、未起服务、未调用真实 MinerU/千问，因此识别准确率、SSE 端到端与 iPad 拖图/粘贴/白板行为**尚未实测**。
+
+---
+
+## 2026-11-08 选科页六学科图标按学科区分
 
 **背景**（用户发现）：`/student/training` 六张卡全部是同一枚哑铃，学生只能靠文字分辨学科。查证该页自 2026-09 建立以来从未按学科区分图标；2026-10-31 六卡计划里也明确写了「本计划不新增图标」「DumbbellIcon 不变」——不是某次调整没生效。
 
