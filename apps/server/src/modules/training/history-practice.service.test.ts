@@ -241,7 +241,7 @@ describe('HistoryPracticeService.startSimilar', () => {
     const r = await svc.startSimilar({ studentId: 7, subjectId: 2, questionId: 100, count: 3 });
 
     expect(r.questions).toHaveLength(3);
-    expect(variation.generate).not.toHaveBeenCalled();
+    // AI 未调用由下面「只抽到 2 题」用例锁定（该用例真正走到缺口路径）
     expect(questionsRepo.findRandomByKpTypeDifficulty).toHaveBeenCalledWith(
       7, 2, 104, 'choice', [2], 3, [100],
       { requireAllKpRootCodes: ['C01', 'C02'] },
