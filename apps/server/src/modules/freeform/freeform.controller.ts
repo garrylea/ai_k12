@@ -24,15 +24,22 @@ export class FreeformController {
     private readonly judgeService: FreeformJudgeService,
   ) {}
 
-  /** 题图/文字 → 候选题。张数上限在此拦，图片合法性/文字长度由 service 校验。 */
+  /** 题图/文字 → 候选题。参数形状与张数在此拦，图片归属/格式/大小与文字长度由 service 校验。 */
   @Post('recognize')
   async recognize(@Body() dto: FreeformRecognizeDto, @CurrentUser() user: JwtUser) {
+    // `text` 非字符串必须在这里拦：service 会直接 `.trim()`，放过去就是 500 而不是 400。
+    if (dto?.text !== undefined && typeof dto.text !== 'string') {
+      throw new BadRequestException({ code: 1001, message: 'text 必须是字符串' });
+    }
     const fileIds = dto?.fileIds ?? [];
     if (!Array.isArray(fileIds)) {
       throw new BadRequestException({ code: 1001, message: 'fileIds 必须是数组' });
     }
     if (fileIds.length > 6) {
       throw new BadRequestException({ code: 1001, message: '最多 6 张题图' });
+    }
+    if (!fileIds.every((x) => typeof x === 'string' && /^\d+$/.test(x) && Number(x) > 0)) {
+      throw new BadRequestException({ code: 1001, message: 'fileIds 必须是正整数数组' });
     }
     return this.recognizeService.recognize({ text: dto?.text, fileIds }, user.sub);
   }

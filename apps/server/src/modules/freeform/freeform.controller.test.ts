@@ -43,4 +43,27 @@ describe('FreeformController.recognize', () => {
 
     expect(recognize).not.toHaveBeenCalled();
   });
+
+  it('text 非字符串 → 400/1001（不能落到 service 的 trim 上）', async () => {
+    const { controller, recognize } = make();
+
+    await expect(
+      controller.recognize({ text: 123 } as any, { sub: 1 } as any),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+
+    expect(recognize).not.toHaveBeenCalled();
+  });
+
+  it('fileIds 元素非正整数 → 400/1001', async () => {
+    const { controller, recognize } = make();
+
+    await expect(
+      controller.recognize({ fileIds: ['abc'] }, { sub: 1 } as any),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+    await expect(
+      controller.recognize({ fileIds: ['0'] }, { sub: 1 } as any),
+    ).rejects.toMatchObject({ response: { code: 1001 } });
+
+    expect(recognize).not.toHaveBeenCalled();
+  });
 });
