@@ -139,6 +139,25 @@ describe('ConversationsService (scene 分型 + 训练讲一讲按题锚定)', ()
     ).rejects.toThrow(BadRequestException);
   });
 
+  // --- aux_freeform（自由答疑，辅线专属；问答列表只查 aux_qna 故不会混入）------
+  it('aux_freeform 可创建', async () => {
+    const d = await svc.create(1, { track: 'auxiliary', scene: 'aux_freeform', subjectId: 1 });
+    expect(d!.scene).toBe('aux_freeform');
+  });
+
+  it('scene 与 track 不匹配仍拒绝（mainline + aux_freeform）', async () => {
+    await expect(svc.create(1, { track: 'mainline', scene: 'aux_freeform' })).rejects.toThrow(/不匹配/);
+  });
+
+  it('list(auxiliary, aux_qna) 不含 aux_freeform 会话', async () => {
+    await svc.create(1, { track: 'auxiliary' });  // aux_qna
+    const free = await svc.create(1, { track: 'auxiliary', scene: 'aux_freeform', subjectId: 1 });
+    const qna = await svc.list(1, 'auxiliary', undefined, 'aux_qna');
+    expect(qna).toHaveLength(1);
+    expect(qna.every((r) => r.scene === 'aux_qna')).toBe(true);
+    expect(qna.some((r) => r.id === free!.id)).toBe(false);
+  });
+
   it('list 支持按 scene 过滤', async () => {
     await svc.create(1, { track: 'auxiliary' });  // aux_qna
     await svc.create(1, { track: 'auxiliary', scene: 'aux_training', questionId: 3, questionText: '题' });
