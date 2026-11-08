@@ -93,6 +93,41 @@ export class QuestionsRepository {
     }
   }
 
+  /**
+   * freeform（AI 生成的自由作答/解答题）落库：与 create 分开，是因为它必须写
+   * full_score 并把 answer_verified 固定为 0（未经人工/权威校验）、is_active=1。
+   * 不绑知识点（question_knowledge_points 无行）。
+   */
+  async createFreeform(row: {
+    subject_id: number; type: string; difficulty: number; full_score: number;
+    content: string; options: string | null; answer: string;
+    approach: string | null; explanation: string | null; source: 'freeform';
+    content_hash: string;
+  }): Promise<number> {
+    const [r] = await this.pool.execute<ResultSetHeader>(
+      `INSERT INTO questions
+        (subject_id, type, difficulty, full_score, content, options, answer, approach, explanation, source, content_hash, answer_verified, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)`,
+      [row.subject_id, row.type, row.difficulty, row.full_score, row.content, row.options,
+       row.answer, row.approach, row.explanation, row.source, row.content_hash],
+    );
+    return r.insertId;
+  }
+
+  /** 只允许改 freeform 行：题库题（source 非 freeform）绝不被 AI 侧覆写。 */
+  async updateFreeform(id: number, row: {
+    type: string; difficulty: number; full_score: number; content: string;
+    options: string | null; answer: string; approach: string | null;
+    explanation: string | null; content_hash: string;
+  }): Promise<void> {
+    await this.pool.execute(
+      `UPDATE questions SET type=?, difficulty=?, full_score=?, content=?, options=?,
+         answer=?, approach=?, explanation=?, content_hash=? WHERE id=? AND source='freeform'`,
+      [row.type, row.difficulty, row.full_score, row.content, row.options,
+       row.answer, row.approach, row.explanation, row.content_hash, id],
+    );
+  }
+
   async deleteById(id: number): Promise<void> {
     await this.pool.execute(`DELETE FROM questions WHERE id = ?`, [id]);
   }

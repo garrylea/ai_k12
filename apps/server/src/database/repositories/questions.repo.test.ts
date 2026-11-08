@@ -114,3 +114,62 @@ describe('QuestionsRepository.updateExplanation', () => {
     expect(params).toEqual(['标准题解', 1]);
   });
 });
+
+describe('QuestionsRepository.createFreeform', () => {
+  const row = {
+    subject_id: 1,
+    type: 'solution',
+    difficulty: 3,
+    full_score: 10,
+    content: '已知 ![图](/uploads/a.png) 求 x',
+    options: null,
+    answer: 'x=1',
+    approach: null,
+    explanation: null,
+    source: 'freeform' as const,
+    content_hash: 'abc123',
+  };
+
+  it('写入 full_score 且 answer_verified=0 / is_active=1', async () => {
+    const pool = {
+      execute: vi.fn().mockResolvedValue([{ insertId: 7 }, []]),
+      query: vi.fn(),
+    };
+    const repo = new QuestionsRepository(pool as any);
+    const id = await repo.createFreeform(row);
+    expect(id).toBe(7);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('full_score');
+    expect(sql).toContain('answer_verified');
+    expect(sql).toContain('is_active');
+    expect(params).toContain(10);
+    // 列数 = 占位符数：11 个 ? + 字面量 0/1
+    expect((sql.match(/\?/g) ?? []).length).toBe(params.length);
+    expect(params).toEqual([
+      1, 'solution', 3, 10, row.content, null, 'x=1', null, null, 'freeform', 'abc123',
+    ]);
+  });
+});
+
+describe('QuestionsRepository.updateFreeform', () => {
+  it('按 id + source=freeform 限定更新，占位符与参数对齐', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{}, []]), query: vi.fn() };
+    const repo = new QuestionsRepository(pool as any);
+    await repo.updateFreeform(7, {
+      type: 'solution',
+      difficulty: 3,
+      full_score: 10,
+      content: '题面',
+      options: null,
+      answer: 'x=1',
+      approach: null,
+      explanation: null,
+      content_hash: 'abc123',
+    });
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain("WHERE id=? AND source='freeform'");
+    expect(sql).toContain('full_score=?');
+    expect((sql.match(/\?/g) ?? []).length).toBe(params.length);
+    expect(params).toEqual(['solution', 3, 10, '题面', null, 'x=1', null, null, 'abc123', 7]);
+  });
+});

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeForHash, computeContentHash } from './content-hash.util.js';
+import {
+  normalizeForHash,
+  computeContentHash,
+  stripMarkdownImages,
+  computeFreeformContentHash,
+} from './content-hash.util.js';
 
 describe('content-hash', () => {
   it('strips whitespace', () => {
@@ -19,6 +24,20 @@ describe('content-hash', () => {
   });
   it('normalizeForHash returns string', () => {
     expect(typeof normalizeForHash('test')).toBe('string');
+  });
+});
+
+describe('content-hash freeform（先剥 Markdown 图片再哈希）', () => {
+  it('去 Markdown 图片后同题干 hash 相同', () => {
+    const a = computeFreeformContentHash('已知 ![图](https://x/a.jpg) 求 x');
+    const b = computeFreeformContentHash('已知 ![图](https://x/b.jpg) 求 x');
+    expect(a).toBe(b);
+  });
+  it('纯文字与原 hash 一致', () => {
+    expect(computeFreeformContentHash('x+1=2')).toBe(computeContentHash('x+1=2'));
+  });
+  it('stripMarkdownImages 同时去掉图片与 <!-- page N --> 页码标记', () => {
+    expect(stripMarkdownImages('![图](/uploads/a.png)\n<!-- page 3 -->\n求 x')).toBe('求 x');
   });
 });
 

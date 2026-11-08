@@ -15,6 +15,20 @@ export function computeContentHash(content: string): string {
   return createHash('sha256').update(normalizeForHash(content)).digest('hex');
 }
 
+/** 剥掉 Markdown 图片与 <!-- page N --> 页码标记（AI 生成的 freeform 题带图时，
+ *  同一道题换图片 URL 也应命中同一条记录）。 */
+export function stripMarkdownImages(content: string): string {
+  return content
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/<!-- page \d+ -->/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+}
+
+export function computeFreeformContentHash(content: string): string {
+  return computeContentHash(stripMarkdownImages(content));
+}
+
 // 更宽松的归一化：在 normalizeForHash 基础上再去掉标点/符号。用于「同一道题
 // 只是文字或格式微调」的兜底匹配（同一道题连标点都可能不完全一致）。
 export const PREFIX_STRIP = /[\s,，.。!！?？;；:：、·'"“”‘’`()（）\[\]【】{}<>《》「」『』〈〉…～~〜\-—_/\\|]/g;
