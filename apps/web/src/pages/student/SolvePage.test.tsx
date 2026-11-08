@@ -236,6 +236,26 @@ describe('SolvePage 状态机', () => {
     expect(screen.queryByText(/识别到 0 道题/)).toBeNull();
   });
 
+  it('识别出 0 道题 → 手动输入：选题页是录入的那一道，不是「识别到 0 道题」', async () => {
+    recognizeMock.mockResolvedValueOnce({ candidates: [], figures: [] });
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {
+      target: { value: '手写题干' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
+    fireEvent.click(await screen.findByRole('button', { name: '手动输入题目' }));
+
+    // 空的识别结果必须被清掉：否则第一个选题分支按 candidates.length=0 渲染空列表
+    expect(await screen.findByText('识别到 1 道题')).toBeInTheDocument();
+    expect(screen.queryByText(/识别到 0 道题/)).toBeNull();
+    expect(screen.getByText('手写题干')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '开始作答' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '开始作答' }));
+    expect(await screen.findByLabelText('作答输入')).toBeInTheDocument();
+  });
+
   it('选题页「返回重新上传」真的回到录入页（不被识别结果弹回）', async () => {
     renderPage();
     fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {

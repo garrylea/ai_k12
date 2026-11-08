@@ -225,6 +225,8 @@ export default function SolvePage() {
   };
 
   const noCandidate = !!recognize.result && recognize.result.candidates.length === 0;
+  // 有候选才走「识别结果选题」，否则一律用录入文字造的单候选（与自动进选题的 effect 同口径）
+  const hasCandidates = (recognize.result?.candidates.length ?? 0) > 0;
   const inputError =
     recognize.error ??
     (noCandidate ? '没有识别到题目，请换一张更清晰的图片，或手动输入题目' : null);
@@ -253,6 +255,9 @@ export default function SolvePage() {
                 if (source) void recognize.run(source);
               }}
               onManual={() => {
+                // 与 backToInput 同理：识别结果（哪怕是 candidates: []）不清掉，
+                // 选题分支就会按「识别到 0 道题」渲染空列表，学生手动输入的题干直接丢失。
+                recognize.reset();
                 setPicked({
                   content: source?.text ?? '',
                   figureUrls: [],
@@ -269,7 +274,7 @@ export default function SolvePage() {
           </main>
         )}
 
-        {stage === 'select' && recognize.result && (
+        {stage === 'select' && recognize.result && hasCandidates && (
           <main className="flex-1 overflow-auto py-6 flex justify-center">
             <SolveCandidatePicker
               candidates={recognize.result.candidates}
@@ -284,7 +289,7 @@ export default function SolvePage() {
         )}
 
         {/* 识别失败改手动：没有 candidates，用录入文字造一条单候选（空则让学生就地编辑题干） */}
-        {stage === 'select' && !recognize.result && picked && (
+        {stage === 'select' && !hasCandidates && picked && (
           <main className="flex-1 overflow-auto py-6 flex justify-center">
             <SolveCandidatePicker
               candidates={[
