@@ -5,7 +5,7 @@ import type { CreateConversationDto } from './dto/create-conversation.dto.js';
 
 const SCENE_BY_TRACK: Record<'mainline' | 'auxiliary', AiDialogueScene[]> = {
   mainline: ['mainline_question', 'mainline_card'],
-  auxiliary: ['aux_qna', 'aux_training'],
+  auxiliary: ['aux_qna', 'aux_training', 'aux_freeform'],
 };
 
 @Injectable()

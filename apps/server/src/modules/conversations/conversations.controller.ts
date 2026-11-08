@@ -30,7 +30,7 @@ export class ConversationsController {
       user.sub,
       track,
       cursor ? Number(cursor) : undefined,
-      scene as 'aux_qna' | 'aux_training' | 'mainline_question' | 'mainline_card' | undefined,
+      scene as 'aux_qna' | 'aux_training' | 'aux_freeform' | 'mainline_question' | 'mainline_card' | undefined,
     );
   }
 
