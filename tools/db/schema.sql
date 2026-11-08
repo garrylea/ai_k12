@@ -1093,7 +1093,8 @@ CREATE TABLE IF NOT EXISTS uploaded_files (
   size_bytes BIGINT NOT NULL,
   source VARCHAR(20) NOT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  KEY idx_uf_uploader (uploader_type, uploader_id)
+  KEY idx_uf_uploader (uploader_type, uploader_id),
+  KEY idx_uf_uploader_url (uploader_id, url)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS extract_tasks (
