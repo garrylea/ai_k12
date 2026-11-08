@@ -101,6 +101,18 @@ describe('QuestionsRepository.findRandomByKpTypeDifficulty', () => {
     expect(sql).toContain('q.id NOT IN (?,?)');
     expect(params).toEqual([7, 1, 3, 'choice', 1, 3, 100, 201, 5]);
   });
+
+  it('requireAllKpRootCodes：追加 EXISTS + NOT EXISTS，参数顺序在排除 id 之前', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    await repo.findRandomByKpTypeDifficulty(7, 2, 104, 'choice', [2], 3, [100], {
+      requireAllKpRootCodes: ['C01', 'C02'],
+    });
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('COALESCE(pk2.code, kp2.code) IN (?,?)');
+    expect(sql).toContain('COALESCE(pk3.code, kp3.code) NOT IN (?,?)');
+    expect(params).toEqual([7, 2, 104, 'choice', 2, 'C01', 'C02', 'C01', 'C02', 100, 3]);
+  });
 });
 
 describe('QuestionsRepository.updateExplanation', () => {
@@ -112,5 +124,38 @@ describe('QuestionsRepository.updateExplanation', () => {
     const [sql, params] = pool.execute.mock.calls[0];
     expect(sql).toBe('UPDATE questions SET explanation = ? WHERE id = ?');
     expect(params).toEqual(['标准题解', 1]);
+  });
+});
+
+describe('QuestionsRepository.findKpRefsByQuestionIds', () => {
+  it('按题聚合知识点并带顶层 code', async () => {
+    const pool = mockPool([
+      { question_id: 100, id: 88, root_code: 'C01' },
+      { question_id: 100, id: 109, root_code: 'C03' },
+      { question_id: 200, id: 104, root_code: 'C02' },
+    ]);
+    const repo = new QuestionsRepository(pool as any);
+    const map = await repo.findKpRefsByQuestionIds([100, 200]);
+    expect(map.get(100)).toEqual([
+      { id: 88, rootCode: 'C01' },
+      { id: 109, rootCode: 'C03' },
+    ]);
+    expect(map.get(200)).toEqual([{ id: 104, rootCode: 'C02' }]);
+  });
+
+  it('空入参不发 SQL', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    expect(await repo.findKpRefsByQuestionIds([])).toEqual(new Map());
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('SQL 用父级 code 兜底自身 code', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    await repo.findKpRefsByQuestionIds([1]);
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toContain('COALESCE(pk.code, kp.code) AS root_code');
+    expect(sql).toContain('LEFT JOIN knowledge_points pk ON pk.id = kp.parent_kp_id');
   });
 });
