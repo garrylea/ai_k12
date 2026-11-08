@@ -45,8 +45,9 @@ export class FilesService {
 
     // Auto-start PDF extraction via Refinery (outside the try/catch so
     // task-creation failures don't delete the uploaded file or its DB row).
+    // Freeform uploads are images-only; never spawn a math-extraction task for them.
     let taskId: number | undefined;
-    if (file.mimetype === 'application/pdf') {
+    if (file.mimetype === 'application/pdf' && source !== 'freeform') {
       taskId = await this.refineryService.createTask(fileId, uploaderId, source);
     }
 
