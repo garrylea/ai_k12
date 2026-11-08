@@ -60,12 +60,15 @@ export function useFreeformJudge() {
           }
           // start / done 不改 UI：流结束在 finally 里复位
         }
-      } catch {
-        useChatStore.getState().setLastAssistantError({
-          code: 1012,
-          message: '网络连接失败，请重试',
-          retryable: true,
-        });
+      } catch (err) {
+        // 学生主动点停止（AbortError）保留已流出的判题过程，不算错误
+        if (!(err instanceof Error && err.name === 'AbortError')) {
+          useChatStore.getState().setLastAssistantError({
+            code: 1012,
+            message: '网络连接失败，请重试',
+            retryable: true,
+          });
+        }
       } finally {
         useChatStore.getState().setIsStreaming(false);
         setSubmitting(false);

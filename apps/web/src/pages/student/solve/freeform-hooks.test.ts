@@ -208,14 +208,20 @@ describe('useFreeformJudge', () => {
     expect(useChatStore.getState().messages).toHaveLength(0);
   });
 
-  it('stop() 中断进行中的流并复位 submitting', async () => {
+  it('stop() 中断进行中的流、保留已流出内容且不弹错误', async () => {
     let seenSignal: AbortSignal | undefined;
     judgeStreamMock.mockImplementation(async function* (_body, signal) {
       seenSignal = signal;
       yield { type: 'start', dialogueId: '1', questionId: null };
-      await new Promise<void>((resolve) => {
-        if (signal?.aborted) return resolve();
-        signal?.addEventListener('abort', () => resolve(), { once: true });
+      yield { type: 'reasoning', delta: '想' };
+      await new Promise<void>((_resolve, reject) => {
+        const abort = () => {
+          const err = new Error('aborted');
+          err.name = 'AbortError';
+          reject(err);
+        };
+        if (signal?.aborted) abort();
+        else signal?.addEventListener('abort', abort, { once: true });
       });
     });
 
@@ -233,6 +239,8 @@ describe('useFreeformJudge', () => {
     });
 
     expect(seenSignal?.aborted).toBe(true);
+    expect(useChatStore.getState().messages[1].reasoning).toBe('想');
+    expect(useChatStore.getState().messages[1].error).toBeUndefined();
     expect(result.current.submitting).toBe(false);
     expect(useChatStore.getState().isStreaming).toBe(false);
   });
