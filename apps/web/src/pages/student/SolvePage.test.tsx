@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import SolvePage from './SolvePage';
 import {
@@ -221,6 +221,39 @@ describe('SolvePage 状态机', () => {
     expect(screen.getByText('手写题干')).toBeInTheDocument();
   });
 
+  it('识别出 0 道题时留在录入页，给提示与手动输入，不进空选题页', async () => {
+    recognizeMock.mockResolvedValueOnce({ candidates: [], figures: [] });
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {
+      target: { value: '看不清的题' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
+
+    expect(await screen.findByText(/没有识别到题目/)).toBeInTheDocument();
+    expect(screen.getByText('把题目发给我')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '手动输入题目' })).toBeInTheDocument();
+    expect(screen.queryByText(/识别到 0 道题/)).toBeNull();
+  });
+
+  it('选题页「返回重新上传」真的回到录入页（不被识别结果弹回）', async () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {
+      target: { value: '求 1+1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
+    await screen.findByText('识别到 1 道题');
+
+    fireEvent.click(screen.getByRole('button', { name: '返回重新上传' }));
+    // 冲掉 effect：若 reset 漏了，自动进选题的 effect 会在这里把页面弹回
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('把题目发给我')).toBeInTheDocument();
+    expect(screen.queryByText(/识别到 1 道题/)).toBeNull();
+  });
+
   it('白板快照出口经 DraftPanel 透传（只挂一个白板）', async () => {
     renderPage();
     await goToAnswerStage();
@@ -309,5 +342,147 @@ describe('SolvePage 状态机', () => {
     await waitFor(() => expect(judgeStreamMock).toHaveBeenCalledTimes(1));
     expect(judgeStreamMock.mock.calls[0][0].draftFileId).toBe('99');
     expect(judgeStreamMock.mock.calls[0][0].answer).toBe('');
+  });
+
+  it('切 tab 不卸载作答页：草稿面板是同一个 DOM 节点（编辑/笔迹不丢）', async () => {
+    renderPage();
+    await goToAnswerStage();
+    fireEvent.click(screen.getByRole('button', { name: '答疑' }));
+
+    // 默认落在 AI tab（作答页隐藏但仍在树上）
+    fireEvent.click(await screen.findByRole('button', { name: '作答' }));
+    const before = document.querySelector('[role="dialog"][aria-label="草稿"]');
+    expect(before).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI 答疑' }));
+    fireEvent.click(screen.getByRole('button', { name: '作答' }));
+
+    expect(document.querySelector('[role="dialog"][aria-label="草稿"]')).toBe(before);
+  });
+
+  it('收起草稿面板会取消「附上草稿」；空答案提交回到首条提示', async () => {
+    const { toast } = await import('@/components/base/Toast');
+    renderPage();
+    await goToAnswerStage();
+
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '收起' }));
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('error', '请先写答案或在草稿上作答'));
+    expect(judgeStreamMock).not.toHaveBeenCalled();
+  });
+
+  it('作答页可编辑题干：保存在题干里生效，后续判题用新 questionContent', async () => {
+    renderPage();
+    await goToAnswerStage();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑题干' }));
+    expect(screen.getByLabelText('编辑题干内容')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('编辑题干内容'), {
+      target: { value: '修正后的题干文字' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(screen.queryByLabelText('编辑题干内容')).toBeNull();
+    expect(screen.getByText('修正后的题干文字')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('作答输入'), { target: { value: '答案是 2' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => expect(judgeStreamMock).toHaveBeenCalledTimes(1));
+    expect(judgeStreamMock.mock.calls[0][0].questionContent).toBe('修正后的题干文字');
+  });
+
+  it('判题失败 → 错误气泡的「重试」只重发判题流，不重复发首问', async () => {
+    judgeStreamMock
+      .mockImplementationOnce(async function* () {
+        yield { type: 'error', code: 5000, message: '判题失败', retryable: true };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'content', delta: '重试后成功' };
+      });
+
+    renderPage();
+    await goToAnswerStage();
+    fireEvent.change(screen.getByLabelText('作答输入'), { target: { value: '答案是 2' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }));
+
+    await waitFor(() => expect(judgeStreamMock).toHaveBeenCalledTimes(2));
+    // 同一份判题 body（含已上传的草稿/题图），没有第二次上传或首问
+    expect(judgeStreamMock.mock.calls[1][0]).toEqual(judgeStreamMock.mock.calls[0][0]);
+    expect(uploadFileMock).not.toHaveBeenCalled();
+
+    const messages = useChatStore.getState().messages;
+    expect(messages.filter((m) => m.role === 'user')).toHaveLength(1);
+    expect(messages[messages.length - 1].content).toBe('重试后成功');
+    expect(messages[messages.length - 1].error).toBeUndefined();
+  });
+
+  it('连点「答疑」只建一场会话、只发一次首问', async () => {
+    let releaseConversation!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseConversation = resolve;
+    });
+    createConversationMock.mockImplementationOnce(async () => {
+      await gate;
+      return {
+        id: 7,
+        track: 'auxiliary',
+        scene: 'aux_freeform',
+        title: null,
+        status: 'active',
+        created_at: '2026-11-08T00:00:00.000Z',
+      };
+    });
+
+    renderPage();
+    await goToAnswerStage();
+
+    const help = screen.getByRole('button', { name: '答疑' });
+    fireEvent.click(help);
+    fireEvent.click(help);
+
+    await act(async () => {
+      releaseConversation();
+      await gate;
+    });
+
+    await waitFor(() => expect(tutorStreamMock).toHaveBeenCalledTimes(1));
+    expect(createConversationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('卸载页面会中断进行中的判题流', async () => {
+    let seenSignal: AbortSignal | undefined;
+    judgeStreamMock.mockImplementation(async function* (_body, signal) {
+      seenSignal = signal;
+      yield { type: 'start', dialogueId: '7', questionId: null };
+      await new Promise<void>((_resolve, reject) => {
+        const abort = () => {
+          const err = new Error('aborted');
+          err.name = 'AbortError';
+          reject(err);
+        };
+        if (signal?.aborted) abort();
+        else signal?.addEventListener('abort', abort, { once: true });
+      });
+    });
+
+    const { unmount } = renderPage();
+    await goToAnswerStage();
+    fireEvent.change(screen.getByLabelText('作答输入'), { target: { value: '答案是 2' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+    await waitFor(() => expect(seenSignal).toBeDefined());
+
+    await act(async () => {
+      unmount();
+      await Promise.resolve();
+    });
+
+    expect(seenSignal?.aborted).toBe(true);
+    expect(useChatStore.getState().isStreaming).toBe(false);
   });
 });

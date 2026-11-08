@@ -36,6 +36,11 @@ export interface SolveAnswerViewProps {
   includeDraft: boolean;
   onIncludeDraftChange: (v: boolean) => void;
   submitting: boolean;
+  /**
+   * 已有流在跑（答疑或判题）：两个按钮都禁用 —— 此时再起流会被 chatStore 拦掉，
+   * 按钮可点却毫无反应；提交按钮不显示 loading 文案（那是 submitting 的语义）。
+   */
+  streaming?: boolean;
   onAskHelp: () => void;
   onSubmit: () => void;
   /** 作答区图片上传中（LatexEditor 透传）；父层把它并进「提交」禁用态（spec §8.5） */
@@ -88,7 +93,7 @@ export function SolveAnswerView(props: SolveAnswerViewProps) {
           <button
             type="button"
             onClick={props.onAskHelp}
-            disabled={props.submitting}
+            disabled={props.submitting || props.streaming}
             className="h-10 px-5 rounded-lg border border-[var(--brand-500)] text-[var(--brand-500)] text-sm disabled:opacity-50"
           >
             答疑
@@ -96,7 +101,7 @@ export function SolveAnswerView(props: SolveAnswerViewProps) {
           <button
             type="button"
             onClick={props.onSubmit}
-            disabled={props.submitting}
+            disabled={props.submitting || props.streaming}
             className="h-10 px-6 rounded-lg bg-[var(--brand-500)] text-white text-sm disabled:opacity-50 inline-flex items-center gap-2"
           >
             {props.submitting && (

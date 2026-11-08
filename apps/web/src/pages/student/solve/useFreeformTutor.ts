@@ -65,6 +65,7 @@ export function useFreeformTutor() {
               code: event.code ?? 5000,
               message: event.message ?? 'AI 服务异常',
               retryable: event.retryable ?? true,
+              stage: 'tutor',
             });
           }
         }
@@ -75,6 +76,7 @@ export function useFreeformTutor() {
             code: 1012,
             message: '网络连接失败，请重试',
             retryable: true,
+            stage: 'tutor',
           });
         }
       } finally {

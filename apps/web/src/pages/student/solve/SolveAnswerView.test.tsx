@@ -97,6 +97,12 @@ describe('SolveAnswerView', () => {
     expect(screen.getByRole('button', { name: '提交中…' })).toBeDisabled();
   });
 
+  it('已有流在跑时两个按钮都禁用，提交按钮不显示 loading 文案', () => {
+    renderView({ answer: '答', streaming: true });
+    expect(screen.getByRole('button', { name: '答疑' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '提交' })).toBeDisabled();
+  });
+
   it('勾选「附上草稿」把反值回传父层', () => {
     const onIncludeDraftChange = vi.fn();
     renderView({ includeDraft: true, onIncludeDraftChange });

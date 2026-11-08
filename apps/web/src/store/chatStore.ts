@@ -4,7 +4,7 @@ export interface ChatError {
   code: number;
   message: string;
   retryable: boolean;
-  stage?: 'tutor';  // which stage failed
+  stage?: 'tutor' | 'judge';  // which stage failed（自由出题页据此决定是否给「重试」）
 }
 
 export interface ChatMessage {

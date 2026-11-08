@@ -189,7 +189,12 @@ describe('useFreeformJudge', () => {
     await act(() => result.current.submit(body));
 
     const last = useChatStore.getState().messages[1];
-    expect(last.error).toEqual({ code: 1005, message: '额度用尽', retryable: false });
+    expect(last.error).toEqual({
+      code: 1005,
+      message: '额度用尽',
+      retryable: false,
+      stage: 'judge',
+    });
     expect(last.streaming).toBe(false);
     expect(result.current.questionId).toBeNull();
   });
@@ -207,6 +212,46 @@ describe('useFreeformJudge', () => {
 
     expect(useChatStore.getState().messages[1].error?.code).toBe(1012);
     expect(result.current.submitting).toBe(false);
+  });
+
+  it('错误气泡重试：复用上一次的 body，不再追加用户气泡', async () => {
+    judgeStreamMock
+      .mockImplementationOnce(async function* () {
+        yield { type: 'error', code: 5000, message: '判题失败', retryable: true };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'content', delta: '重试后的报告' };
+        yield { type: 'done' };
+      });
+
+    const { result } = renderHook(() => useFreeformJudge());
+    await act(() => result.current.submit(body, { images: ['/a.png'], answerMarkdown: '**答**' }));
+
+    expect(useChatStore.getState().messages).toHaveLength(2);
+
+    await act(() => result.current.retry());
+
+    // 重发的是同一条判题请求：不重新上传/不重发首问，用户气泡仍只有一条
+    expect(judgeStreamMock).toHaveBeenCalledTimes(2);
+    expect(judgeStreamMock.mock.calls[1][0]).toEqual(body);
+
+    const messages = useChatStore.getState().messages;
+    expect(messages).toHaveLength(2);
+    expect(messages[0].role).toBe('user');
+    expect(messages[1]).toMatchObject({
+      role: 'assistant',
+      content: '重试后的报告',
+    });
+    expect(messages[1].error).toBeUndefined();
+    expect(result.current.submitting).toBe(false);
+  });
+
+  it('没有可重试的判题时 retry 是空操作', async () => {
+    const { result } = renderHook(() => useFreeformJudge());
+    await act(() => result.current.retry());
+
+    expect(judgeStreamMock).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messages).toHaveLength(0);
   });
 
   it('重新判题时先清空上一轮的 questionId / lastResult', async () => {
@@ -407,6 +452,7 @@ describe('useFreeformTutor', () => {
       code: 1005,
       message: '额度用尽',
       retryable: false,
+      stage: 'tutor',
     });
 
     await act(() => result.current.send('42', '再说一次'));
@@ -414,6 +460,7 @@ describe('useFreeformTutor', () => {
       code: 5000,
       message: 'AI 服务异常',
       retryable: true,
+      stage: 'tutor',
     });
     expect(useChatStore.getState().isStreaming).toBe(false);
   });
