@@ -265,7 +265,9 @@ describe('HistoryPracticeService.startSimilar', () => {
   });
 
   it('语文：只抽到 2 题 -> 按 1 题档发分', async () => {
-    const { svc, questionsRepo, kpRepo, trainingSessionsRepo, pointRules } = make();
+    const {
+      svc, questionsRepo, kpRepo, variation, trainingSessionsRepo, pointRules,
+    } = make();
     questionsRepo.findById.mockResolvedValue(mkQ({ subject_id: 2 }));
     questionsRepo.findKpRefsByQuestionIds.mockResolvedValue(new Map([
       [100, [{ id: 102, rootCode: 'C02' }]],
@@ -279,6 +281,13 @@ describe('HistoryPracticeService.startSimilar', () => {
     const r = await svc.startSimilar({ studentId: 7, subjectId: 2, questionId: 100, count: 5 });
 
     expect(r.questions).toHaveLength(2);
+    // 题目不足也不得走 AI 补题（真实缺口 5-2=3 道，若守卫失效这里会调用 generate）
+    expect(variation.generate).not.toHaveBeenCalled();
+    // 第二轮（难度阶梯）同样必须带语文知识点根过滤，否则会抽到阅读/写作题
+    expect(questionsRepo.findRandomByKpTypeDifficulty).toHaveBeenNthCalledWith(
+      2, 7, 2, 102, 'choice', [1, 2, 3], 4, [100, 201],
+      { requireAllKpRootCodes: ['C01', 'C02'] },
+    );
     expect(trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
       tier_key: '1', expected_count: 2,
     }));
