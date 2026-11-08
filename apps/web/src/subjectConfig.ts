@@ -163,3 +163,8 @@ export function selfAssessEligible(subjectId: number, type: string): boolean {
   if (Number(subjectId) === SUBJECT_MATH) return type === 'short_answer' || type === 'proof';
   return true;
 }
+
+/** 支持「同类型练习」的学科（与后端 common/subject-config.ts 同口径）。 */
+export const SIMILAR_PRACTICE_SUBJECTS: ReadonlySet<number> = new Set([
+  SUBJECT_MATH, SUBJECT_CHINESE, SUBJECT_PHYSICS,
+]);
