@@ -244,7 +244,7 @@
 - 专项抽题 `findRandomByKpAndType` JOIN `question_knowledge_points`：freeform 无 KP → 不入选。
 - 同类型练习/变式按 KP → 不入选。
 - 考试按 `paper_questions` → 不入选。
-- 错题练习 `findUnclearedPracticeByStudentSubject`：需要在抽题 SQL 里排除 `q.source='freeform'`。理由：错题练习会用题库的 `answer` 当标准答案判题，AI 写的答案未经人工核验，进正式练习有判错风险；freeform 错题只在错题本列表回看。
+- 错题练习 `findUnclearedPracticeByStudentSubject`：**实现未改抽题 SQL**——错题练习页把 freeform 条目显示为不可勾选，并由训练判题入口 `judgeQuestion` 对 `source='freeform'` 返回 400/1001 兜底（见 §5.2 实现注）。理由：错题练习会用题库的 `answer` 当标准答案判题，AI 写的答案未经人工核验，进正式练习有判错风险；freeform 错题只在错题本列表回看。
 - 家长端错题列表：`TRACK_SOURCES` 把 `freeform` 归 `training` 档（与 `auxiliary` 同）；家长会看到这道错题，但不参与发分/掌握度/练习池。
 
 ---
@@ -343,6 +343,11 @@
 | 服务内部异常 | 500 | 5000 | AI 服务异常 |
 
 > 失败时前端保留已上传的图片与文字，提供「重试」和「手动输入题目」两个出口。手动输入题目 = 把当前输入的文字（或空）作为一个候选，直接进入选题页。
+
+> **实现注（2026-11-08）**：本节的实现与上文草稿有三处差异，**以本注为准**：
+> 1. **请求体是 `{text?: string, fileIds: string[]}`**（不是 `attachments: [{type,fileId}]`）；`fileIds` 为**正整数字符串**、按数组顺序即页序、最多 6 张，`text` 与 `fileIds` 至少给一个。
+> 2. **recognize 成功返回 201**（Nest `@Post` 默认，未显式 `@HttpCode`），不是 200。
+> 3. **抽题池隔离不靠抽题 SQL 过滤**：错题练习页把 freeform 条目显示为不可勾选，并由**训练判题入口**（`JudgeCoreService.judgeQuestion`）对 `q.source='freeform'` 抛 400/1001 兜底；`main_error_books` 抽题 SQL 不改。
 
 ### 5.3 `POST /api/freeform/judge/stream`
 

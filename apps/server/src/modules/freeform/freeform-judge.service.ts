@@ -1,4 +1,4 @@
-import { HttpException, Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
@@ -218,7 +218,17 @@ export class FreeformJudgeService {
 
   /** 已传 dialogueId：校验归属 + 场景，**不写库**（写在图片全部校验通过之后才发生）。 */
   private async validateDialogue(dto: FreeformJudgeDto, studentId: number): Promise<string> {
-    const dlg = await this.conversations.get(Number(dto.dialogueId), studentId);
+    let dlg: Awaited<ReturnType<ConversationsService['get']>>;
+    try {
+      dlg = await this.conversations.get(Number(dto.dialogueId), studentId);
+    } catch (err) {
+      // 不存在 / 非本人统一转成业务码 1002：SSE 错误事件取的是 exception 的 code，
+      // NotFoundException 默认没有 code，会被 controller 兜底成 5000（不符 §5.33 口径）。
+      if (err instanceof NotFoundException) {
+        throw new HttpException({ code: 1002, message: '对话不存在' }, 404);
+      }
+      throw err;
+    }
     if (dlg.scene !== 'aux_freeform') throw badRequest('对话场景不匹配');
     return String(dlg.id);
   }

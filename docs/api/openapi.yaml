@@ -1735,8 +1735,9 @@ paths:
         - `data: {"type":"error","code":5502,"message":"判题失败，请重试","retryable":true}`
         - `data: {"type":"done"}`
 
-        错误码（均在事件里）：入参/学科/满分/图片 1001；模型失败或尾部 JSON
-        解析失败（含二次结构化提取）5502；题库/错题本写失败 5000。落库：questions
+        错误码（均在事件里）：入参/学科/满分/图片/dialogueId 非数字/场景不符 1001；
+        dialogueId 不存在或非本人 1002；模型失败或尾部 JSON 解析失败（含二次结构化
+        提取）5502；题库/错题本写失败 5000。落库：questions
         （source='freeform'、answer_verified=0、grade_band=NULL、无知识点行）+
         main_error_books（仅 totalScore < maxScore 写/复用，满分清零）；
         **不发积分、不写 practice_results、不更新掌握度**。客户端断开即中止上游模型，
@@ -1793,8 +1794,8 @@ paths:
                   type: string
                   format: binary
       responses:
-        '200':
-          description: 上传成功
+        '201':
+          description: 上传成功（Nest `@Post` 默认 201，未显式 `@HttpCode`）
           content:
             application/json:
               schema:
@@ -2145,8 +2146,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateConversationRequest'
       responses:
-        '200':
-          description: 创建成功
+        '201':
+          description: 创建成功（Nest `@Post` 默认 201，未显式 `@HttpCode`）
           content:
             application/json:
               schema:
@@ -2684,9 +2685,10 @@ paths:
       description: >-
         `track` 由 `source` 现算、不落库，分档表是服务端
         `apps/server/src/database/repositories/parent-insights.repo.ts` 的 `TRACK_SOURCES`（唯一真源）：
-        `main` = `practice | discuss | exam`；`training` = `targeted | error_practice | auxiliary`。
+        `main` = `practice | discuss | exam`；`training` = `targeted | error_practice | auxiliary | freeform`。
         孩子**在辅线答疑里问过**的题（`source = 'auxiliary'`）归 `training`——它进训练轨
-        「错题练习」池、孩子能在那里做对清零，所以不单列「辅线」档。
+        「错题练习」池、孩子能在那里做对清零；做题入口的错题（`source = 'freeform'`）同样归
+        `training`，但只在错题本列表展示、不可勾选（不进练习池）。
         `pageSize` 服务端固定 20，前端不传；`page` 非法（`abc` / `1.5` / `-1`）→ 400 / 1001，不静默回落。
         `page` 超出末页 → 200 + 空 `items` + 正确 `total`。
       operationId: listParentErrors
@@ -2707,7 +2709,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [practice, discuss, exam, targeted, error_practice, auxiliary]
+            enum: [practice, discuss, exam, targeted, error_practice, auxiliary, freeform]
           description: 按错题来源筛选；不传 = 全部。
         - name: track
           in: query
@@ -2786,7 +2788,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [aux_qna, aux_training, mainline_question, mainline_card]
+            enum: [aux_qna, aux_training, aux_freeform, mainline_question, mainline_card]
           description: 不传 = 全部。
         - name: from
           in: query
@@ -9270,7 +9272,7 @@ components:
           description: 错题所属课时 id（冗余字段，用于快速定位上一节课是否有未清零错题）
         source:
           type: string
-          enum: [practice, discuss, exam, targeted, error_practice, auxiliary]
+          enum: [practice, discuss, exam, targeted, error_practice, auxiliary, freeform]
           description: >-
             错题来源。按 `main_error_books.source` 实际写入值列出（原 enum 的
             homework/unit_test/midterm/final 四个值当前无写入点，已移除）。
@@ -10062,10 +10064,10 @@ components:
         track:
           type: string
           enum: [main, training]
-          description: "`training` = `targeted | error_practice | auxiliary`，其余 → `main`。"
+          description: "`training` = `targeted | error_practice | auxiliary | freeform`，其余 → `main`。"
         source:
           type: string
-          enum: [practice, discuss, exam, targeted, error_practice, auxiliary]
+          enum: [practice, discuss, exam, targeted, error_practice, auxiliary, freeform]
         level:
           type: integer
           description: 错题级别 1–5。
@@ -10156,7 +10158,7 @@ components:
           enum: [mainline, auxiliary]
         scene:
           type: string
-          enum: [aux_qna, aux_training, mainline_question, mainline_card]
+          enum: [aux_qna, aux_training, aux_freeform, mainline_question, mainline_card]
         title:
           type: string
           nullable: true
@@ -10705,7 +10707,9 @@ components:
           description: >-
             错题来源（main_error_books.source）：practice / discuss / exam /
             targeted / error_practice / auxiliary / freeform 等；null = 历史行未记。
-            source='freeform' 的错题只可在错题本列表回看，错题练习抽题已排除该来源。
+            source='freeform' 的错题只在错题本列表回看：页面显示但不可勾选，
+            训练判题入口（POST /training/judge）对 freeform 题一律 400/1001。
+            家长端错题列表归 training 档（TRACK_SOURCES.training 含 freeform）。
       required: [errorBookId, questionId, questionText, type, level, createdAt, kpIds, options, source]
 
     TrainingJudgeRequest:
@@ -13118,6 +13122,9 @@ components:
     FreeformRecognizeRequest:
       type: object
       description: 题图 / 文字 → 候选题。text 与 fileIds 至少给一个。
+      anyOf:
+        - required: [text]
+        - required: [fileIds]
       properties:
         text:
           type: string
@@ -13129,7 +13136,7 @@ components:
           description: 题图文件 id（正整数数组，顺序即页序；最多 6 张）
           items:
             type: string
-            pattern: '^\d+$'
+            pattern: '^[1-9]\d*$'
 
     FreeformRecognizeResponse:
       type: object
@@ -13193,7 +13200,10 @@ components:
       properties:
         dialogueId:
           type: string
-          description: 可选；不传由服务端创建 scene=aux_freeform 会话。传则必须是本人的 aux_freeform 会话（否则 400/1001）
+          description: >-
+            可选；不传由服务端创建 scene=aux_freeform 会话。传则必须为正整数
+            （非数字 → SSE error 1001）；不存在 / 非本人 → SSE error 1002；
+            scene 不是 aux_freeform → SSE error 1001。
         subjectId:
           type: integer
           enum: [1, 4, 5]

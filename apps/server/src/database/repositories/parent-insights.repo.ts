@@ -98,7 +98,8 @@ export type ParentErrorTrack = 'main' | 'training';
 /**
  * 已知的全部错题来源（`main_error_books.source`，DB 层是自由 `VARCHAR(20)`、无 enum，
  * 这里是**唯一**的枚举处）。写入点：判题 `practice` / `discuss` / `exam` / `targeted` /
- * `error_practice`，辅线答疑入库 `auxiliary`（`ai.service.ts`）。
+ * `error_practice`，辅线答疑入库 `auxiliary`（`ai.service.ts`），做题入口 `freeform`
+ * （`freeform-judge.service.ts`）。
  */
 export const ALL_ERROR_SOURCES = [
   'practice',
@@ -107,6 +108,7 @@ export const ALL_ERROR_SOURCES = [
   'targeted',
   'error_practice',
   'auxiliary',
+  'freeform',
 ] as const;
 
 /**
@@ -121,8 +123,9 @@ export const ALL_ERROR_SOURCES = [
 export const TRACK_SOURCES: Record<ParentErrorTrack, readonly string[]> = {
   // 主线：课堂练习 / 卡片讨论 / 考试（PRD §6.1，错题进主线错题本）
   main: ['practice', 'discuss', 'exam'],
-  // 训练：训练轨自身产生的错题 + 辅线答疑里孩子问过的题（都进训练轨错题练习池）
-  training: ['targeted', 'error_practice', 'auxiliary'],
+  // 训练：训练轨自身产生的错题 + 辅线答疑里孩子问过的题 + 做题入口的错题
+  //（freeform 与 auxiliary 同档：家长能看到，但不进自动练习池）
+  training: ['targeted', 'error_practice', 'auxiliary', 'freeform'],
 };
 
 /**

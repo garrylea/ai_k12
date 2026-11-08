@@ -1,6 +1,6 @@
 # K12 智学系统 — API 接口与数据流设计文档
 
-> 版本：v4.25
+> 版本：v4.26
 > 对应文档：
 > - [K12智学系统-产品需求文档.md](./K12智学系统-产品需求文档.md)（PRD）
 > - [K12智学系统-架构设计文档.md](./K12智学系统-架构设计文档.md)（架构）
@@ -365,7 +365,7 @@
 | PUT | `/api/parent/students/{studentId}/subject-configs/{subjectId}` | 写入/切换该学科教材配置：`{ gradeCode, term, textbookVersionId? }`；versionId 缺省按默认规则选（同学段 edition 非空优先、id 大者优先）；已开始学习且版本/册别变化时**重置该学科学习状态**并返回 `reset: true`（错题/作业记录保留在库，不再展示/不阻塞门禁） | MVP |
 | GET | `/api/parent/dashboard` | 家长仪表盘：一次返回名下所有孩子的概览（`lastActiveAt` / `activeDays7` / `unreadAlerts`）+ 各自的按学科卡片（进度 / 正确率累计 / 自评 / 错题待清零 / 考试数）；实时聚合，不落库 | MVP |
 | GET | `/api/parent/students/{studentId}/reports` | **实时聚合学情报告（不落库、不调 LLM）**：`?period=weekly\|monthly`（默认 `weekly`，非法值归一化为 `weekly`）。返回 `stats` / `trend` / `subjects` / `weakPoints` / `weakPointsUncoveredCount` / `exams` | MVP |
-| GET | `/api/parent/students/{studentId}/errors` | 孩子错题本（只读；分页壳 `{items,page,pageSize,total}`，`pageSize` 服务端固定 20）。query：`subject` / `source`(practice\|discuss\|exam\|targeted\|error_practice\|auxiliary) / `track`(main\|training) / `cleared`(uncleared\|cleared\|all) / `from` / `to` / `page`；`page` 非法 → 400/1001。**轨道分档**（`source` → 档位，唯一真源 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`）：`main` = `practice\|discuss\|exam`；`training` = `targeted\|error_practice\|auxiliary`。孩子**在辅线答疑里问过**的题（`auxiliary`）归 `training`——它进训练轨「错题练习」池、可被做对清零，故不再单列「辅线」档 | MVP |
+| GET | `/api/parent/students/{studentId}/errors` | 孩子错题本（只读；分页壳 `{items,page,pageSize,total}`，`pageSize` 服务端固定 20）。query：`subject` / `source`(practice\|discuss\|exam\|targeted\|error_practice\|auxiliary\|freeform) / `track`(main\|training) / `cleared`(uncleared\|cleared\|all) / `from` / `to` / `page`；`page` 非法 → 400/1001。**轨道分档**（`source` → 档位，唯一真源 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`）：`main` = `practice\|discuss\|exam`；`training` = `targeted\|error_practice\|auxiliary\|freeform`。孩子**在辅线答疑里问过**的题（`auxiliary`）归 `training`——它进训练轨「错题练习」池、可被做对清零；做题入口的错题（`freeform`）同样归 `training`，但只在错题本列表展示、不可勾选（不进练习池） | MVP |
 | GET | `/api/parent/students/{studentId}/chat-logs` | AI 对话回放列表（分页壳同 `errors`）。query：`track` / `scene` / `from` / `to` / `q`（**只搜会话标题**）/ `page`。**不提供学科筛选**（`ai_dialogues.subject_id` 约 76% 为 NULL） | MVP |
 | GET | `/api/parent/students/{studentId}/chat-logs/{dialogueId}` | 单条对话详情：逐句回放，含 `reasoning`（AI 思考链，默认折叠）、`safetyFlag`（闲聊/偏离学习标记）与 `images[]`（孩子随消息发的图片 URL，服务端从 `attachments` 解析、只留 `type=='image'`，无附件时空数组）；不回传 `token_*` / `response_time_ms` | MVP |
 | GET | `/api/parent/students/{studentId}/study-time` | **学习时长（会话口径）**。query `from` / `to`（`YYYY-MM-DD`，缺省近 7 天；值非法**宽容回落**默认窗口、不 400；`from > to` 自动交换）。响应 `{totalSeconds, activeDays, byDay:[{date,seconds}], byModule:[{module,seconds}], bySubject:[{subjectId,seconds}], source:'sessions'}`。**口径标注**：这是**显式会话**口径，与 `dashboard.activeDays7` 的**四路时间戳代理并存、不替换**（spec §10，详见 §5.25）——UI 必须并列展示 + 区分文案（如「学习时长（会话）」vs「活跃天数」），**不得悄悄换掉** | MVP |
@@ -485,7 +485,7 @@
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
-| GET | `/api/training/error-book?subjectId={subjectId}&from={from}&to={to}&type={type}&kpId={kpId}` | 错题练习筛选列表。`subjectId` 必填 integer；`from`/`to` 可选 string（按 `created_at` 过滤，`to` 含当天即 `< to+1day`）；`type` 可选题型（JOIN `questions.type`）；`kpId` 可选 integer（EXISTS `question_knowledge_points`，非数字 400）。只返回**未清零**（`is_cleared=0`）记录；同一错题挂多 KP 时按 `errorBookId` 聚合 `kpIds` 数组。响应：`[{errorBookId, questionId(nullable), questionText, type(nullable), level, createdAt, kpIds: number[], options(nullable), source}]`。`options` 为 `questions.options` parse 后的数组（选择题用；无 / 坏 JSON 为 null，2026-11-08 补记，字段早已返回）；`source` 为错题来源（`main_error_books.source`，可为 `practice\|discuss\|exam\|targeted\|error_practice\|auxiliary\|freeform` 等，null = 历史行未记）；`source='freeform'` 的错题只可回看，**错题练习抽题已排除该来源**。 | MVP |
+| GET | `/api/training/error-book?subjectId={subjectId}&from={from}&to={to}&type={type}&kpId={kpId}` | 错题练习筛选列表。`subjectId` 必填 integer；`from`/`to` 可选 string（按 `created_at` 过滤，`to` 含当天即 `< to+1day`）；`type` 可选题型（JOIN `questions.type`）；`kpId` 可选 integer（EXISTS `question_knowledge_points`，非数字 400）。只返回**未清零**（`is_cleared=0`）记录；同一错题挂多 KP 时按 `errorBookId` 聚合 `kpIds` 数组。响应：`[{errorBookId, questionId(nullable), questionText, type(nullable), level, createdAt, kpIds: number[], options(nullable), source}]`。`options` 为 `questions.options` parse 后的数组（选择题用；无 / 坏 JSON 为 null，2026-11-08 补记，字段早已返回）；`source` 为错题来源（`main_error_books.source`，可为 `practice\|discuss\|exam\|targeted\|error_practice\|auxiliary\|freeform` 等，null = 历史行未记）；`source='freeform'` 的错题只可回看，**错题练习页不可勾选 + 训练判题入口拒绝（400/1001）**，不进练习池；家长端错题列表归 `training` 档（`TRACK_SOURCES.training` 含 `freeform`）。 | MVP |
 | POST | `/api/training/judge` | 训练判题（题中心变体，JudgeCore 复用）。请求体：`{questionId, subjectId, studentAnswer, source, sessionId?, sessionUid?, title?, questionCount?, questionOrder?, plannedQuestionIds?, suppressErrorFixPoints?}`；`source` 枚举 `targeted\|error_practice`（错题练习/专项练习来源，非法值 400，不透传客户端任意值）；可选 `sessionId`（乙类会话页专用）只用于累加 `training_sessions.judged_count` 审计留痕——不传也能判题，会话不存在/非本人/已完成都静默跳过、不报错。**作答记录旁路写入（2026-11-01）**：`sessionUid?`（string，唯一标识本轮专项练习会话，同 uid 多次判题复用同一行）/ `title?`（会话标题，缺省 null）/ `questionCount?`（本轮题数，缺省 0）/ `questionOrder?`（本题在本轮的 1-based 序号，缺省 1）；**缺 `sessionUid` 时这四个字段一律无效**——不建会话、不写作答记录、不报错（旧客户端向后兼容）。三路由镜像 practice judge：(0) **语文（subject_id=2）非客观题（非 choice/multi_choice/true_false）-> 一律自评**（`isCorrect=null, method='self_assess', needsSelfAssessment=true`，不调 AI、不写错题本，2026-10-28）；(1) choice/true_false + fill_blank 归一化相等 -> exact 比对；(2) fill_blank 不等 / short_answer / proof -> AI JudgmentCapability 判定；(3) 答错 -> find-or-create 写入 `main_error_books`（`source` 落库为训练来源）；答对 -> 清零该题所有未清记录（不限 source）。题目不存在 400（`code=4004`）；AI 判定失败 503（`code=5001`，不写错题本）。判错同时后台异步生成解析入 `questions.explanation`（ExplanationCacheService，不阻塞判题响应；`answer>=100` 字符直接当题解直写，否则强模型 qwen3.8-max 生成，一次入库全生命周期复用）。响应：`{questionId, isCorrect, method:'exact'\|'ai', errorType(nullable, enum: logic/calculation/format/missing), errorBookId(nullable), pointsAwarded: number, awardReason?(enum: daily_limit\|no_rule\|tier_inactive\|genre_unset\|not_cleared)}`（判题只判对错，2026-09-08 去 `analysis`）。**积分字段（2026-09-17）**：`pointsAwarded` 是本次调用**实际入账**的积分（甲类 `error_fix`），`0` = 本次未加分——答对但未清掉任何错题 / 答错 / 幂等命中 / 发分失败 / 任何 `awardReason`；`awardReason` 是未发分原因，**幂等命中（`duplicate`）刻意静默**——回 `pointsAwarded: 0` 但不带原因（`duplicate` 会带回历史分值，报出去会让前端弹假 `+N 分`）。**两个可选字段（2026-11-06）**：① `plannedQuestionIds?: number[]` = 本轮整轮题单（有序、含已答与未答），服务端只保留存在/在架/与 `subjectId` 同学的 id，按数组顺序给 `special_answer_records` 写未作答占位行（`question_order` 取原数组下标 +1，跳过失效题时**不压缩**，故可能不连续）；**仅在同时传 `sessionUid` 时生效**——只传 `plannedQuestionIds` 不传 `sessionUid` 会被**静默忽略**（没有会话就没有可写的记录行），不报错；不传 = 旧客户端，不写占位行。② `suppressErrorFixPoints?: boolean` = **仅当 `true` 生效**（其余值一律按 false），单题重做/快速练习专用：答对**仍清零错题本、仍记清零事件**，只是**不发错题订正分**；由**客户端发送、不是安全边界**（只压制调用者自己的分数，错题本写入/清零逻辑不变）。 | MVP |
 | POST | `/api/training/self-assess` | 主观题学生自评（`JUDGE_SUBJECTIVE_MODE=self_assess` 模式）。请求体：`{questionId, subjectId, assessment, source, sourceRefId?, suppressErrorFixPoints?}`；`assessment` 枚举 `correct\|incorrect`（学生自评对错）；`source` 枚举 `targeted\|error_practice\|exam`（专项练习/错题练习/考试结果页自评）；`sourceRefId` 仅 `source='exam'` 时传 `sessionId`，其余来源不传。校验题目存在后委托 JudgeCore.recordSelfAssessment：每次自评写入 `question_self_assessments` 留痕，并**回写掌握度**（2026-11-07：`correct/incorrect` 与判题同公式累加）；`incorrect` 写入/复用 `main_error_books`（source 落库为训练/考试来源）并 fire-and-forget 触发解析缓存兜底生成；`correct` 清零该题所有未清记录。题目不存在 404；参数非法 400。响应：自评 `incorrect` 时返回 `errorBookId`（写入/复用的错题本 id）；`correct` 时省略该键（缺键按 null 理解）。**`suppressErrorFixPoints?`（2026-11-06）**：仅当 `true` 生效，语义同 judge —— 自评对**仍清零错题本**，只是**不发错题订正分**；客户端发送、不是安全边界。 | MVP |
 | POST | `/api/training/bump-error-levels` | 错题重做仍答错时递增严重程度（镜像 practice 的 bump-error-levels）。请求体：`{errorBookIds: number[]}`。 | MVP |
@@ -775,14 +775,14 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 
 ### 4.30 Freeform — 做题入口（自由做题，2026-11-08）
 
-`/student/solve` 的后端：题图 / 文字 → 候选题 → 作答 → 判题 SSE；答疑 / 追问复用现有会话与 `POST /api/ai/tutor/stream`。全部端点 student JWT（`@Roles('student')`，家长 / 管理员 token 返回 403/1005），归属一律取 JWT 的 `studentId`。spec：`docs/superpowers/specs/2026-11-08-freeform-question-solve-design.md`。
+`/student/solve` 的后端：题图 / 文字 → 候选题 → 作答 → 判题 SSE；答疑 / 追问复用现有会话与 `POST /api/ai/tutor/stream`。`/api/freeform/*` 与 `POST /api/conversations` 为 student JWT（`@Roles('student')`，家长 / 管理员 token 返回 403/1005），归属一律取 JWT 的 `studentId`；`POST /api/files/upload` 只要求登录（`JwtAuthGuard`，任何已认证角色可用），不限定 student。spec：`docs/superpowers/specs/2026-11-08-freeform-question-solve-design.md`。
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
 | POST | `/api/freeform/recognize` | 题图 / 文字 → 候选题。**201**（Nest `@Post` 默认，未显式 `@HttpCode`） | MVP |
 | POST | `/api/freeform/judge/stream` | 判题（SSE）。**200**，`Content-Type: text/event-stream`；错误以 `error` 事件下发 | MVP |
-| POST | `/api/files/upload?source=freeform` | 扩展现有上传端点：`source` query 白名单 `auxiliary\|freeform`，缺省 `auxiliary`（原题图 / 作答图 / 草稿合成图走 `freeform`） | MVP |
-| POST | `/api/conversations` | 扩展：`scene` 增加 `aux_freeform`，新增可选 `title`（≤100 字） | MVP |
+| POST | `/api/files/upload?source=freeform` | 扩展现有上传端点：`source` query 白名单 `auxiliary\|freeform`，缺省 `auxiliary`（原题图 / 作答图 / 草稿合成图走 `freeform`）。**201**（Nest 默认） | MVP |
+| POST | `/api/conversations` | 扩展：`scene` 增加 `aux_freeform`，新增可选 `title`（≤100 字）。**201**（Nest 默认） | MVP |
 
 **1. `POST /api/freeform/recognize`**
 
@@ -846,7 +846,7 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 
 - `subjectId` 必填，仅 `1`（数学）/ `4`（物理）/ `5`（化学）；`maxScore` 必填，1–100 整数；`questionContent` 必填、≤30000 字；`answer` ≤30000 字，`trim()` 为空且无 `draftFileId` → 400/1001「请先写答案或在草稿上作答」。
 - `questionId` 可选：再次提交时带上次 `result` 返回值。`source='freeform'` → 更新同一条；首次去重命中了真实题库题（source 非 freeform）→ 只复用、不改题；不存在 → 400/1001。
-- `dialogueId` 可选：必须属于本人且 `scene='aux_freeform'`，否则 400/1001。
+- `dialogueId` 可选：必须是正整数（非数字 → 400/1001）；不存在 / 非本人 → 404/1002；`scene` 不是 `aux_freeform` → 400/1001。以上均在 SSE `error` 事件里下发（HTTP 仍 200）。
 - `questionImages` / `figureUrls` 各最多 6 张；`figureUrls` 必须以 `/uploads/freeform/` 开头、文件存在；`answer` 内嵌的 `/uploads/` 图片同样校验归属（最多 6 张）。无 `dialogueId` 时服务端创建 `aux_freeform` 会话（`track='auxiliary'`、`title='做题 · <题干前 20 字>'`、题干作 assistant 锚消息）。
 
 SSE 事件（HTTP 恒为 **200**；`data: {json}\n\n`）：
@@ -860,7 +860,7 @@ SSE 事件（HTTP 恒为 **200**；`data: {json}\n\n`）：
 | `error` | `code`, `message`, `retryable` | 判题 / 解析 / 入库失败 |
 | `done` | — | 结束 |
 
-错误一律以 `error` 事件下发（HTTP 仍 200，前端只在流内区分成功失败）：入参 / 学科 / 满分 / 图片 → `code=1001`；模型失败或尾部 JSON 解析失败（含二次结构化提取）→ `code=5502`；题库 / 错题本写失败 → `code=5000`（报告已流出、保留在页面）。客户端断开（`res.close`）中止上游模型，**部分报告不写库**。
+错误一律以 `error` 事件下发（HTTP 仍 200，前端只在流内区分成功失败）：入参 / 学科 / 满分 / 图片 → `code=1001`；`dialogueId` 不存在或非本人 → `code=1002`（`dialogueId` 非数字、场景不符仍为 `1001`）；模型失败或尾部 JSON 解析失败（含二次结构化提取）→ `code=5502`；题库 / 错题本写失败 → `code=5000`（报告已流出、保留在页面）。客户端断开（`res.close`）中止上游模型，**部分报告不写库**。
 
 流结束后：取累计正文中**最后一个** ```json 块 → zod 校验 → 清洗正文并 `content(replace)` → 落库 → `result` → `done`。落库顺序：① questions（插入 / 更新，`source='freeform'`、`answer_verified=0`、`grade_band=NULL`、无知识点行、`full_score=maxScore`、`content_hash` 为去图片后题干哈希）；② `main_error_books`（`totalScore < maxScore` 时 find-or-create，`source='freeform'`；满分 `clearUnclearedByStudentQuestionId`）；③ `ai_dialogues.question_id`（仅 NULL 时）；④ `ai_messages` 两条（user `freeform_submit` / assistant `freeform_judge`）。①② 是关键写（失败发 5000、不发 result），③④ 失败只 warn。**不发积分、不写 `practice_results`、不更新掌握度**。`totalScore` clamp 到 `[0, maxScore]`；`verdict` 按分数重算，不采信模型；`question.type` / `difficulty` 非法分别回落 `short_answer` / `2`。
 
@@ -872,7 +872,7 @@ SSE 事件（HTTP 恒为 **200**；`data: {json}\n\n`）：
 
 `scene` 增加 `aux_freeform`（仅 `track='auxiliary'` 合法，与 track 不匹配 400/1001）；新增可选 `title`（字符串，trim 后 ≤100 字，超长 400/1001；缺省 `辅线答疑`）。做题入口首次提交或首次【答疑】时创建（带 `subjectId`、`questionText` 题干锚、自定义标题）。`GET /api/conversations?track=auxiliary&scene=aux_qna` 仍按 scene 过滤，`aux_freeform` **不出现在答疑历史列表**。
 
-**隔离与副作用**：freeform 题无知识点关联，且错题练习抽题 SQL 显式排除 `source='freeform'`，故不进专项 / 同类型 / 变式 / 考试 / 错题练习任何自动池；错题只在错题本列表回看。家长端错题列表按 `TRACK_SOURCES` 归 `training` 档可见，不参与发分 / 掌握度 / 练习池。
+**隔离与副作用**：freeform 题无知识点关联，且**页面不可勾选 + 训练判题入口拒绝**——错题练习页把 freeform 条目显示但置为不可勾选，`POST /api/training/judge`（`judgeQuestion`）对 `source='freeform'` 的题一律 400/1001「做题记录的题目暂不支持错题练习」，直连也绕不过；故不进专项 / 同类型 / 变式 / 考试 / 错题练习任何自动池。错题只在错题本列表回看。家长端错题列表按 `TRACK_SOURCES` 归 `training` 档（与 `auxiliary` 同档），不参与发分 / 掌握度 / 练习池。
 
 ---
 
@@ -1597,6 +1597,7 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
 |---|---|---|---|
 | `aux_qna` | auxiliary | /student/auxiliary 自由问答（默认） | `POST /api/conversations`（每次新建） |
 | `aux_training` | auxiliary | 专项/错题 run 的「讲一讲」 | `POST /api/conversations` scene=aux_training（带 questionId 按题 find-or-create，不带则每次新建） |
+| `aux_freeform` | auxiliary | 做题入口 `/student/solve` 的判题 / 答疑（**不出现在答疑 `aux_qna` 历史列表**） | `POST /api/conversations` scene=aux_freeform（首次提交或首次答疑时创建，之后同一会话复用；也由 `POST /api/freeform/judge/stream` 无 `dialogueId` 时服务端创建） |
 | `mainline_question` | mainline | 课堂练习 AnswerModal 题目级讲一讲 | `POST /api/practice/discuss`（error_book 锚定，默认值见旧库回填） |
 | `mainline_card` | mainline | CourseDetailPage 卡片思辨答疑 | `POST /api/practice/discuss-card`（student+card 锚定） |
 
@@ -2241,18 +2242,32 @@ judge/stream（HTTP 200，text/event-stream）
       → reasoning / content 增量原样转发
   · 结束后取最后一个 ```json 块 → zod 校验；失败再走一次非流式结构化提取（仍失败 error 5502）
       → 清洗正文 content(replace:true)
-  · 落库（关键写 ①questions ②main_error_books；尽力写 ③dialogue.question_id ④ai_messages）
+  · 落库（关键写 ①questions ②main_error_books；尽力写 ③dialogue.question_id ④ai_messages
+          ⑤新建错题行的 main_error_books.dialogue_id）
       → result → done；写失败 error 5000（报告保留）
   ▼
 前端：AI 答疑 tab 出现并激活；result 存 questionId，可切回作答改答案重提（重判同一条）
 ```
+
+**错误码**：
+
+| 阶段 | HTTP / code | 触发 |
+|---|---|---|
+| 上传 / 识别入参（文字、fileIds、归属、格式、大小、张数） | 400 / 1001 | 参数校验失败 |
+| MinerU 失败 / 超时 / 缺页 | 502 / 5501 | 「图片解析失败，请重试或手动输入题目」 |
+| 切题模型失败（本地 + 千问都失败） | 502 / 5502 | 「题目切分失败，请重试或手动输入题目」 |
+| 识别服务内部异常 | 500 / 5000 | 「AI 服务异常」 |
+| 判题 `dialogueId` 不存在 / 非本人 | SSE `error` / 1002 | 对话不存在（HTTP 仍 200） |
+| 判题入参 / 学科 / 满分 / 图片 / `dialogueId` 非数字 / 场景不符 | SSE `error` / 1001 | 参数校验失败 |
+| 判题模型失败 / 尾部 JSON 解析失败 | SSE `error` / 5502 | 判题失败，可重试 |
+| 判题落库失败 | SSE `error` / 5000 | 判题完成但入库失败 |
 
 **口径钉子**：
 
 1. **原题照片不入题库**：`questions.content` 只含题干 Markdown 与 MinerU 提取、学生勾选的配图（`/uploads/freeform/...`），原图只在 `uploaded_files` / 磁盘。
 2. **freeform 题**：`source='freeform'`、`answer_verified=0`、`grade_band=NULL`、`full_score=maxScore`、**不写 `question_knowledge_points`**；判题成功且 `answer` 非空才入库；去重先 `content_hash`（去图片后题干）再前 20 字前缀，命中复用不覆盖。
 3. **错题本**：仅 `totalScore < maxScore` 写 / 复用未清行（`source='freeform'`）；满分清零；**不发积分、不写 `practice_results`、不调 MasteryService**；不写 `error_redo_logs`。
-4. **池隔离**：错题练习抽题排除 `source='freeform'`；专项 / 同类型 / 变式按 KP、考试按 `paper_questions`，freeform 无 KP 自然不入选。
+4. **池隔离**：**页面不可勾选 + 训练判题入口拒绝**——错题练习页把 freeform 条目显示但不可勾选；`POST /api/training/judge`（`judgeQuestion`）对 `source='freeform'` 一律 400/1001，直连也绕不过。专项 / 同类型 / 变式按 KP、考试按 `paper_questions`，freeform 无 KP 自然不入选。家长端 `TRACK_SOURCES.training` 含 `freeform`（与 `auxiliary` 同档），家长可见但不进练习池。
 5. **会话隔离**：`ai_dialogues.scene='aux_freeform'`，答疑历史列表按 `aux_qna` 过滤，不会混入；本入口不提供历史页，刷新回到录入。
 6. **交付**：环境检查 + 路由迁移 + schema 对账收敛为一条命令 `bash tools/freeform/setup.sh`；重启后端用 `node dist/main.js`。
 
@@ -2457,7 +2472,8 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
-| v4.25 | 2026-11-08 | **做题入口（自由做题）**。新增 Freeform 分组与 §4.30 / §5.33：`POST /api/freeform/recognize`（题图/文字 → 候选题，**201**；`fileIds` ≤6；MinerU 失败 502/5501、切题失败 502/5502）、`POST /api/freeform/judge/stream`（SSE 200，事件 `start/reasoning/content/result/error/done`；错误以事件下发 1001/5502/5000；落库 questions + main_error_books，不发分/不写 practice_results/不更新掌握度）；`POST /api/files/upload` 的 `source` 改为 query 白名单 `auxiliary\|freeform`（缺省 `auxiliary`，openapi 由 body 移到 query）；`POST /api/conversations` 的 `scene` 增加 `aux_freeform`、新增可选 `title`（≤100）；`GET /api/training/error-book` 响应补记早已返回的 `options` 与 `source`（`source='freeform'` 只回看、不进错题练习池）；`tools/db/schema.sql` 的 `ai_dialogues.scene` 注释补 `aux_freeform`。openapi.yaml 同步（2 path + schema、files source query、conversation scene/title、error-book entry 字段）。 |
+| v4.26 | 2026-11-08 | **做题入口文档对齐实现（Task 23 评审修复）**。① §4.30 鉴权口径纠正：`POST /api/files/upload` 只要求登录（`JwtAuthGuard`，任何已认证角色），student JWT 只限定 `/api/freeform/*` 与 `POST /api/conversations`。② 判题 `dialogueId` 细分：非数字 → 400/1001、不存在 / 非本人 → 404/1002、场景不符 → 400/1001（均以 SSE `error` 事件下发）；错误码清单补 1002。③ 池隔离改为「**页面不可勾选 + 训练判题入口拒绝**（`judgeQuestion` 对 `source='freeform'` 返回 400/1001）」，删除「抽题 SQL 排除 `source='freeform'`」旧表述；家长端 `TRACK_SOURCES.training` 含 `freeform`（归 training 档）。④ §5.18 场景表补 `aux_freeform` 行；§5.33 补紧凑错误码表与落库步骤 ⑤（新建错题行 `main_error_books.dialogue_id` 尽力写）。⑤ `POST /api/files/upload`、`POST /api/conversations` 状态码按 Nest 默认记 **201**。openapi.yaml 同步（recognize `anyOf` 至少一项、fileIds `^[1-9]\\d*$`、chat-log scene enum 含 `aux_freeform`、judge dialogueId 1002、upload/conversations 201、error-book freeform 措辞）。 |
+| v4.25 | 2026-11-08 | **做题入口（自由做题）**。新增 Freeform 分组与 §4.30 / §5.33：`POST /api/freeform/recognize`（题图/文字 → 候选题，**201**；`fileIds` ≤6；MinerU 失败 502/5501、切题失败 502/5502）、`POST /api/freeform/judge/stream`（SSE 200，事件 `start/reasoning/content/result/error/done`；错误以事件下发 1001/1002/5502/5000；落库 questions + main_error_books，不发分/不写 practice_results/不更新掌握度）；`POST /api/files/upload` 的 `source` 改为 query 白名单 `auxiliary\|freeform`（缺省 `auxiliary`，openapi 由 body 移到 query）；`POST /api/conversations` 的 `scene` 增加 `aux_freeform`、新增可选 `title`（≤100）；`GET /api/training/error-book` 响应补记早已返回的 `options` 与 `source`（`source='freeform'` 只回看、不进错题练习池）；`tools/db/schema.sql` 的 `ai_dialogues.scene` 注释补 `aux_freeform`。openapi.yaml 同步（2 path + schema、files source query、conversation scene/title、error-book entry 字段）。 |
 | v4.24 | 2026-11-07 | **自评题计入掌握度**。`POST /api/training/self-assess`、`POST /api/practice/self-assess`、`POST /api/training/variations/self-assess`、`POST /api/training/remediation/self-assess` 在自评落定后**回写 `student_knowledge_mastery`**（`correct` → correct_count+1，`incorrect` → error_count+1，公式与判题出口完全相同；fire-and-forget、失败只 warn）。空白/未作答不写；无 KP 关联的题仍不写。知识图谱「掌握度」与家长端「真掌握度」因此都包含自评数据。历史自评由一次性脚本 `tools/db/backfill_self_assess_mastery.py` 回填（49 条 / 学生 2+7）。 |
 | v4.23 | 2026-10-31 | **训练轨新增物理（subjectId=4）/化学（5）/道法（9）三学科**。① 选科页：六卡遍历配置表渲染，道法 `enabled=false` 灰卡「内容准备中」。② 知识图谱：`weak-points` / `mastery` 的 `subjectId` 允许值由 `{1}` 扩到 `{1,4,5,9}`，错误文案改「subjectId 仅支持 1 / 4 / 5 / 9」（**删除「仅支持 1」旧表述**）。③ 判题三道闸门（语义不同不能合并）：闸门①考试跳过判题——语文=非客观题、物/化/道=仅 `short_answer`/`proof`；闸门②JudgeCore 兜底——`subjectId∈{2,4,5,9}` 的 `fill_blank`/`calculation` 归一化相等判 `exact`、不等转 `self_assess`；闸门③前端内联自评 UI——抽成 `selfAssessEligible(subjectId, type)`，数学分支与今天一字不差，语文填空顺带修好。④ 交卷：未作答按错计但**只有 `q.answer <> ''` 才写错题本**（物理 51/52/53 号卷大量无答案题，进错题本后学生清不掉）；发分按学科取 `math_paper`/`cn_paper`/`physics_paper`/`chemistry_paper`/`politics_paper`。⑤ 积分：新增 6 个任务码 `physics_paper`/`chemistry_paper`/`politics_paper`（50 分/不限次）与 `physics_targeted`/`chemistry_targeted`/`politics_targeted`（1→2/3→8/5→15/10→35、每日上限 5），`DEFAULT_RULES` 懒初始化、零迁移；**删除「其余学科沿用 math_targeted」旧表述**。⑥ 配置：前后端各一份学科配置表（`apps/server/src/common/subject-config.ts`、`apps/web/src/subjectConfig.ts`），新增学科=加一行配置 + 一张卡，**不要在各页写 `if subject ===`**。⑦ 数据缺口：物理 132 题仅 26 题有答案、化学 75 题全无知识点、道法 0 题，本次只做代码与入口，数据排期见 spec §7。openapi.yaml 同步（`weak-points`/`mastery` 的 `subjectId` description）。 |
 | v4.22 | 2026-10-28 | **语文真题考试 + 语文专项练习（首期）**。① 考试：`GET /api/exams/papers` 的 `questionCount` 改为**可考题目数**（`paper_questions.in_exam=1` 且题激活）；试卷详情/会话/结果三处题单元数据加 **`materialText`**（同节共享材料，语文阅读/文段题）；detail + 题单**只下发 `in_exam=1`**；语文非客观题（非 choice/multi_choice/true_false）不判对错、落 `is_correct=NULL + self_assess`，交卷/超时收卷同样不按错计；交卷发分新增 **`cn_paper`**（语文卷，50 分）。② 专项：`GET /api/training/knowledge-points` 响应加 **`questionCount`**（全局可抽题数，0 = 前端置灰）；`targeted/start` 响应题单加 `materialText`，语文按 **`cn_targeted`** 四档校验并把会话 `task_code` 落为 `cn_targeted`；`sessions/{id}/complete` 支持 `cn_targeted`。③ 判题：`judge-core` 语文非客观题走自评分支（数学 fill_blank 归一化判等行为不变）。④ 数据面：`paper_questions` 加 `in_exam TINYINT(1) NOT NULL DEFAULT 1`（迁移 `2026-10-28_paper_question_in_exam.sql`，schema.sql 同步）；语文卷 #17 题 17-27（现代文阅读+作文）置 0。⑤ 前端：语文训练页扩为六卡（默写/解释/含义/真题/专项/错题），考试/专项/错题页面按 `?subjectId=` 参数化并新增材料渲染（共享 markdown 配置，图片走 `resolveAsset`）。openapi.yaml 同步（`materialText`/`questionCount`/`cn_paper` 描述）。 |

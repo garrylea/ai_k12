@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { HttpException } from '@nestjs/common';
 import { JudgeCoreService, compareAnswer, multiChoiceScore, subjectiveJudgeMode } from './judge-core.service';
 import type { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import type { MainErrorBooksRepository } from '../../database/repositories/main-error-books.repo.js';
@@ -80,6 +81,42 @@ describe('JudgeCoreService.judgeQuestion', () => {
     const svc = mkSvc(deps);
     await expect(svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 999, studentAnswer: 'x', source: 'targeted' }))
       .rejects.toMatchObject({ status: 400 });
+  });
+
+  it('freeform 题 -> 400/1001（做题入口的题不进错题练习）', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findById: vi.fn().mockResolvedValue({ id: 30, source: 'freeform', type: 'choice', answer: 'A', options: null }),
+        findByContentHash: vi.fn(),
+        findOrCreate: vi.fn(),
+        deleteById: vi.fn(),
+      },
+    });
+    const svc = mkSvc(deps);
+    const err = await svc
+      .judgeQuestion({ studentId: 1, subjectId: 1, questionId: 30, studentAnswer: 'B', source: 'error_practice' })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(HttpException);
+    expect(err.getStatus()).toBe(400);
+    expect(err.getResponse()).toMatchObject({ code: 1001, message: '做题记录的题目暂不支持错题练习' });
+    // 守卫必须在任何写库 / 调模型之前挡住
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+    expect(deps.judgment.judge).not.toHaveBeenCalled();
+  });
+
+  it('非 freeform 题照常判题（守卫只拦 freeform）', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findById: vi.fn().mockResolvedValue({ id: 31, source: 'practice', type: 'choice', answer: 'A', options: null }),
+        findByContentHash: vi.fn(),
+        findOrCreate: vi.fn(),
+        deleteById: vi.fn(),
+      },
+    });
+    const r = await mkSvc(deps).judgeQuestion({
+      studentId: 1, subjectId: 1, questionId: 31, studentAnswer: 'A', source: 'targeted',
+    });
+    expect(r.isCorrect).toBe(true);
   });
 
   it('AI 判定失败 -> 503，不入错题本', async () => {

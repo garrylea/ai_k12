@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 const fsMock = vi.hoisted(() => ({ readFile: vi.fn() }));
 vi.mock('node:fs/promises', () => fsMock);
 
-import { Logger } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import { FreeformJudgeService, type FreeformJudgeEvent } from './freeform-judge.service.js';
 import type { FreeformJudgeDto } from './dto/freeform.dto.js';
 
@@ -476,6 +476,23 @@ describe('FreeformJudgeService —— 对话', () => {
     await expect(collect(svc.judgeStream({ ...baseDto(), dialogueId: '44' }, 9))).rejects.toMatchObject({
       response: { code: 1001 },
     });
+    expect(deps.capability.stream).not.toHaveBeenCalled();
+  });
+
+  it('传的 dialogueId 不存在 / 非本人 → 404/1002（SSE 取 exception 的 code），不建会话也不调模型', async () => {
+    const deps = mkDeps({
+      conversations: {
+        get: vi.fn().mockRejectedValue(new NotFoundException('dialogue not found')),
+        create: vi.fn(),
+      },
+    });
+    const svc = mkService(deps);
+
+    await expect(collect(svc.judgeStream({ ...baseDto(), dialogueId: '44' }, 9))).rejects.toMatchObject({
+      status: 404,
+      response: { code: 1002 },
+    });
+    expect(deps.conversations.create).not.toHaveBeenCalled();
     expect(deps.capability.stream).not.toHaveBeenCalled();
   });
 });

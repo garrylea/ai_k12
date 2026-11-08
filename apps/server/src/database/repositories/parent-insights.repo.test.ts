@@ -3,6 +3,7 @@ import {
   ALL_ERROR_SOURCES,
   ParentInsightsRepository,
   TRACK_SOURCES,
+  trackOfSource,
 } from './parent-insights.repo.js';
 import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments';
 
@@ -407,8 +408,13 @@ describe('ParentInsightsRepository：错题列表', () => {
     await repo.listParentErrors(9, { track: 'training' }, 20, 0);
     expect(pool.execute.mock.calls[0][1]).toEqual([9, ...TRACK_SOURCES.training]);
     expect(pool.execute.mock.calls[0][1]).toContain('auxiliary');
+    // 做题入口的错题归训练档（家长可见，但不进练习池）
+    expect(pool.execute.mock.calls[0][1]).toContain('freeform');
     // 考试错题属主线档
     expect(pool.execute.mock.calls[0][1]).not.toContain('exam');
+
+    // 响应字段的口径与列表筛选同源：freeform -> training
+    expect(trackOfSource('freeform')).toBe('training');
   });
 
   it('source 分区不重不漏：每个已知 source 恰好归某一档', () => {
