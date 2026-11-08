@@ -177,6 +177,43 @@ describe('SolveCandidatePicker', () => {
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 
+  it('题干按 Markdown + LaTeX 渲染（不是原始 $ 文本）', () => {
+    const withMath: FreeformCandidate[] = [
+      {
+        id: 'c1',
+        no: '7',
+        content: '求 $x^2$ 的值',
+        figureUrls: [],
+        suggestedSubject: 'math',
+        confidence: 0.9,
+      },
+    ];
+    renderPicker(withMath, []);
+    // KaTeX 生成 .katex 节点即证明走了 renderer；若仍是纯文本则不会有该节点。
+    expect(document.querySelector('.katex')).not.toBeNull();
+    expect(screen.queryByText('求 $x^2$ 的值')).toBeNull();
+  });
+
+  it('点图片放大不改变勾选态，并打开大图', () => {
+    renderPicker();
+    const checkbox = screen.getByLabelText('a.jpg') as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: '放大 a.jpg' }));
+
+    const lightbox = screen.getByTestId('image-lightbox');
+    expect(lightbox.querySelector('img')?.getAttribute('src')).toBe('/uploads/freeform/a.jpg');
+    expect(checkbox.checked).toBe(true);
+  });
+
+  it('点复选框只切换勾选，不打开大图', () => {
+    renderPicker();
+    fireEvent.click(screen.getByLabelText('a.jpg'));
+
+    expect((screen.getByLabelText('a.jpg') as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByTestId('image-lightbox')).toBeNull();
+  });
+
   it('满分不是整数时不能提交', () => {
     renderPicker();
     const submit = screen.getByRole('button', { name: '开始作答' }) as HTMLButtonElement;

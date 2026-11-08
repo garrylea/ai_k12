@@ -186,7 +186,7 @@ function renderPage() {
 }
 
 async function goToAnswerStage() {
-  fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {
+  fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
     target: { value: '求 1+1' },
   });
   fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
@@ -198,8 +198,14 @@ async function goToAnswerStage() {
 describe('SolvePage 状态机', () => {
   it('初始停在录入态', () => {
     renderPage();
-    expect(screen.getByText('把题目发给我')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('输入题目，或拖入图片')).toBeInTheDocument();
     expect(screen.queryByLabelText('作答输入')).toBeNull();
+  });
+
+  it('顶栏显示用户药丸与独立的退出按钮', () => {
+    renderPage();
+    expect(screen.getByTestId('user-badge')).toBeInTheDocument();
+    expect(screen.getByLabelText('退出登录')).toBeInTheDocument();
   });
 
   it('识别成功 → 选题；确认后进入作答，且 tab 条在未答疑/提交前隐藏', async () => {
@@ -218,7 +224,7 @@ describe('SolvePage 状态机', () => {
     recognizeMock.mockRejectedValueOnce(new Error('识别失败'));
     renderPage();
 
-    fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {
+    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
       target: { value: '手写题干' },
     });
     fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
@@ -232,13 +238,13 @@ describe('SolvePage 状态机', () => {
     recognizeMock.mockResolvedValueOnce({ candidates: [], figures: [] });
     renderPage();
 
-    fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {
+    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
       target: { value: '看不清的题' },
     });
     fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
 
     expect(await screen.findByText(/没有识别到题目/)).toBeInTheDocument();
-    expect(screen.getByText('把题目发给我')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('输入题目，或拖入图片')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '手动输入题目' })).toBeInTheDocument();
     expect(screen.queryByText(/识别到 0 道题/)).toBeNull();
   });
@@ -247,7 +253,7 @@ describe('SolvePage 状态机', () => {
     recognizeMock.mockResolvedValueOnce({ candidates: [], figures: [] });
     renderPage();
 
-    fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {
+    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
       target: { value: '手写题干' },
     });
     fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
@@ -265,7 +271,7 @@ describe('SolvePage 状态机', () => {
 
   it('选题页「返回重新上传」真的回到录入页（不被识别结果弹回）', async () => {
     renderPage();
-    fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {
+    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
       target: { value: '求 1+1' },
     });
     fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
@@ -277,7 +283,7 @@ describe('SolvePage 状态机', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('把题目发给我')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('输入题目，或拖入图片')).toBeInTheDocument();
     expect(screen.queryByText(/识别到 1 道题/)).toBeNull();
   });
 
@@ -313,7 +319,7 @@ describe('SolvePage 状态机', () => {
 
   it('答疑首问的气泡展示上传的题图（source.imageUrls 透传）', async () => {
     renderPage();
-    fireEvent.change(screen.getByPlaceholderText(/输入题目文字/), {
+    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
       target: { value: '求 1+1' },
     });
     fireEvent.change(screen.getByTestId('source-file-input'), {

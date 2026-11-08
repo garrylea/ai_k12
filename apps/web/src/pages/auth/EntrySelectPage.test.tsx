@@ -52,19 +52,44 @@ beforeEach(() => {
   localStorage.setItem('username', '小明');
 });
 
+function renderPage() {
+  return render(
+    <MemoryRouter initialEntries={['/student/entry']}>
+      <Routes>
+        <Route path="/student/entry" element={<EntrySelectPage />} />
+        <Route path="/student/solve" element={<div>solve-page</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 describe('EntrySelectPage 做题入口', () => {
   it('第 4 卡「做题」跳 /student/solve', () => {
-    render(
-      <MemoryRouter initialEntries={['/student/entry']}>
-        <Routes>
-          <Route path="/student/entry" element={<EntrySelectPage />} />
-          <Route path="/student/solve" element={<div>solve-page</div>} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: '进入做题' }));
     expect(screen.getByText('solve-page')).toBeInTheDocument();
+  });
+});
+
+describe('EntrySelectPage 四宫格布局', () => {
+  it('栅格为 1 列 / ≥sm 2 列（2 上 2 下），不再用 lg 4 列', () => {
+    renderPage();
+
+    const gridClass = screen.getByTestId('entry-grid').className;
+    expect(gridClass).toContain('sm:grid-cols-2');
+    expect(gridClass).not.toContain('lg:grid-cols-4');
+  });
+
+  it('四张卡统一 3:2 宽高比，无固定 h-64', () => {
+    renderPage();
+
+    const labels = ['进入学习', '进入答疑', '进入训练', '进入做题'];
+    for (const label of labels) {
+      const cardClass = screen.getByRole('button', { name: label }).className;
+      expect(cardClass).toContain('aspect-[3/2]');
+      expect(cardClass).not.toContain('h-64');
+    }
   });
 });
 

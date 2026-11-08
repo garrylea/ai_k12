@@ -99,8 +99,11 @@ export default function EntrySelectPage() {
       </header>
 
       {/* 2. 中部：四入口大卡（视觉一致，靠文字「学习/答疑/训练/做题」区分） */}
-      <main className="w-full max-w-4xl my-auto py-10 flex flex-col items-center">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
+      <main className="w-full my-auto py-6 flex flex-col items-center">
+        <div
+          data-testid="entry-grid"
+          className="grid grid-cols-1 sm:grid-cols-2 gap-6 w-full max-w-3xl mx-auto"
+        >
           {/* 学习：主入口 */}
           <motion.button
             initial={reduceMotion ? false : { opacity: 0, y: 12 }}
@@ -108,7 +111,7 @@ export default function EntrySelectPage() {
             transition={{ duration: 0.25, ease: 'easeOut' }}
             whileHover={reduceMotion ? undefined : { y: -4 }}
             onClick={() => navigate('/student/subjects')}
-            className="h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-shadow duration-300 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
+            className="aspect-[3/2] min-h-[168px] p-6 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-shadow duration-300 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
             style={{
               border: '1px solid rgba(226, 232, 240, 0.8)',
               boxShadow: 'var(--shadow-card)',
@@ -142,7 +145,7 @@ export default function EntrySelectPage() {
             transition={{ duration: 0.25, ease: 'easeOut', delay: 0.08 }}
             whileHover={reduceMotion ? undefined : { y: -4 }}
             onClick={() => navigate('/student/auxiliary')}
-            className="h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-shadow duration-300 focus:outline-none focus:ring-4 focus:ring-blue-500/20"
+            className="aspect-[3/2] min-h-[168px] p-6 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-shadow duration-300 focus:outline-none focus:ring-4 focus:ring-blue-500/20"
             style={{
               border: '1px solid rgba(226, 232, 240, 0.8)',
               boxShadow: 'var(--shadow-card)',
@@ -178,7 +181,7 @@ export default function EntrySelectPage() {
             transition={{ duration: 0.25, ease: 'easeOut', delay: 0.16 }}
             whileHover={reduceMotion ? undefined : { y: -4 }}
             onClick={() => navigate('/student/training')}
-            className="h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-shadow duration-300 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
+            className="aspect-[3/2] min-h-[168px] p-6 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-shadow duration-300 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
             style={{
               border: '1px solid rgba(226, 232, 240, 0.8)',
               boxShadow: 'var(--shadow-card)',
@@ -212,7 +215,7 @@ export default function EntrySelectPage() {
             transition={{ duration: 0.25, ease: 'easeOut', delay: 0.24 }}
             whileHover={reduceMotion ? undefined : { y: -4 }}
             onClick={() => navigate('/student/solve')}
-            className="h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-shadow duration-300 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
+            className="aspect-[3/2] min-h-[168px] p-6 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-shadow duration-300 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
             style={{
               border: '1px solid rgba(226, 232, 240, 0.8)',
               boxShadow: 'var(--shadow-card)',

@@ -202,9 +202,36 @@ describe('SolveSourceInput', () => {
     expect(uploadFileMock).not.toHaveBeenCalled();
   });
 
-  it('展示个人信息提示', () => {
+  it('展示简短的个人信息提示', () => {
     render(<SolveSourceInput busy={false} onRecognize={vi.fn()} />);
-    expect(screen.getByText('请勿上传含姓名、学校等个人信息的照片')).toBeInTheDocument();
+    expect(screen.getByText('请勿上传个人信息')).toBeInTheDocument();
+  });
+
+  it('占位符是短文案，颜色走 placeholder token', () => {
+    render(<SolveSourceInput busy={false} onRecognize={vi.fn()} />);
+    const box = screen.getByPlaceholderText('输入题目，或拖入图片');
+    expect(box.className).toContain('placeholder:text-[var(--text-placeholder)]');
+  });
+
+  it('识别中且有图片时显示识别遮罩', async () => {
+    render(<SolveSourceInput busy onRecognize={vi.fn()} />);
+    pickFiles(jpegFiles(1));
+
+    expect(await screen.findByTestId('recognize-overlay')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '正在识别题目' })).toBeInTheDocument();
+  });
+
+  it('识别中但无图片时不显示识别遮罩', () => {
+    render(<SolveSourceInput busy onRecognize={vi.fn()} />);
+    expect(screen.queryByTestId('recognize-overlay')).toBeNull();
+  });
+
+  it('非识别中（busy=false）即使有图片也不显示识别遮罩', async () => {
+    render(<SolveSourceInput busy={false} onRecognize={vi.fn()} />);
+    pickFiles(jpegFiles(1));
+
+    await waitFor(() => expect(screen.getAllByTestId('source-thumb')).toHaveLength(1));
+    expect(screen.queryByTestId('recognize-overlay')).toBeNull();
   });
 
   it('转换与上传期间禁止提交', async () => {

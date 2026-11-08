@@ -238,11 +238,11 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={handlePaste}
-          placeholder="输入题目文字，或拖入/粘贴题目图片（HEIC、JPG、PNG、WebP）"
-          className="w-full bg-transparent outline-none resize-none text-[#1D1D1F] placeholder-[#86868B]"
+          placeholder="输入题目，或拖入图片"
+          className="w-full bg-transparent outline-none resize-none text-[#1D1D1F] placeholder:text-[var(--text-placeholder)]"
         />
 
-        <p className="text-xs text-[#86868B]">请勿上传含姓名、学校等个人信息的照片</p>
+        <p className="text-xs text-[var(--text-tertiary)]">请勿上传个人信息</p>
 
         <div className="flex items-center justify-between">
           <button
@@ -284,6 +284,34 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
           </button>
         </div>
       </div>
+
+      {busy && images.length > 0 && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="正在识别题目"
+          data-testid="recognize-overlay"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        >
+          <div className="w-[280px] rounded-2xl bg-white p-6 flex flex-col items-center gap-3 shadow-xl">
+            <svg
+              className="animate-spin text-[var(--brand-500)]"
+              width="36"
+              height="36"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            </svg>
+            <div className="text-sm font-medium text-[var(--text-primary)]">正在识别题目…</div>
+            <div className="text-xs text-[var(--text-tertiary)]">图片较多时会稍慢</div>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mt-3 text-sm text-[#C44A3F]">

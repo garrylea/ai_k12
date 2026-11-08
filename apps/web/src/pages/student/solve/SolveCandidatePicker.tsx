@@ -1,4 +1,12 @@
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { ImageLightbox } from '@/components/base';
+import {
+  preprocessMarkdown,
+  markdownRemarkPluginsWithBreaks,
+  markdownRehypePlugins,
+  markdownComponents,
+} from '@/components/markdown';
 import type { FreeformCandidate, FreeformFigure } from '@/services/api';
 
 /**
@@ -38,6 +46,7 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
   const [editing, setEditing] = useState(false);
   const [subjectId, setSubjectId] = useState(subjectIdOf(selected?.suggestedSubject));
   const [maxScore, setMaxScore] = useState(10);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
   const pick = (c: FreeformCandidate) => {
     setSelectedId(c.id);
@@ -83,8 +92,16 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
               className="sr-only"
             />
             <div className="font-medium mb-1">第 {c.no || '?'} 题</div>
-            <div className="text-sm text-[#86868B] line-clamp-3">
-              {stripMdImages(c.content).slice(0, 120)}
+            {/* 题干按 Markdown + LaTeX 渲染（与全站同一套 renderer）：MinerU 识别出的
+                $...$ / \[...\] 直接显示原文会看不清；配图另在下方的「配图（多选）」里选。 */}
+            <div className="md-prose text-sm text-[var(--text-primary)] max-h-48 overflow-y-auto">
+              <ReactMarkdown
+                remarkPlugins={markdownRemarkPluginsWithBreaks}
+                rehypePlugins={markdownRehypePlugins}
+                components={markdownComponents}
+              >
+                {preprocessMarkdown(stripMdImages(c.content))}
+              </ReactMarkdown>
             </div>
           </label>
         ))}
@@ -95,26 +112,37 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
           <div className="text-sm font-medium mb-2">配图（多选）</div>
           <div className="flex flex-wrap gap-3">
             {figures.map((f) => (
-              <label key={f.url} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={checked.has(f.url)}
-                  onChange={(e) => {
-                    setChecked((prev) => {
-                      const next = new Set(prev);
-                      if (e.target.checked) next.add(f.url);
-                      else next.delete(f.url);
-                      return next;
-                    });
-                  }}
-                  aria-label={f.name}
-                />
-                <img
-                  src={f.url}
-                  alt={f.name}
-                  className="w-12 h-12 object-cover rounded border border-[#E5E5E5]"
-                />
-              </label>
+              <div
+                key={f.url}
+                className="relative w-24 h-24 rounded-lg border border-[#E5E5E5] overflow-hidden"
+              >
+                {/* 图片是独立 button：点图放大，不碰勾选态（若整块是 label，
+                    点图会连带切 checkbox，学生想看清图却把配图取消了）。 */}
+                <button
+                  type="button"
+                  aria-label={`放大 ${f.name}`}
+                  onClick={() => setPreviewSrc(f.url)}
+                  className="block w-full h-full"
+                >
+                  <img src={f.url} alt={f.name} className="w-full h-full object-cover" />
+                </button>
+                <label className="absolute top-1 left-1 z-10 flex items-center justify-center p-0.5 rounded bg-white/90">
+                  <input
+                    type="checkbox"
+                    checked={checked.has(f.url)}
+                    onChange={(e) => {
+                      setChecked((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(f.url);
+                        else next.delete(f.url);
+                        return next;
+                      });
+                    }}
+                    aria-label={f.name}
+                    className="w-4 h-4 accent-[var(--brand-500)]"
+                  />
+                </label>
+              </div>
             ))}
           </div>
         </div>
@@ -197,6 +225,10 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
           开始作答
         </button>
       </div>
+
+      {previewSrc && (
+        <ImageLightbox src={previewSrc} onClose={() => setPreviewSrc(null)} />
+      )}
     </div>
   );
 }

@@ -9,9 +9,8 @@
 // - 草稿面板的 JPEG 快照经 DraftPanel 透传的 snapshotRef 取（全页只挂一个白板）。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BackButton } from '@/components/base';
-import { UserBadge } from '@/components/business';
+import { StudentAccountActions } from '@/components/business';
 import { toast } from '@/components/base/Toast';
-import { getAuthItem } from '@/services/authStorage';
 import { uploadFile, type AttachmentRequest } from '@/services/api';
 import { useChatStore } from '@/store/chatStore';
 import AuxChatPanel from '@/components/business/AuxChatPanel';
@@ -234,21 +233,18 @@ export default function SolvePage() {
 
   return (
     <div className="student-theme-container" data-theme="student-day" data-school="junior">
-      <div className="relative flex h-screen flex-col p-4 sm:p-6 bg-[var(--bg-page)] text-[var(--text-primary)]">
-        <header className="flex shrink-0 items-center justify-between border-b border-[var(--bg-subtle)] pb-3">
+      <div className="relative flex h-screen flex-col p-5 sm:p-7 lg:p-8 bg-[var(--bg-page)] text-[var(--text-primary)]">
+        <header className="flex shrink-0 min-h-[44px] items-center justify-between border-b border-[var(--bg-subtle)] pb-4">
           <div className="flex items-center gap-3">
             <BackButton to="/student/entry" label="返回入口" />
             <h1 className="text-lg font-bold">做题</h1>
           </div>
-          <UserBadge username={getAuthItem('username') ?? '同学'} />
+          <StudentAccountActions />
         </header>
 
         {stage === 'input' && (
           <main className="flex-1 flex flex-col items-center justify-center px-6">
-            <h2 className="text-2xl font-bold mb-2">把题目发给我</h2>
-            <p className="text-sm text-[var(--text-secondary)] mb-6">
-              可输入文字，或拖入/粘贴题目图片（HEIC、JPG、PNG）
-            </p>
+            <h2 className="sr-only">做题</h2>
             <SolveSourceInput
               busy={recognize.busy}
               error={inputError}
