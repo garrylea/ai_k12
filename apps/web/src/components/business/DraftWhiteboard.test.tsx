@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { MutableRefObject } from 'react';
 import { cleanup, render, fireEvent, waitFor } from '@testing-library/react';
 import { DraftWhiteboard } from './DraftWhiteboard';
 import { clearDraft, getDraft, getDraftImages, setDraftImages } from './draft-store';
@@ -547,6 +548,62 @@ describe('草稿白板：旋转', () => {
     expect(b.x1).toBeCloseTo(100, 0);
     expect(b.y0).toBeCloseTo(100, 0);
     expect(b.y1).toBeCloseTo(200, 0);
+  });
+});
+
+describe('草稿白板：导出快照', () => {
+  type UrlCall = { type: string; quality: number | undefined };
+
+  // renderDraftSnapshot 需要比外层 stub 更完整的 ctx（fillRect / scale / drawImage）
+  beforeEach(() => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({
+      clearRect() {}, setTransform() {}, beginPath() {}, arc() {}, fill() {},
+      moveTo() {}, lineTo() {}, quadraticCurveTo() {}, stroke() {},
+      save() {}, restore() {}, fillRect() {}, fillText() {},
+      scale() {}, drawImage() {}, strokeRect() {}, setLineDash() {},
+    }) as unknown as CanvasRenderingContext2D);
+  });
+
+  function mockDataUrl(next: (call: UrlCall, index: number) => string) {
+    const calls: UrlCall[] = [];
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation((type?: string, quality?: number) => {
+      const call = { type: type ?? '', quality };
+      calls.push(call);
+      return next(call, calls.length - 1);
+    });
+    return calls;
+  }
+
+  function setupSnapshot() {
+    const snapshotRef: MutableRefObject<(() => Promise<string | null>) | null> = { current: null };
+    const view = render(<DraftWhiteboard questionId="q1" snapshotRef={snapshotRef} />);
+    const canvas = view.container.querySelector('canvas')!;
+    return { snapshotRef, canvas, ...view };
+  }
+
+  it('挂载后可用：空板返回 null，有笔迹导出 JPEG 0.85，卸载清空 ref', async () => {
+    const calls = mockDataUrl(() => 'data:image/jpeg;base64,AAA');
+    const { snapshotRef, canvas, unmount } = setupSnapshot();
+
+    expect(typeof snapshotRef.current).toBe('function');
+    expect(await snapshotRef.current!()).toBeNull();
+
+    penLine(canvas, 100);
+    expect(await snapshotRef.current!()).toBe('data:image/jpeg;base64,AAA');
+    expect(calls).toEqual([{ type: 'image/jpeg', quality: 0.85 }]);
+
+    unmount();
+    expect(snapshotRef.current).toBeNull();
+  });
+
+  it('首张数据超过 5MB 时按 0.7 质量重试一次', async () => {
+    const huge = 'x'.repeat(5 * 1024 * 1024 + 1);
+    const calls = mockDataUrl((_call, i) => (i === 0 ? huge : 'data:image/jpeg;base64,SMALL'));
+    const { snapshotRef, canvas } = setupSnapshot();
+
+    penLine(canvas, 100);
+    expect(await snapshotRef.current!()).toBe('data:image/jpeg;base64,SMALL');
+    expect(calls.map((c) => c.quality)).toEqual([0.85, 0.7]);
   });
 });
 

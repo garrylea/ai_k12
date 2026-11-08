@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type MutableRefObject } from 'react';
 import { useThemeStore } from '@/store/themeStore';
 import {
   getDraft, setDraft, getDraftImages, setDraftImages,
@@ -16,6 +16,7 @@ import { DraftImageLayer } from './DraftImageLayer';
 import { fileToDraftImage, draftImageFromSrc, isEditableTarget } from './draft-image-utils';
 import { registerDropTarget } from './draft-image-drag';
 import { strokePivots, nearestPivot, type PivotCandidate } from './draft-shape-pivots';
+import { drawStroke, drawStrokes, renderDraftSnapshot } from './draft-render';
 
 type Tool = 'pen' | 'dot' | 'eraser' | 'select' | 'compass' | 'line' | 'rect' | 'ellipse' | 'triangle';
 
@@ -29,47 +30,8 @@ const INK_WIDTH = 2;
 /** 圆心标记点半径（CSS px）：与圆规参考层的圆心锚点同尺寸，保持「画的圆心」和「预览的圆心」观感一致 */
 const CENTER_DOT_R = 3;
 
-/** 「点」工具直径（CSS px）：落点是一根单点笔迹，渲染半径 = DOT_SIZE / 2（strokePath 对单点笔迹按 size/2 画实心圆） */
+/** 「点」工具直径（CSS px）：落点是一根单点笔迹，渲染半径 = DOT_SIZE / 2（drawStroke 对单点笔迹按 size/2 画实心圆） */
 const DOT_SIZE = 10;
-
-/**
- * 单条笔画平滑渲染（取代 perfect-freehand 填充轮廓画法）：
- * - 统一细线宽 + 圆头圆角（lineCap/lineJoin round），细且均匀；
- * - 用「顶点为控制点、相邻顶点中点为起止」的二次贝塞尔段串成连续曲线（C1 连续），
- *   曲线天然穿过相邻点中点 = 渲染期低通（抑制手抖高频抖动）；
- * - 输入侧不做 EWMA 前向平滑（之前 streamline 让笔尖滞后），最新采样点直接落笔 →
- *   渲染零跟手延迟。stroke.size 通常为 INK_WIDTH（「点」工具为 DOT_SIZE，单点笔迹取它当直径）。
- * - stroke.center 存在时（正圆）在轮廓之上补一个实心圆心点。
- */
-function strokePath(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
-  const pts = stroke.points;
-  if (pts.length === 0) return;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.lineWidth = stroke.size;
-  if (pts.length === 1) {
-    // 单点（点一下）：画实心圆点
-    ctx.beginPath();
-    ctx.arc(pts[0].x, pts[0].y, stroke.size / 2, 0, Math.PI * 2);
-    ctx.fill();
-    return;
-  }
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 1; i < pts.length - 1; i++) {
-    const mx = (pts[i].x + pts[i + 1].x) / 2;
-    const my = (pts[i].y + pts[i + 1].y) / 2;
-    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
-  }
-  ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-  ctx.stroke();
-  if (stroke.center) {
-    // 正圆圆心标记：实心点（颜色取调用方设的 fillStyle，与笔迹同色）
-    ctx.beginPath();
-    ctx.arc(stroke.center.x, stroke.center.y, CENTER_DOT_R, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
 
 /** 橡皮命中容差（CSS px）：笔迹基准线宽之外再放宽 8px（沿用原 `size + 8`，宽松好擦）。
  *  注意：这是「够不够得着」的擦除手感，不要拿它当选中起手的容差，见下。 */
@@ -371,7 +333,7 @@ function squareBox(x0: number, y0: number, x1: number, y1: number): { x: number;
 }
 
 /** 闭合多边形采样：沿边按 ~3px 弦长加密 + 末点闭合（矩形/三角形共用）。
- *  不能只采顶点——strokePath 的「中点二次贝塞尔」平滑会让稀疏拐角点沦为控制点被曲线绕过，
+ *  不能只采顶点——drawStroke 的「中点二次贝塞尔」平滑会让稀疏拐角点沦为控制点被曲线绕过，
  *  拐角各被削掉约 1/4 边长（正方形看起来成大圆角方块）；加密后拐角仅剩笔迹级微圆。 */
 function sampleClosedPolygon(vertices: { x: number; y: number }[]): DraftPoint[] {
   const n = vertices.length;
@@ -454,7 +416,7 @@ const CompassIcon = () => (
 /**
  * 圆规参考层（仅 compass 工具激活时叠加在笔迹之上）：
  * 虚线参考圆 + 圆心→手柄半径线 + 圆心/手柄锚点；placing/resizing 手柄旁显示半径数值；
- * drawing 时用笔迹同款 strokePath 画弧实时预览（视觉上即「正在画出」）。
+ * drawing 时用笔迹同款 drawStroke 画弧实时预览（视觉上即「正在画出」）。
  */
 function drawCompassOverlay(
   ctx: CanvasRenderingContext2D,
@@ -487,7 +449,7 @@ function drawCompassOverlay(
   ctx.arc(h.x, h.y, 4.5, 0, Math.PI * 2);
   ctx.fill();
   if (c.phase === 'drawing' && Math.abs(c.sweep) > 1e-9) {
-    strokePath(ctx, { points: sampleArc(c, c.a0, c.sweep), size: INK_WIDTH });
+    drawStroke(ctx, { points: sampleArc(c, c.a0, c.sweep), size: INK_WIDTH });
   }
   if (c.phase === 'placing' || c.phase === 'resizing') {
     ctx.fillStyle = guide;
@@ -615,7 +577,7 @@ function drawTriangleOverlay(
   if (t.phase === 'placing') {
     if (t.verts.length >= 2) {
       // 已定边：实线（与最终观感一致）
-      strokePath(ctx, {
+      drawStroke(ctx, {
         points: t.verts.map((v) => ({ ...v, pressure: 0.5 })),
         size: INK_WIDTH,
       });
@@ -634,7 +596,7 @@ function drawTriangleOverlay(
     }
   } else {
     // adjust：整三角形实线预览（提交同款采样）
-    strokePath(ctx, { points: sampleClosedPolygon(t.verts), size: INK_WIDTH });
+    drawStroke(ctx, { points: sampleClosedPolygon(t.verts), size: INK_WIDTH });
   }
   for (const v of t.verts) {
     ctx.beginPath();
@@ -648,10 +610,13 @@ export function DraftWhiteboard({
   questionId,
   scrollMode = 'fit',
   persist = true,
+  snapshotRef,
 }: {
   questionId: string;
   scrollMode?: 'fit' | 'scroll-y';
   persist?: boolean;
+  /** 父组件取快照的出口：挂载后写入一个「导出当前草稿为 JPEG data URL」的函数（空草稿 → null），卸载时清空 */
+  snapshotRef?: MutableRefObject<(() => Promise<string | null>) | null>;
 }) {
   const [tool, setTool] = useState<Tool>('pen');
   const toolRef = useRef<Tool>('pen'); // redraw（dep-free）读工具态判断是否画圆规参考层
@@ -734,7 +699,7 @@ export function DraftWhiteboard({
     const ink = (getComputedStyle(canvas).getPropertyValue('--text-primary') || '#333').trim();
     ctx.strokeStyle = ink;
     ctx.fillStyle = ink;
-    for (const s of strokesRef.current) strokePath(ctx, s);
+    drawStrokes(ctx, strokesRef.current);
     if (toolRef.current === 'compass') {
       drawCompassOverlay(ctx, canvas, compassRef.current, compassHandleAngleRef.current, ink);
     }
@@ -767,7 +732,7 @@ export function DraftWhiteboard({
       const g = shapeGestureRef.current;
       if (g && g.moved) {
         const out = shapeCommitPoints(g.kind, g);
-        strokePath(ctx, { points: out.points, size: INK_WIDTH, center: out.center });
+        drawStroke(ctx, { points: out.points, size: INK_WIDTH, center: out.center });
       }
     }
     if (toolRef.current === 'triangle') {
@@ -1435,6 +1400,33 @@ export function DraftWhiteboard({
     ro.observe(wrap);
     return () => ro.disconnect();
   }, [redraw, scrollMode]);
+
+  // 快照出口：供判题附草稿图。只读 ref（strokesRef/imagesRef 是最新态，闭包不会拿旧值）；
+  // board 的 clientWidth/Height 是 CSS px 坐标系的画板尺寸（含 scroll-y 的超一屏高）。
+  useEffect(() => {
+    if (!snapshotRef) return;
+    snapshotRef.current = async () => {
+      // boardRef 只在 scroll-y 模式挂载（超一屏的定高画板）；fit 模式下画板就是容器本身
+      const board = boardRef.current ?? wrapRef.current;
+      if (!board) return null;
+      const first = await renderDraftSnapshot({
+        strokes: strokesRef.current,
+        images: imagesRef.current,
+        width: board.clientWidth,
+        height: board.clientHeight,
+      });
+      if (!first) return null;
+      // data URL 字符串长度约等于字节数；超过 5MB 降质量重试一次
+      if (first.length > 5 * 1024 * 1024) {
+        return renderDraftSnapshot({
+          strokes: strokesRef.current, images: imagesRef.current,
+          width: board.clientWidth, height: board.clientHeight, quality: 0.7,
+        });
+      }
+      return first;
+    };
+    return () => { if (snapshotRef) snapshotRef.current = null; };
+  }, [snapshotRef]);
 
   // 拖拽落点 = canvas（画布坐标系原点）；注销函数随卸载调用
   useEffect(() => {
