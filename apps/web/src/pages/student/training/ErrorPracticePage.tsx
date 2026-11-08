@@ -192,6 +192,14 @@ export default function ErrorPracticePage() {
     [entries],
   );
 
+  // 「一条 freeform 都没有」与「一条可选都没有」是两回事：全孤儿题也有 selectableCount === 0，
+  // 但那时不该显示「做题记录」的提示（2026-11-08 评审）。
+  const freeformCount = useMemo(
+    () => entries.filter((e) => e.source === 'freeform').length,
+    [entries],
+  );
+  const allFreeform = entries.length > 0 && freeformCount === entries.length;
+
   const selectedCount = useMemo(
     () => entries.filter((e) => isSelectable(e) && selected.has(e.errorBookId)).length,
     [entries, selected],
@@ -306,7 +314,14 @@ export default function ErrorPracticePage() {
                 return (
                   <Card
                     key={entry.errorBookId}
-                    className={isOrphan || isFreeform ? 'bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)] opacity-70' : 'cursor-pointer hover:shadow-[var(--shadow-elevated)] bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]'}
+                    className={
+                      isOrphan
+                        ? 'bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)] opacity-70'
+                        : isFreeform
+                          // freeform 行不降透明度：要能正常读题，靠禁用复选框 + 提示表达不可选
+                          ? 'bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]'
+                          : 'cursor-pointer hover:shadow-[var(--shadow-elevated)] bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]'
+                    }
                     onClick={isOrphan || isFreeform ? undefined : () => toggle(entry)}
                   >
                     <div className="flex items-start gap-4">
@@ -364,7 +379,7 @@ export default function ErrorPracticePage() {
                             该题未入库，暂不支持线上重做
                           </p>
                         )}
-                        {isFreeform && (
+                        {isFreeform && selectableCount > 0 && (
                           <p className="text-xs text-[var(--learn-text-tertiary)]">
                             做题记录的题目暂不支持错题练习
                           </p>
@@ -409,7 +424,7 @@ export default function ErrorPracticePage() {
           <div className="fixed bottom-0 left-0 right-0 border-t border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] shadow-[var(--shadow-card)]">
             <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 py-4 flex items-center justify-between">
               <span className="text-sm text-[var(--learn-text-secondary)]">
-                {selectableCount === 0
+                {allFreeform
                   ? '做题记录的题目暂不支持错题练习'
                   : `已选 ${selectedCount} / ${selectableCount} 题`}
               </span>

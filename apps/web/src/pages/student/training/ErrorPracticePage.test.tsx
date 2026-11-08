@@ -32,6 +32,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  sessionStorage.clear();
   getTrainingErrorBook.mockReset();
   getKnowledgePoints.mockReset();
   getTrainingVariations.mockReset();
@@ -47,6 +48,7 @@ function renderAt(path: string) {
   const router = createMemoryRouter(
     [
       { path: '/student/training/errors', element: <ErrorPracticePage /> },
+      { path: '/student/training/errors/run', element: <div>错题练习作答页</div> },
       { path: '/student/training/variations/run', element: <div>变式作答页</div> },
     ],
     { initialEntries: [path] },
@@ -86,7 +88,7 @@ describe('ErrorPracticePage ?kpId= 预填', () => {
 });
 
 describe('ErrorPracticePage freeform 条目（2026-11-08）', () => {
-  it('freeform 条目显示但不可勾选，不计入已选', async () => {
+  it('freeform 条目显示但不可勾选，不计入已选；提示只在条目出现一次', async () => {
     getTrainingErrorBook.mockResolvedValue([
       { errorBookId: 1, questionId: 1, questionText: '普通题', type: 'choice', level: 1, createdAt: '', source: 'practice' },
       { errorBookId: 2, questionId: 2, questionText: '做题记录', type: 'short_answer', level: 1, createdAt: '', source: 'freeform' },
@@ -100,9 +102,41 @@ describe('ErrorPracticePage freeform 条目（2026-11-08）', () => {
     expect(screen.getByText('做题')).toBeTruthy();
     // 分母只算可选条目（2 条里 1 条是 freeform）
     expect(screen.getByText(/已选 0 \/ 1 题/)).toBeTruthy();
+    // 混合列表：条目行提示一次，底部栏是计数句，不重复
+    expect(screen.getAllByText('做题记录的题目暂不支持错题练习')).toHaveLength(1);
   });
 
-  it('全为 freeform 时「开始练习」禁用并提示', async () => {
+  it('混合列表：只有普通条目进题单；点 freeform 行不改变已选', async () => {
+    const user = userEvent.setup();
+    getTrainingErrorBook.mockResolvedValue([
+      { errorBookId: 1, questionId: 1, questionText: '普通题', type: 'choice', level: 1, createdAt: '', source: 'practice' },
+      { errorBookId: 2, questionId: 2, questionText: '做题记录', type: 'short_answer', level: 1, createdAt: '', source: 'freeform' },
+    ]);
+
+    renderAt('/student/training/errors');
+
+    const checks = (await screen.findAllByRole('checkbox')) as HTMLInputElement[];
+
+    // 点 freeform 行的题面：卡片没有 onClick，勾选态不变
+    await user.click(screen.getByText('做题记录'));
+    expect(checks[1]).not.toBeChecked();
+    expect(checks[0]).not.toBeChecked();
+    expect(screen.getByText(/已选 0 \/ 1 题/)).toBeTruthy();
+
+    // 选普通条目后开始练习：题单里只有普通条目
+    await user.click(checks[0]);
+    expect(screen.getByText(/已选 1 \/ 1 题/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /开始练习/ }));
+
+    const payload = JSON.parse(sessionStorage.getItem('training:errors') ?? '[]') as Array<{
+      errorBookId: number;
+      source: string | null;
+    }>;
+    expect(payload.map((e) => e.errorBookId)).toEqual([1]);
+    expect(payload.some((e) => e.source === 'freeform')).toBe(false);
+  });
+
+  it('全为 freeform 时「开始练习」禁用并提示（提示只在底部栏出现一次）', async () => {
     getTrainingErrorBook.mockResolvedValue([
       { errorBookId: 2, questionId: 2, questionText: '做题记录', type: 'short_answer', level: 1, createdAt: '', source: 'freeform' },
     ]);
@@ -112,7 +146,19 @@ describe('ErrorPracticePage freeform 条目（2026-11-08）', () => {
     const checks = (await screen.findAllByRole('checkbox')) as HTMLInputElement[];
     expect(checks[0]).toBeDisabled();
     expect(screen.getByRole('button', { name: /开始练习/ })).toBeDisabled();
-    expect(screen.getAllByText('做题记录的题目暂不支持错题练习').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('做题记录的题目暂不支持错题练习')).toHaveLength(1);
+    expect(screen.queryByText(/已选/)).toBeNull();
+  });
+
+  it('全为孤儿题（无 freeform）时显示计数句，不显示 freeform 提示', async () => {
+    getTrainingErrorBook.mockResolvedValue([
+      { errorBookId: 3, questionId: null, questionText: '未入库题', type: 'choice', level: 1, createdAt: '', source: 'practice' },
+    ]);
+
+    renderAt('/student/training/errors');
+
+    expect(await screen.findByText(/已选 0 \/ 1 题/)).toBeTruthy();
+    expect(screen.queryByText('做题记录的题目暂不支持错题练习')).toBeNull();
   });
 });
 
