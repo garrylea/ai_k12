@@ -74,7 +74,7 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
             key={c.id}
             className={`rounded-xl border p-3 cursor-pointer ${
               c.id === selectedId
-                ? 'border-[#FF6B00] bg-[#FFF7F2]'
+                ? 'border-[#FF6B00] bg-[#FFF0E5]'
                 : 'border-[#E5E5E5]'
             }`}
           >
