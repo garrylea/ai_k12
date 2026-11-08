@@ -795,7 +795,7 @@ CREATE TABLE IF NOT EXISTS ai_dialogues (
   student_id BIGINT NOT NULL,
   subject_id BIGINT DEFAULT NULL,
   track VARCHAR(10) NOT NULL,
-  scene VARCHAR(30) NOT NULL DEFAULT 'aux_qna',  -- 会话场景分型: aux_qna(辅线答疑)|aux_training(训练讲一讲)|mainline_question(课堂练习讲一讲)|mainline_card(卡片思辨答疑)
+  scene VARCHAR(30) NOT NULL DEFAULT 'aux_qna',  -- 会话场景分型: aux_qna(辅线答疑)|aux_training(训练讲一讲)|aux_freeform(做题入口)|mainline_question(课堂练习讲一讲)|mainline_card(卡片思辨答疑)
   card_id BIGINT DEFAULT NULL,
   question_id BIGINT DEFAULT NULL,               -- 训练讲一讲按题锚（find-or-create）；question 级讨论由 main_error_books.dialogue_id 锚定
   knowledge_point_id BIGINT DEFAULT NULL,

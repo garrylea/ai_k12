@@ -49,7 +49,7 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 | `docs/API接口与数据流设计文档.md` + `docs/api/openapi.yaml` | API 契约，两份**互为对照、必须同步**（规则见下）。**各专项的端点、抽题池谓词、判题口径**见 §4.18 / §5.20–§5.23；积分 / 埋点 / 家长端聚合见 §5.24–§5.28 |
 | `docs/ai-core-changelog.md` | 历史工作日志。**本文件迁出的带日期细节都在这里**，它同时记录各次事故与踩坑 |
 | `docs/data-refinery-管线总结与后续.md` / `使用手册.md` | 数据管线的约定与操作 |
-| `docs/constraints/*.md` | **按主题的硬约束与踩坑（动手前必读对应那份，本文迁出的「勿动」细节）**：`ai-core.md`（模型路由 / 流式超时 / 判题分层 / 构建拷贝）、`家长端.md`、`专项子系统.md`（语文·英语）、`pc-app-学习管控.md`、`数学薄弱点图谱.md`、`数据管线.md` |
+| `docs/constraints/*.md` | **按主题的硬约束与踩坑（动手前必读对应那份，本文迁出的「勿动」细节）**：`ai-core.md`（模型路由 / 流式超时 / 判题分层 / 构建拷贝）、`家长端.md`、`专项子系统.md`（语文·英语）、`pc-app-学习管控.md`、`数学薄弱点图谱.md`、`数据管线.md`、`做题入口.md` |
 | `docs/superpowers/specs/` 与 `docs/superpowers/plans/` | 各子系统的设计 spec 与任务级实施计划 |
 
 ## 基本原则（硬规则，勿违背）
