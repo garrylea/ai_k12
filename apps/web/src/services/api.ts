@@ -402,11 +402,15 @@ export interface UploadedFileResult {
   taskId?: number;  // PDF extraction task ID returned by backend for PDF files
 }
 
-export async function uploadFile(file: File, signal?: AbortSignal): Promise<UploadedFileResult> {
+/** `source` 决定后端登记的来源（自由输入做题的题图传 `freeform`，其余默认 `auxiliary`）。 */
+export type UploadSource = 'auxiliary' | 'freeform';
+
+export async function uploadFile(file: File, signal?: AbortSignal, source?: UploadSource): Promise<UploadedFileResult> {
   const token = getAuthToken();
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${API_BASE}/files/upload`, {
+  const qs = source ? `?source=${source}` : '';
+  const res = await fetch(`${API_BASE}/files/upload${qs}`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     // NOTE: do NOT set Content-Type - browser sets multipart boundary
@@ -421,7 +425,7 @@ export async function uploadFile(file: File, signal?: AbortSignal): Promise<Uplo
 // --- Conversations (auxiliary) ---
 
 // 会话场景分型：与后端 ai_dialogues.scene 对应，用于按系统隔离对话历史。
-export type AiConversationScene = 'aux_qna' | 'aux_training' | 'mainline_question' | 'mainline_card';
+export type AiConversationScene = 'aux_qna' | 'aux_training' | 'aux_freeform' | 'mainline_question' | 'mainline_card';
 
 export interface ConversationItem {
   id: number;
@@ -655,6 +659,115 @@ export async function* streamExtraction(
   buffer += decoder.decode(); // flush decoder state
   if (buffer.trim().startsWith('data: ') && buffer.trim() !== 'data: [DONE]') {
     try { yield JSON.parse(buffer.trim().slice(6)); } catch { /* skip */ }
+  }
+}
+
+// --- Freeform（自由输入做题：题图/文字 → 候选题 → 判题） ---
+
+export interface FreeformCandidate {
+  id: string;
+  no: string;
+  content: string;
+  figureUrls: string[];
+  suggestedSubject: 'math' | 'physics' | 'chemistry' | null;
+  confidence: number;
+}
+
+export interface FreeformFigure {
+  url: string;
+  name: string;
+  page: number;
+}
+
+export interface FreeformRecognizeResult {
+  candidates: FreeformCandidate[];
+  figures: FreeformFigure[];
+}
+
+/** 识别请求：附件只传 `fileId`，后端收的是 `fileIds: string[]`（按数组顺序当题图顺序）。 */
+export function recognizeFreeform(body: {
+  text?: string;
+  attachments: AttachmentRequest[];
+}): Promise<FreeformRecognizeResult> {
+  return fetchApi<FreeformRecognizeResult>('/freeform/recognize', {
+    method: 'POST',
+    body: JSON.stringify({ text: body.text, fileIds: body.attachments.map((a) => a.fileId) }),
+  });
+}
+
+export type FreeformJudgeEvent =
+  | { type: 'start'; dialogueId: string; questionId: number | null }
+  | { type: 'reasoning'; delta: string }
+  | { type: 'content'; delta: string; replace?: boolean }
+  | {
+      type: 'result';
+      questionId: number;
+      totalScore: number;
+      maxScore: number;
+      verdict: 'correct' | 'partial' | 'incorrect';
+      errorBookId?: number;
+    }
+  | { type: 'error'; code: number; message: string; retryable: boolean }
+  | { type: 'done' };
+
+export interface FreeformJudgeBody {
+  dialogueId?: string;
+  subjectId: number;
+  maxScore: number;
+  questionId?: number;
+  questionContent: string;
+  questionImages?: AttachmentRequest[];
+  figureUrls?: string[];
+  answer: string;
+  draftFileId?: string;
+}
+
+/**
+ * 判题 SSE（`POST /api/freeform/judge/stream`）。
+ *
+ * 与 `streamTutorEvents` 同一套 buffer 解析：按 `\n` 切、最后一段留到下一轮；
+ * 流结束再 flush 解码器与残留行——最后一个事件若没有以 `\n\n` 结尾，不 flush 就会静默丢掉。
+ * 非 JSON 行（含 `data: [DONE]`）直接跳过。
+ */
+export async function* streamFreeformJudge(
+  body: FreeformJudgeBody,
+  signal?: AbortSignal,
+): AsyncIterable<FreeformJudgeEvent> {
+  const token = getAuthToken() ?? '';
+  const res = await fetch(`${API_BASE}/freeform/judge/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error('freeform judge stream unavailable');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data: ') || trimmed === 'data: [DONE]') continue;
+      try {
+        yield JSON.parse(trimmed.slice(6)) as FreeformJudgeEvent;
+      } catch {
+        // skip non-JSON lines
+      }
+    }
+  }
+  buffer += decoder.decode(); // flush decoder state
+  const tail = buffer.trim();
+  if (tail.startsWith('data: ') && tail !== 'data: [DONE]') {
+    try {
+      yield JSON.parse(tail.slice(6)) as FreeformJudgeEvent;
+    } catch {
+      // skip
+    }
   }
 }
 
