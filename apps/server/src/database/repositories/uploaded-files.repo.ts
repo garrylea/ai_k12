@@ -31,4 +31,13 @@ export class UploadedFilesRepository {
     );
     return (rows[0] as UploadedFileRow) ?? null;
   }
+
+  /** Ownership-scoped lookup by stored `/uploads/...` URL (judge resolves answer/embedded images). */
+  async findByUrlAndOwner(url: string, uploaderId: number): Promise<UploadedFileRow | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM uploaded_files WHERE url = ? AND uploader_id = ? LIMIT 1`,
+      [url, uploaderId],
+    );
+    return (rows[0] as UploadedFileRow) ?? null;
+  }
 }
