@@ -1,21 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/components/base';
-import { StudentAccountActions } from '@/components/business';
+import { StudentAccountActions, SubjectGlyph } from '@/components/business';
 import { TRAINING_SUBJECTS, type TrainingSubjectConfig } from '@/subjectConfig';
-
-const DumbbellIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <path d="M6.5 6.5v11M17.5 6.5v11M3 9v6M21 9v6M6.5 12h11" />
-  </svg>
-);
 
 export default function TrainingSubjectPage() {
   const navigate = useNavigate();
@@ -67,7 +53,7 @@ export default function TrainingSubjectPage() {
                   }}
                   aria-hidden="true"
                 >
-                  <DumbbellIcon />
+                  <SubjectGlyph name={subject.icon} />
                 </div>
                 <span className="text-3xl font-black tracking-tight text-[var(--text-primary)]">
                   {subject.name}
@@ -97,7 +83,7 @@ export default function TrainingSubjectPage() {
                   }}
                   aria-hidden="true"
                 >
-                  <DumbbellIcon />
+                  <SubjectGlyph name={subject.icon} />
                 </div>
                 <span className="text-3xl font-black tracking-tight text-slate-500">
                   {subject.name}

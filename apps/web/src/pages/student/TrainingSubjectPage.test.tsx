@@ -26,6 +26,16 @@ describe('TrainingSubjectPage', () => {
     }
   });
 
+  it('六张卡用六种不同的学科图标（不再共用一枚哑铃）', () => {
+    const { container } = renderPage();
+    const icons = Array.from(container.querySelectorAll('[data-subject-icon]')).map((el) =>
+      el.getAttribute('data-subject-icon'),
+    );
+
+    expect(icons).toHaveLength(6);
+    expect(new Set(icons).size).toBe(6);
+  });
+
   it('道法卡已开放，点击进入四卡页并带 subjectId=9', () => {
     const { router } = renderPage();
     expect(screen.queryByText('内容准备中')).toBeNull();

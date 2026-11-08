@@ -8,6 +8,22 @@
 
 ---
 
+## 2026-11-08 选科页六学科图标按学科区分
+
+**背景**（用户发现）：`/student/training` 六张卡全部是同一枚哑铃，学生只能靠文字分辨学科。查证该页自 2026-09 建立以来从未按学科区分图标；2026-10-31 六卡计划里也明确写了「本计划不新增图标」「DumbbellIcon 不变」——不是某次调整没生效。
+
+**改动**：
+- 新增 `apps/web/src/components/business/SubjectGlyph.tsx`：六学科线性 SVG（数学=直尺、语文=卷轴、英语=Aa、物理=原子、化学=烧瓶、道德与法治=天平），`currentColor` + 1.5 描边，带 `data-subject-icon` 供测试断言；**新增学科 = 配置加一行 + glyph 加一枚**，不在页面写 `if subject ===`。
+- `apps/web/src/subjectConfig.ts`：新增 `SubjectIconName` 与 `TrainingSubjectConfig.icon`（六个学科各填一个）。
+- `TrainingSubjectPage` 与主线 `SubjectSelectPage` 改为 `<SubjectGlyph name={subject.icon} />`，删掉各页内的 `DumbbellIcon` / `BookIcon`（两页原先都是多卡共用一枚）。
+- 测试：`SubjectGlyph.test.tsx` 锁「六图形互不相同」；两个选科页各断言卡片图标的 `data-subject-icon` 去重后等于卡片数。
+
+**文档同步**：`docs/UX-UI设计文档.md` §2.4 学科图标规则（原表述「学科选择/入口选择页使用统一书形图标，各学科图标仅星图/教材卡片使用」已改写为按学科区分）、P1.5 布局、§5.13 训练选科页卡片描述。
+
+**验证**：本次改动文件 eslint 0 问题；`npm run build` 通过（新产物 `index-BynjXQvL.js`，哑铃 path 仅剩入口选择页一处）。
+
+---
+
 ## 2026-11-07 语文标记识别改为「材料块级」
 
 **口径**（用户确认）：只有 `material_text` 非空且题干命中 `加点|画线|下划线|波浪线|着重号` 的材料题才做识别；用 MinerU JSON 的 `page_idx + bbox` 只裁材料块；注入只写 `material_text`，不再扫题干。

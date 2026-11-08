@@ -23,6 +23,15 @@ export type SubjectId =
   | typeof SUBJECT_CHEMISTRY
   | typeof SUBJECT_POLITICS;
 
+/** 学科图标的 key；图形实现见 `components/business/SubjectGlyph.tsx`。 */
+export type SubjectIconName =
+  | 'math'
+  | 'chinese'
+  | 'english'
+  | 'physics'
+  | 'chemistry'
+  | 'politics';
+
 export interface SubjectTypeOption {
   value: string;
   label: string;
@@ -32,6 +41,8 @@ export interface TrainingSubjectConfig {
   id: SubjectId;
   name: string;
   desc: string;
+  /** 选科卡片徽章里的学科图标（按学科区分，别再让六张卡共用一个图形）。 */
+  icon: SubjectIconName;
   /** 选科页是否可点；false 渲染灰卡 + badge。 */
   enabled: boolean;
   badge?: string;
@@ -81,32 +92,32 @@ const HUMANITIES_TYPE_OPTIONS: readonly SubjectTypeOption[] = [
 
 export const TRAINING_SUBJECTS: readonly TrainingSubjectConfig[] = [
   {
-    id: SUBJECT_MATH, name: '数学', desc: '考试 / 专项练习 / 错题练习',
+    id: SUBJECT_MATH, name: '数学', icon: 'math', desc: '考试 / 专项练习 / 错题练习',
     enabled: true, homePath: '/student/training/home',
     typeOptions: MATH_TYPE_OPTIONS, targetedTaskCode: 'math_targeted', isMathLike: true,
   },
   {
-    id: SUBJECT_CHINESE, name: '语文', desc: '真题考试 / 专项练习 / 古诗文专项',
+    id: SUBJECT_CHINESE, name: '语文', icon: 'chinese', desc: '真题考试 / 专项练习 / 古诗文专项',
     enabled: true, homePath: '/student/training/chinese/special',
     typeOptions: CN_TYPE_OPTIONS, targetedTaskCode: 'cn_targeted', isMathLike: false,
   },
   {
-    id: SUBJECT_ENGLISH, name: '英语', desc: '背单词',
+    id: SUBJECT_ENGLISH, name: '英语', icon: 'english', desc: '背单词',
     enabled: true, homePath: '/student/training/english/vocabulary',
     typeOptions: [], isMathLike: false,
   },
   {
-    id: SUBJECT_PHYSICS, name: '物理', desc: '考试 / 专项练习 / 错题练习',
+    id: SUBJECT_PHYSICS, name: '物理', icon: 'physics', desc: '考试 / 专项练习 / 错题练习',
     enabled: true, homePath: '/student/training/home?subjectId=4',
     typeOptions: PHYSICS_TYPE_OPTIONS, targetedTaskCode: 'physics_targeted', isMathLike: true,
   },
   {
-    id: SUBJECT_CHEMISTRY, name: '化学', desc: '考试 / 专项练习 / 错题练习',
+    id: SUBJECT_CHEMISTRY, name: '化学', icon: 'chemistry', desc: '考试 / 专项练习 / 错题练习',
     enabled: true, homePath: '/student/training/home?subjectId=5',
     typeOptions: HUMANITIES_TYPE_OPTIONS, targetedTaskCode: 'chemistry_targeted', isMathLike: true,
   },
   {
-    id: SUBJECT_POLITICS, name: '道德与法治', desc: '考试 / 专项练习 / 错题练习',
+    id: SUBJECT_POLITICS, name: '道德与法治', icon: 'politics', desc: '考试 / 专项练习 / 错题练习',
     enabled: true, homePath: '/student/training/home?subjectId=9',
     typeOptions: HUMANITIES_TYPE_OPTIONS, targetedTaskCode: 'politics_targeted', isMathLike: false,
   },

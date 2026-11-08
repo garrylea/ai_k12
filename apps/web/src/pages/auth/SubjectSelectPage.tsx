@@ -4,34 +4,22 @@ import { Subject } from '@/types';
 import { fetchSubjects } from '@/services/api';
 import { getAuthItem } from '@/services/authStorage';
 import { PageHeader } from '@/components/base';
-import { StudentAccountActions } from '@/components/business';
+import { StudentAccountActions, SubjectGlyph } from '@/components/business';
+import type { SubjectIconName } from '@/subjectConfig';
 
 interface SubjectConfig {
   key: Subject;
   name: string;
   available: boolean;
+  /** 学科图标；三科各不同，别再共用一枚书本。 */
+  icon: SubjectIconName;
 }
 
 const subjects: SubjectConfig[] = [
-  { key: 'chinese', name: '语文', available: false },
-  { key: 'math', name: '数学', available: true },
-  { key: 'english', name: '英语', available: false },
+  { key: 'chinese', name: '语文', available: false, icon: 'chinese' },
+  { key: 'math', name: '数学', available: true, icon: 'math' },
+  { key: 'english', name: '英语', available: false, icon: 'english' },
 ];
-
-const BookIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <path d="M10 2v8l3-3 3 3V2" />
-    <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
-  </svg>
-);
 
 export default function SubjectSelectPage() {
   const navigate = useNavigate();
@@ -103,7 +91,7 @@ export default function SubjectSelectPage() {
                   }}
                   aria-hidden="true"
                 >
-                  <BookIcon />
+                  <SubjectGlyph name={subject.icon} />
                 </div>
                 <span className="text-3xl font-black tracking-tight text-[var(--text-primary)]">
                   {subject.name}
@@ -127,7 +115,7 @@ export default function SubjectSelectPage() {
                   }}
                   aria-hidden="true"
                 >
-                  <BookIcon />
+                  <SubjectGlyph name={subject.icon} />
                 </div>
                 <span className="text-3xl font-black tracking-tight text-slate-500">
                   {subject.name}
