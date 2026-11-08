@@ -8,6 +8,7 @@ import type { FreeformCandidate, FreeformFigure } from '@/services/api';
  * - 切题把题干 / 配图 / 学科一起重置为该题的建议值；
  * - 确认时按「勾选结果」重整题干 Markdown：未勾选的图连 Markdown 一起删掉，
  *   勾选但题干里没有的图追加到末尾；figureUrls 按配图展示顺序返回；
+ *   该结果同时决定「开始作答」是否可点（空则禁用），避免按钮与提交内容错位；
  * - 学科按识别建议预选（math=1 / physics=4 / chemistry=5），满分默认 10、限 1–100。
  */
 
@@ -45,20 +46,14 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
     setSubjectId(subjectIdOf(c.suggestedSubject));
   };
 
+  // 提交内容与 disabled 判定必须同源：只看原始 content 会漏掉「唯一内容是未勾选的图」。
+  const out = buildContent(content, figures, checked);
+  const canConfirm =
+    Boolean(out) && Number.isFinite(maxScore) && maxScore >= 1 && maxScore <= 100;
+
   const confirm = () => {
-    let out = content;
-    for (const f of figures) {
-      if (checked.has(f.url)) {
-        if (!out.includes(f.url)) out += `\n\n![配图](${f.url})`;
-      } else {
-        out = out.replace(
-          new RegExp(`!\\[[^\\]]*\\]\\(${escapeRegExp(f.url)}\\)`, 'g'),
-          '',
-        );
-      }
-    }
     onConfirm({
-      content: out.trim(),
+      content: out,
       figureUrls: figures.filter((f) => checked.has(f.url)).map((f) => f.url),
       subjectId,
       maxScore,
@@ -74,7 +69,7 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
             key={c.id}
             className={`rounded-xl border p-3 cursor-pointer ${
               c.id === selectedId
-                ? 'border-[#FF6B00] bg-[#FFF0E5]'
+                ? 'border-[#FF6B00] bg-[var(--brand-100)]'
                 : 'border-[#E5E5E5]'
             }`}
           >
@@ -191,7 +186,7 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
         <button
           type="button"
           onClick={confirm}
-          disabled={!content.trim() || maxScore < 1 || maxScore > 100}
+          disabled={!canConfirm}
           className="h-10 px-5 rounded-lg bg-[#FF6B00] text-white text-sm disabled:opacity-50"
         >
           开始作答
@@ -205,6 +200,33 @@ function subjectIdOf(subject: FreeformCandidate['suggestedSubject'] | undefined)
   if (subject === 'physics') return 4;
   if (subject === 'chemistry') return 5;
   return 1;
+}
+
+/** 单张配图在题干里的 Markdown 写法；匹配与删除共用同一个形状，避免两处漂移。 */
+function imgRefRegExp(url: string): RegExp {
+  return new RegExp(`!\\[[^\\]]*\\]\\(${escapeRegExp(url)}\\)`, 'g');
+}
+
+function hasImgRef(text: string, url: string): boolean {
+  return imgRefRegExp(url).test(text);
+}
+
+/**
+ * 按勾选结果重整题干：未勾选的图连 Markdown 一起删掉，勾选但题干里没有的图追加到末尾。
+ *
+ * 返回值同时用于「开始作答」的 disabled 判定与提交内容 —— 两者若各算一遍，
+ * 就会出现「题干唯一内容是未勾选的图」时按钮可点、提交却是空串的错位。
+ */
+function buildContent(content: string, figures: FreeformFigure[], checked: Set<string>): string {
+  let out = content;
+  for (const f of figures) {
+    if (checked.has(f.url)) {
+      if (!hasImgRef(out, f.url)) out += `\n\n![配图](${f.url})`;
+    } else {
+      out = out.replace(imgRefRegExp(f.url), '');
+    }
+  }
+  return out.trim();
 }
 
 function stripMdImages(md: string): string {
