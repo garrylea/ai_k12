@@ -31,9 +31,32 @@ it('按顺序传文件、设置 token、不带 shell', async () => {
   expect(spawnMock).toHaveBeenCalledTimes(1);
   const [bin, args, opts] = spawnMock.mock.calls[0];
   expect(bin).toBe(process.env.MINERU_BIN ?? 'mineru-open-api');
-  expect(args).toEqual(expect.arrayContaining(['extract', '/tmp/page_01.jpg', '/tmp/page_02.jpg', '-o', '/tmp/out', '-f', 'md']));
+  // argv 契约钉死（顺序、形状、默认 --timeout=90），防止静默漂移
+  expect(args).toEqual([
+    'extract',
+    '/tmp/page_01.jpg',
+    '/tmp/page_02.jpg',
+    '-o',
+    '/tmp/out',
+    '-f',
+    'md',
+    '--timeout',
+    '90',
+  ]);
   expect(opts.shell).toBe(false);
   expect(opts.env.MINERU_TOKEN).toBe('sk-test');
+});
+
+it('MINERU_TIMEOUT_MS 按秒四舍五入传入 --timeout', async () => {
+  const child = fakeChild();
+  spawnMock.mockReturnValue(child);
+  process.env.MINERU_TOKEN = 'sk-test';
+  process.env.MINERU_TIMEOUT_MS = '45000';
+  const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out');
+  child.emit('close', 0);
+  await p;
+  const [, args] = spawnMock.mock.calls[0];
+  expect(args).toEqual(['extract', '/tmp/a.jpg', '-o', '/tmp/out', '-f', 'md', '--timeout', '45']);
 });
 
 it('非 0 退出抛 FreeformMineruError，且 stderr 不含 token', async () => {
@@ -153,5 +176,65 @@ describe('MineruLimiter', () => {
     const limiter = new MineruLimiter(1);
     await expect(limiter.run(async () => { throw new Error('boom'); })).rejects.toThrow('boom');
     await expect(limiter.run(async () => 'ok')).resolves.toBe('ok');
+  });
+
+  it('3 个任务、并发 2：名额交接期间也不会瞬时超卖', async () => {
+    const limiter = new MineruLimiter(2);
+    let running = 0;
+    let peak = 0;
+    let nextId = 0;
+    const started: number[] = [];
+    const gates: Array<() => void> = [];
+    const task = () => {
+      const id = (nextId += 1);
+      return limiter.run(async () => {
+        started.push(id);
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise<void>((r) => gates.push(r));
+        running -= 1;
+      });
+    };
+
+    const ps = [task(), task(), task()];
+    await vi.waitFor(() => expect(started).toEqual([1, 2]));
+
+    // 释放一个名额的同一 tick 里再提交一个：交接窗口内新任务不得看到「空位」
+    gates.shift()!();
+    ps.push(task());
+    await vi.waitFor(() => expect(started).toEqual([1, 2, 3]));
+
+    gates.shift()!();
+    await vi.waitFor(() => expect(started).toEqual([1, 2, 3, 4]));
+
+    while (gates.length > 0) gates.shift()!();
+    await Promise.all(ps);
+    expect(peak).toBe(2);
+  });
+
+  it('排队过之后名额仍可复用（交接不得重复计数）', async () => {
+    const limiter = new MineruLimiter(1);
+    // 走两次「排队 → 交接」路径；若交接时额外 +1，active 会泄漏并让后续调用永久排队
+    await Promise.all([1, 2, 3].map((i) => limiter.run(async () => i)));
+    for (let i = 0; i < 5; i += 1) {
+      await expect(limiter.run(async () => i)).resolves.toBe(i);
+    }
+  });
+
+  it('多任务反复交接：运行数始终不超过 max', async () => {
+    const limiter = new MineruLimiter(2);
+    let running = 0;
+    let peak = 0;
+    const tasks = Array.from({ length: 20 }, () =>
+      limiter.run(async () => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise<void>((r) => setTimeout(r, 0));
+        await Promise.resolve();
+        running -= 1;
+      }),
+    );
+    await Promise.all(tasks);
+    expect(peak).toBeLessThanOrEqual(2);
   });
 });
