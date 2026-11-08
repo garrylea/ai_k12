@@ -132,6 +132,14 @@ describe('TrainingService.getErrorBookEntries', () => {
     expect(r[1].options).toBeNull();
     expect(r[2].options).toBeNull();
   });
+
+  it('getErrorBookEntries 透传 source', async () => {
+    const deps = mk({ mainErrorRepo: { findErrorBookEntries: vi.fn().mockResolvedValue([
+      { id: 1, question_id: 2, questionText: '题', type: 'short_answer', level: 1, created_at: new Date(), kp_id: null, options: null, source: 'freeform' },
+    ]) } });
+    const r = await mkSvc(deps).getErrorBookEntries(1, 1, {});
+    expect(r[0].source).toBe('freeform');
+  });
 });
 
 describe('TrainingService.judgeTraining', () => {

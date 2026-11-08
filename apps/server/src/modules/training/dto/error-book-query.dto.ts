@@ -23,4 +23,6 @@ export interface ErrorBookEntryDto {
   kpIds: number[];
   /** 选择题选项（questions.options 解析后的 JSON 数组：字符串选项或 {label,text}），非选择题/解析失败为 null。 */
   options: unknown[] | null;
+  /** 错题来源（main_error_books.source，如 practice/freeform）：前端据此把 freeform 条目显示但不可勾选。 */
+  source: string | null;
 }

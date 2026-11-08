@@ -177,6 +177,7 @@ export class TrainingService {
         createdAt: new Date(row.created_at).toISOString(),
         kpIds: row.kp_id != null ? [row.kp_id] : [],
         options: parseOptions(row.options),
+        source: row.source ?? null,
       });
     }
     return [...byId.values()];
