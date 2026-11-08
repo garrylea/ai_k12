@@ -6,6 +6,10 @@ import type { Stroke, DraftImage } from './draft-store';
 /** 圆心标记点半径（CSS px）：与圆规参考层的圆心锚点同尺寸，保持「画的圆心」和「预览的圆心」观感一致 */
 const CENTER_DOT_R = 3;
 
+/** 快照墨色。白板重绘由调用方按主题设色；快照固定白底，故必须显式设回墨色 ——
+ *  否则 fillStyle 仍是铺底用的 '#fff'，单点笔迹与圆心点会被「白底画白点」吞掉（stroke 不受影响）。 */
+const INK = '#000';
+
 /**
  * 单条笔画平滑渲染（取代 perfect-freehand 填充轮廓画法）：
  * - 统一细线宽 + 圆头圆角（lineCap/lineJoin round），细且均匀；
@@ -70,20 +74,31 @@ export async function renderDraftSnapshot(opts: {
   maxEdge?: number; quality?: number;
 }): Promise<string | null> {
   if (opts.strokes.length === 0 && opts.images.length === 0) return null;
+  const width = opts.width;
+  const height = opts.height;
+  // 尺寸为 0（画板还没布局出来）时不产出 1×1 白图，直接视作无可导出内容
+  if (width <= 0 || height <= 0) return null;
   const maxEdge = opts.maxEdge ?? 1600;
-  const scale = Math.min(1, maxEdge / Math.max(opts.width, opts.height));
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(opts.width * scale));
-  canvas.height = Math.max(1, Math.round(opts.height * scale));
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = INK;
+  ctx.fillStyle = INK;
   ctx.scale(scale, scale);
   drawStrokes(ctx, opts.strokes);
   for (const img of opts.images) {
     const el = await loadImage(img.src);
     if (el) ctx.drawImage(el, img.x, img.y, img.w, img.h);
   }
-  return canvas.toDataURL('image/jpeg', opts.quality ?? 0.85);
+  try {
+    return canvas.toDataURL('image/jpeg', opts.quality ?? 0.85);
+  } catch {
+    // 贴图跨域且没带 CORS 头会把画布标脏，toDataURL 抛 SecurityError —— 视作导不出
+    return null;
+  }
 }

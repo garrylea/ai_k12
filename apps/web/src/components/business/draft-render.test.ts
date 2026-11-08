@@ -12,11 +12,14 @@ interface CtxRecord {
   ops: string[];
   calls: Array<{ op: string; args: unknown[] }>;
   fills: string[];
+  /** 每次 fill() 时的 fillStyle —— 用于钉住「填充用的不是铺底白色」 */
+  fillStylesAtFill: string[];
   lineWidths: number[];
 }
 
 function makeCtx(): { ctx: CanvasRenderingContext2D; rec: CtxRecord } {
-  const rec: CtxRecord = { ops: [], calls: [], fills: [], lineWidths: [] };
+  const rec: CtxRecord = { ops: [], calls: [], fills: [], fillStylesAtFill: [], lineWidths: [] };
+  let fillStyle = '#000';
   const push = (op: string) => (...args: unknown[]) => {
     rec.ops.push(op);
     rec.calls.push({ op, args });
@@ -28,7 +31,11 @@ function makeCtx(): { ctx: CanvasRenderingContext2D; rec: CtxRecord } {
     quadraticCurveTo: push('quad'),
     lineTo: push('line'),
     stroke: push('stroke'),
-    fill: push('fill'),
+    fill: (...args: unknown[]) => {
+      rec.ops.push('fill');
+      rec.calls.push({ op: 'fill', args });
+      rec.fillStylesAtFill.push(fillStyle);
+    },
     fillRect: push('fillRect'),
     drawImage: push('drawImage'),
     scale: push('scale'),
@@ -36,8 +43,8 @@ function makeCtx(): { ctx: CanvasRenderingContext2D; rec: CtxRecord } {
     lineJoin: 'miter',
     set lineWidth(v: number) { rec.lineWidths.push(v); },
     get lineWidth() { return rec.lineWidths[rec.lineWidths.length - 1] ?? 1; },
-    set fillStyle(v: string) { rec.fills.push(v); },
-    get fillStyle() { return rec.fills[rec.fills.length - 1] ?? '#000'; },
+    set fillStyle(v: string) { fillStyle = v; rec.fills.push(v); },
+    get fillStyle() { return fillStyle; },
     strokeStyle: '',
   } as unknown as CanvasRenderingContext2D;
   return { ctx, rec };
@@ -154,8 +161,51 @@ describe('renderDraftSnapshot', () => {
     expect(rec.calls[0].args).toEqual([0, 0, 400, 300]);
     expect(rec.calls[1].args).toEqual([1, 1]);
     expect(rec.fills[0]).toBe('#fff');
+    // 铺底之后画笔画必须换回墨色，否则单点填充就是白点（白底上看不见）
+    expect(rec.fillStylesAtFill).toEqual(['#000']);
     expect(dataUrls).toEqual([{ type: 'image/jpeg', quality: 0.85 }]);
     expect(sizes[0]).toEqual({ w: 400, h: 300 });
+  });
+
+  it('单点笔迹在白底之上用墨色填充', async () => {
+    await renderDraftSnapshot({
+      strokes: [{ points: [{ x: 5, y: 6, pressure: 1 }], size: 10 }],
+      images: [], width: 100, height: 100,
+    });
+    const fillIdx = rec.ops.indexOf('fill');
+    expect(fillIdx).toBeGreaterThan(rec.ops.indexOf('fillRect'));
+    expect(rec.fillStylesAtFill).toEqual(['#000']);
+  });
+
+  it('正圆的圆心点同样用墨色填充（不是白底残留）', async () => {
+    await renderDraftSnapshot({
+      strokes: [{
+        points: [{ x: 0, y: 0, pressure: 1 }, { x: 10, y: 0, pressure: 1 }],
+        size: 2,
+        center: { x: 5, y: 5, pressure: 0.5 },
+      }],
+      images: [], width: 100, height: 100,
+    });
+    // 唯一一次 fill 是圆心点（轮廓走 stroke）
+    expect(rec.fillStylesAtFill).toEqual(['#000']);
+  });
+
+  it('画板尺寸为 0 时返回 null（不产出 1×1 白图）', async () => {
+    const strokes = [{ points: [{ x: 0, y: 0, pressure: 1 }], size: 10 }];
+    expect(await renderDraftSnapshot({ strokes, images: [], width: 0, height: 300 })).toBeNull();
+    expect(await renderDraftSnapshot({ strokes, images: [], width: 400, height: 0 })).toBeNull();
+    expect(dataUrls).toEqual([]);
+  });
+
+  it('画布被跨域贴图污染时返回 null 而不是抛错', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(() => {
+      throw new DOMException('tainted', 'SecurityError');
+    });
+    const out = await renderDraftSnapshot({
+      strokes: [{ points: [{ x: 0, y: 0, pressure: 1 }], size: 10 }],
+      images: [], width: 100, height: 100,
+    });
+    expect(out).toBeNull();
   });
 
   it('长边超过 maxEdge 时等比缩小（默认 1600）', async () => {

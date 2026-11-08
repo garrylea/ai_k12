@@ -1409,18 +1409,22 @@ export function DraftWhiteboard({
       // boardRef 只在 scroll-y 模式挂载（超一屏的定高画板）；fit 模式下画板就是容器本身
       const board = boardRef.current ?? wrapRef.current;
       if (!board) return null;
+      // 尺寸只读一次：等待图片解码期间画板可能被滚动/改高度，重试时沿用同一坐标系，
+      // 否则首张与重试张的 scale 不同、贴图位置会漂
+      const width = board.clientWidth;
+      const height = board.clientHeight;
       const first = await renderDraftSnapshot({
         strokes: strokesRef.current,
         images: imagesRef.current,
-        width: board.clientWidth,
-        height: board.clientHeight,
+        width,
+        height,
       });
       if (!first) return null;
       // data URL 字符串长度约等于字节数；超过 5MB 降质量重试一次
       if (first.length > 5 * 1024 * 1024) {
         return renderDraftSnapshot({
           strokes: strokesRef.current, images: imagesRef.current,
-          width: board.clientWidth, height: board.clientHeight, quality: 0.7,
+          width, height, quality: 0.7,
         });
       }
       return first;

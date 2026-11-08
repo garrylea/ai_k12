@@ -578,7 +578,12 @@ describe('草稿白板：导出快照', () => {
     const snapshotRef: MutableRefObject<(() => Promise<string | null>) | null> = { current: null };
     const view = render(<DraftWhiteboard questionId="q1" snapshotRef={snapshotRef} />);
     const canvas = view.container.querySelector('canvas')!;
-    return { snapshotRef, canvas, ...view };
+    // jsdom 不做布局 → clientWidth/Height 恒为 0，而快照把尺寸 0 视为「无可导出内容」；
+    // 这里给 fit 模式的画板（canvas 的父容器）一个真实尺寸，才能验到导出链路
+    const board = canvas.parentElement!;
+    Object.defineProperty(board, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(board, 'clientHeight', { configurable: true, value: 300 });
+    return { snapshotRef, canvas, board, ...view };
   }
 
   it('挂载后可用：空板返回 null，有笔迹导出 JPEG 0.85，卸载清空 ref', async () => {
@@ -604,6 +609,25 @@ describe('草稿白板：导出快照', () => {
     penLine(canvas, 100);
     expect(await snapshotRef.current!()).toBe('data:image/jpeg;base64,SMALL');
     expect(calls.map((c) => c.quality)).toEqual([0.85, 0.7]);
+  });
+
+  it('重试沿用首次读到的画板尺寸（不在 await 之后重读）', async () => {
+    const sizes: Array<{ w: number; h: number }> = [];
+    let n = 0;
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(function (this: HTMLCanvasElement) {
+      sizes.push({ w: this.width, h: this.height });
+      if (n++ === 0) {
+        // 等图片解码期间画板被改宽：重试必须沿用同一坐标系（400×300），否则贴图位置会漂
+        Object.defineProperty(board, 'clientWidth', { configurable: true, value: 800 });
+        return 'x'.repeat(5 * 1024 * 1024 + 1);
+      }
+      return 'data:image/jpeg;base64,SMALL';
+    });
+    const { snapshotRef, canvas, board } = setupSnapshot();
+
+    penLine(canvas, 100);
+    await snapshotRef.current!();
+    expect(sizes).toEqual([{ w: 400, h: 300 }, { w: 400, h: 300 }]);
   });
 });
 
