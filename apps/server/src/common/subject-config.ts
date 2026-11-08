@@ -84,3 +84,11 @@ const ROUTE_SUBJECT: Readonly<Record<number, RouteSubject>> = {
 export function subjectCodeOf(subjectId: number | null | undefined): RouteSubject {
   return ROUTE_SUBJECT[Number(subjectId)] ?? 'math';
 }
+
+/** 支持「同类型练习」的学科：数学、物理、语文（语文仅基础运用/古诗文类知识点）。 */
+export const SIMILAR_PRACTICE_SUBJECTS: ReadonlySet<number> = new Set([
+  SUBJECT_MATH, SUBJECT_CHINESE, SUBJECT_PHYSICS,
+]);
+
+/** 语文同类型练习开放的顶层知识点 code：积累与运用 / 古诗文。 */
+export const CN_SIMILAR_KP_ROOTS: readonly string[] = ['C01', 'C02'];

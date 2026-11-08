@@ -207,6 +207,7 @@ export class QuestionsRepository {
     difficulties: number[],
     count: number,
     excludeQuestionIds: number[],
+    opts?: { requireAllKpRootCodes?: string[] },
   ): Promise<QuestionRow[]> {
     // 空难度数组会生成 `q.difficulty IN ()` → MySQL ER_PARSE_ERROR（500）。调用方理论上
     // 已经收敛过，这里再兜一层：无档位可抽时直接返回空，不发 SQL。
@@ -215,6 +216,27 @@ export class QuestionsRepository {
     const exclusion = excludeQuestionIds.length > 0
       ? ` AND q.id NOT IN (${excludeQuestionIds.map(() => '?').join(',')})`
       : '';
+    // 语文「同类型」：候选题的所有知识点都必须落在指定顶层 code（C01/C02）下，
+    // 否则抽到的可能是同考点的现代文阅读题（2026-11-08）。
+    const roots = opts?.requireAllKpRootCodes ?? [];
+    const rootPlaceholders = roots.map(() => '?').join(',');
+    const rootFilter = roots.length > 0
+      ? ` AND EXISTS (
+            SELECT 1 FROM question_knowledge_points qkp2
+            JOIN knowledge_points kp2 ON kp2.id = qkp2.knowledge_point_id
+            LEFT JOIN knowledge_points pk2 ON pk2.id = kp2.parent_kp_id
+            WHERE qkp2.question_id = q.id
+              AND COALESCE(pk2.code, kp2.code) IN (${rootPlaceholders})
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM question_knowledge_points qkp3
+            JOIN knowledge_points kp3 ON kp3.id = qkp3.knowledge_point_id
+            LEFT JOIN knowledge_points pk3 ON pk3.id = kp3.parent_kp_id
+            WHERE qkp3.question_id = q.id
+              AND (COALESCE(pk3.code, kp3.code) IS NULL
+                   OR COALESCE(pk3.code, kp3.code) NOT IN (${rootPlaceholders}))
+          )`
+      : '';
     const sql = `SELECT q.* FROM questions q
       JOIN question_knowledge_points qkp ON qkp.question_id = q.id
       LEFT JOIN student_hidden_questions shq
@@ -222,12 +244,13 @@ export class QuestionsRepository {
       WHERE q.subject_id = ? AND qkp.knowledge_point_id = ? AND q.is_active = 1
         AND q.type = ? AND q.difficulty IN (${diffFilter})
         AND q.answer <> ''
-        AND shq.id IS NULL${exclusion}
+        AND shq.id IS NULL${rootFilter}${exclusion}
       ORDER BY RAND() LIMIT ?`;
     // pool.query（非 execute）：LIMIT 占位符会被 MySQL prepared statement 拒绝
     //（见 findRandomByKpAndType 注释，联调实测过的问题）。
     const [rows] = await this.pool.query<RowDataPacket[]>(sql, [
-      studentId, subjectId, kpId, type, ...difficulties, ...excludeQuestionIds, count,
+      studentId, subjectId, kpId, type, ...difficulties,
+      ...roots, ...roots, ...excludeQuestionIds, count,
     ]);
     return rows as QuestionRow[];
   }
@@ -272,6 +295,37 @@ export class QuestionsRepository {
     for (const r of rows) {
       const qid = Number(r.question_id);
       if (!map.has(qid)) map.set(qid, Number(r.knowledge_point_id));
+    }
+    return map;
+  }
+
+  /**
+   * question_id -> 该题挂的全部知识点（id + 所属顶层 code）。
+   * 语文「同类型练习」按顶层 code 判定可练范围（C01/C02 开放）；
+   * 详情页与抽题共用同一口径。
+   */
+  async findKpRefsByQuestionIds(
+    questionIds: number[],
+  ): Promise<Map<number, Array<{ id: number; rootCode: string | null }>>> {
+    if (questionIds.length === 0) return new Map();
+    const placeholders = questionIds.map(() => '?').join(',');
+    const [rows] = await this.pool.query<
+      (RowDataPacket & { question_id: number; id: number; root_code: string | null })[]
+    >(
+      `SELECT qkp.question_id, kp.id, COALESCE(pk.code, kp.code) AS root_code
+       FROM question_knowledge_points qkp
+       JOIN knowledge_points kp ON kp.id = qkp.knowledge_point_id
+       LEFT JOIN knowledge_points pk ON pk.id = kp.parent_kp_id
+       WHERE qkp.question_id IN (${placeholders})
+       ORDER BY qkp.question_id, kp.id`,
+      questionIds,
+    );
+    const map = new Map<number, Array<{ id: number; rootCode: string | null }>>();
+    for (const r of rows) {
+      const qid = Number(r.question_id);
+      const list = map.get(qid) ?? [];
+      list.push({ id: Number(r.id), rootCode: r.root_code ?? null });
+      map.set(qid, list);
     }
     return map;
   }
