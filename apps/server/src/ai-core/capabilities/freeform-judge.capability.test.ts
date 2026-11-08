@@ -24,6 +24,10 @@ describe('FreeformJudgeCapability', () => {
 
     expect(events[0]).toEqual({ type: 'reasoning', delta: '先看题' });
     expect(events[1]).toEqual({ type: 'content', delta: '## 判题结果\n得分 7/10' });
+    // spec 固定场景与学科：scene 改名会静默落到默认路由（带 deepseek fallback）。
+    expect(router.route).toHaveBeenCalledWith(
+      expect.objectContaining({ scene: 'freeform_judge', subject: 'math' }),
+    );
     const req = client.streamChat.mock.calls[0][0];
     expect(req.model.modelId).toBe('qwen3.8-max');
     expect(JSON.stringify(req.messages)).toContain('x+1=2');
@@ -34,6 +38,9 @@ describe('FreeformJudgeCapability', () => {
     const user = messages.find(m => m.role === 'user')!.content;
     expect(system).toContain('满分固定为 10');
     expect(system).toContain('"verdict"');
+    // 前端用 KaTeX：只认 $...$ / $$...$$，且示例必须包在 ```json 围栏里。
+    expect(system).toContain('$...$');
+    expect(system).toContain('尾部 JSON：\n```json');
     expect(user).toContain('满分：10');
     expect(user).toContain('x=1');
   });
@@ -50,6 +57,12 @@ describe('FreeformJudgeCapability', () => {
     const out = await new FreeformJudgeCapability({ modelClient: client, modelRouter: judgeRoute() })
       .extractStructured({ report: '报告', questionContent: '题', studentAnswer: '答', maxScore: 10 });
     expect((out as any).totalScore).toBe(7);
+
+    // spec 固定的调用参数 + 无 fallback 契约（必须落在 qwen3.8-max 上）。
+    expect(client.chat).toHaveBeenCalledWith(expect.objectContaining({
+      responseFormat: 'json_object', thinking: false, timeout: 45000,
+    }));
+    expect(client.chat.mock.calls[0][0].model.modelId).toBe('qwen3.8-max');
   });
 
   it('图片按 label 逐个追加到最后一条 user 消息（text + image_url 部件）', async () => {
@@ -102,5 +115,17 @@ describe('FreeformJudgeCapability', () => {
     const out = await new FreeformJudgeCapability({ modelClient: client, modelRouter: judgeRoute() })
       .extractStructured({ report: '报告', questionContent: '题', studentAnswer: '答', maxScore: 10 });
     expect(out).toBeNull();
+  });
+
+  it('extractStructured 遇到非对象 JSON（字符串 / 数组）返回 null', async () => {
+    const client = {
+      chat: vi.fn()
+        .mockResolvedValueOnce({ content: '"ok"' })
+        .mockResolvedValueOnce({ content: '[]' }),
+    } as any;
+    const cap = new FreeformJudgeCapability({ modelClient: client, modelRouter: judgeRoute() });
+    const req = { report: '报告', questionContent: '题', studentAnswer: '答', maxScore: 10 };
+    expect(await cap.extractStructured(req)).toBeNull();
+    expect(await cap.extractStructured(req)).toBeNull();
   });
 });

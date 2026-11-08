@@ -105,7 +105,10 @@ export class FreeformJudgeCapability {
         thinking: false,
         timeout: 45000,
       });
-      return JSON.parse(res.content) as unknown;
+      // 只认 JSON 对象：字符串 / 数组 / null 都不算提取成功（调用方按 null 降级）。
+      const parsed = JSON.parse(res.content) as unknown;
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      return parsed;
     } catch {
       return null;
     }
