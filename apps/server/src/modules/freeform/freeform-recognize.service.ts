@@ -1,4 +1,5 @@
-import { BadRequestException, HttpException, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
+import type { Dirent } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -7,7 +8,7 @@ import { UploadedFilesRepository } from '../../database/repositories/uploaded-fi
 import type { UploadedFileRow } from '../../database/repositories/types.js';
 import { FreeformSplitCapability } from '../../ai-core/capabilities/freeform-split.capability.js';
 import { MineruRunner, mineruLimiter } from './mineru-runner.js';
-import { rewriteFigureRefs, figureRefs } from './freeform-figures.js';
+import { rewriteFigureRefs } from './freeform-figures.js';
 
 export interface FreeformRecognizeResult {
   candidates: Array<{
@@ -24,8 +25,13 @@ export interface FreeformRecognizeResult {
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp']);
-/** 切题模型上下文上限：超长 Markdown 截断，避免单次请求堆爆 token。 */
+/**
+ * 切题模型上下文上限：超过就不是「截断后还能切对」的量级了。
+ * 超长时不截断，改走 `preferFallback`（千问）送全文——截断会静默丢掉尾部题目。
+ */
 const MAX_MARKDOWN = 24000;
+
+const MINERU_FAILED = { code: 5501, message: '图片解析失败，请重试或手动输入题目' } as const;
 
 /**
  * 自由输入做题第一步：题图/文字 → MinerU Markdown → 候选题。
@@ -37,6 +43,7 @@ const MAX_MARKDOWN = 24000;
  */
 @Injectable()
 export class FreeformRecognizeService {
+  private readonly logger = new Logger(FreeformRecognizeService.name);
   private readonly uploadDir = process.env.UPLOAD_DIR ?? './uploads';
   private readonly tmpDir = os.tmpdir();
 
@@ -114,57 +121,43 @@ export class FreeformRecognizeService {
       try {
         await mineruLimiter.run(() => this.mineru.run(pages, out));
       } catch {
-        throw new HttpException(
-          { code: 5501, message: '图片解析失败，请重试或手动输入题目' },
-          502,
-        );
+        throw new HttpException(MINERU_FAILED, 502);
       }
 
-      const entries = (await fs.readdir(out)).filter((f: string) => f.endsWith('.md')).sort();
-      if (entries.length === 0) {
-        throw new HttpException(
-          { code: 5501, message: '图片解析失败，请重试或手动输入题目' },
-          502,
-        );
-      }
+      // 每张输入图都必须有对应的 Markdown：少一页就是解析残缺，不能拿半套结果去切题。
+      const pageMarkdowns = await this.findPageMarkdowns(out, rows.length);
 
-      // 配图：复制到公开目录 + 登记 uploaded_files（登记失败不阻断识别，图仍可访问）。
-      const imgDir = path.join(out, 'images');
-      let imgNames: string[] = [];
-      try {
-        imgNames = await fs.readdir(imgDir);
-      } catch {
-        /* MinerU 可能没有输出配图 */
-      }
-      for (const name of imgNames) {
-        const dst = path.join(destDir, name);
-        await fs.copyFile(path.join(imgDir, name), dst);
-        const st = await fs.stat(dst).catch(() => ({ size: 0 }));
-        await this.files
-          .create({
-            uploader_id: studentId,
-            uploader_type: 'student',
-            url: `${publicBase}/${path.posix.basename(name)}`,
-            mime_type: 'image/jpeg',
-            size_bytes: st.size,
-            source: 'freeform_figure',
-          })
-          .catch(() => {});
-      }
-
-      // 逐页拼接，页间留注释锚点，切题模型据此判断跨页题。
+      // 逐页落配图 + 重写引用，页间留注释锚点（切题模型据此判断跨页题）。
+      const figures: Array<{ url: string; name: string; page: number }> = [];
+      // 扁平输出是共享 `out/images/`：同一张图被多页引用时只落一份，别按页重复复制。
+      const copiedSources = new Map<string, string>();
       const parts: string[] = [];
-      for (let i = 0; i < entries.length; i++) {
-        const md = await fs.readFile(path.join(out, entries[i]), 'utf-8');
-        const rewritten = rewriteFigureRefs(md, publicBase);
-        parts.push(`<!-- page ${i + 1} -->\n${rewritten.markdown}`);
+      for (let i = 0; i < pageMarkdowns.length; i++) {
+        const pageNo = i + 1;
+        const nameMap = await this.copyPageFigures(
+          pageMarkdowns[i],
+          pageNo,
+          destDir,
+          publicBase,
+          studentId,
+          figures,
+          copiedSources,
+        );
+        const md = await fs.readFile(pageMarkdowns[i], 'utf-8');
+        // 多页各自的 images/ 里可能同名，落盘统一加 fig-<page>- 前缀，引用同步改写。
+        const rewritten = rewriteFigureRefs(
+          md,
+          publicBase,
+          (name) => nameMap.get(name) ?? `fig-${pageNo}-${name}`,
+        );
+        parts.push(`<!-- page ${pageNo} -->\n${rewritten.markdown}`);
       }
       const markdown = parts.join('\n\n');
-      const splitInput = markdown.length > MAX_MARKDOWN ? markdown.slice(0, MAX_MARKDOWN) : markdown;
+      const preferFallback = markdown.length > MAX_MARKDOWN;
 
       let candidates: Awaited<ReturnType<FreeformSplitCapability['split']>> = [];
       try {
-        candidates = await this.split.split({ markdown: splitInput, textHint: text });
+        candidates = await this.split.split({ markdown, textHint: text, preferFallback });
       } catch {
         throw new HttpException(
           { code: 5502, message: '题目切分失败，请重试或手动输入题目' },
@@ -173,34 +166,127 @@ export class FreeformRecognizeService {
       }
       if (candidates.length === 0) return { candidates: [], figures: [] };
 
-      const allFigures = new Set<string>();
-      for (const name of imgNames) allFigures.add(`${publicBase}/${path.posix.basename(name)}`);
-
+      // figureUrls 必须是本次真实落盘的子集（模型可能幻觉出不存在的图）。
+      const allFigures = new Set(figures.map((f) => f.url));
       return {
-        candidates: candidates.map((c, i) => {
-          const refs = c.figureRefs
+        candidates: candidates.map((c, i) => ({
+          id: `c${i + 1}`,
+          no: c.no || String(i + 1),
+          content: c.content,
+          figureUrls: c.figureRefs
             .map((r) => `${publicBase}/${path.posix.basename(r)}`)
-            .filter((u) => allFigures.has(u));
-          return {
-            id: `c${i + 1}`,
-            no: c.no || String(i + 1),
-            content: c.content,
-            // figureRefs 只留真实落盘的图；缺失时回退到正文里的图片引用。
-            figureUrls: refs.length
-              ? refs
-              : figureRefs(c.content).map((r) => `${publicBase}/${path.posix.basename(r)}`),
-            suggestedSubject: c.suggestedSubject,
-            confidence: c.confidence,
-          };
-        }),
-        figures: [...allFigures].map((url) => ({
-          url,
-          name: path.posix.basename(url),
-          page: 1,
+            .filter((u) => allFigures.has(u)),
+          suggestedSubject: c.suggestedSubject,
+          confidence: c.confidence,
         })),
+        figures,
       };
     } finally {
       await fs.rm(work, { recursive: true, force: true }).catch(() => {});
     }
+  }
+
+  /**
+   * 按输入页数找齐 Markdown：优先 `out/<stem>.md`（MinerU 扁平输出），
+   * 找不到再递归扫 `out/` 取文件名以 stem 开头的第一个（新版本按页建子目录）。
+   * 少一页就抛 5501——不能让缺页的结果静默返回。
+   */
+  private async findPageMarkdowns(outDir: string, expected: number): Promise<string[]> {
+    const all = await this.collectMarkdowns(outDir);
+    const picked: string[] = [];
+    for (let i = 0; i < expected; i++) {
+      const stem = `page_${String(i + 1).padStart(2, '0')}`;
+      const direct = path.join(outDir, `${stem}.md`);
+      const found = all.includes(direct)
+        ? direct
+        : all.find((p) => path.basename(p).startsWith(stem));
+      if (!found) throw new HttpException(MINERU_FAILED, 502);
+      picked.push(found);
+    }
+    return picked;
+  }
+
+  /** 递归收集 `out/` 下所有 `.md`（相对路径排序保证「第一个匹配」稳定）。 */
+  private async collectMarkdowns(root: string): Promise<string[]> {
+    const found: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      let entries: Dirent[] = [];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) await walk(full);
+        else if (entry.name.endsWith('.md')) found.push(full);
+      }
+    };
+    await walk(root);
+    return found.sort();
+  }
+
+  /**
+   * 把某一页 Markdown 的同级 `images/` 复制到公开目录并登记。
+   *
+   * 文件名加页前缀，多页同名图不会互相覆盖；`copiedSources` 以源路径去重，
+   * 扁平输出的共享 `images/` 不会被每页重复复制。
+   * 登记失败（含取不到大小）不阻断识别：图已经可访问，缺一行 uploaded_files 比丢掉整道题轻。
+   *
+   * @returns 该页 Markdown 里原始文件名 → 落盘文件名
+   */
+  private async copyPageFigures(
+    markdownPath: string,
+    pageNo: number,
+    destDir: string,
+    publicBase: string,
+    studentId: number,
+    figures: Array<{ url: string; name: string; page: number }>,
+    copiedSources: Map<string, string>,
+  ): Promise<Map<string, string>> {
+    const imgDir = path.join(path.dirname(markdownPath), 'images');
+    let names: string[] = [];
+    try {
+      names = (await fs.readdir(imgDir)).sort();
+    } catch {
+      return new Map(); /* MinerU 可能没有输出配图 */
+    }
+    const byName = new Map<string, string>();
+    for (const raw of names) {
+      const name = path.posix.basename(raw);
+      const src = path.join(imgDir, raw);
+      let copyName = copiedSources.get(src);
+      if (!copyName) {
+        copyName = `fig-${pageNo}-${name}`;
+        copiedSources.set(src, copyName);
+        const dst = path.join(destDir, copyName);
+        await fs.copyFile(src, dst);
+        const url = `${publicBase}/${copyName}`;
+        figures.push({ url, name: copyName, page: pageNo });
+
+        let size: number;
+        try {
+          size = (await fs.stat(dst)).size;
+        } catch {
+          // 量不到大小就写 NULL 语义行不通（size_bytes 非空），宁可不登记也不写 0。
+          this.logger.warn(`配图落盘后取不到大小，跳过 uploaded_files 登记：${copyName}`);
+          byName.set(name, copyName);
+          continue;
+        }
+        // 登记失败不阻断识别：图仍可通过 url 访问。
+        await this.files
+          .create({
+            uploader_id: studentId,
+            uploader_type: 'student',
+            url,
+            mime_type: 'image/jpeg',
+            size_bytes: size,
+            source: 'freeform_figure',
+          })
+          .catch(() => {});
+      }
+      byName.set(name, copyName);
+    }
+    return byName;
   }
 }

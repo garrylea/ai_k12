@@ -8,14 +8,19 @@ const IMG_RE = /!\[([^\]]*)\]\((images\/[^)\s]+)\)/g;
  *
  * 只重写 `images/` 前缀：外链（`https://…`）与其它相对路径保持原样，
  * 避免把用户原文里的图片地址误指向本服务的静态目录。
+ *
+ * `mapName` 用于落盘时的重命名（多页各自的 `images/` 会有同名文件，
+ * 服务端加 `fig-<page>-` 前缀后，Markdown 引用必须指向重命名后的文件）。
+ * 默认原样保留文件名。
  */
 export function rewriteFigureRefs(
   markdown: string,
   publicBase: string,
+  mapName: (name: string) => string = (name) => name,
 ): { markdown: string; urls: string[] } {
   const urls: string[] = [];
   const out = markdown.replace(IMG_RE, (_m, alt: string, rel: string) => {
-    const name = path.posix.basename(rel);
+    const name = mapName(path.posix.basename(rel));
     const url = `${publicBase}/${name}`;
     urls.push(url);
     return `![${alt}](${url})`;

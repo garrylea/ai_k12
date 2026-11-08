@@ -22,6 +22,16 @@ describe('rewriteFigureRefs', () => {
     expect(r.markdown).toBe(md);
     expect(r.urls).toEqual([]);
   });
+
+  it('mapName 重命名（多页同名图加页前缀）后改写，urls 用新名字', () => {
+    const r = rewriteFigureRefs(
+      '![a](images/a.jpg)',
+      '/uploads/freeform/j1',
+      (name) => `fig-2-${name}`,
+    );
+    expect(r.markdown).toBe('![a](/uploads/freeform/j1/fig-2-a.jpg)');
+    expect(r.urls).toEqual(['/uploads/freeform/j1/fig-2-a.jpg']);
+  });
 });
 
 describe('figureRefs', () => {

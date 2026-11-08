@@ -98,6 +98,24 @@ describe('FreeformSplitCapability', () => {
     expect(out[0].figureRefs).toEqual([]);
   });
 
+  it('preferFallback: 跳过本地，只调千问且全文进提示词（不截断）', async () => {
+    const route = freshRouter();
+    const client = clientReturning(JSON.stringify({ questions: [{ content: '题' }] }));
+    const cap = new FreeformSplitCapability({ modelRouter: route, modelClient: client });
+    const markdown = `${'题'.repeat(25000)}尾部标记`;
+
+    await cap.split({ markdown, preferFallback: true });
+
+    expect(client.chat).toHaveBeenCalledTimes(1);
+    expect(client.chat.mock.calls[0][0].model).toEqual({
+      modelId: 'qwen3.8-max',
+      modelKey: 'qwen3.8-max',
+    });
+    const user = userMessageOf(client.chat);
+    expect(user).toContain('尾部标记');
+    expect(user.length).toBeGreaterThan(25000);
+  });
+
   it('注入的 Markdown 原样进入 user message（含 ## 标题与图片引用）', async () => {
     const client = clientReturning(JSON.stringify({ questions: [{ content: '题' }] }));
     const cap = new FreeformSplitCapability({ modelRouter: freshRouter(), modelClient: client });

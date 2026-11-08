@@ -44,6 +44,11 @@ export interface FreeformSplitRequest {
   markdown: string;
   textHint?: string;
   subjectHint?: 'math' | 'physics' | 'chemistry';
+  /**
+   * 跳过 primary（本地小模型），直接走 fallback（千问）。
+   * 供超长 Markdown 使用：本地模型上下文不够，截断又会丢掉尾部题目。
+   */
+  preferFallback?: boolean;
 }
 export interface FreeformSplitDeps {
   modelClient?: ModelClient;
@@ -54,8 +59,9 @@ export interface FreeformSplitDeps {
  * 自由输入做题入口的第一步：MinerU Markdown → 候选题列表。
  *
  * 场景 `freeform_split`：primary=local（Qwen3.8-27B），fallback=qwen3.8-max。
- * 本地 JSON 坏 / 抛错都回退千问；两路都失败才抛 `freeform split failed`，
- * 由调用方决定降级（不在这里静默返回空列表——空列表会被误当成「图里没有题」）。
+ * 本地 JSON 坏 / 抛错都回退千问；`preferFallback` 时跳过本地、只用千问（超长 Markdown）。
+ * 两路都失败才抛 `freeform split failed`，由调用方决定降级（不在这里静默返回空列表——
+ * 空列表会被误当成「图里没有题」）。
  *
  * 切题**不是解题**：提示词明确禁止给答案，能力层也不做任何判题/补全。
  */
@@ -88,7 +94,13 @@ export class FreeformSplitCapability {
       },
     });
     const route = this.router.route({ scene: 'freeform_split', subject });
-    const models = [route.primary, route.fallback].filter(Boolean) as typeof route.primary[];
+    const models = (
+      req.preferFallback ? [route.fallback] : [route.primary, route.fallback]
+    ).filter(Boolean) as typeof route.primary[];
+    if (models.length === 0) {
+      // 只有 preferFallback 且场景没配 fallback 时才会走到这里。
+      throw new Error('freeform split failed: 没有可用的切题模型');
+    }
     let lastErr: unknown;
     for (const model of models) {
       try {
