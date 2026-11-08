@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import EntrySelectPage from './EntrySelectPage';
 import { getMyPoints, type MyPoints } from '@/services/api';
@@ -50,6 +50,22 @@ beforeEach(() => {
   getMyPointsMock.mockReset();
   getMyPointsMock.mockResolvedValue(POINTS);
   localStorage.setItem('username', '小明');
+});
+
+describe('EntrySelectPage 做题入口', () => {
+  it('第 4 卡「做题」跳 /student/solve', () => {
+    render(
+      <MemoryRouter initialEntries={['/student/entry']}>
+        <Routes>
+          <Route path="/student/entry" element={<EntrySelectPage />} />
+          <Route path="/student/solve" element={<div>solve-page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '进入做题' }));
+    expect(screen.getByText('solve-page')).toBeInTheDocument();
+  });
 });
 
 describe('EntrySelectPage 用户信息入口', () => {

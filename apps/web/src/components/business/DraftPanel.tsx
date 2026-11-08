@@ -14,6 +14,11 @@ interface Props {
   /** 草稿键前缀（与同页 QuestionRunner 一致：tp / errp / exam-${sid}），提交后 clearDraft 同键清空 */
   draftKeyPrefix: string;
   onClose: () => void;
+  /**
+   * 快照出口透传：自由出题页（SolvePage）要在提交时取本面板白板的 JPEG，
+   * 但白板只应挂一个 —— 由面板把 ref 转给内部 `DraftWhiteboard`，调用方不另挂白板。
+   */
+  snapshotRef?: React.MutableRefObject<(() => Promise<string | null>) | null>;
 }
 
 /** 模块级会话记忆：拖拽/双击后的宽度在本会话内跨页、跨开关保持（刷新归默认） */
@@ -24,7 +29,7 @@ const WIDTH_MIN = 25;
 const WIDTH_MAX = 55;
 const WIDTH_DEFAULT = 35;
 
-export function DraftPanel({ questionId, draftKeyPrefix, onClose }: Props) {
+export function DraftPanel({ questionId, draftKeyPrefix, onClose, snapshotRef }: Props) {
   const [widthPct, setWidthPct] = useState<number>(() => lastWidthPct ?? WIDTH_DEFAULT);
   // 拖拽中关宽度过渡（实时跟随不滞后），落定后恢复过渡动画
   const [dragging, setDragging] = useState(false);
@@ -127,6 +132,7 @@ export function DraftPanel({ questionId, draftKeyPrefix, onClose }: Props) {
             key={`${draftKeyPrefix}-${questionId}`}
             questionId={`${draftKeyPrefix}-${questionId}`}
             scrollMode="scroll-y"
+            snapshotRef={snapshotRef}
           />
         </div>
       </div>

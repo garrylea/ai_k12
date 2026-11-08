@@ -49,6 +49,23 @@ const DumbbellIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
   </svg>
 );
 
+/** 做题：笔 + 直尺（线性 SVG，与前三卡同 1.5 描边） */
+const PencilRulerIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="M13 3l8 8-8.5 8.5L3 21l1.5-9.5L13 3z" />
+    <path d="M11 5l8 8" />
+    <path d="M4.5 11.5L12 19" />
+  </svg>
+);
+
 export default function EntrySelectPage() {
   const navigate = useNavigate();
   const reduceMotion = useReducedMotion();
@@ -81,9 +98,9 @@ export default function EntrySelectPage() {
         </div>
       </header>
 
-      {/* 2. 中部：三入口大卡（三卡视觉一致，靠文字「学习/答疑/训练」区分） */}
+      {/* 2. 中部：四入口大卡（视觉一致，靠文字「学习/答疑/训练/做题」区分） */}
       <main className="w-full max-w-4xl my-auto py-10 flex flex-col items-center">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
           {/* 学习：主入口 */}
           <motion.button
             initial={reduceMotion ? false : { opacity: 0, y: 12 }}
@@ -185,6 +202,40 @@ export default function EntrySelectPage() {
             </div>
             <span className="text-3xl font-black tracking-tight text-[var(--text-primary)]">
               训练
+            </span>
+          </motion.button>
+
+          {/* 做题：自由出题（拍/贴一道题 → 识别 → 作答 → AI 答疑），与训练同色系靠文字区分 */}
+          <motion.button
+            initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut', delay: 0.24 }}
+            whileHover={reduceMotion ? undefined : { y: -4 }}
+            onClick={() => navigate('/student/solve')}
+            className="h-64 rounded-3xl bg-white flex flex-col items-center justify-center gap-5 transition-shadow duration-300 focus:outline-none focus:ring-4 focus:ring-[var(--brand-500)]/20"
+            style={{
+              border: '1px solid rgba(226, 232, 240, 0.8)',
+              boxShadow: 'var(--shadow-card)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow = 'var(--shadow-elevated)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = 'var(--shadow-card)';
+            }}
+            aria-label="进入做题"
+          >
+            <div
+              className="w-20 h-20 rounded-2xl flex items-center justify-center text-white shadow-sm"
+              style={{
+                background: 'linear-gradient(to top right, #FF6B35, #FF8C61)',
+              }}
+              aria-hidden="true"
+            >
+              <PencilRulerIcon />
+            </div>
+            <span className="text-3xl font-black tracking-tight text-[var(--text-primary)]">
+              做题
             </span>
           </motion.button>
         </div>
