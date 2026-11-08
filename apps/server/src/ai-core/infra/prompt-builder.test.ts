@@ -262,4 +262,43 @@ describe('PromptBuilder', () => {
     });
     expect(result.messages[0].content).toContain('自由做题判题模板');
   });
+
+  it('preserves ## headings inside the user message', async () => {
+    // Regression: buildMessages used to split the rendered prompt on /^##\s+/m
+    // (every markdown H2), so injected content such as MinerU output with
+    // "## 一、选择题" truncated the user message at the first heading.
+    const result = await builder.build({
+      capability: 'freeform_split',
+      subject: 'math',
+      context: {
+        student: { grade: '八年级', gradeLevel: 'junior' },
+        userMessage: '## 题目\n求 x 的值。\nEND',
+      },
+    });
+
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages[1].role).toBe('user');
+    expect(result.messages[1].content).toContain('## 题目');
+    expect(result.messages[1].content).toContain('求 x 的值。');
+    expect(result.messages[1].content).toContain('END');
+    // The injected heading must not leak into the system message either.
+    expect(result.messages[0].content).not.toContain('## 题目');
+  });
+
+  it('splits a normal template into exactly one system and one user message', async () => {
+    const result = await builder.build({
+      capability: 'freeform_judge',
+      subject: 'physics',
+      context: {
+        student: { grade: '八年级', gradeLevel: 'junior' },
+        userMessage: '请判这道题',
+      },
+    });
+
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages[0].role).toBe('system');
+    expect(result.messages[1].role).toBe('user');
+    expect(result.messages[0].content).toBe('自由做题判题模板。');
+    expect(result.messages[1].content).toBe('请判这道题');
+  });
 });
