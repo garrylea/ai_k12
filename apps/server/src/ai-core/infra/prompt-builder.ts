@@ -108,6 +108,8 @@ export class PromptBuilder {
     if (capability === 'structuring') {
       return `structuring/question.md`;
     }
+    if (capability === 'freeform_split') return 'freeform/split.md';
+    if (capability === 'freeform_judge') return 'freeform/judge.md';
     throw new Error(`Unknown capability: ${capability}`);
   }
 

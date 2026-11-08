@@ -13,6 +13,7 @@ beforeAll(() => {
   mkdirSync(resolve(testTemplateDir, 'system'), { recursive: true });
   mkdirSync(resolve(testTemplateDir, 'explanation'), { recursive: true });
   mkdirSync(resolve(testTemplateDir, 'grading'), { recursive: true });
+  mkdirSync(resolve(testTemplateDir, 'freeform'), { recursive: true });
 
   writeFileSync(resolve(testTemplateDir, 'system/socratic-rules.md'), `---
 version: "1.0"
@@ -82,6 +83,26 @@ description: "证明题批改"
 学生答案：{{studentAnswer}}
 满分：{{maxScore}} 分
 `);
+  writeFileSync(resolve(testTemplateDir, 'freeform/split.md'), `---
+version: "1.0"
+description: "自由做题拆题"
+---
+
+## System Prompt
+拆题模板。
+
+## User Message
+{{userMessage}}`);
+  writeFileSync(resolve(testTemplateDir, 'freeform/judge.md'), `---
+version: "1.0"
+description: "自由做题判题"
+---
+
+## System Prompt
+自由做题判题模板。
+
+## User Message
+{{userMessage}}`);
 });
 
 describe('PromptBuilder', () => {
@@ -216,5 +237,29 @@ describe('PromptBuilder', () => {
     expect(result.messages[1].content).not.toContain('&gt;');
     expect(result.messages[1].content).not.toContain('&amp;');
     expect(result.messages[1].content).not.toContain('&#x3D;');
+  });
+
+  it('loads freeform/split.md for freeform_split capability', async () => {
+    const result = await builder.build({
+      capability: 'freeform_split',
+      subject: 'math',
+      context: {
+        student: { grade: '七年级', gradeLevel: 'junior' },
+        userMessage: '帮我拆这道题',
+      },
+    });
+    expect(result.messages[0].content).toContain('拆题模板');
+  });
+
+  it('loads freeform/judge.md for freeform_judge capability', async () => {
+    const result = await builder.build({
+      capability: 'freeform_judge',
+      subject: 'physics',
+      context: {
+        student: { grade: '八年级', gradeLevel: 'junior' },
+        userMessage: '请判这道题',
+      },
+    });
+    expect(result.messages[0].content).toContain('自由做题判题模板');
   });
 });
