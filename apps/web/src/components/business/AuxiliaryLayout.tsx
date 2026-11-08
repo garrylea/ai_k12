@@ -15,7 +15,7 @@ export default function AuxiliaryLayout({ sidebar, children }: Props) {
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
       <div
-        className="w-full max-w-6xl h-[85vh] min-h-[600px] flex rounded-3xl overflow-hidden bg-white border border-[#E5E5E5]"
+        className="w-full max-w-6xl h-[80vh] min-h-[600px] flex rounded-3xl overflow-hidden bg-white border border-[#E5E5E5]"
         style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)' }}
       >
         {sidebar && (

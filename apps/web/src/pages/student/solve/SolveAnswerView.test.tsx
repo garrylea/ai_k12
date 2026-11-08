@@ -103,6 +103,14 @@ describe('SolveAnswerView', () => {
     expect(screen.getByRole('button', { name: '提交' })).toBeDisabled();
   });
 
+  it('草稿面板收起（draftAvailable=false）时不显示「附上草稿」', () => {
+    renderView({ draftAvailable: false, includeDraft: false });
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    // 按钮不受影响
+    expect(screen.getByRole('button', { name: '答疑' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '提交' })).toBeTruthy();
+  });
+
   it('勾选「附上草稿」把反值回传父层', () => {
     const onIncludeDraftChange = vi.fn();
     renderView({ includeDraft: true, onIncludeDraftChange });

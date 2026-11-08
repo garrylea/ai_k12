@@ -211,11 +211,11 @@ describe('SolvePage 状态机', () => {
     expect(screen.getByLabelText('退出登录')).toBeInTheDocument();
   });
 
-  it('整页复用答疑外壳：内容在 max-w-6xl / h-[85vh] 的同一张卡里', () => {
+  it('整页复用答疑外壳：内容在 max-w-6xl / h-[80vh] 的同一张卡里', () => {
     renderPage();
     const shell = document.querySelector('.max-w-6xl');
     expect(shell).not.toBeNull();
-    expect(shell?.className).toContain('h-[85vh]');
+    expect(shell?.className).toContain('h-[80vh]');
     // 做题页没有侧栏，卡片里只有内容区
     expect(shell?.querySelector('aside')).toBeNull();
     // 页面内容确实嵌在这张卡里，而不是另起全屏布局
@@ -305,8 +305,21 @@ describe('SolvePage 状态机', () => {
     renderPage();
     await goToAnswerStage();
 
+    fireEvent.click(screen.getByRole('button', { name: '草稿' }));
     expect(screen.getAllByTestId('whiteboard')).toHaveLength(1);
     await waitFor(() => expect(draftStub.receivedRef?.current).toBeTypeOf('function'));
+  });
+
+  it('草稿默认收起：先看到草稿入口，展开后才附上草稿', async () => {
+    renderPage();
+    await goToAnswerStage();
+
+    expect(screen.queryByRole('dialog', { name: '草稿' })).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '草稿' }));
+    expect(await screen.findByRole('dialog', { name: '草稿' })).toBeInTheDocument();
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
   });
 
   it('答疑：先建 aux_freeform 会话再发首问，并切到 AI tab', async () => {
@@ -385,11 +398,12 @@ describe('SolvePage 状态机', () => {
     expect(judgeStreamMock.mock.calls[1][0].dialogueId).toBe('7');
   });
 
-  it('答案与草稿都为空时不判题，并提示', async () => {
+  it('草稿展开但内容为空时不判题，并提示', async () => {
     const { toast } = await import('@/components/base/Toast');
     renderPage();
     await goToAnswerStage();
 
+    fireEvent.click(screen.getByRole('button', { name: '草稿' }));
     fireEvent.click(screen.getByRole('button', { name: '提交' }));
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith('error', '草稿为空，请先作答'));
@@ -405,6 +419,7 @@ describe('SolvePage 状态机', () => {
 
     renderPage();
     await goToAnswerStage();
+    fireEvent.click(screen.getByRole('button', { name: '草稿' }));
 
     fireEvent.click(screen.getByRole('button', { name: '提交' }));
 
@@ -418,6 +433,7 @@ describe('SolvePage 状态机', () => {
   it('切 tab 不卸载作答页：草稿面板是同一个 DOM 节点（编辑/笔迹不丢）', async () => {
     renderPage();
     await goToAnswerStage();
+    fireEvent.click(screen.getByRole('button', { name: '草稿' }));
     fireEvent.click(screen.getByRole('button', { name: '答疑' }));
 
     // 默认落在 AI tab（作答页隐藏但仍在树上）
@@ -435,35 +451,46 @@ describe('SolvePage 状态机', () => {
     const { toast } = await import('@/components/base/Toast');
     renderPage();
     await goToAnswerStage();
+    fireEvent.click(screen.getByRole('button', { name: '草稿' }));
 
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: '收起' }));
-    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    // 收起后没有草稿可附，勾选框整体隐藏（不是留在那里显示未勾选）
+    expect(screen.queryByRole('checkbox')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '提交' }));
     await waitFor(() => expect(toast).toHaveBeenCalledWith('error', '请先写答案或在草稿上作答'));
     expect(judgeStreamMock).not.toHaveBeenCalled();
   });
 
-  it('作答页可编辑题干：保存在题干里生效，后续判题用新 questionContent', async () => {
+  it('作答页不再提供「编辑题干」入口', async () => {
     renderPage();
     await goToAnswerStage();
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑题干' }));
-    expect(screen.getByLabelText('编辑题干内容')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('编辑题干内容'), {
-      target: { value: '修正后的题干文字' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
-
+    expect(screen.queryByRole('button', { name: '编辑题干' })).toBeNull();
     expect(screen.queryByLabelText('编辑题干内容')).toBeNull();
-    expect(screen.getByText('修正后的题干文字')).toBeInTheDocument();
+  });
+
+  it('题干在选题页修正后进入作答，判题用修正后的 questionContent', async () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
+      target: { value: '求 1+1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
+    await screen.findByText('识别到 1 道题');
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑题干' }));
+    fireEvent.change(screen.getByLabelText('题干'), {
+      target: { value: '选题页改过的题干' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '开始作答' }));
+    await screen.findByLabelText('作答输入');
 
     fireEvent.change(screen.getByLabelText('作答输入'), { target: { value: '答案是 2' } });
     fireEvent.click(screen.getByRole('button', { name: '提交' }));
 
     await waitFor(() => expect(judgeStreamMock).toHaveBeenCalledTimes(1));
-    expect(judgeStreamMock.mock.calls[0][0].questionContent).toBe('修正后的题干文字');
+    expect(judgeStreamMock.mock.calls[0][0].questionContent).toContain('选题页改过的题干');
   });
 
   it('判题失败 → 错误气泡的「重试」只重发判题流，不重复发首问', async () => {

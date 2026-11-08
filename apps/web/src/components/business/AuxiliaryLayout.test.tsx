@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import AuxiliaryLayout from './AuxiliaryLayout';
 
 /**
- * 外壳尺寸只有这一处真源：答疑页与做题页必须共用 `max-w-6xl / h-[85vh]`。
+ * 外壳尺寸只有这一处真源：答疑页与做题页必须共用 `max-w-6xl / h-[80vh]`。
  * 做题页不传 sidebar —— 不渲染空 aside，否则内容区会平白窄 256px。
  */
 describe('AuxiliaryLayout', () => {
@@ -31,7 +31,7 @@ describe('AuxiliaryLayout', () => {
     expect(container.querySelector('aside')).toBeNull();
     const shell = container.querySelector('.max-w-6xl');
     expect(shell).not.toBeNull();
-    expect(shell?.className).toContain('h-[85vh]');
+    expect(shell?.className).toContain('h-[80vh]');
     expect(shell?.textContent).toBe('内容');
   });
 });

@@ -35,6 +35,8 @@ export interface SolveAnswerViewProps {
   /** 底部「附上草稿」勾选态；草稿内容由页面级 DraftPanel 持有 */
   includeDraft: boolean;
   onIncludeDraftChange: (v: boolean) => void;
+  /** 草稿面板是否展开：收起时没有草稿可附，不显示勾选框（默认 true，兼容既有调用） */
+  draftAvailable?: boolean;
   submitting: boolean;
   /**
    * 已有流在跑（答疑或判题）：两个按钮都禁用 —— 此时再起流会被 chatStore 拦掉，
@@ -80,15 +82,19 @@ export function SolveAnswerView(props: SolveAnswerViewProps) {
       </div>
 
       <div className="shrink-0 grid grid-cols-3 items-center gap-3 px-4 py-3 border-t border-[var(--bg-subtle)]">
-        <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-          <input
-            type="checkbox"
-            className="w-4 h-4 accent-[var(--brand-500)]"
-            checked={props.includeDraft}
-            onChange={(e) => props.onIncludeDraftChange(e.target.checked)}
-          />
-          附上草稿
-        </label>
+        {props.draftAvailable === false ? (
+          <div />
+        ) : (
+          <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-[var(--brand-500)]"
+              checked={props.includeDraft}
+              onChange={(e) => props.onIncludeDraftChange(e.target.checked)}
+            />
+            附上草稿
+          </label>
+        )}
         <div className="flex items-center justify-center gap-3">
           <button
             type="button"

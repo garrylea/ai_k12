@@ -7,7 +7,7 @@
 // - 作答 / AI 答疑两个 tab 同时挂载、用 hidden 切换（spec §8.8）：编辑器、草稿、
 //   滚动位置与白板快照出口都靠「不卸载」活下来；
 // - 草稿面板的 JPEG 快照经 DraftPanel 透传的 snapshotRef 取（全页只挂一个白板）。
-// - 整页复用 `AuxiliaryLayout`（不传 sidebar）：与答疑页同一张 max-w-6xl / 85vh 的卡，
+// - 整页复用 `AuxiliaryLayout`（不传 sidebar）：与答疑页同一张 max-w-6xl / 80vh 的卡，
 //   尺寸只有那一处真源，别再在本页另写全屏布局。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BackButton } from '@/components/base';
@@ -54,12 +54,12 @@ export default function SolvePage() {
   const [source, setSource] = useState<SourceState | null>(null);
   const [picked, setPicked] = useState<PickedQuestion | null>(null);
   const [answer, setAnswer] = useState('');
-  const [includeDraft, setIncludeDraft] = useState(true);
-  const [draftOpen, setDraftOpen] = useState(true);
+  // 草稿默认收起：多数题用文字/公式就能答完，白板是「需要时再开」的辅助；
+  // 打开后才默认附上草稿（与 closeDraft 的取消勾选互为镜像，避免开了却没送判题）。
+  const [includeDraft, setIncludeDraft] = useState(false);
+  const [draftOpen, setDraftOpen] = useState(false);
   const [answerUploading, setAnswerUploading] = useState(false);
   const [dialogueId, setDialogueId] = useState<string | null>(null);
-  const [stemEditing, setStemEditing] = useState(false);
-  const [stemDraft, setStemDraft] = useState('');
 
   const draftQuestionId = useMemo(makeDraftId, []);
   const snapshotRef = useRef<(() => Promise<string | null>) | null>(null);
@@ -213,18 +213,9 @@ export default function SolvePage() {
     setIncludeDraft(false);
   };
 
-  const startStemEdit = () => {
-    if (!picked) return;
-    setTab('answer');
-    setStemDraft(picked.content);
-    setStemEditing(true);
-  };
-
-  const saveStem = () => {
-    const next = stemDraft.trim();
-    if (!next) return;
-    setPicked((prev) => (prev ? { ...prev, content: next } : prev));
-    setStemEditing(false);
+  const openDraft = () => {
+    setDraftOpen(true);
+    setIncludeDraft(true);
   };
 
   const noCandidate = !!recognize.result && recognize.result.candidates.length === 0;
@@ -341,46 +332,16 @@ export default function SolvePage() {
                     {label}
                   </button>
                 ))}
-              {/* 学科/满分锁定，但识别错字/公式要允许学生修正（spec 决策 9） */}
-              <button
-                type="button"
-                onClick={startStemEdit}
-                className="ml-auto h-9 px-3 rounded-lg border border-[var(--bg-subtle)] text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-base)]"
-              >
-                编辑题干
-              </button>
+              {/* 题干只在选题页编辑；这里只留草稿入口（默认收起，需要时再展开） */}
+              {!draftOpen && (
+                <div className="ml-auto">
+                  <DraftIconButton onClick={openDraft} />
+                </div>
+              )}
             </div>
 
             {/* 两个 tab 同时挂载、只切 hidden：卸载会丢编辑器内容、草稿笔迹与滚动位置 */}
             <div className={tab === 'answer' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
-              {stemEditing && (
-                <div className="shrink-0 mb-2 rounded-lg border border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] p-3">
-                  <textarea
-                    aria-label="编辑题干内容"
-                    value={stemDraft}
-                    onChange={(e) => setStemDraft(e.target.value)}
-                    rows={4}
-                    className="w-full rounded-lg border border-[var(--bg-subtle)] p-2 text-sm font-mono bg-[var(--bg-base)] text-[var(--text-primary)]"
-                  />
-                  <div className="mt-2 flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setStemEditing(false)}
-                      className="h-9 px-3 rounded-lg border border-[var(--bg-subtle)] text-sm text-[var(--text-secondary)]"
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="button"
-                      onClick={saveStem}
-                      disabled={!stemDraft.trim()}
-                      className="h-9 px-4 rounded-lg bg-[var(--brand-500)] text-white text-sm disabled:opacity-50"
-                    >
-                      保存
-                    </button>
-                  </div>
-                </div>
-              )}
               <div className="flex-1 min-h-0 flex">
                 <div className="flex-1 min-w-0 min-h-0">
                   <SolveAnswerView
@@ -389,6 +350,7 @@ export default function SolvePage() {
                     onAnswerChange={setAnswer}
                     includeDraft={includeDraft}
                     onIncludeDraftChange={setIncludeDraft}
+                    draftAvailable={draftOpen}
                     submitting={judge.submitting || answerUploading}
                     streaming={isStreaming}
                     onUploadingChange={setAnswerUploading}
@@ -396,17 +358,13 @@ export default function SolvePage() {
                     onSubmit={() => void submit()}
                   />
                 </div>
-                {draftOpen ? (
+                {draftOpen && (
                   <DraftPanel
                     questionId={draftQuestionId}
                     draftKeyPrefix="freeform"
                     onClose={closeDraft}
                     snapshotRef={snapshotRef}
                   />
-                ) : (
-                  <div className="absolute top-16 right-4">
-                    <DraftIconButton onClick={() => setDraftOpen(true)} />
-                  </div>
                 )}
               </div>
             </div>
