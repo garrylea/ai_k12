@@ -22,19 +22,21 @@ description: "MinerU Markdown 切题：找出完整题目，不改写题干"
       "no": "5",
       "content": "题干 Markdown（含图片引用）",
       "figureRefs": ["images/a.jpg"],
-      "suggestedSubject": "math" | "physics" | "chemistry" | null,
+      "suggestedSubject": "math",
       "confidence": 0.0,
       "selectedHint": false
     }
   ]
 }
 
+字段说明：`suggestedSubject` 只能是 `math` / `physics` / `chemistry` / `null`；无法判断学科时填 `null`，不要输出其它值。
+
 ## User Message
 
 学生文字提示（可为空）：
 {{textHint}}
 
-学科建议：
+学科建议（为空表示未指定，请根据题干自行判断 suggestedSubject）：
 {{subjectHint}}
 
 MinerU Markdown：

@@ -12,6 +12,23 @@ function clientReturning(content: string) {
   return { chat: vi.fn().mockResolvedValue({ content }) } as any;
 }
 
+/** 每个用例独立的 router mock，避免调用次数/参数断言互相污染。 */
+function freshRouter() {
+  return {
+    route: vi.fn().mockReturnValue({
+      primary: { modelId: 'Qwen3.8-27B', modelKey: 'local' },
+      fallback: { modelId: 'qwen3.8-max', modelKey: 'qwen3.8-max' },
+    }),
+  } as any;
+}
+
+const userMessageOf = (chat: ReturnType<typeof vi.fn>): string => {
+  const messages = chat.mock.calls[0][0].messages as Array<{ role: string; content: string }>;
+  const user = messages.find(m => m.role === 'user');
+  expect(user).toBeDefined();
+  return user!.content;
+};
+
 describe('FreeformSplitCapability', () => {
   it('解析候选题 JSON', async () => {
     const content = JSON.stringify({
@@ -43,5 +60,54 @@ describe('FreeformSplitCapability', () => {
     const client = { chat: vi.fn().mockResolvedValue({ content: 'not json' }) } as any;
     const cap = new FreeformSplitCapability({ modelRouter: router, modelClient: client });
     await expect(cap.split({ markdown: '题' })).rejects.toThrow(/freeform split failed/i);
+  });
+
+  it('未指定学科时提示词不声称数学，但路由仍用 math', async () => {
+    const route = freshRouter();
+    const client = clientReturning(JSON.stringify({ questions: [{ content: '题' }] }));
+    const cap = new FreeformSplitCapability({ modelRouter: route, modelClient: client });
+
+    await cap.split({ markdown: '第5题 求 x' });
+
+    const user = userMessageOf(client.chat);
+    expect(user).not.toContain('学科建议：math');
+    expect(user).toMatch(/学科建议（为空表示未指定/);
+    // 路由仍需要一个 subject 才能选场景模型。
+    expect(route.route).toHaveBeenCalledWith(expect.objectContaining({ subject: 'math' }));
+  });
+
+  it('单题字段失范（题号数字 / 置信度越界 / 学科乱写）不废掉整批', async () => {
+    const content = JSON.stringify({
+      questions: [{
+        no: 5,
+        content: '求 x',
+        figureRefs: 'images/a.jpg',
+        suggestedSubject: 'math | physics | chemistry | null',
+        confidence: 1.2,
+      }],
+    });
+    const cap = new FreeformSplitCapability({ modelRouter: freshRouter(), modelClient: clientReturning(content) });
+
+    const out = await cap.split({ markdown: '第5题' });
+
+    expect(out).toHaveLength(1);
+    expect(out[0].no).toBe('5');
+    expect(typeof out[0].no).toBe('string');
+    expect(out[0].confidence).toBe(1);
+    expect(out[0].suggestedSubject).toBeNull();
+    expect(out[0].figureRefs).toEqual([]);
+  });
+
+  it('注入的 Markdown 原样进入 user message（含 ## 标题与图片引用）', async () => {
+    const client = clientReturning(JSON.stringify({ questions: [{ content: '题' }] }));
+    const cap = new FreeformSplitCapability({ modelRouter: freshRouter(), modelClient: client });
+    const markdown = '## 一、选择题\n第5题 如图 ![](images/a.jpg) 求 x 的值。';
+
+    await cap.split({ markdown, textHint: '第5题' });
+
+    const user = userMessageOf(client.chat);
+    expect(user).toContain('## 一、选择题');
+    expect(user).toContain('![](images/a.jpg)');
+    expect(user).toContain('求 x 的值。');
   });
 });

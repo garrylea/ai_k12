@@ -15,15 +15,19 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const MAX_CANDIDATES = 20;
 
 /**
- * 单题 schema。`content` 必须非空（空题无意义）；其余字段给整套默认值——
- * 切题是弱结构化任务，模型漏字段不代表切错，宁可保下来让学生自己挑。
+ * 单题 schema。`content` 必须非空（空题无意义）；其余字段一律 `catch` 兜底——
+ * 切题是弱结构化任务，模型写错一个字段（`no` 给数字、`confidence` 越界、把提示词里的
+ * 联合类型原样抄成字符串）不代表切错，不能让整批候选题因一处瑕疵全部作废。
  */
 const CandidateSchema = z.object({
-  no: z.string().max(20).default(''),
+  // 模型可能把题号写成数字 5，统一转字符串并截断。
+  no: z.union([z.string(), z.number()]).transform(v => String(v).slice(0, 20)).catch(''),
   content: z.string().min(1),
-  figureRefs: z.array(z.string()).default([]),
-  suggestedSubject: z.enum(['math', 'physics', 'chemistry']).nullable().default(null),
-  confidence: z.number().min(0).max(1).default(0.8),
+  figureRefs: z.array(z.string()).catch([]),
+  // 枚举外的值（含模型照抄的 `"math" | "physics" | "chemistry" | null"`）落 null。
+  suggestedSubject: z.enum(['math', 'physics', 'chemistry']).nullable().catch(null),
+  // 越界不算错，夹到 [0, 1]；非数字/缺失落默认 0.8。
+  confidence: z.number().transform(v => Math.min(1, Math.max(0, v))).catch(0.8),
   selectedHint: z.boolean().default(false),
 });
 const ResultSchema = z.object({ questions: z.array(CandidateSchema).min(1) });
@@ -68,17 +72,18 @@ export class FreeformSplitCapability {
   }
 
   async split(req: FreeformSplitRequest): Promise<FreeformSplitCandidate[]> {
+    // `math` 只用于路由（场景需要一个 subject 才能选模板/模型）；
+    // 提示词里不能跟着声称数学，否则会把 suggestedSubject 锚定成 math。
     const subject: Subject = req.subjectHint ?? 'math';
     const prompt = await this.promptBuilder.build({
       capability: 'freeform_split',
       subject,
       context: {
         student: { grade: '', gradeLevel: '' },
-        userMessage: req.textHint ?? '切题',
         customVariables: {
           markdown: req.markdown,
           textHint: req.textHint ?? '',
-          subjectHint: subject,
+          subjectHint: req.subjectHint ?? '',
         },
       },
     });

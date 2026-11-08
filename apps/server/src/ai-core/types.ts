@@ -125,7 +125,11 @@ export interface PromptContext {
   };
   studentAnswer?: string;
   dialogueHistory?: Message[];
-  userMessage: string;
+  /**
+   * 模板尾部 `{{userMessage}}` 的内容。可选：模板自带宽裕正文的能力
+   * （如 `freeform_split` 直接注入 markdown）不需要该字段。
+   */
+  userMessage?: string;
   customVariables?: Record<string, unknown>;
 }
 
