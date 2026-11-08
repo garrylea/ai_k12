@@ -52,3 +52,22 @@ describe('AuxChatPanel：历史消息里的图片', () => {
     expect(screen.getByText('2*3*4 等于多少').querySelector('em')).toBeNull();
   });
 });
+
+describe('AuxChatPanel：Markdown 用户消息（自由答疑）', () => {
+  it('markdown=true 的用户消息按 Markdown 渲染', () => {
+    useChatStore.setState({
+      messages: [
+        { role: 'user', content: '答案是 $x=1$', markdown: true },
+      ],
+      isStreaming: false,
+    });
+    const { container } = render(<AuxChatPanel />);
+    expect(container.querySelector('.katex')).toBeTruthy();
+  });
+
+  it('默认用户消息仍是纯文本', () => {
+    useChatStore.setState({ messages: [{ role: 'user', content: '$x=1$' }], isStreaming: false });
+    const { container } = render(<AuxChatPanel />);
+    expect(container.querySelector('.katex')).toBeNull();
+  });
+});

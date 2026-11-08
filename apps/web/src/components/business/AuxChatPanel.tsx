@@ -274,7 +274,8 @@ export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onDele
           const thinking = isStreaming && m.streaming && !m.content && !isError;
           // Error messages render a dedicated error bubble (P3), with any
           // already-streamed partial reply kept above it. Assistant replies
-          // render as markdown+LaTeX; user messages stay plain text.
+          // render as markdown+LaTeX; user messages stay plain text unless the
+          // message opts in via `markdown` (freeform answer tab).
           const contentEl = isError
             ? (
               <div className="flex flex-col gap-2">
@@ -286,7 +287,13 @@ export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onDele
               ? m.content
                 ? <Markdown>{m.content}</Markdown>
                 : thinking ? <ThinkingDots /> : null
-              : m.content;
+              : m.markdown
+                ? (
+                  <div className="rounded-lg bg-white text-[#1D1D1F] p-2">
+                    <Markdown>{m.content}</Markdown>
+                  </div>
+                )
+                : m.content;
           return (
             <div
               key={m.id ?? `optimistic-${idx}`}

@@ -14,6 +14,9 @@ export interface ChatMessage {
   type?: string;
   images?: string[];
   reasoning?: string;
+  // Render the user message as Markdown + LaTeX (freeform answer tab). Defaults
+  // to false so 答疑 user bubbles keep the original plain-text behavior.
+  markdown?: boolean;
   streaming?: boolean;
   error?: ChatError;
 }
