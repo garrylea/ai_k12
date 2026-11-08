@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'r
 import { uploadFile, type AttachmentRequest } from '@/services/api';
 import { ensureJpeg } from '@/utils/image-convert';
 import { toast } from '@/components/base/Toast';
+import { ComposerSurface } from '@/components/business/ComposerSurface';
 import type { SourceImage } from './types';
 
 /**
@@ -177,11 +178,9 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
   };
 
   return (
-    <div className="w-full max-w-2xl">
-      <div
-        className={`rounded-xl bg-[#F9F9FB] border p-3 transition ${
-          dragging ? 'ring-2 ring-[#FF6B00] border-[#FF6B00]' : 'border-[#E5E5E5]'
-        }`}
+    <div className="w-full">
+      <ComposerSurface
+        dragging={dragging}
         onDragEnter={(e) => {
           e.preventDefault();
           setDragging(true);
@@ -193,97 +192,104 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
           setDragging(false);
           addFiles(Array.from(e.dataTransfer.files));
         }}
-      >
-        {images.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-2">
-            {images.map((img, index) => (
-              <div
-                key={img.localId}
-                data-testid="source-thumb"
-                className="relative w-16 h-16 rounded-lg overflow-hidden border border-[#E5E5E5]"
-              >
-                <img src={img.previewUrl} alt={img.fileName} className="w-full h-full object-cover" />
-                <span className="absolute left-0.5 top-0.5 px-1 rounded bg-black/60 text-white text-[10px] whitespace-nowrap">
-                  第 {index + 1} 页
-                </span>
-                <button
-                  type="button"
-                  onClick={() => remove(img.localId)}
-                  aria-label="移除图片"
-                  className="absolute right-0.5 top-0.5 w-4 h-4 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 transition"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    className="w-2.5 h-2.5"
+        preview={
+          <>
+            {/* 附件栏：与答疑的单文件条同一条分隔线/内边距，做题是多图横向排列 */}
+            {images.length > 0 && (
+              <div className="flex items-center gap-2 p-2 border-b border-[#E5E5E5] overflow-x-auto">
+                {images.map((img, index) => (
+                  <div
+                    key={img.localId}
+                    data-testid="source-thumb"
+                    className="relative w-14 h-14 shrink-0 rounded-lg overflow-hidden border border-[#E5E5E5]"
                   >
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </button>
-                {img.status !== 'ready' && (
-                  <span className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[10px] text-center">
-                    {img.status === 'error' ? '失败' : '处理中'}
-                  </span>
-                )}
+                    <img src={img.previewUrl} alt={img.fileName} className="w-full h-full object-cover" />
+                    <span className="absolute left-0 top-0 px-1 rounded-br bg-black/60 text-white text-[10px] leading-4 whitespace-nowrap">
+                      第 {index + 1} 页
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => remove(img.localId)}
+                      aria-label="移除图片"
+                      className="absolute right-0 top-0 w-4 h-4 flex items-center justify-center rounded-bl bg-black/60 text-white hover:bg-black/80 transition"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        className="w-2.5 h-2.5"
+                      >
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                    {img.status !== 'ready' && (
+                      <span className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[10px] text-center leading-4">
+                        {img.status === 'error' ? '失败' : '处理中'}
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+            )}
 
+            {/* 与答疑的 showAnswerHint 同一行样式：px-3 pt-2 的浅灰小字 */}
+            <div className="px-3 pt-2 text-xs text-[#86868B]">请勿上传个人信息</div>
+          </>
+        }
+        actions={
+          <>
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              aria-label="添加图片"
+              className="w-7 h-7 flex items-center justify-center rounded-full border border-[#E5E5E5] text-[#86868B] hover:border-[#FF6B00] hover:text-[#FF6B00] transition shrink-0"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                className="w-4 h-4"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            <input
+              ref={inputRef}
+              data-testid="source-file-input"
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif"
+              className="hidden"
+              onChange={(e) => {
+                addFiles(Array.from(e.target.files ?? []));
+                e.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!canSend}
+              className="h-9 px-4 rounded-lg bg-[#FF6B00] text-white text-sm disabled:opacity-50 hover:opacity-90 transition shrink-0"
+            >
+              {busy ? '识别中…' : '开始识题'}
+            </button>
+          </>
+        }
+      >
         <textarea
           rows={3}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={handlePaste}
           placeholder="输入题目，或拖入图片"
-          className="w-full bg-transparent outline-none resize-none text-[#1D1D1F] placeholder:text-[var(--text-placeholder)]"
+          aria-label="题目输入"
+          className="w-full px-4 py-3 pr-36 bg-transparent text-[#1D1D1F] placeholder-[#86868B] outline-none resize-none"
         />
-
-        <p className="text-xs text-[var(--text-tertiary)]">请勿上传个人信息</p>
-
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            aria-label="添加图片"
-            className="w-7 h-7 flex items-center justify-center rounded-full border border-[#E5E5E5] text-[#86868B] hover:border-[#FF6B00] hover:text-[#FF6B00] transition"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              className="w-4 h-4"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
-          <input
-            ref={inputRef}
-            data-testid="source-file-input"
-            type="file"
-            multiple
-            accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif"
-            className="hidden"
-            onChange={(e) => {
-              addFiles(Array.from(e.target.files ?? []));
-              e.target.value = '';
-            }}
-          />
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!canSend}
-            className="px-4 h-9 rounded-lg bg-[#FF6B00] text-white text-sm disabled:opacity-50 hover:opacity-90 transition"
-          >
-            {busy ? '识别中…' : '开始识题'}
-          </button>
-        </div>
-      </div>
+      </ComposerSurface>
 
       {busy && images.length > 0 && (
         <div

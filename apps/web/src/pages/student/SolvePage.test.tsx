@@ -198,6 +198,9 @@ async function goToAnswerStage() {
 describe('SolvePage 状态机', () => {
   it('初始停在录入态', () => {
     renderPage();
+    // 首屏标题/副文案与答疑同一套层级（h2 + 一行说明），输入框居中 max-w-2xl
+    expect(screen.getByRole('heading', { name: '把题目发给我' })).toBeInTheDocument();
+    expect(screen.getByText('输入题目，或拖入图片')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('输入题目，或拖入图片')).toBeInTheDocument();
     expect(screen.queryByLabelText('作答输入')).toBeNull();
   });

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { uploadFile, streamExtraction, type AttachmentRequest } from '@/services/api';
 import { ensureJpeg } from '@/utils/image-convert';
 import { toast } from '@/components/base/Toast';
+import { ComposerSurface } from './ComposerSurface';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -513,52 +514,36 @@ export default function AuxInputBar({ onSend, onStop, isStreaming = false, showA
 
   // ---- Render ----
   return (
-    <div
-      className={`rounded-xl bg-[#F9F9FB] border border-[#E5E5E5] focus-within:ring-2 focus-within:ring-[#FF6B00]/30 focus-within:border-[#FF6B00] transition ${isDragging ? 'ring-2 ring-[#FF6B00]' : ''}`}
+    <ComposerSurface
+      dragging={isDragging}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-    >
-      {/* File preview bar */}
-      {renderFilePreview()}
+      preview={
+        <>
+          {/* File preview bar */}
+          {renderFilePreview()}
 
-      {/* Error text when no preview is shown (e.g. conversion failed before upload) */}
-      {fs?.status === 'error' && !fs.url && (
-        <div className="px-3 pt-2">
-          <span className="text-sm text-[#86868B]">{fs.errorMsg}</span>
-        </div>
-      )}
+          {/* Error text when no preview is shown (e.g. conversion failed before upload) */}
+          {fs?.status === 'error' && !fs.url && (
+            <div className="px-3 pt-2">
+              <span className="text-sm text-[#86868B]">{fs.errorMsg}</span>
+            </div>
+          )}
 
-      {/* 轮次够了（≥2 轮）：提示可用关键词直接要「答案+思路+解析」。
-          对应后端 AIService 的「≥detailedExplanationAfterRounds 轮 + 关键词」快路径。 */}
-      {showAnswerHint && !isBusy && (
-        <div className="px-3 pt-2 text-xs text-[#86868B]">
-          想直接看答案？输入「<span className="text-[#FF6B00]">详细解析</span>」或「
-          <span className="text-[#FF6B00]">给我答案</span>」，即可获得 答案 + 解题思路 + 解析。
-        </div>
-      )}
-
-      {/* Input area */}
-      <div className="relative">
-        <textarea
-          rows={3}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && canSend) {
-              e.preventDefault();
-              doSend();
-            }
-          }}
-          onPaste={handlePaste}
-          placeholder={isDragging ? '拖放文件到此处...' : '输入问题或粘贴/拖拽文件...'}
-          aria-label="输入问题"
-          className="w-full px-4 py-3 pr-20 bg-transparent text-[#1D1D1F] placeholder-[#86868B] outline-none resize-none"
-        />
-
-        {/* Action buttons (right side) */}
-        <div className="absolute right-2 bottom-2 flex items-center gap-2">
+          {/* 轮次够了（≥2 轮）：提示可用关键词直接要「答案+思路+解析」。
+              对应后端 AIService 的「≥detailedExplanationAfterRounds 轮 + 关键词」快路径。 */}
+          {showAnswerHint && !isBusy && (
+            <div className="px-3 pt-2 text-xs text-[#86868B]">
+              想直接看答案？输入「<span className="text-[#FF6B00]">详细解析</span>」或「
+              <span className="text-[#FF6B00]">给我答案</span>」，即可获得 答案 + 解题思路 + 解析。
+            </div>
+          )}
+        </>
+      }
+      actions={
+        <>
           {/* + button – triggers hidden file input */}
           <button
             type="button"
@@ -581,8 +566,24 @@ export default function AuxInputBar({ onSend, onStop, isStreaming = false, showA
 
           {/* Send / Stop / Spinner */}
           {renderActionButton()}
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <textarea
+        rows={3}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey && canSend) {
+            e.preventDefault();
+            doSend();
+          }
+        }}
+        onPaste={handlePaste}
+        placeholder={isDragging ? '拖放文件到此处...' : '输入问题或粘贴/拖拽文件...'}
+        aria-label="输入问题"
+        className="w-full px-4 py-3 pr-20 bg-transparent text-[#1D1D1F] placeholder-[#86868B] outline-none resize-none"
+      />
+    </ComposerSurface>
   );
 }

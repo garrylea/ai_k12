@@ -207,10 +207,14 @@ describe('SolveSourceInput', () => {
     expect(screen.getByText('请勿上传个人信息')).toBeInTheDocument();
   });
 
-  it('占位符是短文案，颜色走 placeholder token', () => {
+  it('占位符与答疑输入框同色（placeholder-[#86868B]）', () => {
     render(<SolveSourceInput busy={false} onRecognize={vi.fn()} />);
     const box = screen.getByPlaceholderText('输入题目，或拖入图片');
-    expect(box.className).toContain('placeholder:text-[var(--text-placeholder)]');
+    expect(box.className).toContain('placeholder-[#86868B]');
+    // 与答疑同一套外壳：圆角、浅灰底、聚焦品牌环
+    const shell = box.closest('.rounded-xl');
+    expect(shell).not.toBeNull();
+    expect(shell?.className).toContain('bg-[#F9F9FB]');
   });
 
   it('识别中且有图片时显示识别遮罩', async () => {

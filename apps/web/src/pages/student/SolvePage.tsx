@@ -246,31 +246,37 @@ export default function SolvePage() {
         </header>
 
         {stage === 'input' && (
-          <main className="flex-1 flex flex-col items-center justify-center px-6">
-            <h2 className="sr-only">做题</h2>
-            <SolveSourceInput
-              busy={recognize.busy}
-              error={inputError}
-              onRetry={() => {
-                if (source) void recognize.run(source);
-              }}
-              onManual={() => {
-                // 与 backToInput 同理：识别结果（哪怕是 candidates: []）不清掉，
-                // 选题分支就会按「识别到 0 道题」渲染空列表，学生手动输入的题干直接丢失。
-                recognize.reset();
-                setPicked({
-                  content: source?.text ?? '',
-                  figureUrls: [],
-                  subjectId: 1,
-                  maxScore: 10,
-                });
-                setStage('select');
-              }}
-              onRecognize={(input) => {
-                setSource(input);
-                void recognize.run(input);
-              }}
-            />
+          <main className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 pb-10">
+            {/* 与答疑首屏同一套标题层级/字号/间距：h2 + 一行副文案 + max-w-2xl 输入框 */}
+            <h2 className="text-2xl sm:text-3xl font-bold text-[#1D1D1F] mb-2">
+              把题目发给我
+            </h2>
+            <p className="text-sm text-[#86868B] mb-8">输入题目，或拖入图片</p>
+            <div className="w-full max-w-2xl">
+              <SolveSourceInput
+                busy={recognize.busy}
+                error={inputError}
+                onRetry={() => {
+                  if (source) void recognize.run(source);
+                }}
+                onManual={() => {
+                  // 与 backToInput 同理：识别结果（哪怕是 candidates: []）不清掉，
+                  // 选题分支就会按「识别到 0 道题」渲染空列表，学生手动输入的题干直接丢失。
+                  recognize.reset();
+                  setPicked({
+                    content: source?.text ?? '',
+                    figureUrls: [],
+                    subjectId: 1,
+                    maxScore: 10,
+                  });
+                  setStage('select');
+                }}
+                onRecognize={(input) => {
+                  setSource(input);
+                  void recognize.run(input);
+                }}
+              />
+            </div>
           </main>
         )}
 
