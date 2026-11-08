@@ -1,16 +1,6 @@
 import { useCallback, useRef } from 'react';
-import { getAuthToken } from '@/services/authStorage';
-import { createConversation, type AttachmentRequest } from '@/services/api';
+import { createConversation, streamTutorEvents, type AttachmentRequest } from '@/services/api';
 import { useChatStore } from '@/store/chatStore';
-
-interface TutorStreamEvent {
-  type: 'reasoning' | 'content' | 'done' | 'error';
-  delta?: string;
-  replace?: boolean;
-  message?: string;
-  code?: number;
-  retryable?: boolean;
-}
 
 /**
  * 自由作答页的「问 AI」答疑（`POST /api/ai/tutor/stream`），scene = `aux_freeform`。
@@ -53,56 +43,29 @@ export function useFreeformTutor() {
 
       const ctrl = new AbortController();
       abortRef.current = ctrl;
-      const token = getAuthToken() ?? '';
       try {
-        const res = await fetch('/api/ai/tutor/stream', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
+        for await (const event of streamTutorEvents(
+          {
             mode: 'auxiliary',
             dialogueId,
             // 纯图片提问也要给后端一句非空 message（AIService 拒空）
             message: text.trim() || '帮我看一下这道题',
             attachments,
-          }),
-          signal: ctrl.signal,
-        });
-        if (!res.ok || !res.body) throw new Error('stream unavailable');
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data: ')) continue;
-            let event: TutorStreamEvent;
-            try {
-              event = JSON.parse(trimmed.slice(6));
-            } catch {
-              continue;
-            }
-            const s = useChatStore.getState();
-            if (event.type === 'reasoning' && event.delta) {
-              s.appendLastAssistant({ reasoning: event.delta });
-            } else if (event.type === 'content' && event.delta !== undefined) {
-              if (event.replace) s.updateLastAssistant(event.delta);
-              else s.appendLastAssistant({ content: event.delta });
-            } else if (event.type === 'error') {
-              s.setLastAssistantError({
-                code: event.code ?? 5000,
-                message: event.message ?? 'AI 服务异常',
-                retryable: event.retryable ?? true,
-              });
-            }
+          },
+          ctrl.signal,
+        )) {
+          const s = useChatStore.getState();
+          if (event.type === 'reasoning' && event.delta) {
+            s.appendLastAssistant({ reasoning: event.delta });
+          } else if (event.type === 'content' && event.delta !== undefined) {
+            if (event.replace) s.updateLastAssistant(event.delta);
+            else s.appendLastAssistant({ content: event.delta });
+          } else if (event.type === 'error') {
+            s.setLastAssistantError({
+              code: event.code ?? 5000,
+              message: event.message ?? 'AI 服务异常',
+              retryable: event.retryable ?? true,
+            });
           }
         }
       } catch (err) {

@@ -29,6 +29,11 @@ export function useFreeformJudge() {
       const store = useChatStore.getState();
       if (store.isStreaming) return;
 
+      // 重新判题必须先清掉上一轮的结果：新流若中途失败/被停，页面不能继续
+      // 展示上一次的 questionId / 分数（会指到另一条错题、显示过期得分）。
+      setQuestionId(null);
+      setLastResult(null);
+
       store.appendMessage({
         role: 'user',
         content: display?.answerMarkdown ?? body.answer,

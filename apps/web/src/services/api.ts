@@ -558,6 +558,10 @@ export interface TutorStreamEvent {
   delta?: string;
   replace?: boolean;
   message?: string;
+  /** error 事件专用：后端错误码（缺省由消费方兜 5000）。 */
+  code?: number;
+  /** error 事件专用：是否可重试（缺省由消费方兜 true）。 */
+  retryable?: boolean;
 }
 
 export async function* streamTutorEvents(

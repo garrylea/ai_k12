@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { createConversation, recognizeFreeform, streamFreeformJudge } from '@/services/api';
+import {
+  createConversation,
+  recognizeFreeform,
+  streamFreeformJudge,
+  streamTutorEvents,
+} from '@/services/api';
 import { useChatStore } from '@/store/chatStore';
 import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 import { useFreeformRecognize } from './useFreeformRecognize';
@@ -24,30 +29,32 @@ vi.mock('@/services/api', async (importOriginal) => {
     ...actual,
     recognizeFreeform: vi.fn(),
     streamFreeformJudge: vi.fn(),
+    streamTutorEvents: vi.fn(),
     createConversation: vi.fn(),
   };
 });
 
 const recognizeMock = vi.mocked(recognizeFreeform);
 const judgeStreamMock = vi.mocked(streamFreeformJudge);
+const tutorStreamMock = vi.mocked(streamTutorEvents);
 const createConversationMock = vi.mocked(createConversation);
 
-/** SSE 响应体桩：按事件顺序逐块吐出，避开 jsdom 里 ReadableStream 的兼容问题。 */
-function sseBody(events: unknown[]) {
+/** SSE 响应体桩：按原始文本块顺序吐出，用于验证解析器的尾块处理。 */
+function rawBody(chunks: string[]) {
   const encoder = new TextEncoder();
   let i = 0;
   return {
     getReader: () => ({
       read: async () =>
-        i < events.length
-          ? { done: false, value: encoder.encode(`data: ${JSON.stringify(events[i++])}\n\n`) }
+        i < chunks.length
+          ? { done: false, value: encoder.encode(chunks[i++]) }
           : { done: true, value: undefined },
     }),
   };
 }
 
-function stubFetch(events: unknown[]) {
-  const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: sseBody(events) });
+function stubFetch(chunks: string[]) {
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, body: rawBody(chunks) });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
@@ -57,6 +64,7 @@ beforeEach(() => {
   useAuxiliaryStore.setState({ currentDialogueId: null, conversations: [], auxErrorCount: 0 });
   recognizeMock.mockReset();
   judgeStreamMock.mockReset();
+  tutorStreamMock.mockReset();
   createConversationMock.mockReset();
 });
 
@@ -123,6 +131,9 @@ describe('useFreeformJudge', () => {
 
     const { result } = renderHook(() => useFreeformJudge());
     await act(() => result.current.submit(body, { images: ['/a.png'], answerMarkdown: '**答**' }));
+
+    // 展示层用 markdown，但上行 body 必须是原始答案串，不能被 display 污染
+    expect(judgeStreamMock).toHaveBeenCalledWith(body, expect.any(AbortSignal));
 
     const messages = useChatStore.getState().messages;
     expect(messages).toHaveLength(2);
@@ -196,6 +207,49 @@ describe('useFreeformJudge', () => {
 
     expect(useChatStore.getState().messages[1].error?.code).toBe(1012);
     expect(result.current.submitting).toBe(false);
+  });
+
+  it('重新判题时先清空上一轮的 questionId / lastResult', async () => {
+    judgeStreamMock.mockImplementation(async function* () {
+      yield { type: 'result', questionId: 7, totalScore: 7, maxScore: 10, verdict: 'partial' };
+      yield { type: 'done' };
+    });
+
+    const { result } = renderHook(() => useFreeformJudge());
+    await act(() => result.current.submit(body));
+    expect(result.current.questionId).toBe(7);
+    expect(result.current.lastResult?.totalScore).toBe(7);
+
+    // 第二次提交：流停在半路（尚未出 result）—— 上一轮的分数/错题 id 必须已经不在了
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    judgeStreamMock.mockImplementation(async function* () {
+      yield { type: 'start', dialogueId: '1', questionId: null };
+      yield { type: 'reasoning', delta: '再看' };
+      await gate;
+      yield { type: 'error', code: 1005, message: '额度用尽', retryable: false };
+    });
+
+    let pending: Promise<void> = Promise.resolve();
+    await act(async () => {
+      pending = result.current.submit(body);
+      await Promise.resolve();
+    });
+
+    expect(result.current.submitting).toBe(true);
+    expect(result.current.questionId).toBeNull();
+    expect(result.current.lastResult).toBeNull();
+
+    await act(async () => {
+      release();
+      await pending;
+    });
+    // 中途失败也不该回填旧结果
+    expect(result.current.questionId).toBeNull();
+    expect(result.current.lastResult).toBeNull();
+    expect(useChatStore.getState().messages[3].error?.code).toBe(1005);
   });
 
   it('isStreaming 为真时 submit 直接返回，不追加消息也不起流', async () => {
@@ -273,12 +327,12 @@ describe('useFreeformTutor', () => {
   });
 
   it('send 写 chatStore 并消费答疑 SSE，不碰 useAuxiliaryStore', async () => {
-    const fetchMock = stubFetch([
-      { type: 'reasoning', delta: '想' },
-      { type: 'content', delta: '先' },
-      { type: 'content', delta: '先算', replace: true },
-      { type: 'done' },
-    ]);
+    tutorStreamMock.mockImplementation(async function* () {
+      yield { type: 'reasoning', delta: '想' };
+      yield { type: 'content', delta: '先' };
+      yield { type: 'content', delta: '先算', replace: true };
+      yield { type: 'done' };
+    });
     const before = {
       currentDialogueId: useAuxiliaryStore.getState().currentDialogueId,
       conversations: useAuxiliaryStore.getState().conversations,
@@ -292,15 +346,17 @@ describe('useFreeformTutor', () => {
       result.current.send('42', '这题怎么做', [{ type: 'image', fileId: 'f1' }], ['/a.png']),
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('/api/ai/tutor/stream');
-    expect(JSON.parse(String(init.body))).toMatchObject({
-      mode: 'auxiliary',
-      dialogueId: '42',
-      message: '这题怎么做',
-      attachments: [{ type: 'image', fileId: 'f1' }],
-    });
+    // 走共享的 streamTutorEvents（尾部 flush 已在那里实现），hook 只做事件 → store 映射
+    expect(tutorStreamMock).toHaveBeenCalledTimes(1);
+    expect(tutorStreamMock).toHaveBeenCalledWith(
+      {
+        mode: 'auxiliary',
+        dialogueId: '42',
+        message: '这题怎么做',
+        attachments: [{ type: 'image', fileId: 'f1' }],
+      },
+      expect.any(AbortSignal),
+    );
 
     const messages = useChatStore.getState().messages;
     expect(messages).toHaveLength(2);
@@ -316,19 +372,67 @@ describe('useFreeformTutor', () => {
     expect(useAuxiliaryStore.getState().conversations).toBe(before.conversations);
   });
 
+  it('纯图片提问时 message 兜底非空串，附件原样上行', async () => {
+    tutorStreamMock.mockImplementation(async function* () {
+      yield { type: 'done' };
+    });
+
+    const { result } = renderHook(() => useFreeformTutor());
+    await act(() => result.current.send('42', '  ', [{ type: 'image', fileId: 'f1' }]));
+
+    expect(tutorStreamMock).toHaveBeenCalledWith(
+      {
+        mode: 'auxiliary',
+        dialogueId: '42',
+        message: '帮我看一下这道题',
+        attachments: [{ type: 'image', fileId: 'f1' }],
+      },
+      expect.any(AbortSignal),
+    );
+    expect(useChatStore.getState().messages[0].content).toBe('');
+  });
+
+  it('error 事件写成错误气泡，code/retryable 缺省时兜底', async () => {
+    tutorStreamMock
+      .mockImplementationOnce(async function* () {
+        yield { type: 'error', code: 1005, message: '额度用尽', retryable: false };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'error' };
+      });
+
+    const { result } = renderHook(() => useFreeformTutor());
+    await act(() => result.current.send('42', '这题怎么做'));
+    expect(useChatStore.getState().messages[1].error).toEqual({
+      code: 1005,
+      message: '额度用尽',
+      retryable: false,
+    });
+
+    await act(() => result.current.send('42', '再说一次'));
+    expect(useChatStore.getState().messages[3].error).toEqual({
+      code: 5000,
+      message: 'AI 服务异常',
+      retryable: true,
+    });
+    expect(useChatStore.getState().isStreaming).toBe(false);
+  });
+
   it('空文本且无附件时直接返回，不发起请求也不写消息', async () => {
-    const fetchMock = stubFetch([]);
     const { result } = renderHook(() => useFreeformTutor());
 
     await act(() => result.current.send('42', '   '));
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(tutorStreamMock).not.toHaveBeenCalled();
     expect(useChatStore.getState().messages).toHaveLength(0);
   });
 
-  it('fetch 失败时落 1012 错误而不是抛出', async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
-    vi.stubGlobal('fetch', fetchMock);
+  it('流抛错时落 1012 错误而不是抛出', async () => {
+    tutorStreamMock.mockImplementation(() => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.reject(new TypeError('Failed to fetch')),
+      }),
+    }));
     const { result } = renderHook(() => useFreeformTutor());
 
     await act(() => result.current.send('42', '这题怎么做'));
@@ -337,19 +441,21 @@ describe('useFreeformTutor', () => {
     expect(useChatStore.getState().isStreaming).toBe(false);
   });
 
-  it('stop() 中断进行中的请求', async () => {
+  it('stop() 中断进行中的请求（AbortError 不弹错误）', async () => {
     let seenSignal: AbortSignal | undefined;
-    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
-      seenSignal = init.signal as AbortSignal;
-      return new Promise((_resolve, reject) => {
-        seenSignal?.addEventListener('abort', () => {
+    tutorStreamMock.mockImplementation(async function* (_req, signal) {
+      seenSignal = signal;
+      yield { type: 'content', delta: '已流出' };
+      await new Promise<void>((_resolve, reject) => {
+        const abort = () => {
           const err = new Error('aborted');
           err.name = 'AbortError';
           reject(err);
-        }, { once: true });
+        };
+        if (signal?.aborted) abort();
+        else signal?.addEventListener('abort', abort, { once: true });
       });
     });
-    vi.stubGlobal('fetch', fetchMock);
 
     const { result } = renderHook(() => useFreeformTutor());
     let pending: Promise<void> = Promise.resolve();
@@ -365,8 +471,27 @@ describe('useFreeformTutor', () => {
     });
 
     expect(seenSignal?.aborted).toBe(true);
-    // 学生主动停止不算错误，不该冒出网络失败气泡
+    // 学生主动停止不算错误，不该冒出网络失败气泡；已流出的内容保留
+    expect(useChatStore.getState().messages[1].content).toBe('已流出');
     expect(useChatStore.getState().messages[1].error).toBeUndefined();
     expect(useChatStore.getState().isStreaming).toBe(false);
+  });
+
+  it('末尾没有换行的 data 行也被消费（复用 streamTutorEvents 的尾部 flush）', async () => {
+    // 用真实实现跑一遍：hook 不再自带解析器，尾块丢事件的问题由 api.ts 兜住
+    const { streamTutorEvents: actualStreamTutorEvents } =
+      await vi.importActual<typeof import('@/services/api')>('@/services/api');
+    tutorStreamMock.mockImplementation(actualStreamTutorEvents);
+
+    const fetchMock = stubFetch([
+      'data: {"type":"content","delta":"前半"}\n\n',
+      'data: {"type":"content","delta":"尾巴"}',
+    ]);
+
+    const { result } = renderHook(() => useFreeformTutor());
+    await act(() => result.current.send('42', '这题怎么做'));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useChatStore.getState().messages[1].content).toBe('前半尾巴');
   });
 });
