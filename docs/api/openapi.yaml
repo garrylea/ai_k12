@@ -8042,7 +8042,7 @@ components:
           description: 有题目 id 且在架 -> 可单题重做（语文/英语专项为 false，2026-11-06）
         canSimilar:
           type: boolean
-          description: canRedo + 数学/物理 + 有知识点 -> 可同类型练习（不要求原题有标准答案，2026-11-06）
+          description: canRedo + 可练学科 + 知识点符合口径 -> 可同类型练习（数学/物理：有知识点；语文：全部知识点属积累与运用C01/古诗文C02；不要求原题有标准答案，2026-11-06 / 2026-11-08）
       required: [questionOrder, canRedo, canSimilar]
 
     HistoryRunQuestion:

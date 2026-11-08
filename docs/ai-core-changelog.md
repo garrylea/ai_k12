@@ -8,6 +8,21 @@
 
 ---
 
+## 2026-11-08 语文「同类型练习」开放（基础运用 / 古诗文）
+
+**入口**：练习记录详情页的「同类型练习」按钮。语文此前只显示「重做」，因为 `canSimilar` 只放行数学/物理。
+
+**口径（刻意设计，勿改）**：
+- 语文按**知识点顶层 code** 判定：`C01 积累与运用` / `C02 古诗文` 开放；`C03 现代文阅读` / `C04 写作` 关闭；一道题只要混入 C03/C04（或知识点无法归类）就整题不可练。
+- 候选题同样必须「全部知识点在 C01/C02」，避免同考点的阅读题混进练习。
+- **语文不 AI 补题**：题库有多少出多少，按实际题数取不超过它的最大档位（`cn_targeted` 1/3/5）。
+- 判题沿用语文现状：客观题 exact、非客观题学生自评。
+- 顺带修复：语文同类练习落 `special_practice_sessions` 时 `module` 由 `math_targeted` 改为 `cn_targeted`（此前映射把非物理/化学一律当数学）。
+
+**spec / plan**：`docs/superpowers/specs/2026-11-08-chinese-similar-practice-design.md`、`docs/superpowers/plans/2026-11-08-chinese-similar-practice.md`。
+
+`tools/db/schema.sql` 中 `special_practice_sessions.module` / `question_id` 的列 COMMENT 仍列举旧值，列无约束不影响写入，本次未改 schema.sql（避免与 schema_reconcile 对账混淆）。
+
 ## 2026-11-08 选科页六学科图标按学科区分
 
 **背景**（用户发现）：`/student/training` 六张卡全部是同一枚哑铃，学生只能靠文字分辨学科。查证该页自 2026-09 建立以来从未按学科区分图标；2026-10-31 六卡计划里也明确写了「本计划不新增图标」「DumbbellIcon 不变」——不是某次调整没生效。
