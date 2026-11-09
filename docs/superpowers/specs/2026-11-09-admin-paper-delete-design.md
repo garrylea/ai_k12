@@ -169,6 +169,7 @@ LIMIT ? OFFSET ?
 - `exclusiveCount` = 独占题数；
 - `deletableCount` = 独占且无 RESTRICT 引用；
 - `retainedCount` = `exclusiveCount - deletableCount`；
+- **`exam_answers` 引用口径**：只统计「非本卷会话」的作答（`session_id NOT IN (SELECT id FROM exam_sessions WHERE paper_id = ?)`）。本卷会话在删除时先被清掉，若预览把它们算作阻断，预览的「保留 N 道」会与执行结果矛盾；
 - `sessionCount` = `exam_sessions WHERE paper_id = ?`；
 - `answerCount` = 这些会话的 `exam_answers` 总数。
 
@@ -204,7 +205,7 @@ LIMIT ? OFFSET ?
      UNION ALL SELECT question_id FROM remediation_set_items WHERE question_id IN (...)
    ) t
    ```
-   **顺序不可换**：本卷会话必须在第 3 步删完，这里查到的 `exam_answers` 才是「其它来源」的引用。
+   **顺序不可换**：本卷会话必须在第 3 步删完，这里查到的 `exam_answers` 才是「其它来源」的引用。**预览口径与执行一致**：预览的 `exam_answers` 分支必须排除本卷会话（§6.3），否则 `retainedCount` 虚高。
 6. `DELETE FROM questions WHERE id IN (可删题 id 列表)`（空列表则跳过；SQL 用动态占位符拼接，禁止字符串拼值）。
 7. `DELETE FROM exam_papers WHERE id = ?`（级联清剩余 `paper_questions`；保留题变成孤儿题，仍可被错题练习使用）。
 8. `commit()`。

@@ -120,7 +120,7 @@ describe('AdminPapersRepository.countImpact', () => {
     const pool = {
       execute: vi.fn().mockImplementation((sql: string, params: any[]) => {
         if (/FROM paper_questions WHERE paper_id = \?$/i.test(sql)) return Promise.resolve([[{ cnt: 14 }], []]);
-        if (/EXISTS \(SELECT 1 FROM paper_questions x/.test(sql)) return Promise.resolve([[{ cnt: 2 }], []]);
+        if (/EXISTS\s*\(\s*SELECT 1 FROM paper_questions x/.test(sql)) return Promise.resolve([[{ cnt: 2 }], []]);
         if (/FROM exam_sessions WHERE paper_id = \?/i.test(sql)) return Promise.resolve([[{ cnt: 1 }], []]);
         if (/FROM exam_answers ea[\s\S]*JOIN exam_sessions es/.test(sql)) return Promise.resolve([[{ cnt: 5 }], []]);
         if (/SELECT pq.question_id AS qid/.test(sql)) {
@@ -168,6 +168,8 @@ describe('AdminPapersRepository.countImpact', () => {
     ]) {
       expect(unionSql).toContain(table);
     }
+    // 本卷会话的作答不能算阻断（预览必须与执行一致）
+    expect(unionSql).toContain('session_id NOT IN (SELECT id FROM exam_sessions WHERE paper_id = ?)');
   });
 });
 ```
@@ -254,14 +256,27 @@ async function findExclusiveIds(db: Queryable, paperId: number): Promise<number[
   return result[0].map((r) => Number(r.qid));
 }
 
-/** 在被学生数据引用的题 id 集合。 */
-async function findBlockedIds(db: Queryable, ids: number[]): Promise<Set<number>> {
+/** 在被学生数据引用的题 id 集合。
+ *  `exam_answers` 必须排除本卷会话：这些会话执行删除时先清掉，算进来会让预览虚高。 */
+async function findBlockedIds(db: Queryable, ids: number[], paperId: number): Promise<Set<number>> {
   if (ids.length === 0) return new Set();
   const placeholders = ids.map(() => '?').join(',');
-  const union = BLOCKING_TABLES
-    .map((t) => `SELECT question_id AS qid FROM ${t} WHERE question_id IN (${placeholders})`)
-    .join(' UNION ALL ');
-  const params = BLOCKING_TABLES.flatMap(() => ids);
+  const branches = [
+    ...BLOCKING_TABLES
+      .filter((t) => t !== 'exam_answers')
+      .map((t) => ({
+        sql: `SELECT question_id AS qid FROM ${t} WHERE question_id IN (${placeholders})`,
+        params: ids,
+      })),
+    {
+      sql: `SELECT question_id AS qid FROM exam_answers
+             WHERE question_id IN (${placeholders})
+               AND session_id NOT IN (SELECT id FROM exam_sessions WHERE paper_id = ?)`,
+      params: [...ids, paperId],
+    },
+  ];
+  const union = branches.map((b) => b.sql).join(' UNION ALL ');
+  const params = branches.flatMap((b) => b.params);
   const result = (await db.execute(
     `SELECT DISTINCT qid FROM (${union}) t`,
     params,
@@ -356,7 +371,7 @@ export class AdminPapersRepository {
     );
 
     const exclusiveIds = await findExclusiveIds(this.pool, paperId);
-    const blocked = await findBlockedIds(this.pool, exclusiveIds);
+    const blocked = await findBlockedIds(this.pool, exclusiveIds, paperId);
 
     const questionCount = Number(questionRows[0]?.cnt ?? 0);
     const sharedCount = Number(sharedRows[0]?.cnt ?? 0);
@@ -560,7 +575,7 @@ export interface PaperDeleteOutcome {
       await conn.execute('DELETE FROM exam_sessions WHERE paper_id = ?', [paperId]);
 
       const exclusiveIds = await findExclusiveIds(conn, paperId);
-      const blocked = await findBlockedIds(conn, exclusiveIds);
+      const blocked = await findBlockedIds(conn, exclusiveIds, paperId);
       const deletable = exclusiveIds.filter((id) => !blocked.has(id));
       if (deletable.length > 0) {
         const placeholders = deletable.map(() => '?').join(',');
