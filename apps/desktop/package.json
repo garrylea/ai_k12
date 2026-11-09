@@ -1,18 +1,22 @@
 {
   "name": "k12-desktop",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.3",
   "description": "K12 智学 PC App（Electron 壳）。安装包由 GitHub Actions 出，见 docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test": "vitest run",
-    "verify:asar": "node scripts/verify-asar.js"
+    "build:keyhook": "node scripts/build-keyhook.js",
+    "verify:asar": "node scripts/verify-asar.js",
+    "verify:keyhook": "node scripts/verify-keyhook.js"
   },
   "devDependencies": {
     "@electron/asar": "^4.3.1",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
+    "node-addon-api": "^8.9.2",
+    "node-gyp": "^12.4.0",
     "vitest": "^3.2.7"
   }
 }

@@ -31,7 +31,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          # ⚠️ 2026-11-09：原 `macos-14` 已被 GitHub 退役，job 会在 1 秒内静默 cancelled
+          #    （注解："The configuration 'macos-14-arm64-us-default' is not supported"）。
+          #    这里用 `macos-latest`（arm64，当前指向受支持的镜像）——比钉死某个版本号更抗退役。
+          - os: macos-latest
             platform: --mac
           - os: windows-latest
             platform: --win
@@ -53,6 +56,12 @@ jobs:
 
       - name: 安装依赖
         run: npm ci
+
+      # Windows 键盘钩子（2026-11-09）：源码在 native/keyhook，只有 windows runner 能编译。
+      # 必须在 npm test 之前 —— win 上有一条用例会真的 load 这个 .node。
+      # 其它平台这一步会自己跳过（脚本判 platform）。
+      - name: 编译 Windows 键盘钩子
+        run: npm run build:keyhook
 
       - name: 版本一致性校验（tag 必须等于 package.json 的 version）
         if: startsWith(github.ref, 'refs/tags/desktop-v')
@@ -126,6 +135,11 @@ jobs:
 
       - name: 产物白名单校验（asar）
         run: npm run verify:asar
+
+      # .node 真的解包出来了、是 x64、且能 require（N-API 稳定，能 load 就说明 Electron 里也能用）。
+      - name: 键盘钩子校验（仅 win）
+        if: matrix.platform == '--win'
+        run: npm run verify:keyhook
 
       # 只收产物本身，**不收** dist/mac*/ 下的 .app 目录 —— 那条路径含中文与空格。
       # .exe 旁的 .blockmap（差量更新差分索引）一并上传：缺了它 ④ 只能回退成全量下载（spec §9）。

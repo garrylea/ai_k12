@@ -78,8 +78,11 @@ cd apps/desktop && npm install && npm start            # 3) 壳（首次 npm ins
 ```
 
 > 学生登录即进真全屏 kiosk（**处于 kiosk 就关不掉窗口**，与是否在锁定期无关）；家长/管理员登录是普通窗口。
-> ⚠️ Electron 拦不住 `Alt+Tab` / `Cmd+Tab` / `Ctrl+Alt+Del` / 强制退出 —— 那是系统级；
-> 真·无法切屏要靠装机时的 OS 级单应用模式（运维配置）。见 [设计文档](docs/superpowers/specs/2026-09-23-pc-app-study-lockdown-design.md)。
+> ⚠️ 逃逸只能尽力拦：macOS 由 kiosk 真禁 `Cmd+Tab`（Siri/通知打断后约 1–2 秒恢复）；
+> Windows 由应用内全局键盘钩子吞掉 `Alt+Tab` / `Win` / `Alt+F4` / `Ctrl+Shift+Esc`；
+> `Ctrl+Alt+Del`、强杀进程仍拦不住。真·隔离要靠装机配置（macOS 受监督设备 Single App Mode、
+> Windows 企业版 Shell Launcher —— **家庭版没有系统级 kiosk**）。
+> 见 [设计文档](docs/superpowers/specs/2026-11-09-pc-app-windows-keyboard-hook-design.md)。
 
 #### 交付形态：安装包（学生机不需要装 Node）
 
@@ -197,8 +200,9 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
 - **壳全局不使用代理**（`no-proxy-server`）。它只访问自己的服务器，直连最稳；这也很关键 ——
   若走系统代理/PAC，局域网地址会被代理挂住、`did-fail-load` 不触发，**那张「连不上」本地页就不会出现**。
   所以：装壳的机器**不需要**（也不能靠）配代理来访问学习服务器
-- Electron 拦不住 `Alt+Tab` / `Cmd+Tab` / `Ctrl+Alt+Del` / 强制退出 —— 那是系统级；
-  真·无法切屏要靠装机时的 OS 级单应用模式（运维配置）
+- 切屏：macOS 由 kiosk 真禁 `Cmd+Tab`（被打断后约 1–2 秒恢复）；Windows 由应用内全局键盘钩子
+  吞掉 `Alt+Tab` / `Win` / `Alt+F4` / `Ctrl+Shift+Esc`。`Ctrl+Alt+Del`、强杀进程仍拦不住 ——
+  真·隔离要靠装机配置（macOS Single App Mode、Windows 企业版 Shell Launcher；家庭版无系统级 kiosk）
 
 ### Web 端 (`apps/web`)
 

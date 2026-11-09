@@ -1,0 +1,8 @@
+{
+  "name": "k12-keyhook",
+  "version": "0.0.1",
+  "private": true,
+  "description": "K12 智学 PC App 的 Windows 全局键盘钩子（学生模式下拦 Alt+Tab / Win 等）。只由 CI 的 windows runner 编译，产物被复制到 apps/desktop/native/keyhook.node。",
+  "gypfile": true,
+  "license": "UNLICENSED"
+}

@@ -21,7 +21,14 @@ files:
   - lib/**/*.js
   - pages/**
   - package.json
+  - native/keyhook.node          # Windows 键盘钩子（只在 windows runner 上编译出来；mac/linux 匹配不到）
   - '!**/*.test.js'
+
+# ⚠️ `.node` 必须解包到 app.asar.unpacked —— asar 里的动态库无法 dlopen。
+#    产物由 scripts/build-keyhook.js 生成（不入库），缺失时报错由 scripts/verify-asar.js 与
+#    scripts/verify-keyhook.js 兜住。
+asarUnpack:
+  - native/keyhook.node
 
 # 产物名必须 ASCII：默认模板是 ${productName}-${version}-${arch}.${ext}，会产出
 # 「K12 智学-0.1.0-arm64.pkg」（中文 + 空格）→ 污染 /download/ 的 URL、复制粘贴变脆。

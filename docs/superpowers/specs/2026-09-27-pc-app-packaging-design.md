@@ -236,9 +236,11 @@ app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
 
 **触发**：推 `desktop-v*` tag，或手动 `workflow_dispatch`。
 
-**三个 job**（`strategy.matrix.os` = `macos-14` / `windows-latest` / `ubuntu-latest`）：
-macOS 那个标签若在 Actions 里不可用，退回 `macos-latest` —— **架构对本设计不关键**（见下方「关于 runner 架构」）。
-标签可用性以**当天** GitHub 的 runner 列表为准（`macos-14` 属较老的镜像，投产前核一下）。
+**三个 job**（`strategy.matrix.os` = `macos-latest` / `windows-latest` / `ubuntu-latest`）：
+macOS 那个标签若在 Actions 里不可用，一律用 `macos-latest` —— **架构对本设计不关键**（见下方「关于 runner 架构」）。
+标签可用性以**当天** GitHub 的 runner 列表为准（**2026-11-09 更正**：原 `macos-14` 已被 GitHub 退役，
+job 会在 1 秒内静默 `cancelled`，注解是 `The configuration 'macos-14-arm64-us-default' is not supported`；
+现用 `macos-latest`，比钉死版本号更抗退役）。
 
 1. `actions/checkout`
 2. `actions/setup-node` → **node 22**（⚠️ **不是**被 electron-builder 逼的：稳定 v26 的 engines 只要求 `node >= 14`；选 22 是为了与仓库其它工具链对齐、并给日后可能升 v27 留余量），并开 npm 缓存（`cache-dependency-path: apps/desktop/package-lock.json`）
