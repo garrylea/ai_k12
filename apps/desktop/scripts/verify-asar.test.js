@@ -64,6 +64,10 @@ describe('REQUIRED 与本仓库的真实形态一致（防漂移）', () => {
     );
     expect(rel.length, '没扫到本地 require，正则失效了').toBeGreaterThanOrEqual(4);
     for (const r of rel) {
+      // `.node` 是平台专属产物（Windows 键盘钩子）：mac/linux 的包里根本不存在，
+      // 不能进 REQUIRED。它的打包由 electron-builder.yml 的 files/asarUnpack +
+      // verify-asar 的 win-unpacked 检查 + keyboard-hook.wiring.guard.test.js 三处兜住。
+      if (r.endsWith('.node')) continue;
       expect(REQUIRED, `main.js require 了 ${r}，但 asar 白名单没钉住它 → 打包后会缺件`).toContain(
         r,
       );

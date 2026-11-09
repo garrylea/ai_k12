@@ -7,6 +7,7 @@ const { resolveServerUrl } = require('./lib/resolve-server-url.js');
 const { probeServer } = require('./lib/probe-server.js');
 const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
 const { createKioskGuard } = require('./lib/kiosk-guard.js');
+const { createKeyboardHook } = require('./lib/keyboard-hook.js');
 
 /**
  * **全局禁用代理**（spec §4.7）。
@@ -49,10 +50,12 @@ app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
  *   2. 锁定期间关不掉窗口（拦 close / before-quit / minimize）；
  *   3. 封堵应用内逃逸（外链、跨源导航）。
  *
- * **能力边界（有意写在这里，别当成缺陷去“修”）**：Electron 拦不住 Alt+Tab / Cmd+Tab /
- * Ctrl+Alt+Del / 强制退出——那是系统级，任何应用都做不到。`blur` 抢回只是尽力而为。
- * 真·无法切屏要靠装机时的 OS 级单应用模式（Windows Assigned Access / macOS Single App Mode），
- * 属运维配置，不是代码（spec §8 局限 1）。
+ * **能力边界（有意写在这里，别当成缺陷去“修”）**：macOS 的 Cmd+Tab 由 kiosk 真禁用
+ * （打断后靠 kiosk-guard 恢复，约 1–2 秒）；Windows 的 Alt+Tab / Win / Alt+F4 / Ctrl+Shift+Esc
+ * 由应用内全局键盘钩子（`lib/keyboard-hook.js` + `native/keyhook`）吞掉。
+ * `Ctrl+Alt+Del` 与强杀进程**拦不住**——那是系统级，任何应用都做不到。
+ * 真·隔离要靠装机配置（macOS 受监督设备 Single App Mode、Windows 企业版 Shell Launcher；
+ * 家庭版没有系统级 kiosk）。
  */
 
 /**
@@ -65,6 +68,15 @@ app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
  */
 let studentMode = false;
 let win = null;
+/**
+ * App 是否刚从「非前台」回到前台（2026-11-09）。
+ *
+ * **为什么需要它**：kiosk 挡 Cmd+Tab 靠的是 macOS 的 `NSApplicationPresentationOptions`，
+ * 这组选项是 **app 级**的 —— App 一失活（Siri / 通知 / 切到别的应用）就被系统收回，
+ * 而 `isVisible/isFocused/isKiosk/isFullScreen` 四项仍全是 true，守护自己看不出异常。
+ * 所以「从后台回来」这件事本身必须触发一次**无条件重进 kiosk**，不能等状态变"不健康"。
+ */
+let appWasInactive = false;
 
 /** 守护日志的大小上限：超过就清空重写，避免长期运行无限增长。 */
 const KIOSK_LOG_MAX_BYTES = 256 * 1024;
@@ -126,6 +138,22 @@ const kioskGuard = createKioskGuard({
       return {};
     }
   },
+  log: appendKioskLog,
+});
+
+/**
+ * Windows 全局键盘钩子（2026-11-09）。
+ *
+ * **只在 Windows + 学生模式下生效**：吞掉 Alt+Tab / Win / Alt+F4 / Ctrl+Shift+Esc 等
+ * 能逃离或杀掉 App 的组合键。mac/linux 上 `createKeyboardHook` 直接 no-op，不会 require
+ * `native/keyhook.node`（那个产物只在 CI 的 windows runner 上编译，不入库）。
+ *
+ * 失败一律降级：缺 .node / ABI 不兼容 / `SetWindowsHookEx` 失败都只写 kiosk-guard.log，
+ * 绝不阻断启动或答题。
+ */
+const keyboardHook = createKeyboardHook({
+  platform: process.platform,
+  load: () => require('./native/keyhook.node'),
   log: appendKioskLog,
 });
 
@@ -277,7 +305,10 @@ function createWindow() {
   // 与每秒一次的看门狗里 —— 不要在这里各写一套 focus/kiosk 逻辑（会漂移）。
   //
   // 刻意**不加** `setAlwaysOnTop`：那会盖住 UAC / 系统安全对话框，风险大于收益。
-  win.on('blur', () => kioskGuard.schedule('blur'));
+  win.on('blur', () => {
+    appWasInactive = true;
+    kioskGuard.schedule('blur');
+  });
   win.on('leave-full-screen', () => kioskGuard.schedule('leave-full-screen'));
   win.on('hide', () => kioskGuard.schedule('hide'));
   win.on('show', () => kioskGuard.schedule('show'));
@@ -289,6 +320,7 @@ function createWindow() {
     // 模块级 `win`，不是捕获的旧窗口）。新窗口加载失败时 did-fail-load 会自己重新起表。
     stopRetry();
     kioskGuard.stop();
+    keyboardHook.setEnabled(false); // 窗口没了钩子也不该继续拦系统快捷键
     win = null;
   });
 }
@@ -296,6 +328,11 @@ function createWindow() {
 // 拦 before-quit：否则 Cmd+Q / Alt+F4 能绕过上面那个 close 拦截。
 app.on('before-quit', (event) => {
   if (studentMode) event.preventDefault();
+});
+
+// 进程要退出时一定摘钩子：钩子回调指向本模块的代码，不能带着它退出。
+app.on('will-quit', () => {
+  keyboardHook.setEnabled(false);
 });
 
 app.whenReady().then(() => {
@@ -329,9 +366,28 @@ app.whenReady().then(() => {
   powerMonitor.on('resume', () => kioskGuard.schedule('power-resume'));
   powerMonitor.on('unlock-screen', () => kioskGuard.schedule('unlock-screen'));
 
-  // Siri / 通知把 App 顶到后台后，系统把它切回前台会走这里（与窗口的 blur/focus 不同：
-  // 那是窗口级，这是 App 级）。此时最需要重新确认 kiosk 是否还完整。
-  app.on('did-become-active', () => kioskGuard.schedule('did-become-active'));
+  // Siri / 通知把 App 顶到后台后，系统把它切回前台会走这里（与窗口的 focus/blur 不同：
+  // 那是窗口级，这是 App 级）。**只要之前确实离开过前台，就无条件重进 kiosk** ——
+  // 失活的副作用是 presentation options 被系统收回（Cmd+Tab 重新可用），
+  // 而窗口四项状态全部照旧为 true，`schedule()` 会判定健康、什么都不做。
+  app.on('did-resign-active', () => {
+    appWasInactive = true;
+  });
+  app.on('did-become-active', () => {
+    if (appWasInactive) {
+      appWasInactive = false;
+      // macOS 才需要「无条件重进」：失活会收回 app 级 presentation options（Cmd+Tab 封锁），
+      // 而窗口四项状态仍全是 true，健康检查看不出来。Windows/Linux 的 kiosk 只是全屏，
+      // 每次切回来都重进等于白白闪一下，交给常规健康检查即可。
+      if (process.platform === 'darwin') {
+        kioskGuard.scheduleReassert('did-become-active');
+      } else {
+        kioskGuard.schedule('did-become-active');
+      }
+    } else {
+      kioskGuard.schedule('did-become-active');
+    }
+  });
 });
 
 app.on('window-all-closed', () => {
@@ -349,6 +405,10 @@ function applyStudentMode(on) {
   // 先落盘：写失败只 warn、绝不抛（写入永不阻断主链路）。落盘是为了下次启动能恢复。
   writeStudentMode(app.getPath('userData'), studentMode);
   appendKioskLog(`[guard] student-mode=${studentMode}`);
+
+  // ⚠️ 必须在窗口判空**之前**：启动恢复学生模式时窗口可能还没建好，
+  // 放到后面会让「开机即学生模式」这一路永远不装 Windows 钩子。
+  keyboardHook.setEnabled(studentMode);
 
   if (!win || win.isDestroyed()) {
     kioskGuard.stop();

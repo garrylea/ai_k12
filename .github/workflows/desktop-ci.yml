@@ -1,0 +1,55 @@
+# PC App（Electron 壳）的 PR 级 CI —— 只在 apps/desktop 变更时跑。
+#
+# 为什么单独一个 workflow（2026-11-09）：`ci.yml` 的 server/web/data-refinery 是全量跑的，
+# 再给它加 path filter 会把别人的测试也一起跳过。而 Windows 键盘钩子（native/keyhook）
+# 只有 windows runner 能编译，等 desktop-v* tag 的 release workflow 才发现编译失败太晚。
+#
+# ⚠️ 本文件也是 YAML：根 .gitignore 的 `*.yml` 规则靠 `!.github/workflows/*.yml` 放行。
+name: Desktop CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/desktop/**'
+      - '.github/workflows/desktop-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/desktop/**'
+      - '.github/workflows/desktop-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: windows (native + vitest)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      # must 在 npm test 之前：win 上有一条用例会真的 load 这个 .node
+      - name: 编译键盘钩子
+        run: npm run build:keyhook
+
+      - name: vitest
+        run: npm test

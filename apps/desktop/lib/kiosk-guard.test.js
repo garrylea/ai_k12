@@ -35,6 +35,8 @@ function makeWindow(initial = {}) {
     setKiosk: (on) => {
       calls.push(`setKiosk:${on}`);
       state.kiosk = on;
+      // 真实 Electron：setKiosk(false) 是**异步**退出全屏（约 100ms 后才变 false），
+      // 所以这里刻意不动 fullscreen —— 测试用 state.finishExit() 手动结束动画。
       if (on) state.fullscreen = true;
     },
     setFullScreen: (on) => {
@@ -44,11 +46,19 @@ function makeWindow(initial = {}) {
     setClosable: (on) => calls.push(`setClosable:${on}`),
     setMinimizable: (on) => calls.push(`setMinimizable:${on}`),
   };
-  return { win, state, calls };
+  return {
+    win,
+    state,
+    calls,
+    /** 模拟「退出全屏动画结束」。 */
+    finishExit: () => {
+      state.fullscreen = false;
+    },
+  };
 }
 
 function createHarness({ initial = {}, platform = 'darwin', enabled = true } = {}) {
-  const { win, state, calls } = makeWindow(initial);
+  const { win, state, calls, finishExit } = makeWindow(initial);
   const focusAppCalls = [];
   const logs = [];
   const mode = { enabled };
@@ -63,7 +73,7 @@ function createHarness({ initial = {}, platform = 'darwin', enabled = true } = {
     watchdogMs: 1000,
     cooldownMs: 1500,
   });
-  return { guard, win, state, calls, focusAppCalls, logs, mode };
+  return { guard, win, state, calls, finishExit, focusAppCalls, logs, mode };
 }
 
 beforeEach(() => {
@@ -95,16 +105,65 @@ describe('createKioskGuard', () => {
   it('被踢出全屏（kiosk 标志还在）：必须 false→true 完整重进 kiosk，而不是只补全屏', () => {
     const { guard, calls, state } = createHarness({ initial: { fullscreen: false } });
     guard.schedule('leave-full-screen');
-    vi.advanceTimersByTime(300);
+    vi.advanceTimersByTime(300); // 调度延迟
 
     // 关键：isKiosk() 仍为 true 时 setKiosk(true) 是空操作，必须先 false 复位。
     expect(calls).toContain('setKiosk:false');
-    expect(calls).toContain('setKiosk:true');
+    expect(calls).not.toContain('setKiosk:true'); // 退出动画还没结束，不能急着进
+
+    vi.advanceTimersByTime(100); // 轮询到「已退出全屏」→ 才 setKiosk(true)
     expect(calls.indexOf('setKiosk:false')).toBeLessThan(calls.indexOf('setKiosk:true'));
-    expect(calls).toContain('setFullScreen:true'); // 兜底
+
+    vi.advanceTimersByTime(1200); // 进入动画结束 → 钉窗口能力
     expect(calls).toContain('setClosable:false');
     expect(calls).toContain('setMinimizable:false');
     expect(state.fullscreen).toBe(true);
+    expect(state.kiosk).toBe(true);
+  });
+
+  it('重进必须等退出全屏动画结束：全屏还没退干净就不许 setKiosk(true)', () => {
+    // 2026-11-09 实测：back-to-back 调用时 Electron 的 SetFullScreen 会直接 return，
+    // presentation options（Cmd+Tab 封锁）永远不会被重新设置 —— 看着全屏、其实能切走。
+    const { guard, calls, state, finishExit } = createHarness();
+    guard.scheduleReassert('did-become-active');
+    vi.advanceTimersByTime(300);
+
+    expect(calls).toContain('setKiosk:false');
+    vi.advanceTimersByTime(500); // 全屏仍是 true（假窗口模拟动画没结束）
+    expect(calls).not.toContain('setKiosk:true');
+
+    finishExit();
+    vi.advanceTimersByTime(100);
+    expect(calls).toContain('setKiosk:true');
+    expect(state.kiosk).toBe(true);
+  });
+
+  it('scheduleReassert：四项状态全"健康"也要重进 kiosk（Siri 之后 Cmd+Tab 能切走的根因）', () => {
+    // 失活会收回 app 级 presentation options，但 isVisible/isFocused/isKiosk/isFullScreen
+    // 全是 true —— healthy() 看不出来，必须无条件重进。
+    const { guard, calls, state, finishExit, focusAppCalls } = createHarness();
+    guard.scheduleReassert('did-become-active');
+    vi.advanceTimersByTime(300);
+
+    expect(focusAppCalls).toContain('focusApp'); // 先把 App 激活，选项才会生效
+    expect(calls).toContain('setKiosk:false');
+    finishExit();
+    vi.advanceTimersByTime(100);
+    expect(calls).toContain('setKiosk:true');
+    expect(state.kiosk).toBe(true);
+  });
+
+  it('scheduleReassert 受冷却约束：紧接着再来一次不会重复闪全屏', () => {
+    const { guard, calls, finishExit } = createHarness();
+    guard.scheduleReassert('first');
+    vi.advanceTimersByTime(300);
+    finishExit();
+    vi.advanceTimersByTime(100);
+    const before = calls.filter((c) => c === 'setKiosk:false').length;
+
+    guard.scheduleReassert('second');
+    vi.advanceTimersByTime(300);
+    expect(calls.filter((c) => c === 'setKiosk:false')).toHaveLength(before);
   });
 
   it('全屏还在但 kiosk 标志掉了：只补一次 setKiosk(true)，不做完整重进', () => {
@@ -116,8 +175,10 @@ describe('createKioskGuard', () => {
     expect(calls).not.toContain('setFullScreen:true');
   });
 
-  it('只是失焦（kiosk + 全屏都还在）：不重进 kiosk，避免每次通知都闪一次全屏', () => {
-    const { guard, calls, focusAppCalls, state } = createHarness();
+  it('只是失焦（kiosk + 全屏都还在）：抢回焦点后仍要完整重进 kiosk', () => {
+    // 2026-11-09 修正：旧版这条断言「失焦不重进」，结果 Siri 之后 Cmd+Tab 永久可用 ——
+    // presentation options 是 app 级的，失活即被收回，抢回焦点不会自动恢复。
+    const { guard, calls, finishExit, focusAppCalls, state } = createHarness();
     state.focused = false;
 
     guard.schedule('blur');
@@ -127,9 +188,14 @@ describe('createKioskGuard', () => {
     expect(focusAppCalls).toEqual(['focusApp']);
     expect(calls).toContain('focus');
     expect(calls).toContain('moveTop');
-    expect(calls).not.toContain('setKiosk:true');
-    expect(calls).not.toContain('setKiosk:false');
     expect(state.focused).toBe(true);
+    expect(calls).not.toContain('setKiosk:false'); // 先等焦点生效，再重进
+
+    vi.advanceTimersByTime(300);
+    expect(calls).toContain('setKiosk:false'); // 完整重进，而不是只补焦点
+    finishExit();
+    vi.advanceTimersByTime(100);
+    expect(calls).toContain('setKiosk:true');
   });
 
   it('非 macOS 不调用 app.focus，只聚焦窗口', () => {
@@ -139,6 +205,15 @@ describe('createKioskGuard', () => {
     vi.advanceTimersByTime(300);
     expect(focusAppCalls).toEqual([]);
     expect(calls).toContain('focus');
+  });
+
+  it('Windows 失焦但不缺全屏：只聚焦，不重进 kiosk（避免每次切回来闪一下）', () => {
+    const { guard, calls, state } = createHarness({ platform: 'win32' });
+    state.focused = false;
+    guard.schedule('blur');
+    vi.advanceTimersByTime(600);
+    expect(calls).toContain('focus');
+    expect(calls).not.toContain('setKiosk:false');
   });
 
   it('现场诊断写进日志（真机复现 Siri 时用来判读窗口/显示器状态）', () => {
@@ -152,7 +227,7 @@ describe('createKioskGuard', () => {
   it('kiosk 掉了：setKiosk(true) 一并恢复全屏', () => {
     const { guard, calls, state } = createHarness({ initial: { kiosk: false, fullscreen: false } });
     guard.schedule('leave-full-screen');
-    vi.advanceTimersByTime(300);
+    vi.advanceTimersByTime(400); // 300 调度 + 100 轮询
     expect(calls).toContain('setKiosk:true');
     expect(state.kiosk).toBe(true);
     expect(state.fullscreen).toBe(true);
@@ -170,17 +245,18 @@ describe('createKioskGuard', () => {
     const { guard, state, calls } = createHarness();
     guard.start();
     state.fullscreen = false;
-    vi.advanceTimersByTime(1300); // 1000ms 触发 → 再等 300ms 延迟
-    expect(calls).toContain('setFullScreen:true');
+    vi.advanceTimersByTime(1400); // 1000ms 触发 → 再等 300ms 延迟 + 100ms 轮询
+    expect(calls).toContain('setKiosk:false');
+    expect(calls).toContain('setKiosk:true');
+    expect(state.kiosk).toBe(true);
     guard.stop();
   });
 
   it('冷却期内不重复恢复，避免全屏动画抖动', () => {
-    const { guard, calls, state } = createHarness();
-    state.kiosk = false;
-    state.fullscreen = false;
+    const { guard, calls, state } = createHarness({ initial: { kiosk: false, fullscreen: false } });
 
     guard.restore('manual-1');
+    vi.advanceTimersByTime(100); // 轮询到已退出全屏 → setKiosk(true)
     expect(calls.filter((c) => c === 'setKiosk:true')).toHaveLength(1);
 
     state.kiosk = false; // 模拟恢复还没生效又掉了
@@ -188,8 +264,11 @@ describe('createKioskGuard', () => {
     guard.restore('manual-2');
     expect(calls.filter((c) => c === 'setKiosk:true')).toHaveLength(1); // 冷却期内被挡
 
-    vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(2000); // 等第一次重进彻底结束 + 过冷却
+    state.kiosk = false;
+    state.fullscreen = false;
     guard.restore('manual-3');
+    vi.advanceTimersByTime(100);
     expect(calls.filter((c) => c === 'setKiosk:true')).toHaveLength(2);
   });
 
@@ -200,6 +279,21 @@ describe('createKioskGuard', () => {
     guard.stop();
     vi.advanceTimersByTime(300);
     expect(calls).toEqual([]);
+  });
+
+  it('stop 会中止进行中的重进（家长登录后不能被继续按在 kiosk 里）', () => {
+    const { guard, calls, mode, finishExit } = createHarness();
+    guard.scheduleReassert('did-become-active');
+    vi.advanceTimersByTime(300); // 重进已开始（setKiosk(false) 已调用）
+    expect(calls).toContain('setKiosk:false');
+
+    mode.enabled = false; // 学生登出 / 家长登录
+    guard.stop();
+    finishExit();
+    vi.advanceTimersByTime(5000);
+
+    expect(calls.filter((c) => c === 'setKiosk:true')).toHaveLength(0);
+    expect(calls).not.toContain('setClosable:false');
   });
 
   it('窗口已销毁：不抛错、不动作', () => {
@@ -239,9 +333,12 @@ describe('createKioskGuard', () => {
       log: (message) => logs.push(message),
     });
 
-    expect(() => guard.restore('boom')).not.toThrow();
+    expect(() => {
+      guard.restore('boom');
+      vi.advanceTimersByTime(300); // 失焦时先等焦点生效，再重进 → 这里才真正调 setKiosk(false)
+    }).not.toThrow();
     expect(calls).toEqual(['setKiosk']);
-    expect(logs.some((line) => line.includes('restore-error reason=boom'))).toBe(true);
+    expect(logs.some((line) => line.includes('reenter-error reason=boom'))).toBe(true);
     expect(logs.some((line) => line.includes('native window gone'))).toBe(true);
   });
 });

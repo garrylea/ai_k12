@@ -8,6 +8,61 @@
 
 ---
 
+## 2026-11-09 PC App：Windows 全局键盘钩子（拦 Alt+Tab / Win 等）
+
+**背景**：孩子在 Windows 家庭版上试用，锁定期间 `Alt+Tab` 能切走。Windows 上 Electron 的 kiosk
+只是无边框全屏；而**家庭版没有系统级 kiosk**——Assigned Access 的**单应用模式只认 UWP/Edge**，
+传统 exe 在专业版要走「多应用/受限体验」，企业版/教育版才有 Shell Launcher。
+
+**做法**：自研 N-API 原生模块 `apps/desktop/native/keyhook/`（`WH_KEYBOARD_LL`），
+装在有消息循环的独立线程上，`studentMode === true` 时吞 `Alt+Tab` / `Alt+Shift+Tab` / `Ctrl+Alt+Tab` /
+`Win`（按下与抬起）/ `Alt+F4` / `Ctrl+Shift+Esc` / `Ctrl+Esc` / `Alt+Esc`；`Tab` / `Ctrl+Tab` / 输入法放行。
+`lib/keyboard-hook.js` 负责平台守卫（非 win32 **不 require** 原生模块）、失败降级（只写
+`kiosk-guard.log`）、5 秒健康检查；`main.js` 在 `applyStudentMode()` **窗口判空之前**接线。
+
+**打包**：`.node` 不入库，由 `scripts/build-keyhook.js` 在 windows runner 上编译；
+`electron-builder.yml` 的 `files` + `asarUnpack` 都要有它（asar 内无法 dlopen）；
+`verify-asar.js`（win-unpacked 断言）+ `verify-keyhook.js`（PE x64 + require + ping）双保险；
+新增 `.github/workflows/desktop-ci.yml`（path-filtered，windows-latest 编译 + 全量 vitest）。
+
+**边界（勿当缺陷修）**：`Ctrl+Alt+Del`（SAS）、强杀进程、UAC 安全桌面、RDP、ARM64 仍拦不住/不支持；
+未签名 + 键盘钩子易被杀毒误报。
+
+**spec**：`docs/superpowers/specs/2026-11-09-pc-app-windows-keyboard-hook-design.md`。
+
+## 2026-11-09 PC App：Siri 之后 Cmd+Tab 能切走（kiosk 封锁未恢复）
+
+**现象**：孩子试用时「先用 Siri，之后就能用 Cmd+Tab 把界面切走」。装的是 11-05 本机重打、已带守护的包。
+
+**根因（本机 Electron 44.4.5 / macOS 27 实测）**：
+
+- 挡 Cmd+Tab 的是 kiosk 设置的 `NSApplicationPresentationOptions`（实测 `506`，含
+  `DisableProcessSwitching`），**不是「全屏」**。这组选项是 **app 级**的：App 一失活就被系统收回，
+  `app.focus({ steal: true })` 抢回前台后实测 `front=Electron` 但 `options=0` —— 不会自动恢复。
+- 守护的健康判定只看 `isVisible/isFocused/isKiosk/isFullScreen`，这四项此时**全是 true**，
+  于是判定"健康"、不重进 → Cmd+Tab 永久可用。
+- 11-04 版写的 `setKiosk(false); setKiosk(true)` **back-to-back 无效**：退出全屏是异步动画
+  （约 105ms），第二次进入时 `IsWindowFullScreen()` 仍为 true，Electron 直接 return，
+  options 不会被重新设置（实测 back-to-back 后恒为 0）。必须先等 `isFullScreen()` 变 false。
+  这正是 11-05「修好了全屏、没修回 Cmd+Tab」的原因。
+
+**修法**：
+
+- `apps/desktop/lib/kiosk-guard.js`：`reenterKiosk()` 改成两段式（退出 → 轮询到全屏真退出 →
+  进入 → 等 1.2s 动画 → 钉窗口能力/抢焦点）；`kiosk=false` 时跳过退出段（避免与启动时的
+  进入动画打架、白等 4s）；`restore()` 对「只是失焦」也完整重进；新增 `scheduleReassert()`
+  —— **不看四项状态、无条件重进**。
+- `apps/desktop/main.js`：`did-resign-active` 记账，`did-become-active` 时若有离开过前台就走
+  `scheduleReassert()`。
+- 测试：`lib/kiosk-guard.test.js` 重写「只是失焦不重进」那条（旧断言是错的）；
+  `kiosk-guard.wiring.guard.test.js` 改钉「必须等 `isFullScreen()` 再重进、禁止 back-to-back」。
+
+**验证**：用生产代码的 `createKioskGuard` 起真窗口 → `osascript` 激活 Finder 模拟 Siri →
+外部读 options：`506 → 0 →（守护恢复）506`，全程约 1.3 秒。
+
+**遗留**：打断后的 1–2 秒窗口仍在（应用层极限）；绝对锁死仍需 macOS 单应用模式。
+发版时**必须升版本号**（0.2.0 已有两个不同内容的包，无法区分）。
+
 ## 2026-11-08 语文「同类型练习」开放（基础运用 / 古诗文）
 
 **入口**：练习记录详情页的「同类型练习」按钮。语文此前只显示「重做」，因为 `canSimilar` 只放行数学/物理。
