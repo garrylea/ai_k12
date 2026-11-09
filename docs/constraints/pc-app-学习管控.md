@@ -200,6 +200,9 @@ Windows 上 Electron 的 kiosk **只是无边框全屏**，`Alt+Tab` / `Win` 完
   CI 与 `tools/publish-installer.sh` 都从它推导。**别把 URL 抄进 yml**（那就是第二处、必然漂移）
 - **mac 包只能在 macOS runner 上构建**（`pkg` 走 `productbuild`，macOS 自带）；win/linux 只出 x64。
   **本机出不了 AppImage**（要 docker）—— 本机验证一律用 `--mac`
+- ⚠️ **macOS runner 标签不要钉死版本号**：`macos-14` 于 2026-11-09 实测已被 GitHub 退役，
+  job 会在 1 秒内**静默 cancelled**（注解 `The configuration 'macos-14-arm64-us-default' is not supported`，
+  任何 step 都没跑，极易误判成"排队失败"）。现用 `macos-latest`。
 - **mac 产物是 `.pkg` 不是 dmg**（2026-10-07 spec）：Installer.app 不向产物传播 quarantine（实测见
   spec §2），安装零终端；dmg 路线废止的原因是 quarantine 会**静默断掉 App 的局域网访问**
   （App 能启动但永远「暂时连不上学习服务器」，浏览器却正常 —— 别再当网络/代码问题排查）

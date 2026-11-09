@@ -31,7 +31,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          # ⚠️ 2026-11-09：原 `macos-14` 已被 GitHub 退役，job 会在 1 秒内静默 cancelled
+          #    （注解："The configuration 'macos-14-arm64-us-default' is not supported"）。
+          #    这里用 `macos-latest`（arm64，当前指向受支持的镜像）——比钉死某个版本号更抗退役。
+          - os: macos-latest
             platform: --mac
           - os: windows-latest
             platform: --win
