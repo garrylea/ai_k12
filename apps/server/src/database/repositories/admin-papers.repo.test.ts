@@ -57,10 +57,14 @@ describe('AdminPapersRepository.countImpact', () => {
   it('独占 = 卷内题 - 共享；被引用题从可删里扣除', async () => {
     const pool = {
       execute: vi.fn().mockImplementation((sql: string, params: any[]) => {
-        if (/FROM paper_questions WHERE paper_id = \?$/i.test(sql)) return Promise.resolve([[{ cnt: 14 }], []]);
-        if (/EXISTS \(SELECT 1 FROM paper_questions x/.test(sql)) return Promise.resolve([[{ cnt: 2 }], []]);
-        if (/FROM exam_sessions WHERE paper_id = \?/i.test(sql)) return Promise.resolve([[{ cnt: 1 }], []]);
-        if (/FROM exam_answers ea[\s\S]*JOIN exam_sessions es/.test(sql)) return Promise.resolve([[{ cnt: 5 }], []]);
+        // 四个计数查询都以 COUNT(*) AS cnt 开头，用前缀区分，避免匹配到 UNION 里的子查询
+        if (/SELECT COUNT\(\*\) AS cnt FROM paper_questions WHERE paper_id = \?$/i.test(sql)) return Promise.resolve([[{ cnt: 14 }], []]);
+        // 共享题计数；带上 COUNT/别名前缀，避免与 findExclusiveIds 的 EXISTS 撞车
+        if (/SELECT COUNT\(\*\) AS cnt FROM paper_questions pq[\s\S]*EXISTS\s*\(\s*SELECT 1 FROM paper_questions x/.test(sql)) {
+          return Promise.resolve([[{ cnt: 2 }], []]);
+        }
+        if (/SELECT COUNT\(\*\) AS cnt FROM exam_sessions WHERE paper_id = \?/i.test(sql)) return Promise.resolve([[{ cnt: 1 }], []]);
+        if (/SELECT COUNT\(\*\) AS cnt FROM exam_answers ea[\s\S]*JOIN exam_sessions es/.test(sql)) return Promise.resolve([[{ cnt: 5 }], []]);
         if (/SELECT pq.question_id AS qid/.test(sql)) {
           return Promise.resolve([params.length ? Array.from({ length: 12 }, (_, i) => ({ qid: 100 + i })) : [], []]);
         }
@@ -106,5 +110,35 @@ describe('AdminPapersRepository.countImpact', () => {
     ]) {
       expect(unionSql).toContain(table);
     }
+    // 本卷会话的作答不能算阻断（预览必须与执行一致）
+    expect(unionSql).toContain('session_id NOT IN (SELECT id FROM exam_sessions WHERE paper_id = ?)');
+  });
+
+  it('exam_answers 分支排除本卷会话，且各分支参数与占位符按序对齐', async () => {
+    const pool = {
+      execute: vi.fn().mockImplementation((sql: string) => {
+        if (/SELECT pq.question_id AS qid/.test(sql)) {
+          return Promise.resolve([[{ qid: 1 }, { qid: 2 }], []]);
+        }
+        if (/SELECT DISTINCT qid FROM/.test(sql)) return Promise.resolve([[], []]);
+        return Promise.resolve([[{ cnt: 0 }], []]);
+      }),
+    };
+    const repo = new AdminPapersRepository(pool as any);
+    await repo.countImpact(77);
+
+    const call = pool.execute.mock.calls.find((c) => String(c[0]).includes('SELECT DISTINCT qid FROM'))!;
+    const [sql, params] = call as [string, unknown[]];
+
+    // 只有 exam_answers 分支带会话排除，且只出现一次
+    expect(sql.match(/session_id NOT IN/g)).toHaveLength(1);
+    expect(sql).toContain('session_id NOT IN (SELECT id FROM exam_sessions WHERE paper_id = ?)');
+    // 7 分支 × 2 个 id 占位 + exam_answers 分支额外的 paper_id 占位
+    expect(sql.split('?').length - 1).toBe(7 * 2 + 1);
+    expect(params).toHaveLength(7 * 2 + 1);
+    // 前 6 个分支各是 [1, 2]；最后是 exam_answers 分支的 [1, 2, paperId]
+    expect(params.slice(0, 12)).toEqual([1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2]);
+    expect(params.slice(-3)).toEqual([1, 2, 77]);
+    expect(params.filter((p) => p === 77)).toHaveLength(1);
   });
 });

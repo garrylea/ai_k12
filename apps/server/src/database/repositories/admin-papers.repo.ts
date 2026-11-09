@@ -71,14 +71,27 @@ async function findExclusiveIds(db: Queryable, paperId: number): Promise<number[
   return result[0].map((r) => Number(r.qid));
 }
 
-/** 在被学生数据引用的题 id 集合。 */
-async function findBlockedIds(db: Queryable, ids: number[]): Promise<Set<number>> {
+/** 在被学生数据引用的题 id 集合。
+ *  `exam_answers` 必须排除本卷会话：这些会话执行删除时先清掉，算进来会让预览虚高。 */
+async function findBlockedIds(db: Queryable, ids: number[], paperId: number): Promise<Set<number>> {
   if (ids.length === 0) return new Set();
   const placeholders = ids.map(() => '?').join(',');
-  const union = BLOCKING_TABLES
-    .map((t) => `SELECT question_id AS qid FROM ${t} WHERE question_id IN (${placeholders})`)
-    .join(' UNION ALL ');
-  const params = BLOCKING_TABLES.flatMap(() => ids);
+  const branches = [
+    ...BLOCKING_TABLES
+      .filter((t) => t !== 'exam_answers')
+      .map((t) => ({
+        sql: `SELECT question_id AS qid FROM ${t} WHERE question_id IN (${placeholders})`,
+        params: ids,
+      })),
+    {
+      sql: `SELECT question_id AS qid FROM exam_answers
+             WHERE question_id IN (${placeholders})
+               AND session_id NOT IN (SELECT id FROM exam_sessions WHERE paper_id = ?)`,
+      params: [...ids, paperId],
+    },
+  ];
+  const union = branches.map((b) => b.sql).join(' UNION ALL ');
+  const params = branches.flatMap((b) => b.params);
   const result = (await db.execute(
     `SELECT DISTINCT qid FROM (${union}) t`,
     params,
@@ -155,8 +168,10 @@ export class AdminPapersRepository {
     const [sharedRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT COUNT(*) AS cnt FROM paper_questions pq
         WHERE pq.paper_id = ?
-          AND EXISTS (SELECT 1 FROM paper_questions x
-                       WHERE x.question_id = pq.question_id AND x.paper_id <> ?)`,
+          AND EXISTS (
+            SELECT 1 FROM paper_questions x
+             WHERE x.question_id = pq.question_id AND x.paper_id <> ?
+          )`,
       [paperId, paperId],
     );
     const [sessionRows] = await this.pool.execute<RowDataPacket[]>(
@@ -171,7 +186,7 @@ export class AdminPapersRepository {
     );
 
     const exclusiveIds = await findExclusiveIds(this.pool, paperId);
-    const blocked = await findBlockedIds(this.pool, exclusiveIds);
+    const blocked = await findBlockedIds(this.pool, exclusiveIds, paperId);
 
     const questionCount = Number(questionRows[0]?.cnt ?? 0);
     const sharedCount = Number(sharedRows[0]?.cnt ?? 0);
