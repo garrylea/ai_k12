@@ -93,8 +93,15 @@ describe('AdminPapersPage 列表', () => {
   });
 
   it('筛选提交后带条件重新请求并回第 1 页', async () => {
+    // total 40 / pageSize 20 → 2 页，才能先翻到第 2 页再验证提交回跳
+    listMock.mockResolvedValue(listResult({ total: 40 }));
     render(<AdminPapersPage />);
     await screen.findByTestId('papers-table');
+    expect(screen.getByText('共 40 条')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(listMock).toHaveBeenLastCalledWith({ page: 2, pageSize: 20 }));
+    expect(screen.getByText('2 / 2')).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId('papers-filter-subject'), { target: { value: '9' } });
     fireEvent.change(screen.getByTestId('papers-filter-keyword'), { target: { value: '汇文' } });
@@ -103,6 +110,7 @@ describe('AdminPapersPage 列表', () => {
     await waitFor(() => {
       expect(listMock).toHaveBeenLastCalledWith({ subjectId: 9, keyword: '汇文', page: 1, pageSize: 20 });
     });
+    expect(screen.getByText('1 / 2')).toBeInTheDocument();
   });
 });
 
@@ -143,5 +151,21 @@ describe('AdminPapersPage 删除', () => {
 
     await waitFor(() => expect(toastMock).toHaveBeenCalledWith('error', '服务异常'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('确认连点两次只发一次删除请求（deletingRef 同步闸门）', async () => {
+    render(<AdminPapersPage />);
+    await screen.findByTestId('papers-table');
+    fireEvent.click(screen.getByTestId('paper-delete-446'));
+    await screen.findByRole('dialog');
+
+    // 两次点击之间不 await，确保第二次点击发生在请求 promise 落地之前
+    const confirmButton = screen.getByTitle('确认');
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(toastMock).toHaveBeenCalledWith('success', '已删除《汇文卷》：题目 10 道、会话 1 场'));
+    expect(deleteMock).toHaveBeenCalledTimes(1);
   });
 });
