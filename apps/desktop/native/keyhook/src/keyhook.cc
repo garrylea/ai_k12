@@ -173,4 +173,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
 
 }  // namespace
 
-NAPI_MODULE(NODE_GYP_MODULE_NAME, Init)
+// ⚠️ 必须用 node-addon-api 的 `NODE_API_MODULE`（C++ 版），不是 C API 的 `NAPI_MODULE`：
+// 后者要求 `napi_value Init(napi_env, napi_value)`，会把我们的 `Init(Napi::Env, Napi::Object)`
+// 判成 C2664（2026-11-09 CI 实测）。
+NODE_API_MODULE(NODE_GYP_MODULE_NAME, Init)
