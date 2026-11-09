@@ -5,6 +5,7 @@ import { ParentMessagesRepository } from '../../database/repositories/parent-mes
 import { AdminChatRepository } from '../../database/repositories/admin-chat.repo.js';
 import { AdminNotificationsRepository } from '../../database/repositories/admin-notifications.repo.js';
 import { AdminsRepository } from '../../database/repositories/admins.repo.js';
+import { AdminPapersRepository } from '../../database/repositories/admin-papers.repo.js';
 import { ModelConfigRegistry, getModelConfigRegistry } from '../../ai-core/infra/model-config-registry.js';
 import { ModelClient } from '../../ai-core/infra/model-client/index.js';
 import { CommonModule } from '../../common/common.module.js';
@@ -17,13 +18,15 @@ import { AdminNotificationsService } from './admin-notifications.service.js';
 import { AdminChatService } from './admin-chat.service.js';
 import { AdminDashboardService } from './admin-dashboard.service.js';
 import { AdminAlertsService } from './admin-alerts.service.js';
+import { AdminPapersController } from './admin-papers.controller.js';
+import { AdminPapersService } from './admin-papers.service.js';
 
 /** registry 复用 ConfigModule 设置的全局单例（带 repo、启动时已 reload），不另建实例。 */
 @Module({
   // `SafetyAlertsModule` 只 import 不重复 provide：它的注释明确警告重复 provide
   // `SafetyAlertsRepository` 会分裂实例、破坏预警去重语义。这里只要它导出的仓储。
   imports: [CommonModule, SafetyAlertsModule],
-  controllers: [AdminController],
+  controllers: [AdminController, AdminPapersController],
   providers: [
     LlmModelsRepository,
     LlmRoutesRepository,
@@ -40,6 +43,8 @@ import { AdminAlertsService } from './admin-alerts.service.js';
     AdminChatService,
     AdminDashboardService,
     AdminAlertsService,
+    AdminPapersRepository,
+    AdminPapersService,
   ],
   exports: [AdminMessagesService, AdminNotificationsService, ParentMessagesRepository],
 })
