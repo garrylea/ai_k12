@@ -907,6 +907,79 @@ export function purgeExpiredAlerts(): Promise<AdminAlertPurgeResult> {
   return fetchApi('/admin/alerts/expired', { method: 'DELETE' });
 }
 
+// --- Admin: papers（试卷管理，2026-11-09） ---
+
+export interface AdminPaperItem {
+  id: number;
+  subjectId: number;
+  subjectName: string;
+  title: string;
+  grade: string | null;
+  gradeBand: string | null;
+  semester: string | null;
+  year: number | null;
+  district: string | null;
+  examType: string | null;
+  sourceKey: string;
+  questionCount: number;
+  sessionCount: number;
+  createdAt: string;
+}
+
+export interface AdminPaperListResult {
+  items: AdminPaperItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface AdminPaperDeletePreview {
+  paperId: number;
+  title: string;
+  subjectName: string;
+  questionCount: number;
+  sharedCount: number;
+  exclusiveCount: number;
+  deletableCount: number;
+  retainedCount: number;
+  sessionCount: number;
+  answerCount: number;
+}
+
+export interface AdminPaperDeleteResult {
+  paperId: number;
+  deletedQuestions: number;
+  retainedQuestions: number;
+  deletedSessions: number;
+  deletedAnswers: number;
+}
+
+export function listAdminPapers(params: {
+  subjectId?: number;
+  year?: number;
+  gradeBand?: string;
+  keyword?: string;
+  page: number;
+  pageSize: number;
+}): Promise<AdminPaperListResult> {
+  const qs = new URLSearchParams();
+  if (params.subjectId !== undefined) qs.set('subjectId', String(params.subjectId));
+  if (params.year !== undefined) qs.set('year', String(params.year));
+  if (params.gradeBand) qs.set('gradeBand', params.gradeBand);
+  if (params.keyword) qs.set('keyword', params.keyword);
+  qs.set('page', String(params.page));
+  qs.set('pageSize', String(params.pageSize));
+  return fetchApi(`/admin/papers?${qs.toString()}`);
+}
+
+export function getAdminPaperDeletePreview(id: number): Promise<AdminPaperDeletePreview> {
+  return fetchApi(`/admin/papers/${id}/delete-preview`);
+}
+
+export function deleteAdminPaper(id: number): Promise<AdminPaperDeleteResult> {
+  return fetchApi(`/admin/papers/${id}`, { method: 'DELETE' });
+}
+
 // --- Parent: messages ---
 export interface ParentMessageItem { id: number; type: string; title: string; content: string; isRead: boolean; isBroadcast: boolean; createdAt: string; }
 export function listMyMessages(): Promise<ParentMessageItem[]> { return fetchApi('/parent/messages'); }

@@ -74,6 +74,7 @@ import AdminMessagesPage from '@/pages/admin/AdminMessagesPage';
 import AdminChatPage from '@/pages/admin/AdminChatPage';
 import AdminAlertsPage from '@/pages/admin/AdminAlertsPage';
 import AdminBillingPage from '@/pages/admin/AdminBillingPage';
+import AdminPapersPage from '@/pages/admin/AdminPapersPage';
 import AdminSecurityPage from '@/pages/admin/AdminSecurityPage';
 import AnalyticsOverviewPage from '@/pages/admin/analytics/AnalyticsOverviewPage';
 import AnalyticsFunnelPage from '@/pages/admin/analytics/AnalyticsFunnelPage';
@@ -123,6 +124,7 @@ export const routes: RouteObject[] = [
       { path: 'messages', element: <AdminMessagesPage /> },
       { path: 'chat', element: <AdminChatPage /> },
       { path: 'alerts', element: <AdminAlertsPage /> },
+      { path: 'papers', element: <AdminPapersPage /> },
       { path: 'billing', element: <AdminBillingPage /> },
       { path: 'security', element: <AdminSecurityPage /> },
       // 埋点 Phase 2 运营面（Task 14 先通路由，页面 Task 15/16 填实）

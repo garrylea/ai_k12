@@ -98,3 +98,12 @@ describe('AdminNav 订阅裁决角标（store 联动）', () => {
     expect(await screen.findByTestId('billing-pending-badge')).toHaveTextContent('99+');
   });
 });
+
+describe('AdminNav 导航项', () => {
+  it('包含「试卷管理」入口且指向 /admin/papers', () => {
+    listClaimsMock.mockRejectedValue(new Error('隔离'));
+    renderNav();
+    const link = screen.getByRole('link', { name: '试卷管理' });
+    expect(link).toHaveAttribute('href', '/admin/papers');
+  });
+});

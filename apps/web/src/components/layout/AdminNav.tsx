@@ -10,6 +10,7 @@ const navItems = [
   { to: '/admin/messages', label: '消息推送' },
   { to: '/admin/chat', label: 'AI 助手' },
   { to: '/admin/billing', label: '订阅裁决' },
+  { to: '/admin/papers', label: '试卷管理' },
   { to: '/admin/alerts', label: '预警数据' },
   { to: '/admin/security', label: '账号安全' },
   { to: '/admin/analytics', label: '数据分析' },
