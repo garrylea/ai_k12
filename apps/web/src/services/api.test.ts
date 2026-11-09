@@ -18,6 +18,7 @@ import {
   getSubscriptionPlans,
   getSubscriptionStatus,
   heartbeatStudySession,
+  listAdminPapers,
   listBillingOrders,
   redeemParentPoints,
   saveParentPointRules,
@@ -353,6 +354,42 @@ describe('订阅/计费 API：路径与 body', () => {
     await confirmBillingOrderPaid('NO1', '微信号 xx 已转账 198 元');
 
     expect(requestBody(f)).toEqual({ note: '微信号 xx 已转账 198 元' });
+  });
+});
+
+describe('管理端试卷列表：query 契约', () => {
+  it('仅给 page/pageSize 时，query 只有这两项（可选键缺席不生成空条目）', async () => {
+    const f = stubData({ items: [], total: 0, page: 2, pageSize: 20 });
+
+    await listAdminPapers({ page: 2, pageSize: 20 });
+
+    expect(f.mock.calls[0][0]).toBe('/api/admin/papers?page=2&pageSize=20');
+  });
+
+  it('可选参数按固定顺序拼接，未传的键不出现（也不出现 undefined/null）', async () => {
+    const f = stubData({ items: [], total: 0, page: 1, pageSize: 10 });
+
+    await listAdminPapers({ subjectId: 3, year: 2025, gradeBand: 'junior', page: 1, pageSize: 10 });
+
+    const url = f.mock.calls[0][0] as string;
+    expect(url).toBe(
+      '/api/admin/papers?subjectId=3&year=2025&gradeBand=junior&page=1&pageSize=10',
+    );
+    expect(url).not.toContain('keyword');
+    expect(url).not.toContain('undefined');
+    expect(url).not.toContain('null');
+  });
+
+  it('中文关键词带空格走 URL 编码（不能裸拼进 query）', async () => {
+    const f = stubData({ items: [], total: 0, page: 1, pageSize: 10 });
+
+    await listAdminPapers({ keyword: '二次 函数', page: 1, pageSize: 10 });
+
+    const url = f.mock.calls[0][0] as string;
+    expect(url).toContain('keyword=%E4%BA%8C%E6%AC%A1+%E5%87%BD%E6%95%B0');
+    // 分页参数始终在（keyword 存在时也不例外）
+    expect(url).toContain('page=1');
+    expect(url).toContain('pageSize=10');
   });
 });
 
