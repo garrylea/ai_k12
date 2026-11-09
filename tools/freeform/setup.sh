@@ -15,7 +15,7 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
   echo "已加载 $ENV_FILE"
 else
-  echo "未找到 $ENV_FILE，改用当前 shell 环境变量"
+  echo "未找到 ${ENV_FILE}，改用当前 shell 环境变量"
 fi
 
 echo "== 2/4 应用路由迁移 =="
