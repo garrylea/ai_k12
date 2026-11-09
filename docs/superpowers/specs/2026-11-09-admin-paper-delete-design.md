@@ -31,7 +31,7 @@
 | # | 决策 | 理由 |
 |---|---|---|
 | 1 | 只删除**该卷独占题**（`paper_questions` 中不属于其它卷的题） | 线上有 18 道跨卷共享题；按题物理删会连带毁掉别的卷 |
-| 2 | 独占题若被学生数据引用则**保留该题**，只解除卷关联 | 错题本/变式/专项作答是学生学习痕迹，删卷不应抹掉；接口返回 `retainedQuestions` 让管理员知情 |
+| 2 | 独占题若被学生数据引用则**保留该题**，只解除卷关联 | 错题本/变式/专项作答是学生学习痕迹，删卷不应抹掉；接口返回 `retainedQuestions` 让管理员知情。**例外**：随题 CASCADE 的自评记录（`question_self_assessments`）、隐藏标记（`student_hidden_questions`）、提示缓存（`question_hints`）会随被删题一起消失，见 §10 |
 | 3 | 该卷的 `exam_sessions` 连同 `exam_answers` 一并删除 | 用户 2026-11-09 裁决；`exam_answers.question_id` 是 `ON DELETE RESTRICT`，不先清会话就删不了题 |
 | 4 | 删除走独立 `AdminPapersController`，不塞进 `AdminController` | `AdminController` 已 207 行、7 个 service；独立文件边界更清晰 |
 | 5 | 列表分页 SQL 用 `pool.query` 而非 `pool.execute` | `LIMIT ?` 在 execute 预编译下会被 MySQL 拒绝（仓内已有护栏测试） |
@@ -55,9 +55,12 @@
 | `variation_questions` | ON DELETE RESTRICT | **阻断** |
 | `special_answer_records` | ON DELETE RESTRICT | **阻断** |
 | `remediation_set_items` | ON DELETE RESTRICT | **阻断** |
-| `reward_items` | ON DELETE RESTRICT | **阻断** |
+| `student_hidden_questions` | ON DELETE CASCADE | 自动删（学生的「不再练」标记） |
+| `ai_dialogues.question_id` | ON DELETE SET NULL | 对话保留、题目引用置空 |
 | `exam_sessions.paper_id` | RESTRICT（默认） | 删卷前先删该卷会话 |
 | `paper_questions.paper_id` | ON DELETE CASCADE | 删卷自动清 |
+
+> 注：`questions` 表没有外键指向它的表还有 `admin_notifications.question_id`、`assessments.question_ids`、`homeworks.question_ids`（均为普通列/JSON），删除后会留下悬空 id，见 §10。原 spec 误列过 `reward_items`（不存在该表），已删。
 
 ### 5.2 概念定义
 
@@ -97,7 +100,7 @@ apps/server/src/modules/admin/admin.module.ts                注册 provider/con
 
 ```sql
 SELECT p.id, p.subject_id, s.name AS subject_name, p.title, p.grade, p.grade_band,
-       p.semester, p.year, p.district, p.exam_type, p.source_key, p.question_count,
+       p.semester, p.year, p.district, p.exam_type, p.source_key, p.created_at,
        (SELECT COUNT(*) FROM paper_questions pq WHERE pq.paper_id = p.id) AS linked_question_count,
        (SELECT COUNT(*) FROM exam_sessions es WHERE es.paper_id = p.id) AS session_count
 FROM exam_papers p JOIN subjects s ON s.id = p.subject_id
@@ -199,10 +202,10 @@ LIMIT ? OFFSET ?
      UNION ALL SELECT question_id FROM variation_questions WHERE question_id IN (...)
      UNION ALL SELECT question_id FROM special_answer_records WHERE question_id IN (...)
      UNION ALL SELECT question_id FROM remediation_set_items WHERE question_id IN (...)
-     UNION ALL SELECT question_id FROM reward_items WHERE question_id IN (...)
    ) t
    ```
-6. `DELETE FROM questions WHERE id IN (可删题 id 列表)`（空列表则跳过）。
+   **顺序不可换**：本卷会话必须在第 3 步删完，这里查到的 `exam_answers` 才是「其它来源」的引用。
+6. `DELETE FROM questions WHERE id IN (可删题 id 列表)`（空列表则跳过；SQL 用动态占位符拼接，禁止字符串拼值）。
 7. `DELETE FROM exam_papers WHERE id = ?`（级联清剩余 `paper_questions`；保留题变成孤儿题，仍可被错题练习使用）。
 8. `commit()`。
 
@@ -234,7 +237,25 @@ LIMIT ? OFFSET ?
 
 - `AdminPapersService`：参数校验后的业务编排、DTO 映射、异常转换；
 - `AdminPapersRepository`：SQL 与事务，不抛 HTTP 异常（返回 `null` / 抛普通 Error，由 service 转）；
-- 事务内不做任何网络/LLM 调用，避免长事务。
+- 事务内不做任何网络/LLM 调用，避免长事务；
+- 列表 `createdAt` 由 `Date` 转 ISO 字符串（`toISOString()`），不要裸传 mysql2 的 `Date`。
+
+### 6.6 入参校验（重要）
+
+**裸 `ZodError` 会被全局 `HttpExceptionFilter` 兜成 500/5000**，不是 400。新 controller 必须用 `safeParse` + 转换（同 `auth.controller.ts` 的 `parseInput`）：
+
+```ts
+function parseQuery<T>(schema: z.ZodType<T>, raw: unknown): T {
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    const detail = parsed.error.issues.map((i) => `${i.path.join('.') || 'query'}: ${i.message}`).join('; ');
+    throw new BadRequestException({ code: 1001, message: `入参校验失败：${detail}` });
+  }
+  return parsed.data;
+}
+```
+
+Query 是字符串，用 `z.coerce.number().int()`；`keyword` 同时校验 `max(50)` 与 `LIKE` 通配符转义（`\` `%` `_`）。删除/预览的 `:id` 走 `ParseIntPipe` + service 内 `> 0` 校验（非正数 → 400/1001）。
 
 ## 7. 前端设计
 
@@ -253,7 +274,8 @@ LIMIT ? OFFSET ?
 ```
 
 - 学科下拉复用 `apps/web/src/subjectConfig.ts` 的 `TRAINING_SUBJECTS`（6 科，与训练轨一致）；选到没有卷的学科时列表为空，不新增学科接口；
-- 删除按钮在 `sessionCount = 0` 时仍可点（有会话也能删，预览会展示数量）。
+- 删除按钮在 `sessionCount = 0` 时仍可点（有会话也能删，预览会展示数量）；
+- **筛选/关键词改变时回到第 1 页**（否则带着旧页码请求新条件可能停在空态）。
 
 ### 7.3 状态机
 
@@ -321,3 +343,7 @@ idle
 2. **保留题会变成孤儿题**：不在任何卷中，但仍可被错题练习/变式使用。这是「不抹学生数据」的代价。
 3. **预览与执行之间有时间差**：预览后到确认前若有新的考试会话/错题本写入，实际结果可能与预览数字不同；响应返回真实数字，UI 以响应为准。
 4. **删除会连带清掉该卷所有学生的考试成绩**（用户裁决）。管理员操作前应从预览里看到会话数。
+5. **进行中的考试会被强制中断**：`sessionCount` 含 `in_progress` 会话，删除后学生端请求该会话会 404。预览不区分状态，管理员需自行判断。
+6. **随题 CASCADE 的学生痕迹**：被删题的自评记录、隐藏标记、提示缓存一并消失；这几类不会阻断删除，也不出现在 `retainedCount` 里。
+7. **悬空 id**：`admin_notifications.question_id`、`assessments.question_ids`、`homeworks.question_ids` 无外键，删除后会指向不存在的题；这几处只在历史记录里出现，本期不清理。
+8. **并发窗口**：事务持 `exam_papers` 行锁，期间新建考试会话会等待，随后因父行不存在而失败 → 前端收到 409/4201，重试即可。
