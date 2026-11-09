@@ -89,7 +89,8 @@ PC App 出包入口
 
 模式（一次只能选一个）：
   --check              快速门禁：跑测试 + 最小出包（--dir，只产出 .app，约 10s）+ asar 自检。
-                       不产出安装包、不清空 dist、不碰 web 层。改完壳先跑这个。
+                       不产出安装包、不清空 dist（只删旧的 dist/mac* 里的 .app）、不碰 web 层。
+                       改完壳先跑这个。
   --local              本机出 mac 安装包：先清空 apps/desktop/dist，再出 x64 + arm64 两个 .app
                        （electron-builder --dir）并用 pkgbuild 封装成两个 pkg（约 1min），最后跑 asar 自检。
   --online             GitHub Actions 出三平台包（mac pkg / win exe / linux AppImage）。
@@ -120,6 +121,11 @@ USAGE
 mode_check() {
   require_builder
   run_tests
+  # 只清掉上次的 .app 目录（安装包保留）：verify-asar 会扫 dist 下所有 app.asar，
+  # 上一次构建的旧包会被按**当前**白名单判红（2026-11-09 实测：新增必需文件后
+  # 陈旧的 dist/mac 让 --check 假失败）。这里不碰 *.pkg。
+  log "清理上次的 .app 目录（dist/mac*, 不动安装包）…"
+  rm -rf "$DESKTOP_DIR/dist/mac" "$DESKTOP_DIR/dist/mac-arm64"
   log "最小出包（--dir：只产出 .app，不打包成 pkg）…"
   run_builder --mac --dir
   verify_asar

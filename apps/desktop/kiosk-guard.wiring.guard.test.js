@@ -8,9 +8,13 @@ import { fileURLToPath } from 'node:url';
  *
  * 这些点删掉后代码照样能跑、单测也不一定红，但逃逸口会回来 —— 所以钉在源码上：
  *   1. macOS 抢回前台必须走 `app.focus({ steal: true })`，`win.focus()` 抢不回来；
- *   2. 必须监听 `leave-full-screen` / `did-become-active`（系统把窗口踢出全屏 / 切回前台）；
- *   3. 被踢出全屏必须 `setKiosk(false) → setKiosk(true)` 完整重进（2026-11-05 实测）；
- *   4. 角色开关必须真的启动/停止守护（否则学生模式退出后家长窗口还会被拽回全屏）。
+ *   2. 必须监听 `leave-full-screen` / `did-become-active` / `did-resign-active`
+ *      （系统把窗口踢出全屏 / 切走前台 / 切回前台）；
+ *   3. 被踢出全屏必须 `setKiosk(false) → 等退出全屏动画 → setKiosk(true)` 完整重进，
+ *      **且不能 back-to-back**（2026-11-09 实测：连着调时第二次进入会直接 return，
+ *      presentation options 不会被重新设置 → 看着全屏、Cmd+Tab 却能切走）；
+ *   4. 「从后台回到前台」必须走 `scheduleReassert`（不看四项状态，无条件重进）；
+ *   5. 角色开关必须真的启动/停止守护（否则学生模式退出后家长窗口还会被拽回全屏）。
  *
  * 单测覆盖的是守护模块的行为；这里只钉 `main.js` 的接线，两者互补。
  */
@@ -34,11 +38,18 @@ describe('kiosk 守护接线护栏', () => {
   });
 
   it('失焦也交给守护层，而不是自己调 win.focus()', () => {
-    expect(mainSrc).toMatch(/win\.on\(\s*'blur'\s*,\s*\(\)\s*=>\s*kioskGuard\.schedule\(/);
+    expect(mainSrc).toMatch(/win\.on\(\s*'blur'\s*,\s*\(\)\s*=>\s*\{[\s\S]*?kioskGuard\.schedule\(/);
   });
 
   it('App 切回前台也交给守护层（Siri 顶到后台后重回前台的关键路径）', () => {
     expect(mainSrc).toMatch(/app\.on\(\s*'did-become-active'/);
+  });
+
+  it('离开前台要记下来，回到前台必须走「无条件重进」而不是只做健康检查', () => {
+    // 失活会收回 app 级 presentation options，而四项状态仍全是 true ——
+    // 只调 schedule() 会被 healthy() 判定挡掉，Siri 之后 Cmd+Tab 就一直可用。
+    expect(mainSrc).toMatch(/app\.on\(\s*'did-resign-active'/);
+    expect(mainSrc).toMatch(/kioskGuard\.scheduleReassert\(/);
   });
 
   it('学生模式开关启动/停止守护', () => {
@@ -46,9 +57,13 @@ describe('kiosk 守护接线护栏', () => {
     expect(mainSrc).toMatch(/else kioskGuard\.stop\(\);/);
   });
 
-  it('被踢出全屏必须完整重进 kiosk：setKiosk(false) 再 setKiosk(true)', () => {
-    expect(guardSrc).toMatch(/win\.setKiosk\(false\);\s*\n\s*win\.setKiosk\(true\);/);
-    expect(guardSrc).toMatch(/win\.setFullScreen\(true\)/); // 异步退出动画的兜底
+  it('重进 kiosk：setKiosk(false) → 等退出全屏 → setKiosk(true)，且禁止 back-to-back', () => {
+    expect(guardSrc).toMatch(/win\.setKiosk\(false\)/);
+    expect(guardSrc).toMatch(/win\.setKiosk\(true\)/);
+    expect(guardSrc).toMatch(/win\.setFullScreen\(true\)/); // 进入全屏的兜底
+    // 关键顺序：两者之间必须读取 isFullScreen() 等动画结束，否则选项不会被重新设置。
+    expect(guardSrc).toMatch(/win\.setKiosk\(false\);[\s\S]*?win\.isFullScreen\(\)[\s\S]*?win\.setKiosk\(true\);/);
+    expect(guardSrc).not.toMatch(/win\.setKiosk\(false\);\s*\n\s*win\.setKiosk\(true\);/);
   });
 
   it('看门狗间隔是 1 秒（改大等于把逃逸窗口拉长）', () => {

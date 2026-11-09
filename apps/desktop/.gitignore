@@ -1,1 +1,5 @@
 node_modules/
+
+# Windows 键盘钩子的编译产物：只由 CI 的 windows runner 生成，绝不入库
+native/*.node
+native/keyhook/build/

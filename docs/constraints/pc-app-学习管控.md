@@ -15,7 +15,7 @@
 - **`LEARNING_SESSION_POLL_MS = 10_000` ↔ `LEARNING_SESSION_ONLINE_WINDOW_SECONDS = 45` 是镜像**，改一处必须同步另一处；`online` **后端算好下发**，前端不重算。
 - **拔网线不解锁**（有意的严格性）：失败**绝不清锁**，本地截止时间是唯一判据。`session_lock_minutes` 是**单次登录起算的墙钟窗口**（1..480，**默认 30**；`NULL` = 家长**显式解除设置**），**不是**已废除的每日累计；它是**开始时快照**，家长事后改设置不影响本次。
 - **家长下发命令的主防线 = 「没有进行中会话就 409/1001、不写命令」**；惰性过期只是兜底。命令认领与 `unlocked_at` 落库**必须同一事务**。
-- **做不到的别当缺陷修**：拦不住 `Alt+Tab`/`Cmd+Tab`/`Ctrl+Alt+Del`/强制退出；**不区分异常退出**；真·无法切屏靠 OS 级单应用模式（运维）。**非目标**：自动更新（属 ④）、签名/公证、Web 端管控、`force_close`、云端部署（壳留 `K12_WEB_URL` 接缝）。
+- **做不到的别当缺陷修**：`Ctrl+Alt+Del` / 强制退出 / 系统级手势应用层无解；**macOS 的 `Cmd+Tab` 与 Windows 的 `Alt+Tab` 已各自处理** —— macOS 靠 kiosk（见下文 2026-11-09），Windows 靠应用内全局键盘钩子（见下文「Windows 键盘钩子」）；**不区分异常退出**；真·隔离靠 OS 级单应用模式（macOS 受监督设备 Single App Mode / Windows 企业版 Shell Launcher；**家庭版无系统级 kiosk**）。**非目标**：自动更新（属 ④）、签名/公证、Web 端管控、`force_close`、云端部署（壳留 `K12_WEB_URL` 接缝）。
   （**更正 2026-09-27**：安装包**已移出**上面这份清单 —— 交付形态就是安装包，见本文末「打包与分发（③）」；自动更新仍属 ④。）
 
 ## 壳生产化（2026-09-26，②）
@@ -82,6 +82,33 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
   缺件，护栏测试会红（本次已把 `lib/kiosk-guard.js` 钉进去）。
 - 能力边界不变：学生仍可能短暂看到桌面（约 1 秒），强制退出 / 系统级手势仍挡不住。
   真正的「绝对切不出去」仍靠 OS 级单应用模式（运维）。
+
+### Cmd+Tab 封锁的恢复（2026-11-09，真机事故：孩子先用 Siri，之后就能 Cmd+Tab 切走）
+
+三条实测结论，**改守护逻辑前必读**（复现脚本思路：起一个 kiosk 窗口 → 用 `osascript` 激活 Finder
+模拟「被顶掉」→ 从外部读 `NSApplication.currentSystemPresentationOptions`）：
+
+- **挡 Cmd+Tab 的是 presentation options（app 级），不是「全屏」**。kiosk 在位时实测值为
+  `506` = HideDock + HideMenuBar + DisableAppleMenu + **DisableProcessSwitching(32)** +
+  DisableForceQuit + DisableSessionTermination + DisableHideApplication。四项窗口状态
+  （`isVisible/isFocused/isKiosk/isFullScreen`）**看不出它有没有丢**。
+- **App 一失活（Siri / 通知 / 切到别的应用）系统就把这组选项收回，抢回前台不会自动恢复**：
+  实测 `app.focus({ steal: true })` 之后 `front=Electron` 但 `options=0`。所以
+  「只是失焦」也**必须**完整重进 kiosk —— 11-04 版曾把它写成「失焦不重进，免得闪」，是错的
+  （孩子正是这样拿到 Cmd+Tab 的）。
+- **`setKiosk(false); setKiosk(true)` 连着调无效**：退出全屏是异步动画（实测约 105ms），
+  第二次进入时 `IsWindowFullScreen()` 仍是 true，Electron 直接 return，
+  presentation options **永远不会被重新设置**（实测 back-to-back 后 options 恒为 0，
+  而 kiosk/fullscreen 标志都是 true —— 看着全屏、其实能切走）。必须
+  `setKiosk(false)` → 轮询到 `isFullScreen()` 为 false → `setKiosk(true)` → 等进入动画结束（1.2s）
+  再抢焦点。这就是 11-05 那次「修好了全屏、没修回 Cmd+Tab」的原因。
+
+对应实现：`lib/kiosk-guard.js` 的 `reenterKiosk()`（异步两段式，`REENTER_POLL_MS=100`）、
+`scheduleReassert()`（**不看四项状态、无条件重进**，由 `main.js` 的
+`did-resign-active` → `did-become-active` 触发）。`kiosk=false` 时**不要**先 `setKiosk(false)`
+（空操作，且会与启动时正在进入的全屏打架、白等 4 秒超时）。
+
+⚠️ 新增/改名 `lib/*.js` 仍要同步 `scripts/verify-asar.js` 的 `REQUIRED`。
 - **不要在 App 运行时关 Siri / 改系统偏好**（2026-11-05 裁决）：Siri 是系统守护进程，
   官方禁用手段是 MDM 配置描述文件（`com.apple.applicationaccess` 的 `allowAssistant=false`，
   macOS 26 CIS/STIG 的标准做法）或 26.4+ 的 Siri Settings profile，属**装机时一次性配置**；
@@ -90,6 +117,32 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
   把**整台 Mac 的 Siri 永久留成关闭**（影响所有用户），而强杀本就是已接受的逃逸路径。
   关掉 Siri 也堵不住 Mission Control / 通知 / 控制中心 / Cmd+Tab / 热角等其它控件，
   所以守护层仍是主防线。若将来要做，只能作为交付文档里给家长/运维的一次性装机步骤。
+
+### Windows 键盘钩子（2026-11-09）
+
+Windows 上 Electron 的 kiosk **只是无边框全屏**，`Alt+Tab` / `Win` 完全不受控。而**家庭版没有任何系统级 kiosk**（Assigned Access 单应用只认 UWP/Edge，传统 exe 要专业版的
+「多应用/受限体验」，企业版才有 Shell Launcher），所以逃逸只能靠应用内全局键盘钩子（`WH_KEYBOARD_LL`）。
+
+- **拦截矩阵（全套）**：`Alt+Tab` / `Alt+Shift+Tab` / `Ctrl+Alt+Tab` / `Win`（L/R，按下**与抬起**都吞，
+  否则抬起时开始菜单会弹）/ `Win+*` / `Alt+F4` / `Ctrl+Shift+Esc` / `Ctrl+Esc` / `Alt+Esc`。
+  **必须放行**：`Tab`、`Ctrl+Tab`（应用内快捷键）、输入法相关的所有按键。
+- **实现**：`native/keyhook/src/keyhook.cc`。钩子装在**独立线程的 GetMessage 循环**上
+  （Node 主线程不 pump Win32 消息）；回调里只做 `GetAsyncKeyState` + switch，**禁止分配/日志/回调 JS**；
+  `stop()` 用 `PostThreadMessage` 让钩子线程自己 `UnhookWindowsHookEx`、再 join。
+- **只在 win32 加载**：`lib/keyboard-hook.js` 在 `platform !== 'win32'` 时**根本不 require**
+  `native/keyhook.node`（那个文件只在 CI 的 windows runner 上编译，mac/linux 没有）。
+- **必须失败降级**：缺 .node / ABI 不兼容 / `SetWindowsHookEx` 失败都只写 `kiosk-guard.log`，
+  绝不阻断启动或答题（管控失效好过孩子进不去）。
+- **跟随角色**：`applyStudentMode()` 里调 `keyboardHook.setEnabled(studentMode)`，位置**在窗口判空之前**
+  —— 启动恢复学生模式时窗口还没建好，放后面会让「开机即学生模式」这一路永远不装钩子。
+  窗口 `closed` / `app.on('will-quit')` 必须摘钩子。
+- **5 秒健康检查**：钩子线程意外退出就重装（钩子没了等于没锁）。
+- **打包**：`native/keyhook.node` **不入库**（`.gitignore`），由 `npm run build:keyhook` 在 windows
+  runner 上编译；`electron-builder.yml` 的 `files` + **`asarUnpack`** 都要有它（asar 内无法 dlopen）；
+  `verify-asar.js` 在出现 `win-unpacked` 时断言它被解包，`verify-keyhook.js` 断言 PE 是 x64 且能 `require`。
+- **边界（勿当缺陷修）**：`Ctrl+Alt+Del` 是 SAS，拦不了；UAC 安全桌面下钩子收不到输入；
+  任务管理器/强杀进程仍可能杀掉 App；RDP 会话行为不同；只出 win x64（ARM64 不支持）；
+  未签名 + 键盘钩子容易被杀毒误报，交付文档要写「首次安装需放行」。
 
 ### 连不上本地页：重试必须「先探测、再导航」
 
@@ -136,7 +189,8 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
   有 `apps/desktop/gitignore.guard.test.js` 钉着，**改 .gitignore 后跑 `npm test`**
 - **`files` 是白名单**（`electron-builder.yml`），且**必须排除 `*.test.js`**。白名单漏一件的后果是
   `pages/offline.html` 那种**无节流紧循环 + 屏幕无 UI**（② spec §8-9）。出包后由
-  `apps/desktop/scripts/verify-asar.js` 断言「必需 9 项齐全、无 `*.test.js`」，**CI 红则不发**
+  `apps/desktop/scripts/verify-asar.js` 断言「必需 11 项齐全、无 `*.test.js`」，**CI 红则不发**
+  （另：出现 `win-unpacked` 时还要求 `native/keyhook.node` 已解包到 `app.asar.unpacked`）
 - **`artifactName` 必须全 ASCII**（`k12-desktop-${version}-${arch}.${ext}`）：默认模板带中文
   `productName` 与空格，会污染 `/download/` 的 URL
 - **`appId` 发布后改不得**（`com.k12zhixue.desktop`）：装过的机器按它认身份，④ 的更新也按它认

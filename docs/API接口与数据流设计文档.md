@@ -651,7 +651,7 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 
 1. **锁定时长是「单次登录起算的墙钟窗口」，不是每日累计**：范围 `1..480` 分钟（上限 8 小时，**默认 30**）；`NULL` = 家长显式解除设置（未设锁）。**到点自动解除**；家长也可随时用 `unlock` 提前解除。旧列名 `daily_time_limit_minutes` 与「每日上限」语义已于同批改动废除（§4.13 的 `today-usage` 同步收缩）。
 2. **`online` 的 45 秒阈值只在这一处**（`learning-session-log.service.ts` 的 `LEARNING_SESSION_ONLINE_WINDOW_SECONDS`，与计划 2 的客户端 `LEARNING_SESSION_POLL_MS = 10_000` **成对、改一处必须同步另一处**，沿用 `CLIENT_IDLE_DETECTION_SECONDS` ↔ `IDLE_TIMEOUT_MS` 的镜像纪律）。后端算好下发，**前端不重算**。
-3. **两条「做不到」是有意的非目标，别当缺陷修**：Electron 拦不住 `Alt+Tab` / `Ctrl+Alt+Del` / 强制退出（全屏 ≠ 不能切走）；**拔网线不解锁**（否则等于白送逃逸通道）。
+3. **两条「做不到」是有意的非目标，别当缺陷修**：客户端逃逸只能尽力拦 —— macOS 由 kiosk 真禁 `Cmd+Tab`（打断后 1–2 秒恢复），Windows 由应用内全局键盘钩子吞 `Alt+Tab` / `Win` / `Alt+F4` / `Ctrl+Shift+Esc`；`Ctrl+Alt+Del`、强杀进程仍拦不住（全屏 ≠ 不能切走）；**拔网线不解锁**（否则等于白送逃逸通道）。
 
 **迁移与数据面**：迁移 `tools/db/migrations/2026-09-23_learning_sessions_and_session_lock.sql`（改名列 + 两张新表，幂等）。`learning_sessions.active_student_id` 是**条件式 VIRTUAL 生成列** —— **必须 VIRTUAL 不能 STORED**（STORED 要重建整表，会被外键以 ERROR 1215 挡住）；同理 **`listByStudent` 的 `LIMIT ?` 必须走 `pool.query`**（MySQL 拒绝预处理语句的 `LIMIT ?`，见 `limit-placeholder.guard.test.ts`）。
 

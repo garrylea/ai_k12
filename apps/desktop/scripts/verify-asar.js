@@ -32,6 +32,7 @@ const REQUIRED = [
   'lib/probe-server.js',
   'lib/shell-state.js',
   'lib/kiosk-guard.js',
+  'lib/keyboard-hook.js',
   'pages/offline.html',
 ];
 
@@ -158,6 +159,19 @@ function main() {
   }
 
   if (failed) process.exit(1);
+
+  // Windows 键盘钩子（2026-11-09）：`.node` 必须被解包到 app.asar.unpacked —— asar 内的
+  // 动态库无法 dlopen。mac/linux 上没有这个产物，只在出现 win-unpacked 时检查。
+  const winUnpacked = path.join(distDir, 'win-unpacked');
+  if (fs.existsSync(winUnpacked)) {
+    const native = path.join(winUnpacked, 'resources', 'app.asar.unpacked', 'native', 'keyhook.node');
+    if (!fs.existsSync(native)) {
+      console.error(`[verify-asar] Windows 包缺键盘钩子：${native}（检查 electron-builder.yml 的 files / asarUnpack）`);
+      process.exit(1);
+    }
+    console.log(`[verify-asar] Windows 键盘钩子已解包：${path.relative(distDir, native)}`);
+  }
+
   console.log(`asar 白名单校验通过（${archives.length} 个包）`);
 }
 
