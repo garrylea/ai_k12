@@ -4242,6 +4242,74 @@ paths:
                         $ref: '#/components/schemas/PollView'
 
   # Admin（管理员中枢，全部 @Roles('admin')）
+  /admin/papers:
+    get:
+      tags: [Admin]
+      summary: 试卷列表（分页，可筛选）
+      operationId: listAdminPapers
+      parameters:
+        - { name: subjectId, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: year, in: query, schema: { type: integer, minimum: 2000, maximum: 2100 } }
+        - { name: gradeBand, in: query, schema: { type: string, enum: [primary, junior, senior] } }
+        - { name: keyword, in: query, schema: { type: string, maxLength: 50 } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AdminPaperListResult'
+  /admin/papers/{id}/delete-preview:
+    get:
+      tags: [Admin]
+      summary: 删除试卷前的影响面预览
+      operationId: previewAdminPaperDelete
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AdminPaperDeletePreview'
+        '404':
+          description: 试卷不存在（code=1002）
+  /admin/papers/{id}:
+    delete:
+      tags: [Admin]
+      summary: 删除套卷（独占题 + 考试会话 + 作答，单事务）
+      operationId: deleteAdminPaper
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AdminPaperDeleteResult'
+        '404':
+          description: 试卷不存在（code=1002）
+        '409':
+          description: 并发外键冲突，请刷新后重试（code=4201）
   /admin/models:
     get:
       tags: [Admin]
@@ -8375,6 +8443,57 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/AdminModelItem'
+    AdminPaperItem:
+      type: object
+      required: [id, subjectId, subjectName, title, questionCount, sessionCount, createdAt]
+      properties:
+        id: { type: integer }
+        subjectId: { type: integer }
+        subjectName: { type: string }
+        title: { type: string }
+        grade: { type: string, nullable: true }
+        gradeBand: { type: string, nullable: true }
+        semester: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        district: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        sourceKey: { type: string }
+        questionCount: { type: integer }
+        sessionCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+    AdminPaperListResult:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminPaperItem' }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    AdminPaperDeletePreview:
+      type: object
+      required: [paperId, title, subjectName, questionCount, sharedCount, exclusiveCount, deletableCount, retainedCount, sessionCount, answerCount]
+      properties:
+        paperId: { type: integer }
+        title: { type: string }
+        subjectName: { type: string }
+        questionCount: { type: integer }
+        sharedCount: { type: integer }
+        exclusiveCount: { type: integer }
+        deletableCount: { type: integer }
+        retainedCount: { type: integer }
+        sessionCount: { type: integer }
+        answerCount: { type: integer }
+    AdminPaperDeleteResult:
+      type: object
+      required: [paperId, deletedQuestions, retainedQuestions, deletedSessions, deletedAnswers]
+      properties:
+        paperId: { type: integer }
+        deletedQuestions: { type: integer }
+        retainedQuestions: { type: integer }
+        deletedSessions: { type: integer }
+        deletedAnswers: { type: integer }
     AdminModelCreateRequest:
       type: object
       properties:

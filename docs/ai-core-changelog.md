@@ -8,6 +8,13 @@
 
 ---
 
+## 2026-11-09 管理端「试卷管理」删除套卷
+
+- 新增 `GET /api/admin/papers`、`GET /api/admin/papers/{id}/delete-preview`、`DELETE /api/admin/papers/{id}`（admin）。
+- 删除规则：只删该卷独占题；共享题仅解除关联；独占题被 7 张 RESTRICT 表引用则保留并计数；该卷考试会话 + 逐题作答一并删除；单事务。
+- 前端 `/admin/papers` 页面 + 侧栏「试卷管理」。
+- spec：`docs/superpowers/specs/2026-11-09-admin-paper-delete-design.md`。
+
 ## 2026-11-08 语文「同类型练习」开放（基础运用 / 古诗文）
 
 **入口**：练习记录详情页的「同类型练习」按钮。语文此前只显示「重做」，因为 `canSimilar` 只放行数学/物理。
