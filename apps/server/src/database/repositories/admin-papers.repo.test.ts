@@ -142,3 +142,103 @@ describe('AdminPapersRepository.countImpact', () => {
     expect(params.filter((p) => p === 77)).toHaveLength(1);
   });
 });
+
+function mockConn(overrides: { failOn?: string } = {}) {
+  const calls: Array<{ sql: string; params: any[] }> = [];
+  const conn = {
+    beginTransaction: vi.fn().mockResolvedValue(undefined),
+    commit: vi.fn().mockResolvedValue(undefined),
+    rollback: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn(),
+    execute: vi.fn().mockImplementation((sql: string, params: any[] = []) => {
+      calls.push({ sql, params });
+      if (overrides.failOn && sql.includes(overrides.failOn)) {
+        return Promise.reject(Object.assign(new Error('fk'), { code: 'ER_ROW_IS_REFERENCED_2' }));
+      }
+      if (/SELECT id, title FROM exam_papers/.test(sql)) return Promise.resolve([[{ id: 446, title: '汇文卷' }], []]);
+      if (/COUNT\(\*\) AS cnt FROM exam_sessions/.test(sql)) return Promise.resolve([[{ cnt: 1 }], []]);
+      if (/FROM exam_answers ea JOIN/.test(sql)) return Promise.resolve([[{ cnt: 5 }], []]);
+      if (/SELECT pq.question_id AS qid/.test(sql)) return Promise.resolve([[{ qid: 11 }, { qid: 12 }, { qid: 13 }], []]);
+      if (/SELECT DISTINCT qid FROM/.test(sql)) return Promise.resolve([[{ qid: 13 }], []]);
+      return Promise.resolve([{ affectedRows: 1 }, []]);
+    }),
+  };
+  const pool = { getConnection: vi.fn().mockResolvedValue(conn) };
+  return { pool, conn, calls };
+}
+
+describe('AdminPapersRepository.deletePaperCascade', () => {
+  it('按「会话 → 题 → 卷」顺序删除，只删未被引用的独占题，返回真实计数', async () => {
+    const { pool, conn, calls } = mockConn();
+    const repo = new AdminPapersRepository(pool as any);
+
+    const out = await repo.deletePaperCascade(446);
+
+    expect(out).toEqual({
+      paperTitle: '汇文卷',
+      deletedQuestions: 2,
+      retainedQuestions: 1,
+      deletedSessions: 1,
+      deletedAnswers: 5,
+    });
+    const sqls = calls.map((c) => c.sql);
+    const sessionIdx = sqls.findIndex((s) => s.startsWith('DELETE FROM exam_sessions'));
+    const questionIdx = sqls.findIndex((s) => s.startsWith('DELETE FROM questions'));
+    const paperIdx = sqls.findIndex((s) => s.startsWith('DELETE FROM exam_papers'));
+    expect(sessionIdx).toBeGreaterThan(-1);
+    expect(questionIdx).toBeGreaterThan(sessionIdx);
+    expect(paperIdx).toBeGreaterThan(questionIdx);
+    // 只删 11 / 12（13 被引用保留）
+    expect(calls[questionIdx].params).toEqual([11, 12]);
+    expect(conn.commit).toHaveBeenCalledTimes(1);
+    expect(conn.rollback).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('卷不存在 → 返回 null 并回滚，不提交', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      execute: vi.fn().mockResolvedValue([[], []]),
+    };
+    const repo = new AdminPapersRepository({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    expect(await repo.deletePaperCascade(999)).toBeNull();
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(conn.commit).not.toHaveBeenCalled();
+  });
+
+  it('外键冲突 → 回滚并原样抛出（由 service 转 409）', async () => {
+    const { pool, conn } = mockConn({ failOn: 'DELETE FROM exam_papers' });
+    const repo = new AdminPapersRepository(pool as any);
+
+    await expect(repo.deletePaperCascade(446)).rejects.toMatchObject({ code: 'ER_ROW_IS_REFERENCED_2' });
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(conn.commit).not.toHaveBeenCalled();
+  });
+
+  it('全部题都被引用 → 跳过 DELETE questions，deletedQuestions=0', async () => {
+    const conn = {
+      beginTransaction: vi.fn().mockResolvedValue(undefined),
+      commit: vi.fn().mockResolvedValue(undefined),
+      rollback: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn(),
+      execute: vi.fn().mockImplementation((sql: string) => {
+        if (/SELECT id, title FROM exam_papers/.test(sql)) return Promise.resolve([[{ id: 1, title: 'x' }], []]);
+        if (/COUNT\(\*\) AS cnt/.test(sql)) return Promise.resolve([[{ cnt: 0 }], []]);
+        if (/SELECT pq.question_id AS qid/.test(sql)) return Promise.resolve([[{ qid: 11 }], []]);
+        if (/SELECT DISTINCT qid FROM/.test(sql)) return Promise.resolve([[{ qid: 11 }], []]);
+        return Promise.resolve([{ affectedRows: 0 }, []]);
+      }),
+    };
+    const repo = new AdminPapersRepository({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    const out = await repo.deletePaperCascade(1);
+
+    expect(out?.deletedQuestions).toBe(0);
+    expect(out?.retainedQuestions).toBe(1);
+    expect(conn.execute.mock.calls.some((c) => String(c[0]).includes('DELETE FROM questions WHERE id IN'))).toBe(false);
+  });
+});

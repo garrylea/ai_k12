@@ -37,6 +37,14 @@ export interface PaperImpact {
   answerCount: number;
 }
 
+export interface PaperDeleteOutcome {
+  paperTitle: string;
+  deletedQuestions: number;
+  retainedQuestions: number;
+  deletedSessions: number;
+  deletedAnswers: number;
+}
+
 /** 删除题时会触发 ON DELETE RESTRICT 的表（schema 固定 7 张，勿凭印象增删）。 */
 const BLOCKING_TABLES = [
   'main_error_books',
@@ -199,5 +207,64 @@ export class AdminPapersRepository {
       sessionCount: Number(sessionRows[0]?.cnt ?? 0),
       answerCount: Number(answerRows[0]?.cnt ?? 0),
     };
+  }
+
+  /**
+   * 单事务级联删除：会话（级联作答）→ 可删独占题 → 试卷（级联剩余关联）。
+   *
+   * 顺序不可换：先删本卷会话，后面查到的 `exam_answers` 引用才只来自其它来源。
+   * 返回 null 表示卷不存在（service 转 404）；外键冲突原样抛（service 转 409）。
+   */
+  async deletePaperCascade(paperId: number): Promise<PaperDeleteOutcome | null> {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [paperRows] = await conn.execute<RowDataPacket[]>(
+        'SELECT id, title FROM exam_papers WHERE id = ? FOR UPDATE',
+        [paperId],
+      );
+      if (paperRows.length === 0) {
+        await conn.rollback();
+        return null;
+      }
+      const paperTitle = String(paperRows[0].title);
+
+      const [sessionRows] = await conn.execute<RowDataPacket[]>(
+        'SELECT COUNT(*) AS cnt FROM exam_sessions WHERE paper_id = ?',
+        [paperId],
+      );
+      const [answerRows] = await conn.execute<RowDataPacket[]>(
+        'SELECT COUNT(*) AS cnt FROM exam_answers ea JOIN exam_sessions es ON es.id = ea.session_id WHERE es.paper_id = ?',
+        [paperId],
+      );
+      const deletedSessions = Number(sessionRows[0]?.cnt ?? 0);
+      const deletedAnswers = Number(answerRows[0]?.cnt ?? 0);
+
+      await conn.execute('DELETE FROM exam_sessions WHERE paper_id = ?', [paperId]);
+
+      const exclusiveIds = await findExclusiveIds(conn, paperId);
+      const blocked = await findBlockedIds(conn, exclusiveIds, paperId);
+      const deletable = exclusiveIds.filter((id) => !blocked.has(id));
+      if (deletable.length > 0) {
+        const placeholders = deletable.map(() => '?').join(',');
+        await conn.execute(`DELETE FROM questions WHERE id IN (${placeholders})`, deletable);
+      }
+
+      await conn.execute('DELETE FROM exam_papers WHERE id = ?', [paperId]);
+      await conn.commit();
+
+      return {
+        paperTitle,
+        deletedQuestions: deletable.length,
+        retainedQuestions: exclusiveIds.length - deletable.length,
+        deletedSessions,
+        deletedAnswers,
+      };
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
   }
 }
