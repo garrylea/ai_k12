@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS students (
   age SMALLINT NOT NULL,
   grade VARCHAR(20) NOT NULL,
   school_level VARCHAR(10) NOT NULL,
+  grade_updated_at DATETIME(3) DEFAULT NULL COMMENT '上次年级/年龄校准时间；NULL 时按 created_at 兜底',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   avatar_url VARCHAR(500) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -795,7 +796,7 @@ CREATE TABLE IF NOT EXISTS ai_dialogues (
   student_id BIGINT NOT NULL,
   subject_id BIGINT DEFAULT NULL,
   track VARCHAR(10) NOT NULL,
-  scene VARCHAR(30) NOT NULL DEFAULT 'aux_qna',  -- 会话场景分型: aux_qna(辅线答疑)|aux_training(训练讲一讲)|mainline_question(课堂练习讲一讲)|mainline_card(卡片思辨答疑)
+  scene VARCHAR(30) NOT NULL DEFAULT 'aux_qna',  -- 会话场景分型: aux_qna(辅线答疑)|aux_training(训练讲一讲)|aux_freeform(做题入口)|mainline_question(课堂练习讲一讲)|mainline_card(卡片思辨答疑)
   card_id BIGINT DEFAULT NULL,
   question_id BIGINT DEFAULT NULL,               -- 训练讲一讲按题锚（find-or-create）；question 级讨论由 main_error_books.dialogue_id 锚定
   knowledge_point_id BIGINT DEFAULT NULL,
@@ -1093,7 +1094,8 @@ CREATE TABLE IF NOT EXISTS uploaded_files (
   size_bytes BIGINT NOT NULL,
   source VARCHAR(20) NOT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  KEY idx_uf_uploader (uploader_type, uploader_id)
+  KEY idx_uf_uploader (uploader_type, uploader_id),
+  KEY idx_uf_uploader_url (uploader_id, url)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS extract_tasks (

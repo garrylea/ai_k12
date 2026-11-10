@@ -271,6 +271,12 @@ export class JudgeCoreService {
       // 题目不存在（999）：早退不打点——只有真提交到判题的作答才算 submitted。
       throw new HttpException({ code: 4004, message: '题目不存在' }, 400);
     }
+    // 做题入口（freeform）的题不进训练/错题练习：标准答案是 AI 写的、未经人工核验，
+    // 拿它判正式练习有判错风险。错题练习页已把 freeform 条目置为不可勾选，这里堵直连
+    // `POST /training/judge` 的口子；freeform 自己的判题走 freeform-judge.service。
+    if (q.source === 'freeform') {
+      throw new HttpException({ code: 1001, message: '做题记录的题目暂不支持错题练习' }, 400);
+    }
     const moduleName = JudgeCoreService.moduleFor(input.source);
     const streakKey = `q${input.questionId}:${input.studentId}`;
 

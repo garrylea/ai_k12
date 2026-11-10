@@ -10,6 +10,11 @@ import { SafetyAlertsService } from '../safety/safety-alerts.service.js';
 import { AiDialoguesRepository, AiMessagesRepository, ExtractTasksRepository, MainErrorBooksRepository, QuestionsRepository, UploadedFilesRepository, CardsRepository } from '../../database/repositories/index.js';
 import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
+import { ProgressRepository } from '../../database/repositories/progress.repo.js';
+import { TextbookVersionsRepository } from '../../database/repositories/textbook-versions.repo.js';
+import { SemestersRepository } from '../../database/repositories/semesters.repo.js';
+import { UnitsRepository } from '../../database/repositories/units.repo.js';
+import { StudentScopeService } from './student-scope.service.js';
 
 @Module({
   imports: [ConversationsModule, SafetyAlertsModule],
@@ -29,6 +34,12 @@ import { SubjectsRepository } from '../../database/repositories/subjects.repo.js
     // subjectId lookup (math subject ID for structured question ingestion).
     UploadedFilesRepository,
     SubjectsRepository,
+    // 做题页答疑：从 progress/教材/学期/单元 推导「年级 + 教材版本 + 已学内容」
+    ProgressRepository,
+    TextbookVersionsRepository,
+    SemestersRepository,
+    UnitsRepository,
+    StudentScopeService,
     // B1: direct question bank insertion (aux_error_books no longer used).
     QuestionsRepository,
     // 辅线入库的题要确保进主线错题本（source='auxiliary'）。

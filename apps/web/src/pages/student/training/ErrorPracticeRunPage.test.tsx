@@ -58,10 +58,12 @@ const ENTRY: TrainingErrorBookEntry = {
   questionId: 101,
   questionText: '1 + 1 = ?',
   type: 'choice',
+  fullScore: 10,
   level: 1,
   createdAt: '2026-09-01',
   kpIds: [],
   options: ['A. 1', 'B. 2'],
+  source: null,
 };
 
 /** 判题结果：本页只关心发分字段，其余给最小可用值。 */

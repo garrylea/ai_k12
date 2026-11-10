@@ -8,6 +8,81 @@
 
 ---
 
+## 2026-11-10 做题错题「重练」出口（freeform 不再只能看）
+
+**背景**：做题错题（`source='freeform'`）此前只能看不能练——普通错题练习用库里未核验的 AI 答案判题、还会写分/掌握度，因此被双重锁死。用户要求给一个练习出口。
+
+**方案**：不放开普通错题池，改为「错题本 → 重练 → 复用【做题】页」：
+- 错题本 freeform 条目加「重练」+ 顶部「重练做题错题（N）」；队列存 `sessionStorage['training:freeform-redo']`（刷新恢复、完成/退出清）。
+- `/student/solve?redo=1` 直接进作答（题干只读、学科/满分锁定）；提交带 `questionId` 重判同一条，满分清零、不满分保留；结果卡加「下一题 / 返回错题本」。
+- 重练**不发积分、不写 `practice_results`、不更新掌握度、不 bump level**；普通错题练习对 freeform 仍 400/1001。
+
+**后端（无新端点/无迁移）**：
+- `findErrorBookEntries` 增 `q.full_score`，DTO 补 `fullScore`；
+- `FreeformJudgeService` 的 `resolveImages` 增 `relaxedFigures`：仅 `questionId + source=freeform` 的重练请求跳过无权配图，首次提交仍严格 400/1001。
+
+**前端**：`freeformRedoQueue`（队列/配图提取）、`ErrorPracticePage` 两个入口、`useFreeformJudge.reset()`、`SolveJudgeResult` 的 `nextLabel/onNext`、`SolvePage` 重练模式（页头/题号/下一题/退出/队列失效回列表）。新增对应单测；两端全量通过。
+
+---
+
+## 2026-11-09 做题三修：文字免识题 / 判题结果卡 / 富文本渲染
+
+**背景**：用户实测三个问题——① 输入文字时按钮还写「开始识题」；② 提交后被拽进聊天区看判题流，看不到「我答的是什么、正确答案是什么」；③ AI 回答里的 Markdown/LaTeX/SVG/HTML 渲染不全。
+
+**录入分流**：`SolveSourceInput` 按输入类型切按钮——文字非空 →「开始作答」，只有图片 →「开始识题」。`SolvePage` 的 `onRecognize` 改为：文字非空时**不调识别**，直接把文字当题干、图片按 `![配图N](url)` 追加到末尾并作为 `figureUrls`，跳进作答区（`subjectId=1`、`maxScore=10`）。作答区顶部新增「学科 / 满分」选择，首次提交后锁定。
+
+**判题结果卡**：新增 `solve/SolveJudgeResult.tsx`。`FreeformJudgeService` 的 `result` 事件补 `correctAnswer`（模型 JSON 的 `question.answer`）。【提交】不再 `setAiOpen(true)`/`setTab('ai')`，结果卡在「作答」tab 内展示：结论（回答正确/部分正确/回答错误）、得分、我的答案（提交快照）、正确答案、完整判题报告、`再答一次`（回编辑器）、`答疑`。判题中与失败态都有独立界面。已判题后点【答疑】才进 AI tab，首问改为「这道题我还是没太懂…」，不重发学生答案。
+
+**富文本**：聊天区的 `AuxChatPanel` 改用共享 `preprocessMarkdown`（`\[…\]`→`$$…$$`、`svg` 围栏解包、残缺标签修补），再走 rehype-raw + KaTeX + svg 属性名修正。`freeform-core.md` 新增第 9 节「输出格式契约」（Markdown / `$...$` / 内联 `<svg viewBox>` / HTML，禁 Mermaid/外链/`<script>`/`json` 块），`judge.md` 同步要求 SVG。新增 `SolveJudgeResult` 渲染测试、聊天区 LaTeX/SVG/HTML 渲染测试。
+
+**判题等待态**：结果卡不再只转圈——实时显示已等待秒数、模型思考过程、报告增量，并给「停止」；`useFreeformJudge` 新增 `stopped` 与 120s 无事件看门狗（abort → 1009），停止后「继续判题」复用原 body 重发。新增 hook 用例（停止 / 看门狗）与结果卡渲染用例。
+
+**注意**：prompts 改动需 `npm run build` + 重启后端（模板缓存）；前端 build 会覆盖 `:5173` preview 正在服务的 dist。
+
+---
+
+## 2026-11-09 做题页：教学法提示词 + 学习信息改由 DB 推导（撤销问卷）
+
+**背景**：做题页原答疑沿用苏格拉底模板（`tutoring/math/auxiliary.md`，含 200 字限制），既讲不清
+「为什么这么做」，也不知道学生学到哪一章。用户给出新的理科教学法模板（角色/只用已学内容/
+核心思路→详细过程→回顾与练习 三块结构/抽丝剥茧六步/检查纠错/训练模式/禁止/回答风格），
+并要求首次答疑前先问清模型猜不到的信息。**当天二次裁定**：年级/教材/已学内容库里都有，不该再问学生
+——前端问卷整套撤销，改为服务端按 `(studentId, subjectId)` 从 DB 推导；年级/年龄在登录时自动校准，
+手工修改只留在家长端。
+
+**提示词**：新增 `prompts/system/freeform-core.md`（通用核心，三科共用 partial）+
+`prompts/freeform/tutor/{math,physics,chemistry}.md`；`PromptBuilder` 增加 `freeform_tutor`
+分支；`TutoringCapability.prepare` 按 `routeScene` 切 capability，并把
+`buildFreeformPromptVars`（`ai-core/freeform.ts`）塞进 `customVariables`。学科只按
+`dto.subjectId → ai_dialogues.subject_id → math` 解析（`loadContext.subject` 恒为 math，不能用于分科）。
+学生原话仍只进 User Message，档案只进 system 的 `<student_profile>` 等标签块。
+
+**学习信息（2026-11-09 二次裁定：撤销前端问卷）**：新增 `StudentScopeService.resolve()`，只读推导
+「年级 = `students.grade`；教材 = `progress.textbook_version_id → textbook_versions.publisher`（缺省 `name`）；
+已学内容 = `current_semester_id`（缺省按年级 `grade_N`）→ `units.sort_order ≤ 当前单元`，未设当前单元视为整册」。
+`AIService` 只在 `scene='aux_freeform'` 时组装 `learningProfile` 并传给 `TutoringCapability`；前端只报 `subjectId`，
+`TutorDto` 删除 `learningProfile`（私自带也不采信）。原前端 `learningProfile.ts` / `useLearningProfileWizard` /
+`LearningProfileWizardBar` / `LearningProfileEditModal` / `chatStore.clearScripted` 全部删除，
+`localStorage` 档案键随之废弃。
+
+**年级/年龄自动校准**：`students` 新增 `grade_updated_at`（迁移 `2026-11-09_students_grade_updated_at.sql`，
+存量回填 `created_at`）。学生每次登录调 `advanceGradeOnLogin`：数基准日到现在的 9/1 个数升年级（高三封顶）、
+满 12 个月 +1 岁；`changed=false` 不写库（否则基准日后移会漏下一次开学）；写库失败只 warn、不阻断登录，
+本次仍返回库里的旧值。手工修改走家长端 `PATCH /api/parent/students/:id`（`name/age/grade`，改年级时
+推导 `school_level` 并刷新基准日），桌面端与移动端「学生管理」都有「编辑资料」。
+
+**请求体**：`POST /api/ai/tutor/stream` 仅保留 `subjectId`（`1|4|5`）。
+
+**快路径关闭**：`maybeStoredExplanation` 对 `aux_freeform` 直接返回 null —— 做题页不再走
+「≥2 轮 + 关键词 → 直出库解析 / 全解析兜底」，否则会绕开新模板。
+
+**注意**：模板由 `PromptBuilder` 按路径永久缓存 → 改 `.md` 必须 `npm run build` + 重启
+（`copy-assets.mjs` 才会把 `prompts` 复制进 `dist`）。
+
+---
+
+---
+
 ## 2026-11-09 管理端「试卷管理」删除套卷
 
 - 新增 `GET /api/admin/papers`、`GET /api/admin/papers/{id}/delete-preview`、`DELETE /api/admin/papers/{id}`（admin）。
@@ -84,6 +159,41 @@
 **spec / plan**：`docs/superpowers/specs/2026-11-08-chinese-similar-practice-design.md`、`docs/superpowers/plans/2026-11-08-chinese-similar-practice.md`。
 
 `tools/db/schema.sql` 中 `special_practice_sessions.module` / `question_id` 的列 COMMENT 仍列举旧值，列无约束不影响写入，本次未改 schema.sql（避免与 schema_reconcile 对账混淆）。
+
+## 2026-11-08 做题入口（自由做题 / freeform）
+
+**入口**：入口选择页第 4 张卡「做题」→ `/student/solve`（`apps/web/src/pages/student/SolvePage.tsx`）。学生上传 1–6 张题目照片或一段题面文字 → 识别候选 → 选题 + 多选配图 → 作答页（草稿白板 / 手写 / LaTeX 预览）→ 【答疑】或【提交】。
+
+**链路**：
+- 识别 `POST /api/freeform/recognize`：MinerU 转 Markdown → **本地切题**（`freeform_split` 路由：`local` 主、`qwen3.8-max` 兜底）→ 返回候选（题干 / 配图 / 分值）。
+- 判题 `POST /api/freeform/judge/stream`（SSE）：`freeform_judge` 路由**直连 `qwen3.8-max`、不设兜底**（判题要准）；流式输出分步得分，尾部 JSON 落库后发 `result`。
+- 答疑复用 `POST /api/ai/tutor/stream`，会话场景新增 `aux_freeform`。
+
+**数据口径（刻意设计，勿改）**：
+- 题库写入 `questions.source='freeform'`，**无知识点行**，**不进任何自动抽题池**（专项 / 同类型 / 考试 / 错题练习都不出现）。
+- `main_error_books` **只在不满分时写**（`source='freeform'`），满分重提走清零；错题练习页**显示但不可勾选**，`judgeQuestion` 对 `source='freeform'` 直接 400/`code=1001` 堵直连 `POST /training/judge` 的口子。
+- **不发积分、不写 `practice_results`、不更新掌握度**；判题服务因此不注入 Points / Mastery / PracticeResults 依赖。
+- 家长端错题轨道：`freeform` 归 **training**（与 `auxiliary` 同档，见 `parent-insights.repo.ts` 的 `TRACK_SOURCES`）。
+
+**交付物**：
+- 后端模块 `apps/server/src/modules/freeform/`（controller / recognize / judge / MinerU runner / 配图提取）。
+- ai-core 能力 `freeform-split` / `freeform-judge` 与两套路由场景 `freeform_split` / `freeform_judge`（`model-routes.yaml`）。
+- 迁移 `tools/db/migrations/2026-11-08_freeform_routes.sql`（两条 `llm_routes` + `uploaded_files` 的 `idx_uf_uploader_url`，幂等）。
+- 一条命令交付 `bash tools/freeform/setup.sh`：加载 `.env` → 应用迁移 → `schema_reconcile.py` 对账（有差异即停）→ MinerU 预检（仅告警）。
+- 文件上传新增 `freeform` 来源，且**不自动触发 refinery**；`uploaded_files` 按 `(uploader_id, url)` 反查归属。
+
+**提交范围**：`8fbd1086..3812467b`（分支 `feat/freeform-solve`）。
+
+**验证**：`apps/server` 全量 2561 用例、`apps/web` 全量 1615 用例通过；`tsc -b` / `tsc --noEmit` 均 0 错误。
+
+**真环境冒烟（2026-11-08 已执行部分）**：
+- `bash tools/freeform/setup.sh` 已应用 `llm_routes` ×2 + `uploaded_files.idx_uf_uploader_url`；schema 对账 78 张表无差异。
+- 对账曾把 7 张表「列集合相同、仅 `information_schema` 返回顺序不同」误报为结构差异；已在 `tools/db/schema_reconcile.py` 跳过 order-only 差异（`3812467b`），重跑通过。
+- MinerU 用**现有 token**（shell / `tools/data-refinery/.env`，无需在 `apps/server/.env` 另配）实测成功：`page_019.jpg` → `page_019.md` + 共享 `images/`（flat 布局，识别服务的按页发现 + 共享图去重覆盖）；Markdown 含 `## 26.2…` 标题，验证了 `PromptBuilder` 保留 `##` 的修复。
+- `:3001` 后端与 `:5173` 前端已用新构建重启；`/api/content/subjects` 200、`POST /api/freeform/recognize` 未登录 401（守卫生效）。
+- **仍待人工点击**：学生登录后的图片识题 → 选题 → 千问流式判题 → 错题本/家长 track 端到端，以及 iPad 拖图/粘贴/白板手感。未验证前不要认为识别准确率与 SSE 端到端已通过。
+
+---
 
 ## 2026-11-08 选科页六学科图标按学科区分
 

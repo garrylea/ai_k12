@@ -228,6 +228,22 @@ routes:
       primary: local
       fallback: qwen3.8-max
 
+  # 做题入口（自由做题）：先拆题（识别学科/题型/结构化题面），本地优先、千问兜底。
+  freeform_split:
+    - subject: "*"
+      primary: local
+      fallback: qwen3.8-max
+
+  # 做题入口判题：固定千问、**无 fallback**（用户 2026-11-08 明确指定只用 qwen）。
+  freeform_judge:
+    - subject: "*"
+      primary: qwen3.8-max
+
+  # 做题入口答疑：与判题同一模型（千问，带思考），但提示词仍是苏格拉底式；无 fallback。
+  freeform_tutor:
+    - subject: "*"
+      primary: qwen3.8-max
+
 default:
   primary: qwen3.8-max
   fallback: deepseek-flash

@@ -132,6 +132,24 @@ describe('TrainingService.getErrorBookEntries', () => {
     expect(r[1].options).toBeNull();
     expect(r[2].options).toBeNull();
   });
+
+  it('getErrorBookEntries 透传 source', async () => {
+    const deps = mk({ mainErrorRepo: { findErrorBookEntries: vi.fn().mockResolvedValue([
+      { id: 1, question_id: 2, questionText: '题', type: 'short_answer', level: 1, created_at: new Date(), kp_id: null, options: null, source: 'freeform' },
+    ]) } });
+    const r = await mkSvc(deps).getErrorBookEntries(1, 1, {});
+    expect(r[0].source).toBe('freeform');
+  });
+
+  it('映射 fullScore：questions.full_score 原样返回，孤儿/缺省为 null', async () => {
+    const deps = mk({ mainErrorRepo: { findErrorBookEntries: vi.fn().mockResolvedValue([
+      { id: 1, question_id: 10, questionText: '题', type: 'short_answer', full_score: 10, level: 1, created_at: new Date(), kp_id: null, options: null, source: 'freeform' },
+      { id: 2, question_id: null, questionText: '孤儿', type: null, full_score: null, level: 1, created_at: new Date(), kp_id: null, options: null, source: 'practice' },
+      { id: 3, question_id: 11, questionText: '题2', type: 'choice', level: 1, created_at: new Date(), kp_id: null, options: null, source: 'exam' },
+    ]) } });
+    const r = await mkSvc(deps).getErrorBookEntries(1, 1, {});
+    expect(r.map((e) => e.fullScore)).toEqual([10, null, null]);
+  });
 });
 
 describe('TrainingService.judgeTraining', () => {

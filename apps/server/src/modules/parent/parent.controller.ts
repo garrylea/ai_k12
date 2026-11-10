@@ -1,4 +1,4 @@
-import { Body, ConflictException, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, UseGuards, Request } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, UseGuards, Request } from '@nestjs/common';
 import type { Request as ExpressRequest } from 'express';
 import { z } from 'zod';
 import { ParentService } from './parent.service.js';
@@ -18,6 +18,15 @@ const CreateStudentSchema = z.object({
 
 const ResetPasswordSchema = z.object({ newPassword: z.string().min(6).max(32) });
 const StatusSchema = z.object({ isActive: z.boolean() });
+
+/** 家长编辑孩子档案：三项都可选，但至少给一项；年级白名单由 service 的 deriveSchoolLevel 判定。 */
+const UpdateStudentSchema = z
+  .object({
+    name: z.string().min(1).max(50).optional(),
+    age: z.number().int().min(3).max(18).optional(),
+    grade: z.string().min(1).max(20).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: '至少提供一项（name/age/grade）' });
 
 /**
  * 家长改自己密码的 body（spec §4.6）。
@@ -68,6 +77,27 @@ export class ParentController {
     const user = (req as ExpressRequest & { user?: JwtUser }).user!;
     const { newPassword } = ResetPasswordSchema.parse(body);
     return this.parentService.resetPassword(user.sub, id, newPassword);
+  }
+
+  /**
+   * 家长编辑孩子档案（姓名/年龄/年级）。学生端不提供编辑入口——
+   * 年级/年龄还会在每次学生登录时按学年自动校准（见 auth.service.syncStudentGrade）。
+   */
+  @Patch('students/:id')
+  async updateStudent(
+    @Request() req: ExpressRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: unknown,
+  ) {
+    const user = (req as ExpressRequest & { user?: JwtUser }).user!;
+    const parsed = UpdateStudentSchema.safeParse(body);
+    if (!parsed.success) {
+      // 裸 ZodError 会被全局过滤器兜成 500，入参错误必须自己是 400/1001
+      const detail = parsed.error.issues
+        .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`).join('; ');
+      throw new BadRequestException({ code: 1001, message: `入参校验失败：${detail}` });
+    }
+    return this.parentService.updateStudent(user.sub, id, parsed.data);
   }
 
   @Patch('students/:id/status')

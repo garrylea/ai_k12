@@ -1,4 +1,12 @@
-import { BadRequestException, Controller, Post, UploadedFile, UseInterceptors, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Post,
+  Query,
+  UploadedFile,
+  UseInterceptors,
+  UseGuards,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { FilesService } from './files.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
@@ -16,10 +24,15 @@ export class FilesController {
   async upload(
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser() user: JwtUser,
+    @Query('source') source?: string,
   ) {
     if (!file) {
       throw new BadRequestException({ code: 1001, message: '缺少上传文件' });
     }
-    return this.filesService.upload(file, user.sub, 'auxiliary');
+    const s = source ?? 'auxiliary';
+    if (s !== 'auxiliary' && s !== 'freeform') {
+      throw new BadRequestException({ code: 1001, message: 'source 仅支持 auxiliary | freeform' });
+    }
+    return this.filesService.upload(file, user.sub, s);
   }
 }

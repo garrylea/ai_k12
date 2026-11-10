@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ConfirmDialog } from '@/components/base';
-import { createStudent, listMyStudents, resetStudentPassword, setStudentStatus, type MyStudentItem } from '@/services/api';
+import { createStudent, listMyStudents, resetStudentPassword, setStudentStatus, updateStudent, type MyStudentItem } from '@/services/api';
 
 type LoadStatus = 'loading' | 'ready' | 'error';
 
@@ -19,6 +19,10 @@ export default function MobileStudentsPage() {
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [resetId, setResetId] = useState<number | null>(null);
+  // 编辑资料（姓名/年龄/年级）：学生端无入口，家长端是唯一手工修改处
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', age: '', grade: '' });
+  const [editError, setEditError] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   // 停用需确认弹窗（spec §4.2）；启用是恢复性操作，直接执行不弹窗
@@ -47,6 +51,24 @@ export default function MobileStudentsPage() {
         load();
       })
       .catch((e: unknown) => setFormError(e instanceof Error ? e.message : '开通失败'));
+  };
+
+  const openEdit = (s: MyStudentItem) => {
+    setEditId(editId === s.id ? null : s.id);
+    setEditForm({ name: s.name ?? '', age: s.age == null ? '' : String(s.age), grade: s.grade ?? '' });
+    setEditError(null);
+  };
+
+  const submitEdit = () => {
+    if (editId === null) return;
+    const age = Number(editForm.age);
+    if (!editForm.name.trim()) { setEditError('姓名不能为空'); return; }
+    if (!Number.isInteger(age) || age < 3 || age > 18) { setEditError('年龄需为 3-18 的整数'); return; }
+    if (!editForm.grade) { setEditError('请选择年级'); return; }
+    setEditError(null);
+    updateStudent(editId, { name: editForm.name.trim(), age, grade: editForm.grade })
+      .then(() => { setActionMsg('资料已更新'); setEditId(null); load(); })
+      .catch((e: unknown) => setEditError(e instanceof Error ? e.message : '保存失败'));
   };
 
   const submitReset = () => {
@@ -126,9 +148,28 @@ export default function MobileStudentsPage() {
               </div>
               <div className="mt-2 flex flex-wrap gap-2 text-xs">
                 <Link to={`/m/parent/students/${s.id}/config`} className="rounded-lg border border-[var(--bg-subtle)] px-3 py-1.5">学习配置</Link>
+                <button data-testid={`student-edit-toggle-${s.id}`} onClick={() => openEdit(s)} className="rounded-lg border border-[var(--bg-subtle)] px-3 py-1.5">编辑资料</button>
                 <button data-testid={`student-reset-toggle-${s.id}`} onClick={() => { setResetId(resetId === s.id ? null : s.id); setNewPassword(''); }} className="rounded-lg border border-[var(--bg-subtle)] px-3 py-1.5">重置密码</button>
                 <button data-testid={`student-status-toggle-${s.id}`} onClick={() => toggleStatus(s)} className="rounded-lg border border-[var(--bg-subtle)] px-3 py-1.5">{s.isActive ? '停用账号' : '启用账号'}</button>
               </div>
+              {editId === s.id && (
+                <div className="mt-2 space-y-2">
+                  <input aria-label="姓名" value={editForm.name} onChange={(e) => { setEditForm({ ...editForm, name: e.target.value }); setEditError(null); }}
+                    className="w-full rounded-xl border border-[var(--bg-subtle)] px-3 py-2 text-sm" />
+                  <div className="flex gap-2">
+                    <input aria-label="年龄" type="number" min={3} max={18} value={editForm.age} onChange={(e) => { setEditForm({ ...editForm, age: e.target.value }); setEditError(null); }}
+                      className="w-24 rounded-xl border border-[var(--bg-subtle)] px-3 py-2 text-sm" />
+                    <select aria-label="年级" value={editForm.grade} onChange={(e) => { setEditForm({ ...editForm, grade: e.target.value }); setEditError(null); }}
+                      className="min-w-0 flex-1 rounded-xl border border-[var(--bg-subtle)] px-3 py-2 text-sm">
+                      <option value="">请选择</option>
+                      {GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </div>
+                  {editError && <p className="text-xs text-[var(--error)]">{editError}</p>}
+                  <p className="text-[11px] text-[var(--text-tertiary)]">每年 9 月 1 日后学生登录会自动升一级（高三封顶）。</p>
+                  <button data-testid={`student-edit-submit-${s.id}`} onClick={submitEdit} className="w-full rounded-xl bg-[var(--brand-500)] py-2 text-sm text-white">保存</button>
+                </div>
+              )}
               {resetId === s.id && (
                 <div className="mt-2 flex gap-2">
                   <input placeholder="输入新密码（6-32 位）" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="min-w-0 flex-1 rounded-xl border border-[var(--bg-subtle)] px-3 py-2 text-sm" />

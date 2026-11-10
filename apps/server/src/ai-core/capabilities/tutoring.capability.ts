@@ -3,6 +3,7 @@ import { timeoutConfig, fallbackConfig } from '../config.js';
 import { ModelRouter } from '../infra/model-router.js';
 import { getModelConfigRegistry } from '../infra/model-config-registry.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
+import { buildFreeformPromptVars, resolveFreeFormSubject } from '../freeform.js';
 import { ModelClient } from '../infra/model-client/index.js';
 import { mapLLMErrorToClient } from '../infra/model-client/errors.js';
 import { SafetyGuard } from '../infra/safety-guard.js';
@@ -446,11 +447,18 @@ export class TutoringCapability {
       };
     }
 
+    // 做题页（freeform）走独立的教学法模板：分科不看 context.subject（那里恒为 math），
+    // 而是 dto.subjectId → 会话 subject_id → math。
+    const isFreeformPrompt = request.routeScene === 'freeform_tutor';
+    const freeformSubject = isFreeformPrompt ? resolveFreeFormSubject(request.subjectId) : undefined;
+    const promptSubject = freeformSubject ?? context.subject;
+
     // Step 4: Route model. The tutoring route is multimodal (qwen3.8-max), so
     // hasImage no longer switches models; it is only forwarded for uniformity.
     const routeResult = await this.modelRouter.route({
-      scene: 'tutoring',
-      subject: context.subject,
+      // 做题入口的答疑固定走 freeform_tutor（千问，带思考）；其余仍走 tutoring。
+      scene: request.routeScene ?? 'tutoring',
+      subject: promptSubject,
       difficulty: context.currentDifficulty,
       hasImage,
     });
@@ -464,9 +472,17 @@ export class TutoringCapability {
         ? `\n\n---\n附件内容（${fa.fileName}）：\n${fa.extractedText}`
         : `\n\n---\n附件内容：\n${fa.extractedText}`;
     }
+    const freeformVars =
+      freeformSubject !== undefined
+        ? buildFreeformPromptVars({
+            profile: request.learningProfile,
+            studentGrade: context.student.grade,
+            subject: freeformSubject,
+          })
+        : undefined;
     const promptResult = await this.promptBuilder.build({
-      capability: 'tutoring',
-      subject: context.subject,
+      capability: isFreeformPrompt ? 'freeform_tutor' : 'tutoring',
+      subject: promptSubject,
       track: request.mode,
       context: {
         student: context.student,
@@ -474,6 +490,7 @@ export class TutoringCapability {
         knowledgePoint: context.currentKnowledgePoint,
         dialogueHistory: context.messages,
         userMessage,
+        ...(freeformVars ? { customVariables: freeformVars as unknown as Record<string, unknown> } : {}),
       },
     });
 

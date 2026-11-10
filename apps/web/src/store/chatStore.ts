@@ -4,16 +4,22 @@ export interface ChatError {
   code: number;
   message: string;
   retryable: boolean;
-  stage?: 'tutor';  // which stage failed
+  stage?: 'tutor' | 'judge';  // which stage failed（自由出题页据此决定是否给「重试」）
 }
 
 export interface ChatMessage {
   id?: number;
   role: 'user' | 'assistant';
   content: string;
+  /**
+   * 消息来源标记（预留）。目前所有消息都是真实收发内容。
+   */
   type?: string;
   images?: string[];
   reasoning?: string;
+  // Render the user message as Markdown + LaTeX (freeform answer tab). Defaults
+  // to false so 答疑 user bubbles keep the original plain-text behavior.
+  markdown?: boolean;
   streaming?: boolean;
   error?: ChatError;
 }

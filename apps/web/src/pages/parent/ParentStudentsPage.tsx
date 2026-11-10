@@ -6,6 +6,7 @@ import {
   createStudent,
   resetStudentPassword,
   setStudentStatus,
+  updateStudent,
   type MyStudentItem,
 } from '@/services/api';
 import { useParentStudentStore } from '@/store/parentStudentStore';
@@ -24,6 +25,9 @@ export default function ParentStudentsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [resetTarget, setResetTarget] = useState<MyStudentItem | null>(null);
+  // 编辑资料（姓名/年龄/年级）——学生端没有入口，家长端是唯一手工修改处
+  const [editTarget, setEditTarget] = useState<MyStudentItem | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', age: '', grade: '' });
   const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -65,6 +69,45 @@ export default function ParentStudentsPage() {
       await load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '开通失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openEdit = (s: MyStudentItem) => {
+    setEditTarget(s);
+    setEditForm({ name: s.name ?? '', age: s.age == null ? '' : String(s.age), grade: s.grade ?? '' });
+    setError('');
+  };
+
+  const handleEditSave = async () => {
+    if (!editTarget) return;
+    setError('');
+    const age = Number(editForm.age);
+    if (!editForm.name.trim()) {
+      setError('姓名不能为空');
+      return;
+    }
+    if (!Number.isInteger(age) || age < 3 || age > 18) {
+      setError('年龄需为 3-18 的整数');
+      return;
+    }
+    if (!editForm.grade) {
+      setError('请选择年级');
+      return;
+    }
+    setLoading(true);
+    try {
+      await updateStudent(editTarget.id, {
+        name: editForm.name.trim(),
+        age,
+        grade: editForm.grade,
+      });
+      toast('success', '资料已更新');
+      setEditTarget(null);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '保存失败');
     } finally {
       setLoading(false);
     }
@@ -216,6 +259,9 @@ export default function ParentStudentsPage() {
               </div>
             </div>
             <div className="flex flex-col gap-2 mt-5">
+              <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
+                编辑资料
+              </Button>
               <Button variant="secondary" size="sm" onClick={() => { setResetTarget(s); setNewPassword(''); setError(''); }}>
                 重置密码
               </Button>
@@ -252,6 +298,57 @@ export default function ParentStudentsPage() {
           </div>
         )}
       </div>
+
+      <Modal
+        open={editTarget !== null}
+        onClose={() => { setEditTarget(null); setError(''); }}
+        title={`编辑 ${editTarget?.name ?? ''} 的资料`}
+      >
+        <div className="space-y-3 text-sm">
+          <label className="block">
+            <span className="block mb-1" style={{ color: 'var(--text-secondary)' }}>姓名</span>
+            <input
+              value={editForm.name}
+              onChange={(e) => { setEditForm((f) => ({ ...f, name: e.target.value })); setError(''); }}
+              maxLength={50}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-md focus:border-[var(--brand-500)] outline-none"
+            />
+          </label>
+          <label className="block">
+            <span className="block mb-1" style={{ color: 'var(--text-secondary)' }}>年龄</span>
+            <input
+              type="number"
+              min={3}
+              max={18}
+              value={editForm.age}
+              onChange={(e) => { setEditForm((f) => ({ ...f, age: e.target.value })); setError(''); }}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-md focus:border-[var(--brand-500)] outline-none"
+            />
+          </label>
+          <label className="block">
+            <span className="block mb-1" style={{ color: 'var(--text-secondary)' }}>年级</span>
+            <select
+              aria-label="年级"
+              value={editForm.grade}
+              onChange={(e) => { setEditForm((f) => ({ ...f, grade: e.target.value })); setError(''); }}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-md focus:border-[var(--brand-500)] outline-none bg-white"
+            >
+              <option value="">请选择</option>
+              {GRADES.map((g) => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+            <span className="block mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+              每年 9 月 1 日后学生登录会自动升一级（高三封顶），这里只用于修正。
+            </span>
+          </label>
+          {error && <p className="text-sm" style={{ color: 'var(--error)' }}>{error}</p>}
+          <div className="flex gap-3 justify-end">
+            <Button variant="ghost" size="sm" onClick={() => { setEditTarget(null); setError(''); }}>取消</Button>
+            <Button variant="primary" size="sm" loading={loading} onClick={handleEditSave}>保存</Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={resetTarget !== null}

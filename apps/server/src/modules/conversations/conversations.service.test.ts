@@ -70,6 +70,24 @@ describe('ConversationsService (scene 分型 + 训练讲一讲按题锚定)', ()
     expect(b!.id).not.toBe(a!.id);  // 自由问答不复用
   });
 
+  it('自定义 title：trim 后落库；不传时按 track 兜底', async () => {
+    const custom = await svc.create(1, { track: 'auxiliary', title: '  做题 · 已知 x+1=2  ' });
+    expect(custom!.title).toBe('做题 · 已知 x+1=2');
+
+    const plainAux = await svc.create(1, { track: 'auxiliary' });
+    expect(plainAux!.title).toBe('辅线答疑');
+
+    const plainMain = await svc.create(1, { track: 'mainline' });
+    expect(plainMain!.title).toBe('主线讨论');
+  });
+
+  it('自定义 title 超过 100 字 → 400', async () => {
+    await expect(svc.create(1, { track: 'auxiliary', title: 'a'.repeat(101) })).rejects.toThrow(BadRequestException);
+    // 边界：正好 100 字可用。
+    const ok = await svc.create(1, { track: 'auxiliary', title: 'a'.repeat(100) });
+    expect(ok!.title).toHaveLength(100);
+  });
+
   it('aux_training：同一道题复用既有会话，不重复写题面锚', async () => {
     const first = await svc.create(1, {
       track: 'auxiliary',
@@ -119,6 +137,46 @@ describe('ConversationsService (scene 分型 + 训练讲一讲按题锚定)', ()
     await expect(
       svc.create(1, { track: 'mainline', scene: 'aux_training' }),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  // --- aux_freeform（自由答疑，辅线专属；问答列表只查 aux_qna 故不会混入）------
+  it('aux_freeform 可创建', async () => {
+    const d = await svc.create(1, { track: 'auxiliary', scene: 'aux_freeform', subjectId: 1 });
+    expect(d!.scene).toBe('aux_freeform');
+  });
+
+  it('aux_freeform 未传 title：按题干前 20 字生成「做题 · …」', async () => {
+    const questionText = '已知 x+1=2，求 x 的值以及它的相反数';
+    const d = await svc.create(1, {
+      track: 'auxiliary',
+      scene: 'aux_freeform',
+      subjectId: 1,
+      questionText,
+    });
+    expect(d!.title).toBe(`做题 · ${questionText.slice(0, 20)}`);
+  });
+
+  it('aux_freeform 无题干：标题兜底为「做题」', async () => {
+    const d = await svc.create(1, { track: 'auxiliary', scene: 'aux_freeform', subjectId: 1 });
+    expect(d!.title).toBe('做题');
+  });
+
+  it('aux_qna 有题干也不改标题（仍是「辅线答疑」）', async () => {
+    const d = await svc.create(1, { track: 'auxiliary', questionText: '已知 x+1=2' });
+    expect(d!.title).toBe('辅线答疑');
+  });
+
+  it('scene 与 track 不匹配仍拒绝（mainline + aux_freeform）', async () => {
+    await expect(svc.create(1, { track: 'mainline', scene: 'aux_freeform' })).rejects.toThrow(/不匹配/);
+  });
+
+  it('list(auxiliary, aux_qna) 不含 aux_freeform 会话', async () => {
+    await svc.create(1, { track: 'auxiliary' });  // aux_qna
+    const free = await svc.create(1, { track: 'auxiliary', scene: 'aux_freeform', subjectId: 1 });
+    const qna = await svc.list(1, 'auxiliary', undefined, 'aux_qna');
+    expect(qna).toHaveLength(1);
+    expect(qna.every((r) => r.scene === 'aux_qna')).toBe(true);
+    expect(qna.some((r) => r.id === free!.id)).toBe(false);
   });
 
   it('list 支持按 scene 过滤', async () => {

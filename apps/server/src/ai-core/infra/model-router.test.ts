@@ -62,6 +62,24 @@ describe('ModelRouter', () => {
     expect(result.primary.modelId).toBe('deepseek-flash');
   });
 
+  it('freeform_split 本地优先、千问兜底', () => {
+    const r = new ModelRouter().route({ scene: 'freeform_split', subject: 'math' });
+    expect(r.primary.modelId).toBe('Qwen3.8-27B');
+    expect(r.fallback?.modelId).toBe('qwen3.8-max');
+  });
+
+  it('freeform_judge 固定千问、无 fallback', () => {
+    const r = new ModelRouter().route({ scene: 'freeform_judge', subject: 'physics' });
+    expect(r.primary.modelId).toBe('qwen3.8-max');
+    expect(r.fallback).toBeUndefined();
+  });
+
+  it('freeform_tutor 与判题同模型（千问）、无 fallback', () => {
+    const r = new ModelRouter().route({ scene: 'freeform_tutor', subject: 'math' });
+    expect(r.primary.modelId).toBe('qwen3.8-max');
+    expect(r.fallback).toBeUndefined();
+  });
+
   it('route() 给 primary/fallback 打 scene/subject/modelKey；fallback 额外带 isFallbackEntry', () => {
     const result = new ModelRouter().route({ scene: 'judgment', subject: 'math' });
     expect(result.primary.scene).toBe('judgment');

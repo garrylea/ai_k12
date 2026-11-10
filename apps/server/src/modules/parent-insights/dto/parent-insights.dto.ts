@@ -201,9 +201,9 @@ export interface ParentErrorQuestion {
  * `track` 由 `source` 现算、**不落库**，分档表在 `parent-insights.repo.ts` 的
  * `TRACK_SOURCES`（唯一真源）：
  *   - `main` = `practice | discuss | exam`（主线：课堂练习 / 讨论 / 考试）
- *   - `training` = `targeted | error_practice | auxiliary`（训练轨错题 + 辅线答疑里问过的题）
+ *   - `training` = `targeted | error_practice | auxiliary | freeform`（训练轨错题 + 辅线答疑里问过的题 + 做题入口的错题）
  *
- * 与 `openapi` 原 `ErrorItem` 的差别：`source` enum 按**实际 6 个值**修正（原 enum 只有
+ * 与 `openapi` 原 `ErrorItem` 的差别：`source` enum 按**实际 7 个值**修正（原 enum 只有
  * `homework/unit_test/midterm/final/auxiliary/practice/discuss`，缺 `exam`/`targeted`/`error_practice`）。
  */
 export interface ParentErrorItem {

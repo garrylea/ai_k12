@@ -108,6 +108,13 @@ export class PromptBuilder {
     if (capability === 'structuring') {
       return `structuring/question.md`;
     }
+    if (capability === 'freeform_split') return 'freeform/split.md';
+    if (capability === 'freeform_judge') return 'freeform/judge.md';
+    if (capability === 'freeform_tutor') {
+      // 做题页按学科选模块：只认物理/化学，其余（含 chinese/politics）回落数学。
+      const module = subject === 'physics' || subject === 'chemistry' ? subject : 'math';
+      return `freeform/tutor/${module}.md`;
+    }
     throw new Error(`Unknown capability: ${capability}`);
   }
 
@@ -150,16 +157,19 @@ export class PromptBuilder {
   }
 
   private buildMessages(rendered: string, dialogueHistory?: ChatMessage[]): ChatMessage[] {
-    const parts = rendered.split(/^##\s+/m);
-    const systemSection = parts.find(p => p.startsWith('System Prompt'));
-    const userSection = parts.find(p => p.startsWith('User Message'));
+    // Locate the two section markers by position instead of splitting on every
+    // `## ` heading: injected content (MinerU markdown, question bodies) contains
+    // its own `##` headings, and splitting on those silently truncated the text.
+    const systemMarker = this.findSectionMarker(rendered, 'System Prompt');
+    const userMarker = this.findSectionMarker(rendered, 'User Message');
 
     const messages: ChatMessage[] = [];
 
-    if (systemSection) {
+    if (systemMarker) {
+      const end = userMarker && userMarker.start > systemMarker.bodyStart ? userMarker.start : rendered.length;
       messages.push({
         role: 'system',
-        content: systemSection.replace(/^System Prompt\s*\n?/, '').trim(),
+        content: rendered.slice(systemMarker.bodyStart, end).trim(),
       });
     }
 
@@ -167,10 +177,10 @@ export class PromptBuilder {
       messages.push(...dialogueHistory);
     }
 
-    if (userSection) {
+    if (userMarker) {
       messages.push({
         role: 'user',
-        content: userSection.replace(/^User Message\s*\n?/, '').trim(),
+        content: rendered.slice(userMarker.bodyStart).trim(),
       });
     } else {
       messages.push({
@@ -180,5 +190,12 @@ export class PromptBuilder {
     }
 
     return messages;
+  }
+
+  /** Find a line-anchored `## <title>` heading; returns its offset and body start. */
+  private findSectionMarker(rendered: string, title: string): { start: number; bodyStart: number } | undefined {
+    const match = new RegExp(`^##\\s+${title}`, 'm').exec(rendered);
+    if (!match) return undefined;
+    return { start: match.index, bodyStart: match.index + match[0].length };
   }
 }

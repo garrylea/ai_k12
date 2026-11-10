@@ -14,6 +14,13 @@ interface Props {
   /** 草稿键前缀（与同页 QuestionRunner 一致：tp / errp / exam-${sid}），提交后 clearDraft 同键清空 */
   draftKeyPrefix: string;
   onClose: () => void;
+  /**
+   * 快照出口透传：自由出题页（SolvePage）要在提交时取本面板白板的 JPEG，
+   * 但白板只应挂一个 —— 由面板把 ref 转给内部 `DraftWhiteboard`，调用方不另挂白板。
+   */
+  snapshotRef?: React.MutableRefObject<(() => Promise<string | null>) | null>;
+  /** 首次展开的宽度（% of 并排行）；不传用 35。会话内拖过的宽度优先于它 */
+  defaultWidthPct?: number;
 }
 
 /** 模块级会话记忆：拖拽/双击后的宽度在本会话内跨页、跨开关保持（刷新归默认） */
@@ -24,8 +31,10 @@ const WIDTH_MIN = 25;
 const WIDTH_MAX = 55;
 const WIDTH_DEFAULT = 35;
 
-export function DraftPanel({ questionId, draftKeyPrefix, onClose }: Props) {
-  const [widthPct, setWidthPct] = useState<number>(() => lastWidthPct ?? WIDTH_DEFAULT);
+export function DraftPanel({ questionId, draftKeyPrefix, onClose, snapshotRef, defaultWidthPct }: Props) {
+  const [widthPct, setWidthPct] = useState<number>(
+    () => lastWidthPct ?? defaultWidthPct ?? WIDTH_DEFAULT,
+  );
   // 拖拽中关宽度过渡（实时跟随不滞后），落定后恢复过渡动画
   const [dragging, setDragging] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -67,31 +76,12 @@ export function DraftPanel({ questionId, draftKeyPrefix, onClose }: Props) {
   /** 双击分割条：回到默认宽度（拖拽中不响应，避免落定瞬间误触发） */
   const resetWidth = () => {
     if (resizeStartRef.current) return;
-    applyWidth(WIDTH_DEFAULT);
+    applyWidth(defaultWidthPct ?? WIDTH_DEFAULT);
     lastWidthPct = widthPctRef.current;
   };
 
-  return (
-    <>
-      {/* 分割条：左右拖拽调宽（向左变窄、向右变宽），双击复位默认宽度。
-          touch-none 防触屏把拖拽当滚动手势；本身不占视觉重量，只留一根居中握把线 */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="调整草稿宽度（双击恢复默认）"
-        draggable={false}
-        className="w-[10px] shrink-0 cursor-grab touch-none select-none flex items-center justify-center group"
-        onPointerDown={handleResizePointerDown}
-        onPointerMove={handleResizePointerMove}
-        onPointerUp={endResize}
-        onPointerCancel={endResize}
-        onLostPointerCapture={endResize}
-        onDoubleClick={resetWidth}
-      >
-        <span className="w-[2px] h-14 rounded-full bg-[var(--bg-subtle)] group-hover:bg-[var(--text-tertiary)] transition-colors" />
-      </div>
-
-      {/* 草稿面板：占真实空间（与答题卡同款卡片），宽度由分割条控制 */}
+  // 草稿面板本体：占真实空间（与答题卡同款卡片），宽度由分割条控制
+  const panel = (
       <div
         ref={panelRef}
         className={`shrink-0 min-w-0 flex flex-col rounded-xl overflow-hidden border border-[var(--learn-card-border)] shadow-sm transition-[width] duration-200 ${dragging ? 'transition-none select-none' : ''}`}
@@ -127,9 +117,33 @@ export function DraftPanel({ questionId, draftKeyPrefix, onClose }: Props) {
             key={`${draftKeyPrefix}-${questionId}`}
             questionId={`${draftKeyPrefix}-${questionId}`}
             scrollMode="scroll-y"
+            snapshotRef={snapshotRef}
           />
         </div>
       </div>
+  );
+
+  return (
+    <>
+      {/* 分割条：左右拖拽调宽（向左变窄、向右变宽），双击复位默认宽度。
+          touch-none 防触屏把拖拽当滚动手势；本身不占视觉重量，只留一根居中握把线 */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整草稿宽度（双击恢复默认）"
+        draggable={false}
+        className="w-[10px] shrink-0 cursor-col-resize touch-none select-none flex items-center justify-center group"
+        onPointerDown={handleResizePointerDown}
+        onPointerMove={handleResizePointerMove}
+        onPointerUp={endResize}
+        onPointerCancel={endResize}
+        onLostPointerCapture={endResize}
+        onDoubleClick={resetWidth}
+      >
+        {/* 抓手：页面底色上必须看得见，悬停/拖动时点亮成品牌色 */}
+        <span className="w-[3px] h-14 rounded-full bg-[var(--text-tertiary)] opacity-30 group-hover:opacity-70 group-hover:bg-[var(--brand-500)] group-active:opacity-100 group-active:bg-[var(--brand-500)] transition-all" />
+      </div>
+      {panel}
     </>
   );
 }

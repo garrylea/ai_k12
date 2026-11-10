@@ -600,3 +600,79 @@ describe('TutoringCapability.generateTitle（title 路由：local -> deepseek）
     await expect(cap.generateTitle('问题', '回复')).resolves.toBeNull();
   });
 });
+
+describe('TutoringCapability · 做题页（freeform_tutor）提示词', () => {
+  let convService: ConversationService;
+  let dialogueId: number;
+
+  const captureModel = () => {
+    const calls: any[] = [];
+    const client = {
+      chat: async (arg: any): Promise<ChatResponse> => {
+        calls.push(arg);
+        return {
+          id: 'resp', model: 'qwen3.8-max', content: '先看条件',
+          finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 5, cost: 0 }, latencyMs: 5,
+        };
+      },
+    } as unknown as ModelClient;
+    return { client, calls };
+  };
+
+  beforeEach(async () => {
+    const dialogues = new FakeDialoguesRepo();
+    const messages = new FakeMessagesRepo();
+    const students = new FakeStudentsRepo();
+    convService = new ConversationService(dialogues as any, messages as any, students as any, { findContentById: async () => null } as any);
+    dialogueId = await convService.createDialogue({ studentId: 1, subject: 'math', track: 'auxiliary' });
+  });
+
+  const freeReq = (over: any = {}) => ({
+    studentId: '1',
+    mode: 'auxiliary' as const,
+    message: '这题怎么做',
+    dialogueId: String(dialogueId),
+    routeScene: 'freeform_tutor' as const,
+    ...over,
+  });
+
+  it('subjectId=4 → 物理模块 + 学习档案进 system，user 只发原话', async () => {
+    const { client, calls } = captureModel();
+    const capability = new TutoringCapability(convService, { modelClient: client });
+    await capability.tutor(freeReq({
+      subjectId: 4,
+      learningProfile: { grade: '初二', textbook: '人教版', learnedContent: '浮力\n压强', stuckPoint: '不会列方程' },
+    }) as any);
+
+    const messages = calls[0].messages;
+    expect(messages[0].role).toBe('system');
+    expect(messages[0].content).toContain('学科模块 · 物理');
+    expect(messages[0].content).not.toContain('学科模块 · 数学');
+    expect(messages[0].content).toContain('浮力\n压强');
+    expect(messages[0].content).toContain('不会列方程');
+    expect(messages[0].content).not.toContain('{{');
+    // 答疑只发学生原话（不拼档案前缀）
+    expect(messages[1]).toMatchObject({ role: 'user', content: '这题怎么做' });
+  });
+
+  it('没有学习档案 → 空态说明、不出现空洞变量', async () => {
+    const { client, calls } = captureModel();
+    const capability = new TutoringCapability(convService, { modelClient: client });
+    await capability.tutor(freeReq({ subjectId: 5 }) as any);
+
+    const system = calls[0].messages[0].content;
+    expect(system).toContain('学科模块 · 化学');
+    expect(system).toContain('学生未填写');
+    expect(system).not.toContain('{{');
+  });
+
+  it('非 freeform 入口仍用原 tutoring 模板（回归）', async () => {
+    const { client, calls } = captureModel();
+    const capability = new TutoringCapability(convService, { modelClient: client });
+    await capability.tutor({ studentId: '1', mode: 'auxiliary', message: '这题怎么做', dialogueId: String(dialogueId) } as any);
+
+    const system = calls[0].messages[0].content;
+    expect(system).not.toContain('抽丝剥茧');
+    expect(system).toContain('苏格拉底');
+  });
+});

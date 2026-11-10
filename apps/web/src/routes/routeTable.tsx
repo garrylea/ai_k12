@@ -7,6 +7,7 @@ import EntrySelectPage from '@/pages/auth/EntrySelectPage';
 import StarMapPage from '@/pages/student/StarMapPage';
 import CourseDetailPage from '@/pages/student/CourseDetailPage';
 import AuxiliaryHomePage from '@/pages/student/AuxiliaryHomePage';
+import SolvePage from '@/pages/student/SolvePage';
 import ConversationManagePage from '@/pages/student/ConversationManagePage';
 import TrainingSubjectPage from '@/pages/student/TrainingSubjectPage';
 import ProfilePage from '@/pages/student/ProfilePage';
@@ -188,6 +189,15 @@ export const routes: RouteObject[] = [
     element: (
       <RequireRole role="student">
         <ConversationManagePage />
+      </RequireRole>
+    ),
+  },
+  // 自由出题页（全屏沉浸层，独立于任何 Layout；一页一题、刷新即重置）
+  {
+    path: '/student/solve',
+    element: (
+      <RequireRole role="student">
+        <SolvePage />
       </RequireRole>
     ),
   },

@@ -62,6 +62,8 @@ tags:
     description: 学习会话采集（学习时长，student）
   - name: DeviceControl
     description: PC App 学习管控（单次学习锁定 + 家长解除命令）
+  - name: Freeform
+    description: 做题入口（自由做题）：题图/文字识别切题 + 判题 SSE
 paths:
   # Auth
   /auth/register:
@@ -1661,12 +1663,126 @@ paths:
                   - `data: {"type":"error","message":"..."}` — extraction failed
                   - `data: [DONE]` — stream end
 
+  # Freeform
+  /freeform/recognize:
+    post:
+      tags: [Freeform]
+      summary: 题图/文字 → 候选题（做题入口第一步）
+      description: >-
+        student JWT。请求体 {text?, fileIds?}：text ≤20000 字；fileIds 为正整数
+        字符串数组（顺序即页序），最多 6 张；二者至少给一个。纯文字跳过 MinerU，
+        直接返回 1 个候选；有图时按 fileIds 顺序交给 MinerU 转 Markdown + 配图，
+        再由本地 LLM 切题（失败 / 超时 / JSON 非法 / Markdown >24000 字符时回退
+        千问 3.8-max）。配图落 /uploads/freeform/<jobId>/，候选的 figureUrls 只保留
+        本次真实落盘的子集；候选最多 20 道。识别出 0 道题不是错误（201 +
+        candidates: []）。**成功返回 201**（@Post 默认，未显式 @HttpCode）。
+      operationId: recognizeFreeform
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FreeformRecognizeRequest'
+      responses:
+        '201':
+          description: 候选题与本次提取的全部配图
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/FreeformRecognizeResponse'
+        '400':
+          description: >-
+            参数校验失败（text 非字符串/过长、fileIds 非数组/超 6 项/非正整数、
+            文件不存在或非本人、图片格式不支持、单张 >5MB、无图且无文字）——code=1001
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: AI 服务异常（code=5000）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '502':
+          description: >-
+            MinerU 解析失败 / 超时 / 缺页（code=5501，「图片解析失败，请重试或手动
+            输入题目」）或切题模型失败（本地 + 千问都失败，code=5502）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /freeform/judge/stream:
+    post:
+      tags: [Freeform]
+      summary: 做题入口判题（SSE）
+      description: >-
+        student JWT。请求体见 FreeformJudgeRequest；无 dialogueId 时服务端创建
+        scene=aux_freeform 会话（题干作 assistant 锚消息）。HTTP 恒为 200，
+        Content-Type: text/event-stream；错误也以 error 事件下发（前端只在流内
+        区分成功/失败）：
+        - `data: {"type":"start","dialogueId":"123","questionId":null}`
+        - `data: {"type":"reasoning","delta":"..."}`
+        - `data: {"type":"content","delta":"..."}` / `{"type":"content","delta":"...","replace":true}`
+        - `data: {"type":"result","questionId":456,"totalScore":7,"maxScore":10,"verdict":"partial","correctAnswer":"x=1","errorBookId":789}`
+        - `data: {"type":"error","code":5502,"message":"判题失败，请重试","retryable":true}`
+        - `data: {"type":"done"}`
+
+        错误码（均在事件里）：入参/学科/满分/图片/dialogueId 非数字/场景不符 1001；
+        dialogueId 不存在或非本人 1002；模型失败或尾部 JSON 解析失败（含二次结构化
+        提取）5502；题库/错题本写失败 5000。落库：questions
+        （source='freeform'、answer_verified=0、grade_band=NULL、无知识点行）+
+        main_error_books（仅 totalScore < maxScore 写/复用，满分清零）；
+        **不发积分、不写 practice_results、不更新掌握度**。客户端断开即中止上游模型，
+        部分报告不写库。
+      operationId: streamFreeformJudge
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FreeformJudgeRequest'
+      responses:
+        '200':
+          description: SSE 事件流（start/reasoning/content/result/error/done；错误也是事件）
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Events:
+                  - `data: {"type":"start","dialogueId":"123","questionId":null}`
+                  - `data: {"type":"reasoning","delta":"..."}`
+                  - `data: {"type":"content","delta":"..."}`（`replace:true` = 整段替换）
+                  - `data: {"type":"result","questionId":456,"totalScore":7,"maxScore":10,"verdict":"partial","correctAnswer":"x=1","errorBookId":789}`
+                  - `data: {"type":"error","code":5502,"message":"...","retryable":true}`
+                  - `data: {"type":"done"}`
+
   # Files
   /files/upload:
     post:
       tags: [Files]
       summary: 文件上传
       operationId: uploadFile
+      parameters:
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [auxiliary, freeform]
+            default: auxiliary
+          description: >-
+            上传来源（query，缺省 auxiliary）。auxiliary = 答疑等既有上传；
+            freeform = 做题入口的原题图 / 作答图 / 草稿合成图。非白名单 400/1001。
       requestBody:
         required: true
         content:
@@ -1677,12 +1793,9 @@ paths:
                 file:
                   type: string
                   format: binary
-                source:
-                  type: string
-                  enum: [auxiliary, ocr, answer]
       responses:
-        '200':
-          description: 上传成功
+        '201':
+          description: 上传成功（Nest `@Post` 默认 201，未显式 `@HttpCode`）
           content:
             application/json:
               schema:
@@ -2007,7 +2120,7 @@ paths:
           description: 场景分型过滤（缺省返回该 track 全部；辅线答疑列表传 aux_qna）
           schema:
             type: string
-            enum: [aux_qna, aux_training, mainline_question, mainline_card]
+            enum: [aux_qna, aux_training, aux_freeform, mainline_question, mainline_card]
       responses:
         '200':
           description: 会话列表
@@ -2033,8 +2146,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateConversationRequest'
       responses:
-        '200':
-          description: 创建成功
+        '201':
+          description: 创建成功（Nest `@Post` 默认 201，未显式 `@HttpCode`）
           content:
             application/json:
               schema:
@@ -2423,6 +2536,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommonResponse'
+  /parent/students/{studentId}:
+    patch:
+      tags: [Parent]
+      summary: 编辑学生档案（姓名/年龄/年级；家长端是唯一手工入口）
+      operationId: updateStudentProfile
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStudentProfileRequest'
+      responses:
+        '200':
+          description: 更新成功，返回脱敏后的最新档案（school_level 由年级推导）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
   /parent/students/{studentId}/status:
     patch:
       tags: [Parent]
@@ -2572,9 +2709,10 @@ paths:
       description: >-
         `track` 由 `source` 现算、不落库，分档表是服务端
         `apps/server/src/database/repositories/parent-insights.repo.ts` 的 `TRACK_SOURCES`（唯一真源）：
-        `main` = `practice | discuss | exam`；`training` = `targeted | error_practice | auxiliary`。
+        `main` = `practice | discuss | exam`；`training` = `targeted | error_practice | auxiliary | freeform`。
         孩子**在辅线答疑里问过**的题（`source = 'auxiliary'`）归 `training`——它进训练轨
-        「错题练习」池、孩子能在那里做对清零，所以不单列「辅线」档。
+        「错题练习」池、孩子能在那里做对清零；做题入口的错题（`source = 'freeform'`）同样归
+        `training`，但只在错题本列表展示、不可勾选（不进练习池）。
         `pageSize` 服务端固定 20，前端不传；`page` 非法（`abc` / `1.5` / `-1`）→ 400 / 1001，不静默回落。
         `page` 超出末页 → 200 + 空 `items` + 正确 `total`。
       operationId: listParentErrors
@@ -2595,7 +2733,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [practice, discuss, exam, targeted, error_practice, auxiliary]
+            enum: [practice, discuss, exam, targeted, error_practice, auxiliary, freeform]
           description: 按错题来源筛选；不传 = 全部。
         - name: track
           in: query
@@ -2675,7 +2813,7 @@ paths:
           schema:
             type: string
             enum: [aux_qna, aux_training, mainline_question, mainline_card]
-          description: 不传 = 全部。
+          description: 不传 = 全部。做题入口的 `aux_freeform` 会话不进入家长端回放（列表与详情均不可见）。
         - name: from
           in: query
           required: false
@@ -8255,6 +8393,20 @@ components:
           maxLength: 32
       required: [newPassword]
 
+    UpdateStudentProfileRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          maxLength: 50
+        age:
+          type: integer
+          minimum: 3
+          maximum: 18
+        grade:
+          type: string
+          description: 年级中文标签（初一…高三 / 小学一年级…六年级）；后端推导 school_level
     SetStudentStatusRequest:
       type: object
       properties:
@@ -9061,6 +9213,12 @@ components:
                 description: PDF 提取任务 ID（type=file 且为 PDF 时传入）
         dialogueId:
           type: string
+        subjectId:
+          type: integer
+          enum: [1, 4, 5]
+          description: >-
+            仅做题页（scene=aux_freeform）使用：1=数学 4=物理 5=化学，决定答疑用哪个
+            学科模块模板；缺省时取会话 ai_dialogues.subject_id，再缺省按数学。
       required: [studentId, mode, message]
 
     TutorResponse:
@@ -9277,7 +9435,7 @@ components:
           description: 错题所属课时 id（冗余字段，用于快速定位上一节课是否有未清零错题）
         source:
           type: string
-          enum: [practice, discuss, exam, targeted, error_practice, auxiliary]
+          enum: [practice, discuss, exam, targeted, error_practice, auxiliary, freeform]
           description: >-
             错题来源。按 `main_error_books.source` 实际写入值列出（原 enum 的
             homework/unit_test/midterm/final 四个值当前无写入点，已移除）。
@@ -9361,7 +9519,7 @@ components:
         scene:
           type: string
           description: 会话场景分型（各系统共用 ai_dialogues 一张表，列表按此过滤隔离历史）
-          enum: [aux_qna, aux_training, mainline_question, mainline_card]
+          enum: [aux_qna, aux_training, aux_freeform, mainline_question, mainline_card]
         cardId:
           type: string
         questionId:
@@ -9387,7 +9545,14 @@ components:
         scene:
           type: string
           description: 会话场景分型（缺省：auxiliary->aux_qna / mainline->mainline_card）
-          enum: [aux_qna, aux_training, mainline_question, mainline_card]
+          enum: [aux_qna, aux_training, aux_freeform, mainline_question, mainline_card]
+        title:
+          type: string
+          maxLength: 100
+          description: >-
+            可选自定义标题（trim 后 ≤100 字，超长 400/1001）；缺省按 track 取
+            「辅线答疑」/「主线讨论」。`scene=aux_freeform` 且未传时服务端按题干
+            前 20 字生成「做题 · …」（无题干为「做题」）。
         cardId:
           type: string
         questionId:
@@ -10063,10 +10228,10 @@ components:
         track:
           type: string
           enum: [main, training]
-          description: "`training` = `targeted | error_practice | auxiliary`，其余 → `main`。"
+          description: "`training` = `targeted | error_practice | auxiliary | freeform`，其余 → `main`。"
         source:
           type: string
-          enum: [practice, discuss, exam, targeted, error_practice, auxiliary]
+          enum: [practice, discuss, exam, targeted, error_practice, auxiliary, freeform]
         level:
           type: integer
           description: 错题级别 1–5。
@@ -10148,7 +10313,7 @@ components:
 
     ChatLogItem:
       type: object
-      description: 会话列表一行。
+      description: 会话列表一行。做题入口的 `aux_freeform` 会话不会出现在这里。
       properties:
         id:
           type: integer
@@ -10678,6 +10843,10 @@ components:
           type: string
           nullable: true
           description: 题型（questions.type；题目未入库为 null）
+        fullScore:
+          type: integer
+          nullable: true
+          description: questions.full_score（做题错题重练时作为满分；null 时前端按 10）
         level:
           type: integer
           description: 错题严重程度（重做仍错递增）
@@ -10690,7 +10859,26 @@ components:
           items:
             type: integer
           description: 该题关联的知识点 id 列表（无关联为空数组）
-      required: [errorBookId, questionId, questionText, type, level, createdAt, kpIds]
+        options:
+          type: array
+          nullable: true
+          description: 选择题选项（questions.options parse 后的数组；无 / 坏 JSON 为 null）
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              text: { type: string }
+              isCorrect: { type: boolean }
+        source:
+          type: string
+          nullable: true
+          description: >-
+            错题来源（main_error_books.source）：practice / discuss / exam /
+            targeted / error_practice / auxiliary / freeform 等；null = 历史行未记。
+            source='freeform' 的错题只在错题本列表回看：页面显示但不可勾选，
+            训练判题入口（POST /training/judge）对 freeform 题一律 400/1001。
+            家长端错题列表归 training 档（TRACK_SOURCES.training 含 freeform）。
+      required: [errorBookId, questionId, questionText, type, level, createdAt, kpIds, options, source]
 
     TrainingJudgeRequest:
       type: object
@@ -13087,3 +13275,142 @@ components:
         page: { type: integer }
         pageSize: { type: integer, enum: [20] }
         total: { type: integer }
+
+    # ---- Freeform（做题入口，2026-11-08）----
+    ApiError:
+      type: object
+      description: 非包装错误响应（HTTP 异常过滤器输出，非 CommonResponse）
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+      required: [code, message]
+
+    FreeformRecognizeRequest:
+      type: object
+      description: 题图 / 文字 → 候选题。text 与 fileIds 至少给一个。
+      anyOf:
+        - required: [text]
+        - required: [fileIds]
+      properties:
+        text:
+          type: string
+          maxLength: 20000
+          description: 题目文字（纯文字时跳过 MinerU）
+        fileIds:
+          type: array
+          maxItems: 6
+          description: 题图文件 id（正整数数组，顺序即页序；最多 6 张）
+          items:
+            type: string
+            pattern: '^[1-9]\d*$'
+
+    FreeformRecognizeResponse:
+      type: object
+      required: [candidates, figures]
+      properties:
+        candidates:
+          type: array
+          description: 候选题（最多 20 道；0 道时为空数组，不是错误）
+          items:
+            $ref: '#/components/schemas/FreeformCandidate'
+        figures:
+          type: array
+          description: 本次提取出的全部配图（供学生多选）
+          items:
+            $ref: '#/components/schemas/FreeformFigure'
+
+    FreeformCandidate:
+      type: object
+      required: [id, no, content, figureUrls, suggestedSubject, confidence]
+      properties:
+        id:
+          type: string
+          description: 候选 id（c1、c2…）
+        no:
+          type: string
+          description: 原题号（识别不到时为序号）
+        content:
+          type: string
+          description: 题干 Markdown（含配图引用）
+        figureUrls:
+          type: array
+          items:
+            type: string
+          description: AI 建议关联的配图 URL 子集（必须是 figures 的子集）
+        suggestedSubject:
+          type: string
+          nullable: true
+          enum: [math, physics, chemistry]
+          description: AI 预选学科；null = 未判断
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    FreeformFigure:
+      type: object
+      required: [url, name, page]
+      properties:
+        url:
+          type: string
+          description: /uploads/freeform/<jobId>/<name>
+        name:
+          type: string
+        page:
+          type: integer
+          description: 来源页号（从 1 开始）
+
+    FreeformJudgeRequest:
+      type: object
+      required: [subjectId, maxScore, questionContent, answer]
+      properties:
+        dialogueId:
+          type: string
+          description: >-
+            可选；不传由服务端创建 scene=aux_freeform 会话。传则必须为正整数
+            （非数字 → SSE error 1001）；不存在 / 非本人 → SSE error 1002；
+            scene 不是 aux_freeform → SSE error 1001。
+        subjectId:
+          type: integer
+          enum: [1, 4, 5]
+          description: 学科（1 数学 / 4 物理 / 5 化学），其余 400/1001
+        maxScore:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: 满分（学生选定后锁定）
+        questionId:
+          type: integer
+          description: 可选；再次提交时带上次 result 返回的 id。source='freeform' 更新同一条，非 freeform 只复用不改题
+        questionContent:
+          type: string
+          maxLength: 30000
+          description: 最终题干 Markdown（含勾选配图）
+        questionImages:
+          type: array
+          maxItems: 6
+          description: 原题图（按顺序）
+          items:
+            type: object
+            required: [type, fileId]
+            properties:
+              type:
+                type: string
+                enum: [image]
+              fileId:
+                type: string
+        figureUrls:
+          type: array
+          maxItems: 6
+          description: 学生勾选的配图（必须以 /uploads/freeform/ 开头且文件存在）
+          items:
+            type: string
+        answer:
+          type: string
+          maxLength: 30000
+          description: 学生作答 Markdown；trim 后为空且无 draftFileId → 400/1001
+        draftFileId:
+          type: string
+          description: 可选；附上的草稿合成图文件 id

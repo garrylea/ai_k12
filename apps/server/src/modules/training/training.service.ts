@@ -173,10 +173,12 @@ export class TrainingService {
         questionId: row.question_id,
         questionText: row.questionText ?? '',
         type: row.type,
+        fullScore: row.full_score ?? null,
         level: row.level,
         createdAt: new Date(row.created_at).toISOString(),
         kpIds: row.kp_id != null ? [row.kp_id] : [],
         options: parseOptions(row.options),
+        source: row.source ?? null,
       });
     }
     return [...byId.values()];
