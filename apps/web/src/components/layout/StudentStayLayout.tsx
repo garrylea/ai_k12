@@ -4,7 +4,7 @@ import { LockedPillReveal } from '@/kiosk/LockedPillReveal';
 import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 
 /**
- * 浅停留页外壳 —— 个人中心（P5.1）与奖励册（P5.2）专用。
+ * 浅停留页外壳 —— 个人中心（P5.1）、奖励册（P5.2）与练习记录（含详情）专用。
  *
  * **为什么单独有这个外壳（别再把它并进任何跟随主题的外壳）**
  *

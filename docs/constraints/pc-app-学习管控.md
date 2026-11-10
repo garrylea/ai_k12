@@ -17,6 +17,8 @@
 - **家长下发命令的主防线 = 「没有进行中会话就 409/1001、不写命令」**；惰性过期只是兜底。命令认领与 `unlocked_at` 落库**必须同一事务**。
 - **做不到的别当缺陷修**：`Ctrl+Alt+Del` / 强制退出 / 系统级手势应用层无解；**macOS 的 `Cmd+Tab` 与 Windows 的 `Alt+Tab` 已各自处理** —— macOS 靠 kiosk（见下文 2026-11-09），Windows 靠应用内全局键盘钩子（见下文「Windows 键盘钩子」）；**不区分异常退出**；真·隔离靠 OS 级单应用模式（macOS 受监督设备 Single App Mode / Windows 企业版 Shell Launcher；**家庭版无系统级 kiosk**）。**非目标**：自动更新（属 ④）、签名/公证、Web 端管控、`force_close`、云端部署（壳留 `K12_WEB_URL` 接缝）。
   （**更正 2026-09-27**：安装包**已移出**上面这份清单 —— 交付形态就是安装包，见本文末「打包与分发（③）」；自动更新仍属 ④。）
+  **2026-11-10 补**：被 SIGKILL 后由 launchd 托管的看护进程拉回（`lib/watchdog.js`，
+  仅学生模式、5 秒一轮）；这不是"挡住了强杀"，只是"关掉后能自己回来"；学生仍可 `launchctl bootout`。
 
 ## 壳生产化（2026-09-26，②）
 
@@ -177,6 +179,46 @@ Windows 上 Electron 的 kiosk **只是无边框全屏**，`Alt+Tab` / `Win` 完
 - **明确不做**（补回来是错的）：**禁右键**（Electron 默认不弹右键菜单，Web 应用也无自定义右键菜单，
   没有东西可禁）、**禁刷新**（不动 localStorage，锁还在，不构成逃逸，禁了让学生出错时无法自救）、
   **禁文本选中**（与防逃逸无关，学生可能要复制）、**禁拖拽**（`will-navigate` 已拦非同源）
+
+## 剩余时长胶囊：只在浅停留三页、按需唤出（2026-11-10）
+
+之前胶囊是 `LearningSessionShell` 的全局常驻元素、`fixed top-3`（距窗口顶 12px），
+**整块落在 64px 顶栏内部**，正好压住个人中心/奖励册/练习记录三个 tab —— 学生点不到练习记录（用户实测）。
+
+- 现在只在 `StudentStayLayout`（三页 + 练习记录详情）渲染；沉浸页**没有**胶囊，
+  学生点右上角登出时由 `LogoutButton` 的 toast 解释「时长未满」。
+- 锁定态经 `learningLockContext` 下发，`LearningSessionShell` 仍是唯一真源（含 `isDesktopShell()` 闸门），
+  **禁止**在页面里再读一次 localStorage。
+- 交互：进入三个主 tab 显示 **3 秒**；顶边 **10px** 识别区悬停显示、移出 200ms 收起；点击/轻触显示 **5 秒**
+  （触屏没有 hover，这条是 iPad 的唯一路径）。详情页不自动弹。
+- 胶囊 `top-[72px]`（= 64px 顶栏 + 8px）、`pointer-events-none`、`z-40`：**它绝不能再抢任何点击**。
+  识别区只有 10px 高，tab 从约 16px 起、右上「退出本页」从约 11px 起（`p-2.5` + 20px 图标 + 边框
+  = 42px，居中于 64px 顶栏），识别区与它只有约 1px 间隙 —— 改识别区高度前必须重新量。
+
+## 被关掉之后的保活（2026-11-10）
+
+**先记结论，别再当缺陷重查**：`before-quit` 拦得住优雅退出（AppleScript `quit` / `kill -TERM` 都会被
+Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强杀/强制退出）** —— 应用层无解。
+
+- 真正的缺口是「被关掉后没人拉起」：`lib/watchdog.js` 首次启动（仅 `app.isPackaged && darwin`）写
+  `~/Library/Application Support/k12-desktop/sysmon.sh`（0755）与
+  `~/Library/LaunchAgents/com.local.sysmon.plist`（`RunAtLoad` + `KeepAlive` + `ThrottleInterval=10`），
+  并 `launchctl bootstrap`。看护脚本 5 秒一轮，**只在 `shell-state.json` 的 `studentMode=true` 时**
+  用 `pgrep` 判活、`open -a` 拉起；家长/管理员模式直接空转。被强杀后最多约 5–10 秒回到 kiosk。
+- **不用网络心跳判断**：拔网线 / 服务器故障会被误判成「App 死了」，从而反复拉起正常进程。
+- **看护是用户级**：学生 `launchctl bootout gui/$(id -u)/com.local.sysmon` 仍能摘掉。它挡的是
+  Siri / 活动监视器顺手关，不承诺「绝对关不掉」；要那一步得 root 级 `LaunchDaemon` 或受监督设备
+  Single App Mode（未立项）。名字与产品无关只是降低被注意的概率，`launchctl list` / 活动监视器可见。
+- 单实例锁 `app.requestSingleInstanceLock()` 是看护的配套：没有它，「看护拉起 + 用户双击」会双开；
+  第二实例还必须跳过 `markCleanExit`，否则会删掉正在运行实例的 `running.flag`。
+- `lib/exit-audit.js` 用 `running.flag` 判「上次是否非正常结束」，只在 `kiosk-guard.log` 记一行
+  `reason=abnormal-exit`，**不上报家长、不结束会话**（沿用 2026-09-23 裁决 10）。
+- 退出尝试（`close-attempt` / `before-quit` / `will-quit`）都落 `kiosk-guard.log`：
+  下次复现「Siri 关掉」时，**有 `before-quit` 仍死亡 = 系统升级为强杀；一行都没有 = 直接 SIGKILL 或崩溃**。
+- 崩溃自恢复：`render-process-gone` → `reload()`；60 秒内二次崩溃 → `destroy()` + `createWindow()`。
+  `child-process-gone` 只记日志。
+- 卸载：`launchctl bootout gui/$(id -u)/com.local.sysmon && rm ~/Library/LaunchAgents/com.local.sysmon.plist "$HOME/Library/Application Support/k12-desktop/sysmon.sh"`
+  （写进交付文档，App 内不提供开关）。
 
 ## 打包与分发（2026-09-27，③）
 

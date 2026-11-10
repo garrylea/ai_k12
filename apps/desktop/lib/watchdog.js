@@ -141,7 +141,7 @@ function installWatchdog({ platform, execPath, homeDir, uid, log = () => {}, run
     try {
       run('launchctl', ['bootout', `gui/${resolvedUid}/${WATCHDOG_LABEL}`]);
     } catch {
-      // 没加载过就是正常路径。
+      // bootout 失败也继续尝试 bootstrap。
     }
     loaded = false;
   }

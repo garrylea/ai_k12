@@ -8,6 +8,23 @@
 
 ---
 
+## 2026-11-10 PC App：剩余时长胶囊遮挡 tab + 被关掉后不自动恢复
+
+**问题 1**：锁定胶囊 `fixed top-3`（距顶 12px）落在 64px 顶栏内，整块压住个人中心的
+奖励册/个人中心/练习记录三个 tab，学生点不到练习记录。改为只在浅停留三页、`top-[72px]`、
+`pointer-events-none`；进入 3 秒 / 顶边悬停 / 点击 5 秒唤出（iPad 走点击）。
+
+**问题 2**：macOS 下切不走 App，但 Siri 能把它关掉。实测：AppleScript `quit` 与 `kill -TERM`
+都会被 `before-quit` 拦（Electron 把 SIGTERM 转成优雅退出）；只有 SIGKILL 拦不住。
+**真正的缺口是关掉后没人拉起**。新增 `lib/watchdog.js`（launchd 托管的 sh 看护：
+只在 `studentMode=true` 时用 `pgrep` 判活并 `open -a` 拉起，家长模式空转）+ 单实例锁 +
+`lib/exit-audit.js`（`running.flag` 判异常结束）+ 退出尝试日志 + `render-process-gone` 自恢复。
+边界：用户级看护可被 `launchctl bootout`，不是"绝对关不掉"；名字 `com.local.sysmon` 只是降低被注意的概率。
+
+设计：`docs/superpowers/specs/2026-11-10-pc-app-pill-reveal-and-exit-hardening-design.md`
+
+---
+
 ## 2026-11-10 做题错题「重练」出口（freeform 不再只能看）
 
 **背景**：做题错题（`source='freeform'`）此前只能看不能练——普通错题练习用库里未核验的 AI 答案判题、还会写分/掌握度，因此被双重锁死。用户要求给一个练习出口。
