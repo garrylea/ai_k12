@@ -33,6 +33,7 @@ const REQUIRED = [
   'lib/shell-state.js',
   'lib/kiosk-guard.js',
   'lib/keyboard-hook.js',
+  'lib/exit-audit.js',
   'pages/offline.html',
 ];
 

@@ -8,6 +8,7 @@ const { probeServer } = require('./lib/probe-server.js');
 const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
 const { createKioskGuard } = require('./lib/kiosk-guard.js');
 const { createKeyboardHook } = require('./lib/keyboard-hook.js');
+const { markRunning, wasAbnormalExit, markCleanExit } = require('./lib/exit-audit.js');
 
 /**
  * **全局禁用代理**（spec §4.7）。
@@ -289,6 +290,7 @@ function createWindow() {
 
   // 学生模式下关不掉 / 最小化不了（kiosk 就该是这样）。家长/管理员登录时 studentMode=false，窗口完全正常。
   win.on('close', (event) => {
+    appendKioskLog(`[guard] close-attempt student-mode=${studentMode}`);
     if (studentMode) event.preventDefault();
   });
   win.on('minimize', (event) => {
@@ -327,15 +329,25 @@ function createWindow() {
 
 // 拦 before-quit：否则 Cmd+Q / Alt+F4 能绕过上面那个 close 拦截。
 app.on('before-quit', (event) => {
+  appendKioskLog(`[guard] before-quit student-mode=${studentMode}`);
   if (studentMode) event.preventDefault();
 });
 
 // 进程要退出时一定摘钩子：钩子回调指向本模块的代码，不能带着它退出。
+// 同时清 `running.flag`：只有走到这里才算「正常退出」，下次启动据此区分强杀/崩溃。
 app.on('will-quit', () => {
   keyboardHook.setEnabled(false);
+  appendKioskLog('[guard] will-quit');
+  markCleanExit(app.getPath('userData'));
 });
 
 app.whenReady().then(() => {
+  // 必须**先**判定再写标记，否则每次启动都会被自己刚写的标记判成异常结束。
+  if (wasAbnormalExit(app.getPath('userData'))) {
+    appendKioskLog('[guard] reason=abnormal-exit');
+  }
+  markRunning(app.getPath('userData'));
+
   WEB_URL = resolveServerUrl(
     process.env.K12_WEB_URL,
     readServerUrlFromFile(app.getPath('userData')),
