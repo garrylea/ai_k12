@@ -61,9 +61,12 @@ export default function StudentStayLayout() {
       className="flex h-screen flex-col overflow-hidden bg-[var(--bg-base)] text-[var(--text-primary)]"
     >
       {/* 剩余时长浮层：锁定态由上层 `LearningSessionShell` 经 context 下发，
-          没有上下文 / 未锁定时它自己渲染 null。三个 tab 各自挂一份本外壳，切页会重挂、
-          从而重新触发 3 秒自动显示。浮层全是 `fixed`，DOM 顺序不影响绘制。 */}
-      <LockedPillReveal />
+          没有上下文 / 未锁定时它自己渲染 null。三个 tab 是**兄弟路由**，React Router
+          在它们之间导航时会**复用**本外壳（同位置、同类型，不会重挂），所以必须用
+          `key={location.pathname}` 强制 reveal 重挂 —— 否则它的 `visible` 状态跨 tab
+          存活，3 秒自动显示只在第一次进入浅停留区时出现一次。浮层全是 `fixed`，
+          DOM 顺序不影响绘制。 */}
+      <LockedPillReveal key={location.pathname} />
       {/* 顶部全局栏：学生端统一 token，但无日夜切换 */}
       {/* 三栏网格：左右各 1fr、中间胶囊 auto —— 左「返回」删除后胶囊仍停在原来的正中间，
           不能退回 justify-between（那会让胶囊左移，2026-11-06 用户指出）。 */}

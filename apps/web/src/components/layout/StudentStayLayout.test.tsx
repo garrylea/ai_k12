@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import StudentStayLayout from './StudentStayLayout';
@@ -204,5 +204,40 @@ describe('StudentStayLayout 剩余时长浮层', () => {
     expect(screen.getByTestId('locked-pill').className).toContain('pointer-events-none');
     // 三个 tab 仍然可点（胶囊在它们下方、且 pointer-events-none）
     expect(screen.getByRole('link', { name: '练习记录' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * 切 tab 重新触发 3 秒自动显示。
+ *
+ * 三个 tab 是**兄弟路由**，React Router v6 在它们之间导航时会复用同一位置的
+ * 同一类型组件（`<RequireRole>` → `<StudentStayLayout />` 不重挂），所以
+ * `LockedPillReveal` 的 `visible` 状态会跨 tab 存活、effect 依赖不变 ——
+ * 不强制重挂，3 秒只在第一次进入浅停留区时出现一次。
+ *
+ * 点击用 `fireEvent` 而非 `userEvent`：本文件其余用例（无 fake timers）用 `userEvent`
+ * 没问题，但 `userEvent` 的 `asyncWrapper` 在 fake timers 下要等一个 `setTimeout(0)`
+ * 才能 resolve（传 `advanceTimers` 或 `delay: null` 都仍然挂住，实测 5s 超时），
+ * `LockedPillReveal.test.tsx` 的定时器用例也是用 `fireEvent`。
+ */
+describe('StudentStayLayout 切 tab 重新触发剩余时长显示', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('进入个人中心显示 3 秒后收起，切到奖励册又重新显示', () => {
+    const router = renderStay(
+      { pathname: '/student/profile' },
+      { locked: true, remainingMs: 30 * 60_000 },
+    );
+
+    expect(screen.getByTestId('locked-pill')).toHaveAttribute('data-visible', 'true');
+
+    act(() => { vi.advanceTimersByTime(3000); });
+    expect(screen.getByTestId('locked-pill')).toHaveAttribute('data-visible', 'false');
+
+    act(() => { fireEvent.click(screen.getByRole('link', { name: '奖励册' })); });
+    // 先确认真的切页了，否则下一条断言证明不了「切 tab 重新显示」
+    expect(router.state.location.pathname).toBe('/student/rewards');
+    expect(screen.getByTestId('locked-pill')).toHaveAttribute('data-visible', 'true');
   });
 });
