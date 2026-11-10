@@ -144,7 +144,8 @@ locked=false                → 不渲染（连识别区一起不渲染）
 看护脚本是 **5 秒一轮的 POSIX sh 循环**，判据只有两条：
 
 1. 读 `~/Library/Application Support/k12-desktop/shell-state.json` 的 `studentMode`；
-2. `studentMode=true` 且 `pgrep -f "<App>/Contents/MacOS/<name>"` 找不到进程 → **直接执行**
+2. `studentMode=true` 且判活失败（先看 `userData/app.pid` 的 pid 是否 `kill -0` 存活，再用
+   `pgrep -x "<name>"` 兜底 —— **不能按包路径判活**，否则 dist/Applications 混用会反复拉起）→ **直接执行**
    `<App>/Contents/MacOS/<name>`（`nohup` 后台，脱离看护的进程组）。
    ⚠️ **不走 `open -a`**：产物未签名/未公证，LaunchServices 启动在部分机器上会被 Gatekeeper 静默拒绝；
    `open -a` 只作为「可执行文件不存在」时的回退。

@@ -10,6 +10,7 @@ const { createKioskGuard } = require('./lib/kiosk-guard.js');
 const { createKeyboardHook } = require('./lib/keyboard-hook.js');
 const { markRunning, wasAbnormalExit, markCleanExit } = require('./lib/exit-audit.js');
 const { installWatchdog } = require('./lib/watchdog.js');
+const { markAlive, clearAlive } = require('./lib/app-heartbeat.js');
 
 /**
  * **全局禁用代理**（spec §4.7）。
@@ -409,6 +410,7 @@ app.on('will-quit', () => {
   keyboardHook.setEnabled(false);
   appendKioskLog('[guard] will-quit');
   markCleanExit(app.getPath('userData'));
+  clearAlive(app.getPath('userData'));
 });
 
 app.whenReady().then(() => {
@@ -420,6 +422,8 @@ app.whenReady().then(() => {
     appendKioskLog('[guard] reason=abnormal-exit');
   }
   markRunning(app.getPath('userData'));
+  // 写存活心跳：看护脚本据此判「已经在跑」，不必依赖进程路径（dist / Applications 混用会误判）
+  markAlive(app.getPath('userData'));
 
   WEB_URL = resolveServerUrl(
     process.env.K12_WEB_URL,

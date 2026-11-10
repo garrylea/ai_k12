@@ -47,10 +47,19 @@ describe('watchdog', () => {
   it('脚本只在 studentMode=true 时工作，靠进程存在性判断、5 秒一轮', () => {
     const script = buildWatchdogScript();
     expect(script).toContain('"studentMode":true');
-    expect(script).toContain('pgrep -f "$EXE"');
+    expect(script).toContain('pgrep -x "$NAME"');
     expect(script).toContain('sleep 5');
     // 靠网络心跳判断会被拔网线误伤，脚本里不该出现 curl / 后端地址
     expect(script).not.toContain('curl');
+  });
+
+  it('判活不认包路径：心跳 pid 文件优先、进程名兜底（否则 dist/Applications 混用会反复拉起）', () => {
+    const script = buildWatchdogScript();
+    expect(script).toContain('PIDFILE="$HOME/Library/Application Support/k12-desktop/app.pid"');
+    expect(script).toContain('kill -0 "$pid"');
+    expect(script).toContain('pgrep -x "$NAME"');
+    // 不再用完整包路径判活
+    expect(script).not.toContain('pgrep -f');
   });
 
   it('未签名包必须直接 exec 包内可执行文件，而不是走 LaunchServices 的 open -a', () => {

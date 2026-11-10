@@ -205,8 +205,14 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
   `~/Library/LaunchAgents/com.local.sysmon.plist`（这是**看护脚本**的 `RunAtLoad` + `KeepAlive` +
   `ThrottleInterval=10`，**不是 App 的** —— App 直管方案已被否决），
   并 `launchctl bootstrap`。看护脚本 5 秒一轮，**只在 `shell-state.json` 的 `studentMode=true` 时**
-  用 `pgrep` 判活、**直接 exec** `<App>/Contents/MacOS/<name>` 拉起（`nohup` 后台）；家长/管理员模式直接空转。
+  **直接 exec** `<App>/Contents/MacOS/<name>` 拉起（`nohup` 后台）；家长/管理员模式直接空转。
   被强杀后最多约 5–10 秒回到 kiosk。
+- **判活不能认包路径**（2026-11-10 用户实测「App 被反复拉起」）：`pgrep -f "<包路径>/Contents/MacOS/"`
+  只认 plist 里那一个路径，从 `dist` 启动、装到 `/Applications` 后又从旧位置启动、开发态 `npm start`，
+  三种都会把「已经在跑」判成「没在跑」→ 每 5 秒拉起一次。现在的判据是：
+  ① App 启动时写 `userData/app.pid`（`lib/app-heartbeat.js`），脚本用 `kill -0 <pid>` 判活
+  （被杀即失效，不会像时间戳心跳那样假阳性）；② 文件缺失/被删时用 `pgrep -x "<name>"` 兜底。
+  注意这是**进程级心跳**，不是网络心跳 —— 拔网线/后端掉线绝不能触发重启。
 - **拉起不能用 `open -a`**（2026-11-10 用户实测）：产物未签名/未公证，LaunchServices 在部分机器上
   会静默拒绝；`open -a` 只保留为「包内可执行文件不存在」时的回退。可执行文件名 = `.app` 包名去后缀
   （即 `productName`）。

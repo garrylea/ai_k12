@@ -39,9 +39,25 @@ APP="$1"
 NAME="$(/usr/bin/basename "$APP" .app)"
 EXE="$APP/Contents/MacOS/$NAME"
 STATE="$HOME/Library/Application Support/k12-desktop/shell-state.json"
+PIDFILE="$HOME/Library/Application Support/k12-desktop/app.pid"
+
+# 判活优先级：心跳文件（App 启动时写 pid）→ 进程名兜底。
+# ⚠️ 不能用「包路径」判活：从 dist 启动、装到 /Applications 之后再从旧位置启动、
+# 开发态 npm start，三种情况的进程路径都和 plist 里的 APP 不一致，会把「已经在跑」
+# 判成「没在跑」，于是每 5 秒拉起一次 —— 用户看到的就是反复启动。
+alive() {
+  if [ -f "$PIDFILE" ]; then
+    pid="$(cat "$PIDFILE" 2>/dev/null)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  pgrep -x "$NAME" >/dev/null 2>&1
+}
+
 while :; do
   if [ -f "$STATE" ] && grep -q '"studentMode":true' "$STATE" 2>/dev/null; then
-    if ! pgrep -f "$EXE" >/dev/null 2>&1; then
+    if ! alive; then
       if [ -x "$EXE" ]; then
         # nohup + 后台：App 不能是看护脚本的子进程，否则 bootout 本任务时会连带杀掉 App。
         nohup "$EXE" >/dev/null 2>&1 &
