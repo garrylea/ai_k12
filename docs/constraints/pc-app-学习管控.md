@@ -205,7 +205,11 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
   `~/Library/LaunchAgents/com.local.sysmon.plist`（这是**看护脚本**的 `RunAtLoad` + `KeepAlive` +
   `ThrottleInterval=10`，**不是 App 的** —— App 直管方案已被否决），
   并 `launchctl bootstrap`。看护脚本 5 秒一轮，**只在 `shell-state.json` 的 `studentMode=true` 时**
-  用 `pgrep` 判活、`open -a` 拉起；家长/管理员模式直接空转。被强杀后最多约 5–10 秒回到 kiosk。
+  用 `pgrep` 判活、**直接 exec** `<App>/Contents/MacOS/<name>` 拉起（`nohup` 后台）；家长/管理员模式直接空转。
+  被强杀后最多约 5–10 秒回到 kiosk。
+- **拉起不能用 `open -a`**（2026-11-10 用户实测）：产物未签名/未公证，LaunchServices 在部分机器上
+  会静默拒绝；`open -a` 只保留为「包内可执行文件不存在」时的回退。可执行文件名 = `.app` 包名去后缀
+  （即 `productName`）。
 - **不用网络心跳判断**：拔网线 / 服务器故障会被误判成「App 死了」，从而反复拉起正常进程。
 - **看护是用户级**：学生 `launchctl bootout gui/$(id -u)/com.local.sysmon` 仍能摘掉。它挡的是
   Siri / 活动监视器顺手关，不承诺「绝对关不掉」；要那一步得 root 级 `LaunchDaemon` 或受监督设备

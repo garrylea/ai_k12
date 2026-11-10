@@ -144,7 +144,10 @@ locked=false                → 不渲染（连识别区一起不渲染）
 看护脚本是 **5 秒一轮的 POSIX sh 循环**，判据只有两条：
 
 1. 读 `~/Library/Application Support/k12-desktop/shell-state.json` 的 `studentMode`；
-2. `studentMode=true` 且 `pgrep -f "<App>/Contents/MacOS/"` 找不到进程 → `open -a "<App>"`。
+2. `studentMode=true` 且 `pgrep -f "<App>/Contents/MacOS/<name>"` 找不到进程 → **直接执行**
+   `<App>/Contents/MacOS/<name>`（`nohup` 后台，脱离看护的进程组）。
+   ⚠️ **不走 `open -a`**：产物未签名/未公证，LaunchServices 启动在部分机器上会被 Gatekeeper 静默拒绝；
+   `open -a` 只作为「可执行文件不存在」时的回退。
 
 `studentMode=false` 或文件不存在 → **什么都不做**（家长/管理员可正常退出，不会被拉起）。
 脚本内**不 embed App 路径**：路径由 plist 的 `ProgramArguments` 传入，App 挪位置只改 plist。

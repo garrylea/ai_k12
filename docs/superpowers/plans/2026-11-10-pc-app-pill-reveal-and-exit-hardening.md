@@ -975,8 +975,7 @@ describe('watchdog', () => {
   it('脚本只在 studentMode=true 时工作，靠进程存在性判断、5 秒一轮', () => {
     const script = buildWatchdogScript();
     expect(script).toContain('"studentMode":true');
-    expect(script).toContain('pgrep -f "$APP/Contents/MacOS/"');
-    expect(script).toContain('open -a "$APP"');
+    expect(script).toContain('pgrep -f "$EXE"');
     expect(script).toContain('sleep 5');
     // 靠网络心跳判断会被拔网线误伤，脚本里不该出现 curl / 后端地址
     expect(script).not.toContain('curl');
@@ -1110,11 +1109,17 @@ function buildWatchdogScript() {
 # 只在 studentMode=true 时工作：发现 App 不在运行就拉起；家长/管理员模式什么都不做。
 APP="$1"
 [ -n "$APP" ] || exit 0
+NAME="$(/usr/bin/basename "$APP" .app)"
+EXE="$APP/Contents/MacOS/$NAME"
 STATE="$HOME/Library/Application Support/k12-desktop/shell-state.json"
 while :; do
   if [ -f "$STATE" ] && grep -q '"studentMode":true' "$STATE" 2>/dev/null; then
-    if ! pgrep -f "$APP/Contents/MacOS/" >/dev/null 2>&1; then
-      open -a "$APP" >/dev/null 2>&1
+    if ! pgrep -f "$EXE" >/dev/null 2>&1; then
+      if [ -x "$EXE" ]; then
+        nohup "$EXE" >/dev/null 2>&1 &
+      else
+        open -a "$APP" >/dev/null 2>&1
+      fi
     fi
   fi
   sleep 5
@@ -1282,7 +1287,7 @@ const { installWatchdog } = require('./lib/watchdog.js');
   }
 ```
 
-（`app.getAppPath()` 指向 `.asar`，去掉尾部即 `.app` 包路径；`open -a` 需要包路径。）
+（`app.getAppPath()` 指向 `.asar`，去掉尾部即 `.app` 包路径；看护脚本从它推导包内可执行文件。）
 
 3. 单实例与 `second-instance` 保持上一版不变；`will-quit` 里的 `if (!singleInstance) return;`
    **保留**（否则第二实例会删掉正在运行实例的 `running.flag`）。
@@ -1348,7 +1353,8 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
   `~/Library/Application Support/k12-desktop/sysmon.sh`（0755）与
   `~/Library/LaunchAgents/com.local.sysmon.plist`（`RunAtLoad` + `KeepAlive` + `ThrottleInterval=10`），
   并 `launchctl bootstrap`。看护脚本 5 秒一轮，**只在 `shell-state.json` 的 `studentMode=true` 时**
-  用 `pgrep` 判活、`open -a` 拉起；家长/管理员模式直接空转。被强杀后最多约 5–10 秒回到 kiosk。
+  用 `pgrep` 判活、直接 exec 包内可执行文件拉起（未签名包不能走 `open -a`）；家长模式空转。
+  被强杀后最多约 5–10 秒回到 kiosk。
 - **不用网络心跳判断**：拔网线 / 服务器故障会被误判成「App 死了」，从而反复拉起正常进程。
 - **看护是用户级**：学生 `launchctl bootout gui/$(id -u)/com.local.sysmon` 仍能摘掉。它挡的是
   Siri / 活动监视器顺手关，不承诺「绝对关不掉」；要那一步得 root 级 `LaunchDaemon` 或受监督设备
@@ -1386,7 +1392,7 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
 **问题 2**：macOS 下切不走 App，但 Siri 能把它关掉。实测：AppleScript `quit` 与 `kill -TERM`
 都会被 `before-quit` 拦（Electron 把 SIGTERM 转成优雅退出）；只有 SIGKILL 拦不住。
 **真正的缺口是关掉后没人拉起**。新增 `lib/watchdog.js`（launchd 托管的 sh 看护：
-只在 `studentMode=true` 时用 `pgrep` 判活并 `open -a` 拉起，家长模式空转）+ 单实例锁 +
+只在 `studentMode=true` 时用 `pgrep` 判活并直接 exec 拉起，家长模式空转）+ 单实例锁 +
 `lib/exit-audit.js`（`running.flag` 判异常结束）+ 退出尝试日志 + `render-process-gone` 自恢复。
 边界：用户级看护可被 `launchctl bootout`，不是"绝对关不掉"；名字 `com.local.sysmon` 只是降低被注意的概率。
 

@@ -17,7 +17,7 @@
 **问题 2**：macOS 下切不走 App，但 Siri 能把它关掉。实测：AppleScript `quit` 与 `kill -TERM`
 都会被 `before-quit` 拦（Electron 把 SIGTERM 转成优雅退出）；只有 SIGKILL 拦不住。
 **真正的缺口是关掉后没人拉起**。新增 `lib/watchdog.js`（launchd 托管的 sh 看护：
-只在 `studentMode=true` 时用 `pgrep` 判活并 `open -a` 拉起，家长模式空转）+ 单实例锁 +
+只在 `studentMode=true` 时用 `pgrep` 判活并直接 exec 包内可执行文件拉起，家长模式空转）+ 单实例锁 +
 `lib/exit-audit.js`（`running.flag` 判异常结束）+ 退出尝试日志 + `render-process-gone` 自恢复。
 边界：用户级看护可被 `launchctl bootout`，不是"绝对关不掉"；名字 `com.local.sysmon` 只是降低被注意的概率。
 

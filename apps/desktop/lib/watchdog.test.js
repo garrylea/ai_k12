@@ -47,11 +47,18 @@ describe('watchdog', () => {
   it('脚本只在 studentMode=true 时工作，靠进程存在性判断、5 秒一轮', () => {
     const script = buildWatchdogScript();
     expect(script).toContain('"studentMode":true');
-    expect(script).toContain('pgrep -f "$APP/Contents/MacOS/"');
-    expect(script).toContain('open -a "$APP"');
+    expect(script).toContain('pgrep -f "$EXE"');
     expect(script).toContain('sleep 5');
     // 靠网络心跳判断会被拔网线误伤，脚本里不该出现 curl / 后端地址
     expect(script).not.toContain('curl');
+  });
+
+  it('未签名包必须直接 exec 包内可执行文件，而不是走 LaunchServices 的 open -a', () => {
+    const script = buildWatchdogScript();
+    expect(script).toContain('EXE="$APP/Contents/MacOS/$NAME"');
+    expect(script).toContain('nohup "$EXE"');
+    // open -a 只作为「可执行文件不存在」时的回退
+    expect(script).toMatch(/if \[ -x "\$EXE" \]; then[\s\S]*?nohup "\$EXE"[\s\S]*?else[\s\S]*?open -a "\$APP"/);
   });
 
   it('plist 带 KeepAlive / RunAtLoad / ThrottleInterval / 脚本与 App 两个参数', () => {

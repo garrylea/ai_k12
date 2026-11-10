@@ -28,13 +28,26 @@ function buildWatchdogScript() {
   return `#!/bin/sh
 # sysmon —— 本地看护（spec 2026-11-10 §4）。
 # 只在 studentMode=true 时工作：发现 App 不在运行就拉起；家长/管理员模式什么都不做。
+#
+# ⚠️ 拉起方式：**直接执行包内可执行文件**（$APP/Contents/MacOS/<name>），不用 \`open -a\`。
+# 本项目产物未签名/未公证，LaunchServices 启动在部分机器上会被 Gatekeeper 静默拒绝；
+# 直接 exec 包内二进制不经过 LaunchServices 检查，未签名包也能起来。
+# 可执行文件名取 .app 包名去后缀（electron-builder 的 productName 即此名）；
+# 文件不存在时才回退到 \`open -a\`（例如将来换成带签名的正式产物）。
 APP="$1"
 [ -n "$APP" ] || exit 0
+NAME="$(/usr/bin/basename "$APP" .app)"
+EXE="$APP/Contents/MacOS/$NAME"
 STATE="$HOME/Library/Application Support/k12-desktop/shell-state.json"
 while :; do
   if [ -f "$STATE" ] && grep -q '"studentMode":true' "$STATE" 2>/dev/null; then
-    if ! pgrep -f "$APP/Contents/MacOS/" >/dev/null 2>&1; then
-      open -a "$APP" >/dev/null 2>&1
+    if ! pgrep -f "$EXE" >/dev/null 2>&1; then
+      if [ -x "$EXE" ]; then
+        # nohup + 后台：App 不能是看护脚本的子进程，否则 bootout 本任务时会连带杀掉 App。
+        nohup "$EXE" >/dev/null 2>&1 &
+      else
+        open -a "$APP" >/dev/null 2>&1
+      fi
     fi
   fi
   sleep 5
