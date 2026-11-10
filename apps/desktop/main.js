@@ -9,6 +9,7 @@ const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
 const { createKioskGuard } = require('./lib/kiosk-guard.js');
 const { createKeyboardHook } = require('./lib/keyboard-hook.js');
 const { markRunning, wasAbnormalExit, markCleanExit } = require('./lib/exit-audit.js');
+const { installLaunchAgent } = require('./lib/launch-agent.js');
 
 /**
  * **全局禁用代理**（spec §4.7）。
@@ -42,6 +43,13 @@ app.commandLine.appendSwitch('no-proxy-server');
  * 但会让 README 的三条路径全部指向不存在的目录 —— 有 `user-data.guard.test.js` 钉着。
  */
 app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
+
+/**
+ * 单实例（spec 2026-11-10 §4.2）：launchd 的 KeepAlive 与"用户双击图标"可能撞在一起。
+ * 拿不到锁的进程直接退出（此时 studentMode 还是 false，不会被 before-quit 拦）。
+ */
+const singleInstance = app.requestSingleInstanceLock();
+if (!singleInstance) app.quit();
 
 /**
  * K12 智学 PC App —— Electron 壳（spec `2026-09-23-pc-app-study-lockdown-design.md` §6.1）。
@@ -370,6 +378,19 @@ function createWindow() {
   });
 }
 
+/**
+ * 第二个实例被单实例锁挡下时，由**已在运行的**这个实例把窗口抢回前台（spec 2026-11-10 §4.2）。
+ * 不接管的话，学生双击图标看起来"什么都没发生" —— 而窗口可能正被系统压到后台。
+ */
+app.on('second-instance', () => {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  // 与守护层同一套抢前台手段（app.focus 才激活 App，win.focus 不够）。
+  app.focus({ steal: true });
+  if (studentMode) kioskGuard.scheduleReassert('second-instance');
+});
+
 // 拦 before-quit：否则 Cmd+Q / Alt+F4 能绕过上面那个 close 拦截。
 app.on('before-quit', (event) => {
   appendKioskLog(`[guard] before-quit student-mode=${studentMode}`);
@@ -379,12 +400,18 @@ app.on('before-quit', (event) => {
 // 进程要退出时一定摘钩子：钩子回调指向本模块的代码，不能带着它退出。
 // 同时清 `running.flag`：只有走到这里才算「正常退出」，下次启动据此区分强杀/崩溃。
 app.on('will-quit', () => {
+  // ⚠️ 单实例锁输掉的进程**没有**写过 running.flag，绝不能在这里删 ——
+  // 删掉的是**正在运行的那个实例**的标记，之后它被强杀就再也判不出异常退出。
+  if (!singleInstance) return;
   keyboardHook.setEnabled(false);
   appendKioskLog('[guard] will-quit');
   markCleanExit(app.getPath('userData'));
 });
 
 app.whenReady().then(() => {
+  // 单实例锁没拿到 → 本进程已在退出路上，绝不能建窗口或装任何东西。
+  if (!singleInstance) return;
+
   // 必须**先**判定再写标记，否则每次启动都会被自己刚写的标记判成异常结束。
   if (wasAbnormalExit(app.getPath('userData'))) {
     appendKioskLog('[guard] reason=abnormal-exit');
@@ -404,6 +431,16 @@ app.whenReady().then(() => {
   // → 学生「关 Wi-Fi + 杀进程 + 重启」就能逃逸。所以先把上次的状态读回来，
   // 建窗口时就进 kiosk，不等渲染层。
   studentMode = readStudentMode(app.getPath('userData'));
+
+  // 首次启动（打包后）装用户级保活：被 Siri/活动监视器关掉后能自己回到 kiosk。
+  if (app.isPackaged) {
+    installLaunchAgent({
+      platform: process.platform,
+      execPath: process.execPath,
+      homeDir: app.getPath('home'),
+      log: appendKioskLog,
+    });
+  }
 
   createWindow();
   app.on('activate', () => {

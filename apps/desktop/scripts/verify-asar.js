@@ -34,6 +34,7 @@ const REQUIRED = [
   'lib/kiosk-guard.js',
   'lib/keyboard-hook.js',
   'lib/exit-audit.js',
+  'lib/launch-agent.js',
   'pages/offline.html',
 ];
 
