@@ -899,23 +899,32 @@ git commit -m "fix(desktop): 渲染进程崩溃自动 reload / 重建窗口"
 
 ---
 
-### Task 7: launchd 保活 + 单实例
+### Task 7: 看护进程 + 单实例
+
+> **2026-11-10 用户裁决替换了原「launchd 直管 App」方案**：家长也要能正常退出 App，所以改为
+> 「launchd 托管一个极小的看护脚本，脚本只在学生模式下拉起 App」。上一版已提交的
+> `lib/launch-agent.js` 与 `lib/launch-agent.test.js`（commit 96664653）在本任务里**删除** ——
+> 它尚未发布，不保留兼容层。
 
 **Files:**
-- Create: `apps/desktop/lib/launch-agent.js`
-- Create: `apps/desktop/lib/launch-agent.test.js`
+- Create: `apps/desktop/lib/watchdog.js`
+- Create: `apps/desktop/lib/watchdog.test.js`
+- Delete: `apps/desktop/lib/launch-agent.js`, `apps/desktop/lib/launch-agent.test.js`
 - Modify: `apps/desktop/main.js`
 - Modify: `apps/desktop/scripts/verify-asar.js`
+- Modify: `apps/desktop/kiosk-guard.wiring.guard.test.js`
 
 **Interfaces:**
 - Produces:
-  - `buildPlist(execPath: string): string`
-  - `installLaunchAgent({ platform, execPath, homeDir, uid, log, run }): { installed: boolean; reason?: string; file?: string; bootstrapped?: boolean }`
-  - `LAUNCH_AGENT_LABEL = 'com.k12zhixue.desktop'`
+  - `WATCHDOG_LABEL = 'com.local.sysmon'`
+  - `WATCHDOG_SCRIPT_NAME = 'sysmon.sh'`
+  - `buildWatchdogScript(): string`
+  - `buildWatchdogPlist({ execPath, scriptPath }): string`
+  - `installWatchdog({ platform, homeDir, execPath, uid, log, run }): { installed: boolean; reason?: string; scriptPath?: string; plistPath?: string; bootstrapped?: boolean }`
 
 - [ ] **Step 1: 写失败测试**
 
-`apps/desktop/lib/launch-agent.test.js`：
+`apps/desktop/lib/watchdog.test.js`：
 
 ```js
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -925,82 +934,131 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { installLaunchAgent, buildPlist, LAUNCH_AGENT_LABEL } = require('./launch-agent.js');
+const {
+  WATCHDOG_LABEL,
+  WATCHDOG_SCRIPT_NAME,
+  buildWatchdogScript,
+  buildWatchdogPlist,
+  installWatchdog,
+} = require('./watchdog.js');
 
 let home;
 let calls;
-const run = (file, args) => calls.push([file, ...args]);
+let logLines;
+const runOk = (file, args) => calls.push([file, ...args]);
 
 beforeEach(() => {
-  home = fs.mkdtempSync(path.join(os.tmpdir(), 'k12-launch-agent-'));
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'k12-watchdog-'));
   calls = [];
+  logLines = [];
 });
 afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-const EXEC = '/Applications/K12 智学.app/Contents/MacOS/K12 智学';
+const EXEC = '/Applications/K12 智学.app';
+const log = (line) => logLines.push(line);
 
-describe('launch-agent', () => {
-  it('plist 含 KeepAlive / RunAtLoad / ThrottleInterval / 可执行文件路径', () => {
-    const xml = buildPlist(EXEC);
-    expect(xml).toContain(`<string>${LAUNCH_AGENT_LABEL}</string>`);
+function install(overrides = {}) {
+  return installWatchdog({
+    platform: 'darwin',
+    execPath: EXEC,
+    homeDir: home,
+    uid: 501,
+    log,
+    run: runOk,
+    ...overrides,
+  });
+}
+
+describe('watchdog', () => {
+  it('脚本只在 studentMode=true 时工作，靠进程存在性判断、5 秒一轮', () => {
+    const script = buildWatchdogScript();
+    expect(script).toContain('"studentMode":true');
+    expect(script).toContain('pgrep -f "$APP/Contents/MacOS/"');
+    expect(script).toContain('open -a "$APP"');
+    expect(script).toContain('sleep 5');
+    // 靠网络心跳判断会被拔网线误伤，脚本里不该出现 curl / 后端地址
+    expect(script).not.toContain('curl');
+  });
+
+  it('plist 带 KeepAlive / RunAtLoad / ThrottleInterval / 脚本与 App 两个参数', () => {
+    const xml = buildWatchdogPlist({
+      execPath: EXEC,
+      scriptPath: '/Users/x/Library/Application Support/k12-desktop/sysmon.sh',
+    });
+    expect(xml).toContain(`<string>${WATCHDOG_LABEL}</string>`);
     expect(xml).toContain('<key>KeepAlive</key>');
     expect(xml).toContain('<key>RunAtLoad</key>');
     expect(xml).toContain('<integer>10</integer>');
+    expect(xml).toContain('<string>/bin/sh</string>');
+    expect(xml).toContain('/Users/x/Library/Application Support/k12-desktop/sysmon.sh');
     expect(xml).toContain(EXEC);
   });
 
-  it('首次安装写入 ~/Library/LaunchAgents 并 bootstrap', () => {
-    const res = installLaunchAgent({ platform: 'darwin', execPath: EXEC, homeDir: home, uid: 501, run });
+  it('首次安装写脚本(0755)+plist，并 bootstrap', () => {
+    const res = install({ run: (file, args) => { calls.push([file, ...args]); throw new Error('not loaded'); } });
+    const scriptPath = path.join(home, 'Library', 'Application Support', 'k12-desktop', WATCHDOG_SCRIPT_NAME);
+    const plistPath = path.join(home, 'Library', 'LaunchAgents', `${WATCHDOG_LABEL}.plist`);
     expect(res.installed).toBe(true);
-    const file = path.join(home, 'Library', 'LaunchAgents', `${LAUNCH_AGENT_LABEL}.plist`);
-    expect(fs.existsSync(file)).toBe(true);
-    expect(calls).toEqual([['launchctl', 'bootstrap', 'gui/501', file]]);
-  });
-
-  it('内容没变时幂等：不重写、不重复 bootstrap', () => {
-    installLaunchAgent({ platform: 'darwin', execPath: EXEC, homeDir: home, uid: 501, run });
-    calls = [];
-    const res = installLaunchAgent({ platform: 'darwin', execPath: EXEC, homeDir: home, uid: 501, run });
-    expect(res.reason).toBe('unchanged');
-    expect(calls).toEqual([]);
-  });
-
-  it('可执行文件路径变了 → 重写并先 bootout 再 bootstrap', () => {
-    installLaunchAgent({ platform: 'darwin', execPath: EXEC, homeDir: home, uid: 501, run });
-    calls = [];
-    const moved = '/Applications/K12 智学 2.app/Contents/MacOS/K12 智学';
-    installLaunchAgent({ platform: 'darwin', execPath: moved, homeDir: home, uid: 501, run });
+    expect(fs.existsSync(scriptPath)).toBe(true);
+    expect(fs.statSync(scriptPath).mode & 0o777).toBe(0o755);
+    expect(fs.readFileSync(scriptPath, 'utf8')).toContain('pgrep');
+    expect(fs.existsSync(plistPath)).toBe(true);
     expect(calls).toEqual([
-      ['launchctl', 'bootout', `gui/501/${LAUNCH_AGENT_LABEL}`],
-      ['launchctl', 'bootstrap', 'gui/501', path.join(home, 'Library', 'LaunchAgents', `${LAUNCH_AGENT_LABEL}.plist`)],
+      ['launchctl', 'print', `gui/501/${WATCHDOG_LABEL}`],
+      ['launchctl', 'bootstrap', 'gui/501', plistPath],
+    ]);
+  });
+
+  it('内容没变且已加载 → 幂等，不重写不 bootstrap', () => {
+    install({ run: (file, args) => { calls.push([file, ...args]); throw new Error('not loaded'); } });
+    calls = [];
+    const before = fs.statSync(path.join(home, 'Library', 'LaunchAgents', `${WATCHDOG_LABEL}.plist`)).mtimeMs;
+    const res = install(); // print 成功 = 已加载
+    expect(res.reason).toBe('unchanged');
+    expect(calls).toEqual([['launchctl', 'print', `gui/501/${WATCHDOG_LABEL}`]]);
+    const after = fs.statSync(path.join(home, 'Library', 'LaunchAgents', `${WATCHDOG_LABEL}.plist`)).mtimeMs;
+    expect(after).toBe(before);
+  });
+
+  it('App 路径变了 → 重写 plist，先 bootout 再 bootstrap', () => {
+    install({ run: (file, args) => { calls.push([file, ...args]); throw new Error('not loaded'); } });
+    calls = [];
+    const res = install({ execPath: '/Applications/K12 智学 2.app' });
+    const plistPath = path.join(home, 'Library', 'LaunchAgents', `${WATCHDOG_LABEL}.plist`);
+    expect(res.installed).toBe(true);
+    expect(fs.readFileSync(plistPath, 'utf8')).toContain('/Applications/K12 智学 2.app');
+    expect(calls).toEqual([
+      ['launchctl', 'print', `gui/501/${WATCHDOG_LABEL}`],
+      ['launchctl', 'bootout', `gui/501/${WATCHDOG_LABEL}`],
+      ['launchctl', 'bootstrap', 'gui/501', plistPath],
     ]);
   });
 
   it('非 darwin 完全不碰磁盘', () => {
-    const res = installLaunchAgent({ platform: 'win32', execPath: EXEC, homeDir: home, uid: 501, run });
+    const res = install({ platform: 'win32' });
     expect(res.reason).toBe('platform');
     expect(fs.existsSync(path.join(home, 'Library'))).toBe(false);
   });
 
-  it('bootout/bootstrap 失败只记账，不抛', () => {
-    const boom = () => { throw new Error('launchctl failed'); };
-    expect(() =>
-      installLaunchAgent({ platform: 'darwin', execPath: EXEC, homeDir: home, uid: 501, run: boom }),
-    ).not.toThrow();
+  it('launchctl 失败只记账，不抛（也带超时参数）', () => {
+    const boom = (file, args) => {
+      calls.push([file, ...args]);
+      throw new Error('launchctl failed');
+    };
+    expect(() => install({ run: boom })).not.toThrow();
+    expect(logLines.some((line) => line.includes('watchdog-bootstrap-error'))).toBe(true);
   });
 });
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd apps/desktop && npx vitest run lib/launch-agent.test.js`
+Run: `cd apps/desktop && npx vitest run lib/watchdog.test.js`
 Expected: FAIL —— 模块不存在。
 
-- [ ] **Step 3: 实现**
-
-`apps/desktop/lib/launch-agent.js`：
+- [ ] **Step 3: 实现 `lib/watchdog.js`**
 
 ```js
 'use strict';
@@ -1010,31 +1068,58 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 /**
- * 用户级 LaunchAgent 保活（spec 2026-11-10 §4，仅 macOS）。
+ * 看护进程（spec 2026-11-10 §4，仅 macOS，仅打包后）。
  *
- * **为什么必须是 launchd**：自己写的看护进程一样会被杀，而且被杀后没人拉起它；
- * launchd 是系统守护，`KeepAlive` 能在进程被 SIGKILL 后约 1 秒重启它。
+ * **为什么不是把 App 交给 launchd KeepAlive**（2026-11-10 用户裁决）：那样家长点了退出
+ * 也会被立刻拉回来，只能去终端摘。所以改成「launchd 托管一个极小的 sh 看护脚本」：
+ * 脚本只在 `shell-state.json` 的 `studentMode === true` 时工作，家长/管理员模式直接空转。
  *
- * ⚠️ 这是**用户级** agent：学生 `launchctl bootout` 或删 plist 仍然能摘掉。
- * 它挡的是「Siri / 活动监视器顺手关掉」，不是「绝对关不掉」（后者要 root 级，另立 spec）。
+ * **判据用进程存在性（pgrep），不用网络心跳**：心跳会被拔网线 / 服务器故障误判成
+ * "App 死了"，进而反复拉起一个本来正常的程序。
  *
- * ⚠️ 只在打包后调用（`app.isPackaged`）：开发态 `npm start` 装上去会把开发机锁住。
+ * ⚠️ `execFileSync` 必须带 timeout：launchctl 卡住（XPC 无响应）会把主进程一起卡死、
+ * 窗口永远不出来 —— 宁可这一次没保活。
+ *
+ * ⚠️ 名字与产品无关（`com.local.sysmon`）只是降低被注意的概率，**不是隐藏手段**：
+ * `launchctl list`、活动监视器都能看到；学生 `launchctl bootout` 仍能摘掉。
  */
-const LAUNCH_AGENT_LABEL = 'com.k12zhixue.desktop';
+const WATCHDOG_LABEL = 'com.local.sysmon';
+const WATCHDOG_SCRIPT_NAME = 'sysmon.sh';
+const APP_SUPPORT_DIR = 'k12-desktop';
+
+function buildWatchdogScript() {
+  return `#!/bin/sh
+# sysmon —— 本地看护（spec 2026-11-10 §4）。
+# 只在 studentMode=true 时工作：发现 App 不在运行就拉起；家长/管理员模式什么都不做。
+APP="$1"
+[ -n "$APP" ] || exit 0
+STATE="$HOME/Library/Application Support/k12-desktop/shell-state.json"
+while :; do
+  if [ -f "$STATE" ] && grep -q '"studentMode":true' "$STATE" 2>/dev/null; then
+    if ! pgrep -f "$APP/Contents/MacOS/" >/dev/null 2>&1; then
+      open -a "$APP" >/dev/null 2>&1
+    fi
+  fi
+  sleep 5
+done
+`;
+}
 
 function escapeXml(value) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function buildPlist(execPath) {
+function buildWatchdogPlist({ execPath, scriptPath }) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${LAUNCH_AGENT_LABEL}</string>
+  <string>${WATCHDOG_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
+    <string>/bin/sh</string>
+    <string>${escapeXml(scriptPath)}</string>
     <string>${escapeXml(execPath)}</string>
   </array>
   <key>RunAtLoad</key>
@@ -1051,140 +1136,152 @@ function buildPlist(execPath) {
 }
 
 function defaultRun(file, args) {
-  execFileSync(file, args, { stdio: 'ignore' });
+  execFileSync(file, args, { stdio: 'ignore', timeout: 3000, killSignal: 'SIGKILL' });
 }
 
 /**
  * @param {object} deps
  * @param {string} deps.platform
- * @param {string} deps.execPath `process.execPath`（App 内可执行文件）
+ * @param {string} deps.execPath App 包路径（`.app`，不是可执行文件）
  * @param {string} deps.homeDir `app.getPath('home')`
- * @param {number} [deps.uid] 默认 `process.getuid()`
+ * @param {number} [deps.uid]
  * @param {(m: string) => void} [deps.log]
- * @param {(file: string, args: string[]) => void} [deps.run] 测试注入
+ * @param {(file: string, args: string[]) => void} [deps.run]
  */
-function installLaunchAgent({ platform, execPath, homeDir, uid, log = () => {}, run = defaultRun }) {
+function installWatchdog({ platform, execPath, homeDir, uid, log = () => {}, run = defaultRun }) {
   if (platform !== 'darwin') return { installed: false, reason: 'platform' };
-  const resolvedUid = typeof uid === 'number' ? uid : typeof process.getuid === 'function' ? process.getuid() : null;
+  const resolvedUid =
+    typeof uid === 'number' ? uid : typeof process.getuid === 'function' ? process.getuid() : null;
   if (resolvedUid === null) return { installed: false, reason: 'uid' };
 
-  const dir = path.join(homeDir, 'Library', 'LaunchAgents');
-  const file = path.join(dir, `${LAUNCH_AGENT_LABEL}.plist`);
-  const xml = buildPlist(execPath);
+  const scriptPath = path.join(homeDir, 'Library', 'Application Support', APP_SUPPORT_DIR, WATCHDOG_SCRIPT_NAME);
+  const plistPath = path.join(homeDir, 'Library', 'LaunchAgents', `${WATCHDOG_LABEL}.plist`);
+  const script = buildWatchdogScript();
+  const plist = buildWatchdogPlist({ execPath, scriptPath });
 
-  let existing = null;
+  let changed = false;
   try {
-    existing = fs.readFileSync(file, 'utf8');
+    const oldScript = fs.readFileSync(scriptPath, 'utf8');
+    if (oldScript !== script) changed = true;
   } catch {
-    // 不存在是正常路径（首次安装）。
+    changed = true;
   }
-  if (existing === xml) return { installed: false, reason: 'unchanged' };
+  let plistChanged = false;
+  try {
+    const oldPlist = fs.readFileSync(plistPath, 'utf8');
+    if (oldPlist !== plist) plistChanged = true;
+  } catch {
+    plistChanged = true;
+  }
 
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file, xml);
+    if (changed) {
+      fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+      fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+      fs.chmodSync(scriptPath, 0o755);
+    }
+    if (plistChanged) {
+      fs.mkdirSync(path.dirname(plistPath), { recursive: true });
+      fs.writeFileSync(plistPath, plist);
+    }
   } catch (err) {
-    log(`[guard] launch-agent-write-error err=${err && err.message}`);
+    log(`[guard] watchdog-write-error err=${err && err.message}`);
     return { installed: false, reason: 'write-error' };
   }
 
-  // 换过路径/内容时旧 job 还指着旧二进制，必须先摘掉。
-  if (existing !== null) {
+  let loaded = false;
+  try {
+    run('launchctl', ['print', `gui/${resolvedUid}/${WATCHDOG_LABEL}`]);
+    loaded = true;
+  } catch {
+    loaded = false;
+  }
+
+  if (plistChanged && loaded) {
     try {
-      run('launchctl', ['bootout', `gui/${resolvedUid}/${LAUNCH_AGENT_LABEL}`]);
+      run('launchctl', ['bootout', `gui/${resolvedUid}/${WATCHDOG_LABEL}`]);
     } catch {
       // 没加载过就是正常路径。
     }
+    loaded = false;
   }
 
+  if (loaded) return { installed: false, reason: 'unchanged', scriptPath, plistPath };
+
   try {
-    run('launchctl', ['bootstrap', `gui/${resolvedUid}`, file]);
-    log(`[guard] launch-agent-installed file=${file}`);
-    return { installed: true, file, bootstrapped: true };
+    run('launchctl', ['bootstrap', `gui/${resolvedUid}`, plistPath]);
+    log(`[guard] watchdog-installed plist=${plistPath}`);
+    return { installed: true, scriptPath, plistPath, bootstrapped: true };
   } catch (err) {
-    log(`[guard] launch-agent-bootstrap-error err=${err && err.message}`);
-    // 文件已落地：下次登录仍会按 RunAtLoad 拉起，只是本次运行期没有保活。
-    return { installed: true, file, bootstrapped: false };
+    log(`[guard] watchdog-bootstrap-error err=${err && err.message}`);
+    // 文件已落地：下次登录 RunAtLoad 仍会拉起；只是本次运行期没有保活。
+    return { installed: true, scriptPath, plistPath, bootstrapped: false };
   }
 }
 
-module.exports = { LAUNCH_AGENT_LABEL, buildPlist, installLaunchAgent };
+module.exports = { WATCHDOG_LABEL, WATCHDOG_SCRIPT_NAME, buildWatchdogScript, buildWatchdogPlist, installWatchdog };
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `cd apps/desktop && npx vitest run lib/launch-agent.test.js`
-Expected: PASS（6 passed）。
+Run: `cd apps/desktop && npx vitest run lib/watchdog.test.js`
+Expected: PASS（7 passed）。
 
-- [ ] **Step 5: 接到 `main.js`（单实例 + 首次安装）**
+- [ ] **Step 5: 删除上一版实现**
 
-1. 顶部 require 区加：
-
-```js
-const { installLaunchAgent } = require('./lib/launch-agent.js');
+```bash
+git rm apps/desktop/lib/launch-agent.js apps/desktop/lib/launch-agent.test.js
 ```
 
-2. 在 `app.setPath('userData', ...)` 之后、模块级变量之前加：
+- [ ] **Step 6: 改 `main.js` 接线**
+
+1. require 改为：
 
 ```js
-/**
- * 单实例（spec 2026-11-10 §4.2）：launchd 的 KeepAlive 与"用户双击图标"可能撞在一起。
- * 拿不到锁的进程直接退出（此时 studentMode 还是 false，不会被 before-quit 拦）。
- */
-const singleInstance = app.requestSingleInstanceLock();
-if (!singleInstance) app.quit();
+const { installWatchdog } = require('./lib/watchdog.js');
 ```
 
-3. 在 `app.whenReady().then(() => {` 的**最前面**（在 Task 5 加的 `wasAbnormalExit` 判定之前）插一道闸：
+2. `whenReady` 里的安装调用改为：
 
 ```js
-  if (!singleInstance) return;
-```
-
-4. `app.whenReady()` 里、`createWindow();` 之前加：
-
-```js
-  // 首次启动（打包后）装用户级保活：被 Siri/活动监视器关掉后能自己回到 kiosk。
+  // 首次启动（打包后）装看护：学生模式被强杀后 5 秒内拉回 kiosk；家长模式它空转。
   if (app.isPackaged) {
-    installLaunchAgent({
+    installWatchdog({
       platform: process.platform,
-      execPath: process.execPath,
+      execPath: app.getAppPath().replace(/\/Contents\/Resources\/app\.asar$/, ''),
       homeDir: app.getPath('home'),
       log: appendKioskLog,
     });
   }
 ```
 
-5. 模块级（`app.on('before-quit', ...)` 之前）加：
+（`app.getAppPath()` 指向 `.asar`，去掉尾部即 `.app` 包路径；`open -a` 需要包路径。）
+
+3. 单实例与 `second-instance` 保持上一版不变；`will-quit` 里的 `if (!singleInstance) return;`
+   **保留**（否则第二实例会删掉正在运行实例的 `running.flag`）。
+
+- [ ] **Step 7: 更新 `verify-asar.js` 与护栏**
+
+- `REQUIRED` 里把 `'lib/launch-agent.js'` 换成 `'lib/watchdog.js'`。
+- `kiosk-guard.wiring.guard.test.js` 追加：
 
 ```js
-app.on('second-instance', () => {
-  if (!win || win.isDestroyed()) return;
-  if (win.isMinimized()) win.restore();
-  win.show();
-  // 与守护层同一套抢前台手段（app.focus 才激活 App，win.focus 不够）。
-  app.focus({ steal: true });
-  if (studentMode) kioskGuard.scheduleReassert('second-instance');
-});
+  it('首启安装看护进程（不再直管 App 的 KeepAlive）', () => {
+    expect(mainSrc).toMatch(/installWatchdog\(/);
+    expect(mainSrc).not.toMatch(/installLaunchAgent\(/);
+  });
 ```
 
-- [ ] **Step 6: `verify-asar.js` 的 REQUIRED 补两件**
-
-```js
-  'lib/exit-audit.js',
-  'lib/launch-agent.js',
-```
-
-- [ ] **Step 7: 跑壳全量测试**
+- [ ] **Step 8: 跑壳全量测试**
 
 Run: `cd apps/desktop && npm test`
 Expected: PASS。
 
-- [ ] **Step 8: 提交**
+- [ ] **Step 9: 提交**
 
 ```bash
-git add apps/desktop/lib/launch-agent.js apps/desktop/lib/launch-agent.test.js apps/desktop/main.js apps/desktop/scripts/verify-asar.js
-git commit -m "feat(desktop): 用户级 LaunchAgent 保活 + 单实例"
+git add -A apps/desktop/lib apps/desktop/main.js apps/desktop/scripts/verify-asar.js apps/desktop/kiosk-guard.wiring.guard.test.js
+git commit -m "feat(desktop): 看护进程保活（仅学生模式）+ 单实例"
 ```
 
 ---

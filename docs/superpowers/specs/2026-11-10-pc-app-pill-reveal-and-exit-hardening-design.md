@@ -123,38 +123,53 @@ locked=false                → 不渲染（连识别区一起不渲染）
 - 不因异常退出结束学习会话、不上报家长（沿用 2026-09-23 裁决 10「不区分异常退出」）；
   要上报需先改口径，另立 spec。
 
-## 4. 壳加固 B：用 launchd 保活（仅 macOS，仅打包后）
+## 4. 壳加固 B：看护进程（watchdog，仅 macOS，仅打包后）
+
+> **2026-11-10 用户裁决（改口径）**：不把 App 本身交给 launchd `KeepAlive`，而是另起一个极小的
+> **看护进程**——学生登录后它工作，学生登出/家长登录后它休眠等待。理由：家长也要能正常退出 App，
+> 常驻 `KeepAlive` 会让家长点了退出又被立刻拉起来。
 
 ### 4.1 机制
 
-由 App 首次启动时**自己写**用户级 LaunchAgent（不依赖 pkg postinstall 猜用户名，也不需要管理员）：
+首次打包启动时，App 写两样东西（都在用户目录，不需要管理员）：
 
-- 路径：`~/Library/LaunchAgents/com.k12zhixue.desktop.plist`
-- 内容：`Label` + `ProgramArguments=[<App 内可执行文件绝对路径>]` + `RunAtLoad=true` +
-  `KeepAlive=true` + `ThrottleInterval=10` + `LimitLoadToSessionType=Aqua`
-- 写入后 `launchctl bootstrap gui/<uid> <plist>`（失败只 warn，不阻断）。
-- **幂等**：文件已存在且内容一致 → 什么都不做；路径变化（App 被移到别处/重装）→ 重写并 re-bootstrap。
-- **只在 `app.isPackaged && darwin` 时执行**；`npm start` 开发态不装，避免污染开发机。
-- 首次 `bootstrap` 会立刻多起一个实例（launchd 的 `RunAtLoad`），由 §4.2 的单实例锁让它自己退出——
-  **不会出现第二个窗口**，但日志里会多一次启动记录，属预期。
-- 新增 `lib/launch-agent.js`，**必须同步 `scripts/verify-asar.js` 的 `REQUIRED`**。
+- 脚本：`~/Library/Application Support/k12-desktop/sysmon.sh`（`0755`）
+- plist：`~/Library/LaunchAgents/com.local.sysmon.plist`
+  - `ProgramArguments = [/bin/sh, <脚本路径>, <App 绝对路径>]`
+  - `RunAtLoad=true`、`KeepAlive=true`、`ThrottleInterval=10`、`LimitLoadToSessionType=Aqua`
+- 随后 `launchctl bootstrap gui/<uid> <plist>`；失败只 warn，不阻断启动。
 
-### 4.2 单实例（没有它会双开）
+看护脚本是 **5 秒一轮的 POSIX sh 循环**，判据只有两条：
+
+1. 读 `~/Library/Application Support/k12-desktop/shell-state.json` 的 `studentMode`；
+2. `studentMode=true` 且 `pgrep -f "<App>/Contents/MacOS/"` 找不到进程 → `open -a "<App>"`。
+
+`studentMode=false` 或文件不存在 → **什么都不做**（家长/管理员可正常退出，不会被拉起）。
+脚本内**不 embed App 路径**：路径由 plist 的 `ProgramArguments` 传入，App 挪位置只改 plist。
+
+App 每次启动都校验一遍：脚本或 plist 缺失/被改 → 重写；`launchctl print gui/<uid>/com.local.sysmon`
+失败（没加载）→ 重新 `bootstrap`。**幂等**，重复启动无副作用。
+只在 `app.isPackaged && darwin` 执行；`npm start` 开发态不装，避免污染开发机。
+看护脚本以 **JS 字符串常量**内置在 `lib/watchdog.js`，不新增打包白名单条目（避免 asar 白名单漂移）。
+
+### 4.2 单实例（不能用两条保活路径，必须有它）
 
 - `app.requestSingleInstanceLock()` 放在 `whenReady` 之前；拿不到 → `app.quit()`（此时 `studentMode`
-  还不是 true，不会被 `before-quit` 拦）。
+  还不是 true，不会被 `before-quit` 拦）。第二实例**不得**创建窗口、不得安装任何东西、
+  也不得执行 `markCleanExit`（否则会删掉正在运行实例的 `running.flag`，把异常结束判定打瞎）。
 - `app.on('second-instance')`：`app.focus({ steal: true })` + 显示窗口 + `kioskGuard.scheduleReassert('second-instance')`。
 
-### 4.3 崩溃循环
+### 4.3 命名与可发现性（这是边界，不是安全）
 
-- 靠 launchd 的 `ThrottleInterval=10`：连崩时最多 10 秒一次，不会把机器拖死。
-- App 内不额外做"启动失败就关掉保活"的判断——那等于把锁关掉。
+- label `com.local.sysmon`、脚本名 `sysmon.sh`，与产品名无关，降低被注意的概率。
+- **这不是安全边界**：`launchctl list`、活动监视器、`ps` 都能看到；标准用户对自己的 `gui` 域有权限，
+  可 `launchctl bootout gui/$(id -u)/com.local.sysmon`。要真挡需 root 级守护（未立项）。
 
-### 4.4 卸载/关闭保活
+### 4.4 崩溃循环与卸载
 
-- 交付文档（README 的安装说明段）加一条：彻底卸载前先
-  `launchctl bootout gui/$(id -u)/com.k12zhixue.desktop && rm ~/Library/LaunchAgents/com.k12zhixue.desktop.plist`。
-- 不提供 App 内开关（学生能关 = 等于没有）。
+- 看护进程自身被 kill → launchd 的 `KeepAlive` 在 10 秒内拉起（`ThrottleInterval=10` 防连崩拖死机器）。
+- 卸载：
+  `launchctl bootout gui/$(id -u)/com.local.sysmon && rm ~/Library/LaunchAgents/com.local.sysmon.plist "$HOME/Library/Application Support/k12-desktop/sysmon.sh"`
 
 ## 5. 影响文件
 
@@ -165,9 +180,10 @@ locked=false                → 不渲染（连识别区一起不渲染）
 | `apps/web/src/kiosk/LearningSessionShell.tsx` | 不再直接渲染胶囊；改为提供 `LearningLockContext`（`{locked, remainingMs}`），provider 值加 `isDesktopShell()` 闸门 |
 | `apps/web/src/components/layout/StudentStayLayout.tsx` | 消费 context，渲染 `<LockedPillReveal />` |
 | `apps/desktop/lib/exit-audit.js`（新增） | running 标记 / 异常结束判定 / 清理 |
-| `apps/desktop/lib/launch-agent.js`（新增） | plist 生成、幂等安装、bootstrap |
-| `apps/desktop/main.js` | 单实例锁、退出日志、异常结束判定、崩溃恢复、首启装 agent |
-| `apps/desktop/scripts/verify-asar.js` | `REQUIRED` 加两个新 `lib/*.js` |
+| `apps/desktop/lib/watchdog.js`（新增） | 看护脚本内容、plist 生成、幂等安装 / bootstrap |
+| `apps/desktop/lib/launch-agent.js` | **删除**（2026-11-10 裁决改为看护进程） |
+| `apps/desktop/main.js` | 单实例锁、退出日志、异常结束判定、崩溃恢复、首启装看护 |
+| `apps/desktop/scripts/verify-asar.js` | `REQUIRED` 增删对应文件 |
 | `docs/constraints/pc-app-学习管控.md` | 追加本次两条约束与旧表述清单（§7） |
 
 ## 6. 测试
@@ -187,9 +203,10 @@ locked=false                → 不渲染（连识别区一起不渲染）
 **Desktop**
 
 - `lib/exit-audit.test.js`：正常/异常两条路径（临时目录）。
-- `lib/launch-agent.test.js`：内容正确、幂等（重复调用不重写）、路径变化重写、非 darwin / 未打包时不动。
+- `lib/watchdog.test.js`：脚本关键判据、plist 字段、幂等（重复调用不重写）、App 路径变化重写、
+  非 darwin 不动、未加载时 bootstrap、bootout/bootstrap 失败不抛。
 - `kiosk-guard.wiring.guard.test.js` 追加断言：`main.js` 里存在
-  `requestSingleInstanceLock`、`render-process-gone`、`markRunning`、`installLaunchAgent`，且 `REQUIRED` 含新文件。
+  `requestSingleInstanceLock`、`render-process-gone`、`markRunning`、`installWatchdog`，且 `REQUIRED` 含新文件。
 
 ## 7. 旧表述清单（改口径必须同步删改，别只加注记）
 
@@ -199,7 +216,7 @@ locked=false                → 不渲染（连识别区一起不渲染）
   （仍成立），但需补一句"pill 只在浅停留三页、按需唤出"。
 - `2026-09-23-pc-app-study-lockdown-design.md` §6.4 的"顶部居中"描述加一行注记指向本文（旧 spec 不重写）。
 - `docs/constraints/pc-app-学习管控.md` 的"做不到的别当缺陷修"那段补一句：
-  "被 SIGKILL 后由 launchd 保活拉回（2026-11-10）"，避免下次又被当成缺陷重查。
+  "被 SIGKILL 后由 launchd 托管的看护进程拉回（2026-11-10）"，避免下次又被当成缺陷重查。
 
 ## 8. 验收（真机，按顺序）
 
@@ -208,14 +225,17 @@ locked=false                → 不渲染（连识别区一起不渲染）
 3. 触屏/iPad：点顶边出现，5 秒后消失（无 hover 环境必须走这条）。
 4. 进做题页：**没有**胶囊；点登出仍弹"时长未满"toast。
 5. `osascript -e 'quit app "K12 智学"'`：不退出；`kiosk-guard.log` 出现 `before-quit`。
-6. `kill -KILL <pid>`：约 1–2 秒内自动重启并回到 kiosk；`kiosk-guard.log` 出现 `abnormal-exit`。
-7. 连续两次触发第 6 步：仍能回来（验证 ThrottleInterval 不会把学生卡死）。
-8. 卸载演练：`launchctl bootout` + 删 plist 后，App 不会再被拉起（文档步骤可复现）。
+6. `kill -KILL <pid>`：看护进程在一个轮询周期内（≤10 秒）把 App 拉起并回到 kiosk；`kiosk-guard.log` 出现 `abnormal-exit`。
+7. 连续两次触发第 6 步：仍能回来（验证 `ThrottleInterval` 不会把学生卡死）。
+8. 家长登录（`studentMode=false`）后点退出：**不再被拉起**；`launchctl print gui/$(id -u)/com.local.sysmon` 里看护仍在、只是空闲。
+9. 卸载演练：`launchctl bootout` + 删 plist 与脚本后，App 不会再被拉起（文档步骤可复现）。
 
 ## 9. 风险
 
-- **LaunchAgent 是用户级**：学生 `launchctl bootout` 或删 plist 即可摘掉（普通用户对自己的 `gui` 域有权限）。
+- **看护是用户级**：学生 `launchctl bootout` / 删 plist 即可摘掉（普通用户对自己的 `gui` 域有权限）。
   本次只挡"顺手关掉 / Siri 关掉"，不承诺"关不掉"。
-- **强杀瞬间有 1–2 秒桌面闪现**（与 kiosk 被打断同级），不是新问题。
-- 打包后首次启动才装 agent；若学生先手动删了 plist，下次启动会重装（幂等逻辑覆盖）。
+- **看护是 5 秒轮询**：从被强杀到被拉起，最多约 5–10 秒的桌面空窗（比 launchd 直接托管 App 慢）。
+- **看护靠进程存在性（`pgrep`）判断**，不靠网络心跳：拔网线/服务器挂掉不会误判成"App 死了"。
+- 打包后首次启动才装看护；若学生手动删了 plist，下次启动会重装（幂等逻辑覆盖）。
 - `render-process-gone` 自动 reload 可能打断正在输入的答案——仅在真的崩溃时发生，属可接受降级。
+- **命名只是降低被注意的概率**（`com.local.sysmon`），不是隐藏手段：`launchctl list` / 活动监视器可见。
