@@ -79,6 +79,9 @@ let win = null;
  */
 let appWasInactive = false;
 
+/** 最近一次渲染进程崩溃的时间戳：60 秒内二次崩溃改走"重建窗口"。 */
+let rendererCrashAt = 0;
+
 /** 守护日志的大小上限：超过就清空重写，避免长期运行无限增长。 */
 const KIOSK_LOG_MAX_BYTES = 256 * 1024;
 let kioskLogDisabled = false;
@@ -251,6 +254,8 @@ function createWindow() {
       devTools: !app.isPackaged,
     },
   });
+  // 本次创建的窗口。`closed` 处理器靠它区分「旧窗口晚到的 closed」与「当前窗口」。
+  const thisWindow = win;
 
   // 「偏向多锁」：上次是学生模式就一开机就进 kiosk，不等渲染层（spec §4.3、§6-7）。
   // 在首页真正显示出来之前应用，避免「先普通窗口、再全屏」的可见闪动。
@@ -279,6 +284,41 @@ function createWindow() {
     if (!win || win.isDestroyed()) return;
     // 主 frame 加载完成且当前不是本地页（file:）→ 说明连上了，停表
     if (!win.webContents.getURL().startsWith('file:')) stopRetry();
+  });
+
+  // 崩溃自恢复（spec 2026-11-10 §3.2）：界面没了 = 学生看到的是死窗口，
+  // 而"窗口还在、kiosk 还在"会骗过看门狗。首次崩溃就地 reload；60 秒内再来一次
+  // 说明这个页面/进程起不来，直接重建窗口（重建后由 ready-to-show 重新进 kiosk）。
+  win.webContents.on('render-process-gone', (_event, details) => {
+    // 正常关闭/kill 也会触发，别把它当崩溃去"复活"窗口。
+    if (details && details.reason === 'clean-exit') return;
+    const now = Date.now();
+    const repeated = now - rendererCrashAt < 60_000;
+    rendererCrashAt = now;
+    appendKioskLog(
+      `[guard] render-process-gone reason=${details && details.reason} repeated=${repeated}`,
+    );
+    try {
+      if (!win || win.isDestroyed()) return;
+      if (repeated) {
+        const old = win;
+        // 不要先把 win 置 null：`closed` 处理器会按窗口身份判断（见下面的 `thisWindow`），
+        // 由它负责收尾，否则会漏掉 stopRetry / kioskGuard.stop。
+        old.destroy(); // destroy 绕过 close 拦截（拦截是给学生的，不是给恢复逻辑的）
+        createWindow();
+      } else {
+        win.webContents.reload();
+      }
+    } catch (err) {
+      appendKioskLog(`[guard] render-recover-error err=${err && err.message}`);
+    }
+  });
+
+  // GPU / utility 崩了不该整窗重建，记一笔就够（下一次 tick 会检查窗口状态）。
+  win.webContents.on('child-process-gone', (_event, details) => {
+    appendKioskLog(
+      `[guard] child-process-gone type=${details && details.type} reason=${details && details.reason}`,
+    );
   });
 
   // 拦外链：AI 回复的 markdown 会渲染 target="_blank"（AdminChatPage / AuxChatPanel），
@@ -317,6 +357,9 @@ function createWindow() {
   win.on('restore', () => kioskGuard.schedule('restore'));
 
   win.on('closed', () => {
+    // 恢复逻辑会 destroy 旧窗口再建新的；旧窗口的 closed 晚到一步时，
+    // 不能把 `win` 里已经装好的新窗口抹掉。
+    if (win !== thisWindow) return;
     // 窗口没了就把重试表停掉，别留一个每 5 秒空转（被 `!win` 挡掉）的定时器。
     // 注意：这**不是**功能修复 —— 重建窗口后自动重连本来就能工作（interval 回调读的是
     // 模块级 `win`，不是捕获的旧窗口）。新窗口加载失败时 did-fail-load 会自己重新起表。

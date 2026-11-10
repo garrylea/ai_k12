@@ -69,4 +69,15 @@ describe('kiosk 守护接线护栏', () => {
   it('看门狗间隔是 1 秒（改大等于把逃逸窗口拉长）', () => {
     expect(guardSrc).toMatch(/DEFAULT_WATCHDOG_MS\s*=\s*1000/);
   });
+
+  it('渲染进程崩溃要自动恢复（60 秒内二次崩溃则重建窗口）', () => {
+    expect(mainSrc).toMatch(/webContents\.on\(\s*'render-process-gone'/);
+    expect(mainSrc).toMatch(/rendererCrashAt/);
+    // 恢复块里必须真的调 createWindow（单独匹配 createWindow() 会被文件里原有的调用骗过）
+    expect(mainSrc).toMatch(/render-process-gone[\s\S]{0,1200}?createWindow\(\)/);
+  });
+
+  it('子进程崩溃只记日志，不重建窗口', () => {
+    expect(mainSrc).toMatch(/webContents\.on\(\s*'child-process-gone'/);
+  });
 });
