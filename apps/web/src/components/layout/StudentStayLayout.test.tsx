@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import StudentStayLayout from './StudentStayLayout';
 import { buildStayReturnState, STAY_FALLBACK_PATH } from '@/utils/stayReturn';
+import { LearningLockContext } from '@/kiosk/learningLockContext';
 
 /**
  * 浅停留页（个人中心 / 奖励册 / 练习记录）顶栏「退出本页」的落点回归。
@@ -22,7 +23,10 @@ import { buildStayReturnState, STAY_FALLBACK_PATH } from '@/utils/stayReturn';
 
 afterEach(() => cleanup());
 
-function renderStay(initialEntry: { pathname: string; state?: unknown }) {
+function renderStay(
+  initialEntry: { pathname: string; state?: unknown },
+  lock: { locked: boolean; remainingMs: number } | null = null,
+) {
   const router = createMemoryRouter(
     [
       { path: '/student/star-map', element: <div>知识星图</div> },
@@ -41,7 +45,11 @@ function renderStay(initialEntry: { pathname: string; state?: unknown }) {
     ],
     { initialEntries: [initialEntry] },
   );
-  render(<RouterProvider router={router} />);
+  render(
+    <LearningLockContext.Provider value={lock}>
+      <RouterProvider router={router} />
+    </LearningLockContext.Provider>,
+  );
   return router;
 }
 
@@ -181,5 +189,20 @@ describe('练习记录顶栏「退出本页」也回最初来源', () => {
     await user.click(screen.getByRole('button', { name: '退出本页' }));
 
     expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
+  });
+});
+
+describe('StudentStayLayout 剩余时长浮层', () => {
+  it('没有锁定上下文时不渲染识别区', () => {
+    renderStay({ pathname: '/student/profile' });
+    expect(screen.queryByTestId('pill-reveal-zone')).not.toBeInTheDocument();
+  });
+
+  it('锁定时渲染识别区与胶囊，且胶囊不抢点击', () => {
+    renderStay({ pathname: '/student/profile' }, { locked: true, remainingMs: 30 * 60_000 });
+    expect(screen.getByTestId('pill-reveal-zone')).toBeInTheDocument();
+    expect(screen.getByTestId('locked-pill').className).toContain('pointer-events-none');
+    // 三个 tab 仍然可点（胶囊在它们下方、且 pointer-events-none）
+    expect(screen.getByRole('link', { name: '练习记录' })).toBeInTheDocument();
   });
 });

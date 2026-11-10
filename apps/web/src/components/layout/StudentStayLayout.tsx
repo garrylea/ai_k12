@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ExitIcon } from '@/components/base';
+import { LockedPillReveal } from '@/kiosk/LockedPillReveal';
 import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 
 /**
@@ -59,6 +60,10 @@ export default function StudentStayLayout() {
       data-school="junior"
       className="flex h-screen flex-col overflow-hidden bg-[var(--bg-base)] text-[var(--text-primary)]"
     >
+      {/* 剩余时长浮层：锁定态由上层 `LearningSessionShell` 经 context 下发，
+          没有上下文 / 未锁定时它自己渲染 null。三个 tab 各自挂一份本外壳，切页会重挂、
+          从而重新触发 3 秒自动显示。浮层全是 `fixed`，DOM 顺序不影响绘制。 */}
+      <LockedPillReveal />
       {/* 顶部全局栏：学生端统一 token，但无日夜切换 */}
       {/* 三栏网格：左右各 1fr、中间胶囊 auto —— 左「返回」删除后胶囊仍停在原来的正中间，
           不能退回 justify-between（那会让胶囊左移，2026-11-06 用户指出）。 */}
