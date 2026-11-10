@@ -14,6 +14,7 @@ const mk = (overrides: Record<string, any> = {}) => ({
     create: vi.fn().mockResolvedValue(11),
     updatePassword: vi.fn().mockResolvedValue(undefined),
     setActive: vi.fn().mockResolvedValue(undefined),
+    updateProfile: vi.fn().mockResolvedValue(undefined),
     createDefaultSettings: vi.fn().mockResolvedValue(undefined),
   },
   progressRepo: {
@@ -371,5 +372,66 @@ describe('ParentService 改密（spec §4.6）', () => {
     // 明文落库是最危险的退化：既断言不等于明文，也断言 hash 能验回新密码
     expect(received).not.toBe('newpass123');
     expect(await bcrypt.compare('newpass123', received)).toBe(true);
+  });
+});
+
+describe('ParentService 编辑孩子档案（唯一手工入口）', () => {
+  it('改年级 → 推导 schoolLevel 并写库；返回脱敏后的最新档案', async () => {
+    const studentsRepo = Object.assign(mk().studentsRepo, {
+      findById: vi.fn()
+        .mockResolvedValueOnce(own)
+        .mockResolvedValueOnce({ ...own, grade: '高一', schoolLevel: 'senior', age: 16 }),
+    });
+    const d = mk({ studentsRepo });
+
+    const r = await mkSvc(d).updateStudent(3, 5, { grade: '高一', age: 16 });
+
+    expect(studentsRepo.updateProfile).toHaveBeenCalledWith(5, {
+      grade: '高一',
+      schoolLevel: 'senior',
+      age: 16,
+    });
+    expect(r).toMatchObject({ grade: '高一', schoolLevel: 'senior', age: 16 });
+    expect(r).not.toHaveProperty('passwordHash');
+  });
+
+  it('只改姓名 → 不写 school_level / grade', async () => {
+    const studentsRepo = Object.assign(mk().studentsRepo, {
+      findById: vi.fn().mockResolvedValue(own),
+    });
+    const d = mk({ studentsRepo });
+    await mkSvc(d).updateStudent(3, 5, { name: ' 小明同学 ' });
+    expect(studentsRepo.updateProfile).toHaveBeenCalledWith(5, { name: '小明同学' });
+  });
+
+  it('非法年级 → 1001 且不落库', async () => {
+    const studentsRepo = Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) });
+    const d = mk({ studentsRepo });
+    await expect(mkSvc(d).updateStudent(3, 5, { grade: '大学' }))
+      .rejects.toMatchObject({ response: { code: 1001 } });
+    expect(studentsRepo.updateProfile).not.toHaveBeenCalled();
+  });
+
+  it('年龄越界 → 1001', async () => {
+    const studentsRepo = Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) });
+    const d = mk({ studentsRepo });
+    await expect(mkSvc(d).updateStudent(3, 5, { age: 30 }))
+      .rejects.toMatchObject({ response: { code: 1001 } });
+  });
+
+  it('非自己名下学生 → 1005', async () => {
+    const studentsRepo = Object.assign(mk().studentsRepo, {
+      findById: vi.fn().mockResolvedValue({ ...own, parentId: 999 }),
+    });
+    const d = mk({ studentsRepo });
+    await expect(mkSvc(d).updateStudent(3, 5, { age: 14 }))
+      .rejects.toMatchObject({ response: { code: 1005 } });
+  });
+
+  it('空 patch → 1001', async () => {
+    const studentsRepo = Object.assign(mk().studentsRepo, { findById: vi.fn().mockResolvedValue(own) });
+    const d = mk({ studentsRepo });
+    await expect(mkSvc(d).updateStudent(3, 5, {}))
+      .rejects.toMatchObject({ response: { code: 1001 } });
   });
 });

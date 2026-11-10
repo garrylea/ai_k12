@@ -13,7 +13,8 @@ import { toast } from '@/components/base/Toast';
  * 2. 最多 6 张（第 7 张丢弃并提示），每张 ≤5MB、仅图片；**先筛类型/大小再占名额**；
  * 3. 文字可选；纯文字提交时 `attachments` / `imageUrls` 都是空数组；
  * 4. 顺序 = 选择顺序，删中间一张后后续序号前移、提交仍按当前顺序；
- * 5. 所有图片 ready 且（有文字 或 ≥1 图）才允许「开始识题」。
+ * 5. 所有图片 ready 且（有文字 或 ≥1 图）才允许提交；有文字时按钮是「开始作答」（不识别），
+ *    纯图片时才是「开始识题」。
  */
 
 vi.mock('@/utils/image-convert', () => ({ ensureJpeg: vi.fn() }));
@@ -209,7 +210,7 @@ describe('SolveSourceInput', () => {
 
   it('占位符与答疑输入框同色（placeholder-[#86868B]）', () => {
     render(<SolveSourceInput busy={false} onRecognize={vi.fn()} />);
-    const box = screen.getByPlaceholderText('输入题目，或拖入图片');
+    const box = screen.getByPlaceholderText('输入题目文字直接作答；只放图片则自动识别');
     expect(box.className).toContain('placeholder-[#86868B]');
     // 与答疑同一套外壳：圆角、浅灰底、聚焦品牌环
     const shell = box.closest('.rounded-xl');
@@ -272,12 +273,16 @@ describe('SolveSourceInput', () => {
     expect(onRecognize).not.toHaveBeenCalled();
   });
 
-  it('文字非空也可提交（attachments 为空数组）', () => {
+  it('文字非空：按钮变「开始作答」，提交 attachments/imageUrls 为空数组', () => {
     const onRecognize = vi.fn();
     render(<SolveSourceInput busy={false} onRecognize={onRecognize} />);
 
+    expect(recognizeButton()).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '第5题' } });
-    fireEvent.click(recognizeButton());
+
+    // 有文字 = 不需要识题，按钮文案必须跟着变
+    expect(screen.queryByRole('button', { name: '开始识题' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '开始作答' }));
 
     expect(onRecognize).toHaveBeenCalledWith(
       expect.objectContaining({ text: '第5题', attachments: [] }),

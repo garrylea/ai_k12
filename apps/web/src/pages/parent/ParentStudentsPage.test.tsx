@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from '@/routes/routeTable';
 import {
+  updateStudent,
   getParentPointRules,
   getParentPoints,
   getSubscriptionStatus,
@@ -41,6 +42,7 @@ vi.mock('@/services/api', async (importOriginal) => {
     createStudent: vi.fn(),
     resetStudentPassword: vi.fn(),
     setStudentStatus: vi.fn(),
+    updateStudent: vi.fn(),
     getUnreadMessageCount: vi.fn(),
     // 顶栏订阅提示条（SubscriptionNoticeBar）挂载即拉
     getSubscriptionStatus: vi.fn(),
@@ -58,6 +60,7 @@ const getSubscriptionStatusMock = vi.mocked(getSubscriptionStatus);
 const listUnreadBillingNoticesMock = vi.mocked(listUnreadBillingNotices);
 const getParentPointsMock = vi.mocked(getParentPoints);
 const getParentPointRulesMock = vi.mocked(getParentPointRules);
+const updateStudentMock = vi.mocked(updateStudent);
 
 const BOY: MyStudentItem = {
   id: 11,
@@ -183,5 +186,43 @@ describe('ParentStudentsPage：积分与奖励入口', () => {
       String(GIRL.id),
     );
     expect(getParentPointsMock.mock.calls.map((call) => call[0])).toEqual([GIRL.id]);
+  });
+});
+
+describe('ParentStudentsPage · 编辑孩子资料', () => {
+  it('改年级/年龄后保存：调 updateStudent 并刷新列表', async () => {
+    updateStudentMock.mockReset();
+    updateStudentMock.mockResolvedValue({ ...GIRL, age: 13, grade: '初二' });
+    renderAt('/parent/students');
+
+    await screen.findByRole('heading', { name: '小美' });
+    const loadsBeforeSave = listMyStudentsMock.mock.calls.length;
+    const actions = cardActions('小美');
+    fireEvent.click(actions.getByRole('button', { name: '编辑资料' }));
+
+    fireEvent.change(await screen.findByLabelText('年龄'), { target: { value: '13' } });
+    fireEvent.change(screen.getByLabelText('年级'), { target: { value: '初二' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() =>
+      expect(updateStudentMock).toHaveBeenCalledWith(12, { name: '小美', age: 13, grade: '初二' }),
+    );
+    // 保存成功后重新拉列表（在原有次数上 +1，不放死总数——路由/挂载次数会变）
+    await waitFor(() =>
+      expect(listMyStudentsMock.mock.calls.length).toBe(loadsBeforeSave + 1),
+    );
+  });
+
+  it('年龄越界时不发请求', async () => {
+    updateStudentMock.mockReset();
+    renderAt('/parent/students');
+
+    await screen.findByRole('heading', { name: '小美' });
+    fireEvent.click(cardActions('小美').getByRole('button', { name: '编辑资料' }));
+    fireEvent.change(await screen.findByLabelText('年龄'), { target: { value: '30' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(await screen.findByText('年龄需为 3-18 的整数')).toBeInTheDocument();
+    expect(updateStudentMock).not.toHaveBeenCalled();
   });
 });

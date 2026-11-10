@@ -95,6 +95,45 @@ export class ParentService {
     await this.studentsRepo.setActive(student.id, isActive);
   }
 
+  /**
+   * 家长编辑孩子档案（姓名/年龄/年级）——**唯一**的手工修改入口（学生端不提供编辑）。
+   * 改年级/年龄会刷新 `grade_updated_at`，避免下次登录按旧基准又自动升一级。
+   */
+  async updateStudent(
+    parentId: number,
+    studentId: number,
+    dto: { name?: string; age?: number; grade?: string },
+  ) {
+    const student = await this.requireOwnedStudent(parentId, studentId);
+
+    const patch: { name?: string; age?: number; grade?: string; schoolLevel?: string } = {};
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (!name) throw new ConflictException({ code: 1001, message: '姓名不能为空' });
+      patch.name = name;
+    }
+    if (dto.age !== undefined) {
+      if (!Number.isInteger(dto.age) || dto.age < 3 || dto.age > 18) {
+        throw new ConflictException({ code: 1001, message: '年龄需为 3-18 的整数' });
+      }
+      patch.age = dto.age;
+    }
+    if (dto.grade !== undefined) {
+      // 非法年级在这里抛 1001（与创建学生同一套白名单）
+      patch.schoolLevel = deriveSchoolLevel(dto.grade);
+      patch.grade = dto.grade;
+    }
+    if (Object.keys(patch).length === 0) {
+      throw new ConflictException({ code: 1001, message: '没有需要修改的字段' });
+    }
+
+    await this.studentsRepo.updateProfile(student.id, patch);
+    const updated = await this.studentsRepo.findById(student.id);
+    if (!updated) throw new NotFoundException({ code: 1002, message: '学生不存在' });
+    const { passwordHash: _ph, ...rest } = updated;
+    return rest;
+  }
+
   /** 每学科教材配置状态 + 可选项。已配置学科读 progress（textbook_version_id + current_semester_id
    *  为事实源）；未配置学科按学生年级推导默认（全科同年级），不落库。 */
   async getSubjectConfigs(parentId: number, studentId: number): Promise<SubjectConfigsResponse> {

@@ -18,7 +18,16 @@ export type FreeformJudgeEvent =
   | { type: 'start'; dialogueId: string; questionId: number | null }
   | { type: 'reasoning'; delta: string }
   | { type: 'content'; delta: string; replace?: boolean }
-  | { type: 'result'; questionId: number; totalScore: number; maxScore: number; verdict: 'correct' | 'partial' | 'incorrect'; errorBookId?: number }
+  | {
+      type: 'result';
+      questionId: number;
+      totalScore: number;
+      maxScore: number;
+      verdict: 'correct' | 'partial' | 'incorrect';
+      /** 模型判题时给出的标准答案（Markdown+LaTeX），页面直接展示「正确答案」 */
+      correctAnswer: string;
+      errorBookId?: number;
+    }
   | { type: 'error'; code: number; message: string; retryable: boolean }
   | { type: 'done' };
 
@@ -125,7 +134,11 @@ export class FreeformJudgeService {
         anchored || (await this.errorBooks.existsByStudentAndQuestionId(studentId, dto.questionId));
       if (!owned) throw badRequest('题目不存在或无权访问');
     }
-    const images = await this.resolveImages(dto, studentId);
+    // 重练（带 questionId 的 freeform 题）走宽松配图：题干里的图可能属于题目首个提交者，
+    // 当前学生重练时无权读取；跳过即可，不能因此让整次判题失败。首次提交仍严格校验。
+    const relaxedFigures =
+      dto.questionId != null && providedQuestion?.source === 'freeform';
+    const images = await this.resolveImages(dto, studentId, { relaxedFigures });
     const dialogueId = existingDialogue ? String(existingDialogue.id) : await this.createDialogue(studentId, subjectId, questionContent);
 
     yield { type: 'start', dialogueId, questionId: dto.questionId ?? null };
@@ -189,6 +202,7 @@ export class FreeformJudgeService {
         totalScore: parsed.totalScore,
         maxScore,
         verdict: parsed.verdict,
+        correctAnswer: parsed.question.answer,
         ...(errorBookId != null ? { errorBookId } : {}),
       };
       yield { type: 'done' };
@@ -270,7 +284,11 @@ export class FreeformJudgeService {
    * - 作答 Markdown 里内嵌的图：属于正文的一部分，找不到归属就跳过（不因一条过期
    *   Markdown 引用让整次判题失败），最多取 6 张。
    */
-  private async resolveImages(dto: FreeformJudgeDto, studentId: number): Promise<ResolvedImage[]> {
+  private async resolveImages(
+    dto: FreeformJudgeDto,
+    studentId: number,
+    opts: { relaxedFigures?: boolean } = {},
+  ): Promise<ResolvedImage[]> {
     const questionImages = dto.questionImages ?? [];
     const figureUrls = dto.figureUrls ?? [];
 
@@ -288,7 +306,11 @@ export class FreeformJudgeService {
         throw badRequest('配图地址不合法');
       }
       const row = await this.files.findByUrlAndOwner(url, studentId);
-      if (!row) throw badRequest('配图不存在或无权访问');
+      // 宽松模式（重练）只跳过无权图；严格模式（首次提交）仍拒绝。
+      if (!row) {
+        if (opts.relaxedFigures) continue;
+        throw badRequest('配图不存在或无权访问');
+      }
       out.push({ label: `配图${i + 1}`, url, dataUrl: await this.toDataUrl(row) });
     }
     if (dto.draftFileId) {

@@ -16,6 +16,7 @@ import {
   getTrainingVariations,
   type TrainingErrorBookEntry,
 } from '@/services/api';
+import { saveRedoQueue, type FreeformRedoItem } from './freeformRedoQueue';
 
 /** 题型枚举与后端 questions.type 一致（见 ai-core/types.ts QuestionType）。 */
 const TYPE_OPTIONS = [
@@ -76,6 +77,19 @@ function formatDate(iso: string): string {
 /** freeform（做题记录）条目只展示、不参与错题练习（2026-11-08）。 */
 function isSelectable(entry: TrainingErrorBookEntry): boolean {
   return entry.source !== 'freeform';
+}
+
+/** 做题错题走「重练」通道：写题单队列 → 做题页 ?redo=1（2026-11-10）。 */
+function toRedoItems(entries: TrainingErrorBookEntry[]): FreeformRedoItem[] {
+  return entries
+    .filter((e) => e.questionId != null)
+    .map((e) => ({
+      errorBookId: e.errorBookId,
+      questionId: e.questionId as number,
+      questionText: e.questionText,
+      type: e.type,
+      fullScore: e.fullScore ?? null,
+    }));
 }
 
 export default function ErrorPracticePage() {
@@ -205,6 +219,18 @@ export default function ErrorPracticePage() {
     [entries, selected],
   );
 
+  const freeformEntries = useMemo(
+    () => entries.filter((e) => e.source === 'freeform' && e.questionId != null),
+    [entries],
+  );
+
+  const startRedo = (list: TrainingErrorBookEntry[]) => {
+    const items = toRedoItems(list);
+    if (items.length === 0) return;
+    saveRedoQueue({ subjectId, items, index: 0 });
+    navigate('/student/solve?redo=1');
+  };
+
   const startPractice = () => {
     if (selectedCount === 0) return;
     const chosen = entries.filter((e) => isSelectable(e) && selected.has(e.errorBookId));
@@ -280,6 +306,16 @@ export default function ErrorPracticePage() {
               <Button variant="primary" size="md" loading={loading} onClick={() => void load()}>
                 查询
               </Button>
+              {freeformEntries.length > 0 && (
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => startRedo(freeformEntries)}
+                  data-testid="redo-all-freeform"
+                >
+                  重练做题错题（{freeformEntries.length}）
+                </Button>
+              )}
             </div>
           </Card>
 
@@ -379,10 +415,27 @@ export default function ErrorPracticePage() {
                             该题未入库，暂不支持线上重做
                           </p>
                         )}
-                        {isFreeform && selectableCount > 0 && (
-                          <p className="text-xs text-[var(--learn-text-tertiary)]">
-                            做题记录的题目暂不支持错题练习
-                          </p>
+                        {isFreeform && (
+                          <div className="flex items-center gap-3">
+                            {selectableCount > 0 && (
+                              <p className="text-xs text-[var(--learn-text-tertiary)]">
+                                做题记录的题目暂不支持错题练习
+                              </p>
+                            )}
+                            {entry.questionId != null && (
+                              <button
+                                type="button"
+                                data-testid={`redo-freeform-${entry.errorBookId}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startRedo([entry]);
+                                }}
+                                className="ml-auto shrink-0 inline-flex items-center rounded-lg border border-[var(--learn-card-border)] px-3 py-1.5 text-xs font-medium text-[var(--learn-text-secondary)] hover:border-[var(--brand-500)] hover:text-[var(--brand-500)] transition-colors"
+                              >
+                                重练
+                              </button>
+                            )}
+                          </div>
                         )}
                         {/* 错题升级变式入口（2026-10-11）：整块是按钮，stopPropagation 防触发条目勾选 */}
                         {varCount > 0 && subjectId === SUBJECT_MATH && (

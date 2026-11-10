@@ -103,6 +103,34 @@ description: "自由做题判题"
 
 ## User Message
 {{userMessage}}`);
+
+  // 做题页答疑：三学科模块共用一份核心 partial（与真实模板同构）
+  mkdirSync(resolve(testTemplateDir, 'freeform/tutor'), { recursive: true });
+  writeFileSync(resolve(testTemplateDir, 'system/freeform-core.md'), `# 学生信息
+- 年级：{{grade}}
+- 教材：{{textbookPhrase}}
+{{#hasLearnedContent}}<learned_content>{{learnedContent}}</learned_content>{{/hasLearnedContent}}
+{{^hasLearnedContent}}（学生未填写已学内容）{{/hasLearnedContent}}
+通用核心：抽丝剥茧`);
+  for (const [module, marker] of [
+    ['math', '数学模块'],
+    ['physics', '物理模块'],
+    ['chemistry', '化学模块'],
+  ] as const) {
+    writeFileSync(resolve(testTemplateDir, `freeform/tutor/${module}.md`), `---
+version: "2.0"
+description: "做题入口答疑 - ${module}"
+---
+
+## System Prompt
+{{> freeform-core}}
+
+### 二、学科模块
+${marker}
+
+## User Message
+{{userMessage}}`);
+  }
 });
 
 describe('PromptBuilder', () => {
@@ -300,5 +328,75 @@ describe('PromptBuilder', () => {
     expect(result.messages[1].role).toBe('user');
     expect(result.messages[0].content).toBe('自由做题判题模板。');
     expect(result.messages[1].content).toBe('请判这道题');
+  });
+
+  it('freeform_tutor 按学科选模块（物理/化学/其它回落数学）', async () => {
+    const vars = {
+      grade: '初二',
+      textbookPhrase: '使用人教版教材',
+      hasLearnedContent: false,
+      learnedContent: '',
+    };
+
+    const physics = await builder.build({
+      capability: 'freeform_tutor',
+      subject: 'physics',
+      context: { student: { grade: '初二', gradeLevel: 'junior' }, userMessage: '这题怎么做', customVariables: vars },
+    });
+    expect(physics.messages[0].content).toContain('物理模块');
+    expect(physics.messages[0].content).not.toContain('数学模块');
+    expect(physics.templateVersion).toBe('2.0');
+
+    const chemistry = await builder.build({
+      capability: 'freeform_tutor',
+      subject: 'chemistry',
+      context: { student: { grade: '初三', gradeLevel: 'junior' }, userMessage: '这题怎么做', customVariables: vars },
+    });
+    expect(chemistry.messages[0].content).toContain('化学模块');
+
+    // chinese / politics 等非理科一律回落数学模板，不抛错
+    const chinese = await builder.build({
+      capability: 'freeform_tutor',
+      subject: 'chinese',
+      context: { student: { grade: '初二', gradeLevel: 'junior' }, userMessage: '这题怎么做', customVariables: vars },
+    });
+    expect(chinese.messages[0].content).toContain('数学模块');
+  });
+
+  it('freeform_tutor 渲染学习档案变量：多行原文保留、空态有兜底、无残留标签', async () => {
+    const full = await builder.build({
+      capability: 'freeform_tutor',
+      subject: 'math',
+      context: {
+        student: { grade: '初三', gradeLevel: 'junior' },
+        userMessage: '我不会',
+        customVariables: {
+          grade: '北京初三（上）',
+          textbookPhrase: '使用北京版教材',
+          hasLearnedContent: true,
+          learnedContent: '一元二次方程\n二次函数',
+          hasStuckPoint: true,
+          stuckPoint: '不会配方',
+        },
+      },
+    });
+    expect(full.messages[0].content).toContain('北京初三（上）');
+    expect(full.messages[0].content).toContain('使用北京版教材');
+    expect(full.messages[0].content).toContain('一元二次方程\n二次函数');
+    // 只发学生原话，系统提示词不掺进用户消息
+    expect(full.messages[1].content).toBe('我不会');
+    expect(full.messages[0].content).not.toContain('{{');
+
+    const empty = await builder.build({
+      capability: 'freeform_tutor',
+      subject: 'math',
+      context: {
+        student: { grade: '初三', gradeLevel: 'junior' },
+        userMessage: '我不会',
+        customVariables: { grade: '初三', textbookPhrase: '教材版本未填写', hasLearnedContent: false, learnedContent: '' },
+      },
+    });
+    expect(empty.messages[0].content).toContain('（学生未填写已学内容）');
+    expect(empty.messages[0].content).not.toContain('{{');
   });
 });

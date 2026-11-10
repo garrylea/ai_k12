@@ -159,8 +159,21 @@ export function createStudent(req: {
   });
 }
 
-export function resetStudentPassword(id: number, newPassword: string): Promise<null> {
-  return fetchApi<null>(`/parent/students/${id}/reset-password`, {
+/**
+ * 家长编辑孩子档案（姓名/年龄/年级）——学生端无此入口。
+ * 年级/年龄还会在每次学生登录时按学年自动校准（见 auth.service.syncStudentGrade）。
+ */
+export function updateStudent(
+  id: number,
+  req: { name?: string; age?: number; grade?: string },
+): Promise<MyStudentItem> {
+  return fetchApi<MyStudentItem>(`/parent/students/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(req),
+  });
+}
+
+export function resetStudentPassword(id: number, newPassword: string): Promise<null> {  return fetchApi<null>(`/parent/students/${id}/reset-password`, {
     method: 'PATCH',
     body: JSON.stringify({ newPassword }),
   });
@@ -551,6 +564,9 @@ export interface TutorStreamRequest {
   cardId?: string;
   knowledgeId?: string;
   attachments?: AttachmentRequest[];
+  /** 做题页：1=数学 4=物理 5=化学，决定答疑用哪个学科模块模板 */
+  subjectId?: number;
+  /** 做题页学习档案（年级/教材/已学内容/卡点），填进答疑提示词变量；只在该入口生效 */
 }
 
 export interface TutorStreamEvent {
@@ -709,6 +725,8 @@ export type FreeformJudgeEvent =
       totalScore: number;
       maxScore: number;
       verdict: 'correct' | 'partial' | 'incorrect';
+      /** 模型给出的标准答案（Markdown+LaTeX），用于结果卡「正确答案」 */
+      correctAnswer: string;
       errorBookId?: number;
     }
   | { type: 'error'; code: number; message: string; retryable: boolean }
@@ -1037,6 +1055,8 @@ export interface TrainingErrorBookEntry {
   questionId: number | null;
   questionText: string;
   type: string | null;
+  /** questions.full_score；做题错题重练时作为满分（null 时前端按 10）。 */
+  fullScore: number | null;
   level: number;
   createdAt: string;
   kpIds: number[];

@@ -1,4 +1,4 @@
--- 2026-11-08 做题入口（freeform）：两条模型路由 + uploaded_files URL 查询索引。
+-- 2026-11-08 做题入口（freeform）：三条模型路由 + uploaded_files URL 查询索引。
 -- 本文件是**唯一权威源**：apps/server/src/scripts/migrate-freeform-routes.ts 只是等价镜像（供 CI/管理端复用）。
 -- 幂等：路由走 ON DUPLICATE KEY UPDATE（uniq_llm_routes = scene+subject）；
 --       索引先查 information_schema.statistics，已存在则跳过 DDL。
@@ -11,7 +11,8 @@
 INSERT INTO llm_routes (scene, subject, primary_model_key, fallback_model_key)
 VALUES
   ('freeform_split', '*', 'local', 'qwen3.8-max'),
-  ('freeform_judge', '*', 'qwen3.8-max', NULL) AS new
+  ('freeform_judge', '*', 'qwen3.8-max', NULL),
+  ('freeform_tutor', '*', 'qwen3.8-max', NULL) AS new
 ON DUPLICATE KEY UPDATE
   primary_model_key = new.primary_model_key,
   fallback_model_key = new.fallback_model_key;

@@ -8,6 +8,8 @@ import type { SourceImage } from './types';
 /**
  * 状态 A · 录入：文字 + 多图（spec §3.2 / §8.3）。
  *
+ * - 有文字 = 文字题（可带配图）：**不走识题**，直接进作答区，按钮文案「开始作答」；
+ * - 没文字 = 只能从图片识别：按钮「开始识题」，走 MinerU + 切题；
  * - 多图入口三选一：选图 / 拖拽 / 粘贴；顺序 = 选择顺序，删中间一张后续序号前移；
  * - HEIC 在客户端先转 JPEG 再上传，`source=freeform` 供后端登记题图来源；
  * - 提交条件：所有图片 ready，且「文字非空 或 ≥1 张图」。
@@ -155,7 +157,8 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
   };
 
   const allReady = images.every((x) => x.status === 'ready');
-  const canSend = !busy && allReady && (text.trim().length > 0 || images.length > 0);
+  const hasText = text.trim().length > 0;
+  const canSend = !busy && allReady && (hasText || images.length > 0);
 
   const submit = () => {
     if (!canSend) return;
@@ -275,7 +278,7 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
               disabled={!canSend}
               className="h-9 px-4 rounded-lg bg-[#FF6B00] text-white text-sm disabled:opacity-50 hover:opacity-90 transition shrink-0"
             >
-              {busy ? '识别中…' : '开始识题'}
+              {busy ? '识别中…' : hasText ? '开始作答' : '开始识题'}
             </button>
           </>
         }
@@ -285,7 +288,7 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={handlePaste}
-          placeholder="输入题目，或拖入图片"
+          placeholder="输入题目文字直接作答；只放图片则自动识别"
           aria-label="题目输入"
           className="w-full px-4 py-3 pr-36 bg-transparent text-[#1D1D1F] placeholder-[#86868B] outline-none resize-none"
         />

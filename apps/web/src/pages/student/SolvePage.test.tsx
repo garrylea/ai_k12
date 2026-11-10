@@ -13,7 +13,9 @@ import {
   type MyPoints,
 } from '@/services/api';
 import { useChatStore } from '@/store/chatStore';
+import { FREEFORM_REDO_KEY, saveRedoQueue } from './training/freeformRedoQueue';
 
+const STUDENT_ID = 7;
 /**
  * 自由出题页（Task 20）：录入 → 选题 → 作答 → 答疑 的状态机。
  *
@@ -134,6 +136,7 @@ beforeEach(() => {
     (URL as unknown as Record<string, unknown>).revokeObjectURL = vi.fn();
   }
   useChatStore.getState().reset();
+  sessionStorage.clear();
   draftStub.receivedRef = null;
   draftStub.snapshotValue = null;
 
@@ -148,6 +151,7 @@ beforeEach(() => {
       totalScore: 8,
       maxScore: 10,
       verdict: 'partial',
+      correctAnswer: '$x=1$',
     };
   });
   tutorStreamMock.mockReset();
@@ -168,12 +172,14 @@ beforeEach(() => {
   getMyPointsMock.mockReset();
   getMyPointsMock.mockResolvedValue(POINTS);
   localStorage.setItem('username', '小明');
+  localStorage.setItem('userId', String(STUDENT_ID));
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   useChatStore.getState().reset();
+  sessionStorage.clear();
   vi.clearAllMocks();
 });
 
@@ -185,12 +191,66 @@ function renderPage() {
   );
 }
 
+function renderPageAt(path: string) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <SolvePage />
+    </MemoryRouter>,
+  );
+}
+
+const REDO_QUEUE = {
+  subjectId: 1,
+  items: [
+    {
+      errorBookId: 440,
+      questionId: 7091,
+      questionText: '已知 $x+1=2$，求 $x$。',
+      type: 'short_answer',
+      fullScore: 10,
+    },
+    {
+      errorBookId: 441,
+      questionId: 7092,
+      questionText: '第二题：求 $1+1$。',
+      type: 'calculation',
+      fullScore: null,
+    },
+  ],
+  index: 0,
+};
+
+/** 上传一张 jpg（不点按钮）：纯图片识题路径的公共前置。 */
+async function addImageOnly() {
+  fireEvent.change(screen.getByTestId('source-file-input'), {
+    target: { files: [new File(['x'], 'q.jpg', { type: 'image/jpeg' })] },
+  });
+  await waitFor(() => expect(uploadFileMock).toHaveBeenCalled());
+  // ready 后「处理中」角标消失（图片一多会稍慢，等它落定再点）
+  await waitFor(() => expect(screen.queryByText('处理中')).toBeNull());
+}
+
+/** 文字题：输入文字 → 直接进作答，不调用识题。 */
 async function goToAnswerStage() {
-  fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
+  fireEvent.change(screen.getByPlaceholderText('输入题目文字直接作答；只放图片则自动识别'), {
     target: { value: '求 1+1' },
   });
+  // 有文字时按钮是「开始作答」；识别只发生在纯图片输入
+  fireEvent.click(screen.getByRole('button', { name: '开始作答' }));
+  await screen.findByLabelText('作答输入');
+}
+
+/** 纯图片：上传图片 → 开始识题 → 选题页。 */
+async function goToSelectViaImage() {
+  renderPage();
+  await addImageOnly();
   fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
   await screen.findByText('识别到 1 道题');
+}
+
+/** 纯图片：识题 → 选题确认 → 作答区（题干/配图走识别结果）。 */
+async function goToAnswerStageViaImage() {
+  await goToSelectViaImage();
   fireEvent.click(screen.getByRole('button', { name: '开始作答' }));
   await screen.findByLabelText('作答输入');
 }
@@ -200,8 +260,8 @@ describe('SolvePage 状态机', () => {
     renderPage();
     // 首屏标题/副文案与答疑同一套层级（h2 + 一行说明），输入框居中 max-w-2xl
     expect(screen.getByRole('heading', { name: '把题目发给我' })).toBeInTheDocument();
-    expect(screen.getByText('输入题目，或拖入图片')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('输入题目，或拖入图片')).toBeInTheDocument();
+    expect(screen.getByText('输入题目文字直接作答；只放图片则自动识别')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('输入题目文字直接作答；只放图片则自动识别')).toBeInTheDocument();
     expect(screen.queryByLabelText('作答输入')).toBeNull();
   });
 
@@ -219,46 +279,64 @@ describe('SolvePage 状态机', () => {
     // 做题页没有侧栏，卡片里只有内容区
     expect(shell?.querySelector('aside')).toBeNull();
     // 页面内容确实嵌在这张卡里，而不是另起全屏布局
-    expect(shell?.contains(screen.getByPlaceholderText('输入题目，或拖入图片'))).toBe(true);
+    expect(shell?.contains(screen.getByPlaceholderText('输入题目文字直接作答；只放图片则自动识别'))).toBe(true);
   });
 
-  it('识别成功 → 选题；确认后进入作答，且 tab 条在未答疑/提交前隐藏', async () => {
-    renderPage();
-    await goToAnswerStage();
+  it('纯图片才走识题：识别成功 → 选题 → 作答，tab 条在未答疑/提交前隐藏', async () => {
+    await goToSelectViaImage();
 
     expect(recognizeMock).toHaveBeenCalledWith(
-      expect.objectContaining({ text: '求 1+1', attachments: [] }),
+      expect.objectContaining({
+        text: '',
+        attachments: [{ type: 'image', fileId: '99' }],
+      }),
     );
+    fireEvent.click(screen.getByRole('button', { name: '开始作答' }));
+    await screen.findByLabelText('作答输入');
+
     expect(screen.queryByRole('button', { name: 'AI 答疑' })).toBeNull();
     // 题干原样交给作答卡片（不在页面里再 preprocess 一次）：题干图能正常渲染
     expect(document.querySelector('img[alt="图"]')).toBeTruthy();
   });
 
-  it('识别失败 → 手动输入走单候选选题', async () => {
+  it('文字题不走识题：按钮是「开始作答」，直接进作答区', async () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('输入题目文字直接作答；只放图片则自动识别'), {
+      target: { value: '求 $x^2-4x+3$ 的顶点' },
+    });
+
+    const btn = screen.getByRole('button', { name: '开始作答' });
+    fireEvent.click(btn);
+
+    expect(await screen.findByLabelText('作答输入')).toBeInTheDocument();
+    expect(recognizeMock).not.toHaveBeenCalled();
+    // 直接进作答时学科/满分就在顶部，可改（默认数学 10 分）
+    expect(screen.getByLabelText('学科')).toHaveValue('1');
+    expect(screen.getByLabelText('满分')).toHaveValue(10);
+  });
+
+  it('识别失败 → 手动输入走单候选选题（空题干就地写）', async () => {
     recognizeMock.mockRejectedValueOnce(new Error('识别失败'));
     renderPage();
-
-    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
-      target: { value: '手写题干' },
-    });
+    await addImageOnly();
     fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
     fireEvent.click(await screen.findByRole('button', { name: '手动输入题目' }));
 
     await screen.findByText(/识别到 1 道题/);
-    expect(screen.getByText('手写题干')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('stem-render'));
+    fireEvent.change(screen.getByLabelText('题干'), { target: { value: '手写题干' } });
+    expect((screen.getByLabelText('题干') as HTMLTextAreaElement).value).toBe('手写题干');
   });
 
   it('识别出 0 道题时留在录入页，给提示与手动输入，不进空选题页', async () => {
     recognizeMock.mockResolvedValueOnce({ candidates: [], figures: [] });
     renderPage();
+    await addImageOnly();
 
-    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
-      target: { value: '看不清的题' },
-    });
     fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
 
     expect(await screen.findByText(/没有识别到题目/)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('输入题目，或拖入图片')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('输入题目文字直接作答；只放图片则自动识别')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '手动输入题目' })).toBeInTheDocument();
     expect(screen.queryByText(/识别到 0 道题/)).toBeNull();
   });
@@ -266,17 +344,16 @@ describe('SolvePage 状态机', () => {
   it('识别出 0 道题 → 手动输入：选题页是录入的那一道，不是「识别到 0 道题」', async () => {
     recognizeMock.mockResolvedValueOnce({ candidates: [], figures: [] });
     renderPage();
+    await addImageOnly();
 
-    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
-      target: { value: '手写题干' },
-    });
     fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
     fireEvent.click(await screen.findByRole('button', { name: '手动输入题目' }));
 
     // 空的识别结果必须被清掉：否则第一个选题分支按 candidates.length=0 渲染空列表
     expect(await screen.findByText('识别到 1 道题')).toBeInTheDocument();
     expect(screen.queryByText(/识别到 0 道题/)).toBeNull();
-    expect(screen.getByText('手写题干')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('stem-render'));
+    fireEvent.change(screen.getByLabelText('题干'), { target: { value: '手写题干' } });
     expect(screen.getByRole('button', { name: '开始作答' })).toBeEnabled();
 
     fireEvent.click(screen.getByRole('button', { name: '开始作答' }));
@@ -284,12 +361,7 @@ describe('SolvePage 状态机', () => {
   });
 
   it('选题页「返回重新上传」真的回到录入页（不被识别结果弹回）', async () => {
-    renderPage();
-    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
-      target: { value: '求 1+1' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
-    await screen.findByText('识别到 1 道题');
+    await goToSelectViaImage();
 
     fireEvent.click(screen.getByRole('button', { name: '返回重新上传' }));
     // 冲掉 effect：若 reset 漏了，自动进选题的 effect 会在这里把页面弹回
@@ -297,7 +369,7 @@ describe('SolvePage 状态机', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByPlaceholderText('输入题目，或拖入图片')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('输入题目文字直接作答；只放图片则自动识别')).toBeInTheDocument();
     expect(screen.queryByText(/识别到 1 道题/)).toBeNull();
   });
 
@@ -323,8 +395,7 @@ describe('SolvePage 状态机', () => {
   });
 
   it('答疑：先建 aux_freeform 会话再发首问，并切到 AI tab', async () => {
-    renderPage();
-    await goToAnswerStage();
+    await goToAnswerStageViaImage();
 
     fireEvent.click(screen.getByRole('button', { name: '答疑' }));
 
@@ -338,39 +409,46 @@ describe('SolvePage 状态机', () => {
     const [body] = tutorStreamMock.mock.calls[0];
     expect(body.dialogueId).toBe('7');
     expect(body.message).toContain('这题怎么做');
+    // 学科随请求下发（决定用哪个学科模块模板）；学习档案由服务端从 DB 取
+    expect(body.subjectId).toBe(1);
+    expect(body).not.toHaveProperty('learningProfile');
 
     // tab 条出现且默认落在 AI 态
     expect(await screen.findByRole('button', { name: 'AI 答疑' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/输入问题或粘贴/)).toBeInTheDocument();
   });
 
-  it('答疑首问的气泡展示上传的题图（source.imageUrls 透传）', async () => {
+  it('答疑只发学生原话：不加「我的尝试是」模板、不附原题照片', async () => {
     renderPage();
-    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
-      target: { value: '求 1+1' },
-    });
-    fireEvent.change(screen.getByTestId('source-file-input'), {
-      target: { files: [new File(['x'], 'q.jpg', { type: 'image/jpeg' })] },
-    });
-    await waitFor(() => expect(screen.getAllByTestId('source-thumb')).toHaveLength(1));
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '开始识题' })).not.toBeDisabled(),
-    );
-    fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
-    await screen.findByText('识别到 1 道题');
-    fireEvent.click(screen.getByRole('button', { name: '开始作答' }));
-    await screen.findByLabelText('作答输入');
+    await goToAnswerStage();
 
+    fireEvent.change(screen.getByLabelText('作答输入'), { target: { value: '我不会' } });
     fireEvent.click(screen.getByRole('button', { name: '答疑' }));
+
     await waitFor(() => expect(tutorStreamMock).toHaveBeenCalledTimes(1));
+    const [body] = tutorStreamMock.mock.calls[0];
+    expect(body.message).toBe('我不会');
+    expect(body.attachments).toBeUndefined();
+    expect(body.subjectId).toBe(1);
+    expect(body).not.toHaveProperty('learningProfile');
 
     const userMsg = useChatStore.getState().messages.find((m) => m.role === 'user');
-    expect(userMsg?.images).toEqual(['/uploads/draft.jpg']);
+    expect(userMsg?.content).toBe('我不会');
+    expect(userMsg?.images).toBeUndefined();
+  });
+
+  it('答疑未写作答时发一句最短的默认提问', async () => {
+    renderPage();
+    await goToAnswerStage();
+
+    fireEvent.click(screen.getByRole('button', { name: '答疑' }));
+
+    await waitFor(() => expect(tutorStreamMock).toHaveBeenCalledTimes(1));
+    expect(tutorStreamMock.mock.calls[0][0].message).toBe('这题怎么做？');
   });
 
   it('提交：带 dialogueId / questionContent / figureUrls / answer；再次提交带 questionId', async () => {
-    renderPage();
-    await goToAnswerStage();
+    await goToAnswerStageViaImage();
 
     fireEvent.change(screen.getByLabelText('作答输入'), { target: { value: '答案是 2' } });
     fireEvent.click(screen.getByRole('button', { name: '提交' }));
@@ -386,9 +464,14 @@ describe('SolvePage 状态机', () => {
       answer: '答案是 2',
     });
     expect(first.questionId).toBeUndefined();
+    // 判题不再附原题照片：题干（含勾选配图）已是识别后的结果
+    expect(first.questionImages).toBeUndefined();
+    const judgeUserMsg = useChatStore.getState().messages.find((m) => m.role === 'user');
+    expect(judgeUserMsg?.images).toBeUndefined();
 
-    // 回到作答 tab，编辑器内容保留
-    fireEvent.click(screen.getByRole('button', { name: '作答' }));
+    // 提交后留在作答 tab 看结果卡（不自动跳聊天），「再答一次」才回到编辑器
+    expect(await screen.findByText('部分正确')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '再答一次' }));
     const editor = (await screen.findByLabelText('作答输入')) as HTMLTextAreaElement;
     expect(editor.value).toBe('答案是 2');
 
@@ -396,6 +479,52 @@ describe('SolvePage 状态机', () => {
     await waitFor(() => expect(judgeStreamMock).toHaveBeenCalledTimes(2));
     expect(judgeStreamMock.mock.calls[1][0].questionId).toBe(42);
     expect(judgeStreamMock.mock.calls[1][0].dialogueId).toBe('7');
+  });
+
+  it('提交结果卡：直接给结论、我的答案与正确答案（不跳聊天）', async () => {
+    judgeStreamMock.mockReset();
+    judgeStreamMock.mockImplementation(async function* () {
+      yield { type: 'start', dialogueId: '7', questionId: null };
+      yield { type: 'content', delta: '## 判题结果\n\n**得分：8 / 10**' };
+      yield {
+        type: 'result',
+        questionId: 42,
+        totalScore: 8,
+        maxScore: 10,
+        verdict: 'partial',
+        correctAnswer: '$x=1$',
+      };
+    });
+    renderPage();
+    await goToAnswerStage();
+
+    fireEvent.change(screen.getByLabelText('作答输入'), { target: { value: '我的答案是 2' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    expect(await screen.findByText('部分正确')).toBeInTheDocument();
+    expect(screen.getByText('得分 8 / 10')).toBeInTheDocument();
+    expect(screen.getByText('我的答案')).toBeInTheDocument();
+    // 结果卡与（隐藏的）聊天区各有一份，取全部确认至少渲染了一处
+    expect(screen.getAllByText('我的答案是 2').length).toBeGreaterThan(0);
+    expect(screen.getByText('正确答案')).toBeInTheDocument();
+    expect(screen.getByText('完整判题报告')).toBeInTheDocument();
+    // 判题不抢聊天：tab 条也未出现
+    expect(screen.queryByRole('button', { name: 'AI 答疑' })).toBeNull();
+  });
+
+  it('提交后点答疑才进聊天，且不把学生答案原样重发', async () => {
+    renderPage();
+    await goToAnswerStage();
+    fireEvent.change(screen.getByLabelText('作答输入'), { target: { value: '我的答案是 2' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+    expect(await screen.findByText('部分正确')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '答疑' }));
+
+    await waitFor(() => expect(tutorStreamMock).toHaveBeenCalledTimes(1));
+    expect(tutorStreamMock.mock.calls[0][0].message).not.toBe('我的答案是 2');
+    expect(tutorStreamMock.mock.calls[0][0].message).toContain('没太懂');
+    expect(await screen.findByRole('button', { name: 'AI 答疑' })).toBeInTheDocument();
   });
 
   it('草稿展开但内容为空时不判题，并提示', async () => {
@@ -430,21 +559,21 @@ describe('SolvePage 状态机', () => {
     expect(judgeStreamMock.mock.calls[0][0].answer).toBe('');
   });
 
-  it('切 tab 不卸载作答页：草稿面板是同一个 DOM 节点（编辑/笔迹不丢）', async () => {
+  it('点【答疑】自动收起草稿（AI 屏整宽），回作答页草稿仍是收起态', async () => {
     renderPage();
     await goToAnswerStage();
     fireEvent.click(screen.getByRole('button', { name: '草稿' }));
+    expect(await screen.findByRole('dialog', { name: '草稿' })).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('button', { name: '答疑' }));
 
-    // 默认落在 AI tab（作答页隐藏但仍在树上）
+    // 答疑要整屏看对话：草稿面板收起且不显示（也不占右栏宽度）
+    expect(screen.queryByRole('dialog', { name: '草稿' })).toBeNull();
+
     fireEvent.click(await screen.findByRole('button', { name: '作答' }));
-    const before = document.querySelector('[role="dialog"][aria-label="草稿"]');
-    expect(before).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: 'AI 答疑' }));
-    fireEvent.click(screen.getByRole('button', { name: '作答' }));
-
-    expect(document.querySelector('[role="dialog"][aria-label="草稿"]')).toBe(before);
+    expect(screen.queryByRole('dialog', { name: '草稿' })).toBeNull();
+    // 回到作答页后入口图标还在，可以再展开（笔迹由白板 store 保留）
+    expect(screen.getByRole('button', { name: '草稿' })).toBeInTheDocument();
   });
 
   it('收起草稿面板会取消「附上草稿」；空答案提交回到首条提示', async () => {
@@ -472,14 +601,10 @@ describe('SolvePage 状态机', () => {
   });
 
   it('题干在选题页修正后进入作答，判题用修正后的 questionContent', async () => {
-    renderPage();
-    fireEvent.change(screen.getByPlaceholderText('输入题目，或拖入图片'), {
-      target: { value: '求 1+1' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: '开始识题' }));
-    await screen.findByText('识别到 1 道题');
+    await goToSelectViaImage();
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑题干' }));
+    // 题干就地编辑：点题干（渲染态）→ 变源码框，改完直接点「开始作答」
+    fireEvent.click(screen.getByTestId('stem-render'));
     fireEvent.change(screen.getByLabelText('题干'), {
       target: { value: '选题页改过的题干' },
     });
@@ -582,5 +707,76 @@ describe('SolvePage 状态机', () => {
 
     expect(seenSignal?.aborted).toBe(true);
     expect(useChatStore.getState().isStreaming).toBe(false);
+  });
+});
+
+describe('SolvePage · 重练模式（2026-11-10）', () => {
+  it('?redo=1 + 合法队列：直接进作答，不走识别，页头显示题号', async () => {
+    saveRedoQueue(REDO_QUEUE);
+    renderPageAt('/student/solve?redo=1');
+
+    expect(await screen.findByRole('heading', { name: '错题重练' })).toBeInTheDocument();
+    expect(screen.getByText('第 1/2 题')).toBeInTheDocument();
+    expect(await screen.findByLabelText('作答输入')).toBeInTheDocument();
+    expect(recognizeMock).not.toHaveBeenCalled();
+    // 学科/满分锁定（来自 fullScore）
+    expect(screen.getByLabelText('学科')).toBeDisabled();
+    expect(screen.getByLabelText('满分')).toBeDisabled();
+    expect(screen.getByLabelText('满分')).toHaveValue(10);
+  });
+
+  it('提交带 questionId / 题干 / 满分；下一题清空并换到第 2 题', async () => {
+    saveRedoQueue(REDO_QUEUE);
+    renderPageAt('/student/solve?redo=1');
+    await screen.findByLabelText('作答输入');
+
+    fireEvent.change(screen.getByLabelText('作答输入'), { target: { value: 'x=1' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => expect(judgeStreamMock).toHaveBeenCalledTimes(1));
+    expect(judgeStreamMock.mock.calls[0][0]).toMatchObject({
+      questionId: 7091,
+      questionContent: REDO_QUEUE.items[0].questionText,
+      subjectId: 1,
+      maxScore: 10,
+      answer: 'x=1',
+    });
+
+    expect(await screen.findByText('部分正确')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一题' }));
+
+    expect(await screen.findByText('第 2/2 题')).toBeInTheDocument();
+    expect(screen.getByText(/第二题/)).toBeInTheDocument();
+    expect((screen.getByLabelText('作答输入') as HTMLTextAreaElement).value).toBe('');
+    // 第 2 题 fullScore=null → 满分按 10
+    expect(screen.getByLabelText('满分')).toHaveValue(10);
+    // 判题状态与消息已清（不会带着上一题的结果）
+    expect(useChatStore.getState().messages).toEqual([]);
+    expect(screen.queryByText('部分正确')).toBeNull();
+  });
+
+  it('最后一题结果卡显示「返回错题本」，点击清队列', async () => {
+    saveRedoQueue({ ...REDO_QUEUE, index: 1 });
+    renderPageAt('/student/solve?redo=1');
+    await screen.findByLabelText('作答输入');
+
+    expect(screen.getByText('第 2/2 题')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('作答输入'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+    expect(await screen.findByText('部分正确')).toBeInTheDocument();
+
+    // 页头也有「返回错题本」，结果卡的是最后一个
+    const backs = screen.getAllByRole('button', { name: '返回错题本' });
+    fireEvent.click(backs[backs.length - 1]);
+    expect(sessionStorage.getItem(FREEFORM_REDO_KEY)).toBeNull();
+  });
+
+  it('队列失效：toast 并回错题本（不停在空作答页）', async () => {
+    const { toast } = await import('@/components/base/Toast');
+    renderPageAt('/student/solve?redo=1');
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith('error', '重练题单已失效，请回错题本重新选择'),
+    );
   });
 });

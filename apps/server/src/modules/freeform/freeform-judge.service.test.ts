@@ -153,6 +153,8 @@ describe('FreeformJudgeService —— 落库口径', () => {
       totalScore: 7,
       maxScore: 10,
       verdict: 'partial',
+      // 结果卡要直接显示「正确答案」，不能只给分数让学生去报告里找
+      correctAnswer: 'x=1',
       errorBookId: 22,
     });
     expect(events.at(-1)).toEqual({ type: 'done' });
@@ -712,6 +714,38 @@ describe('FreeformJudgeService —— 图片解析', () => {
       collect(svc.judgeStream({ ...baseDto(), figureUrls: ['/uploads/freeform/x/gone.jpg'] }, 9)),
     ).rejects.toMatchObject({ response: { code: 1001 } });
     expect(deps.capability.stream).not.toHaveBeenCalled();
+  });
+
+  it('重练（questionId + source=freeform）配图无权 → 跳过不报错，有权的照常送模型', async () => {
+    const deps = mkDeps({
+      capability: { stream: streamOnce(REPORT_WITH_JSON(10, 10)), extractStructured: vi.fn() },
+      files: {
+        findByIdAndOwner: vi.fn(),
+        findByUrlAndOwner: vi.fn().mockImplementation(async (url: string) => {
+          if (url === '/uploads/freeform/x/mine.png') {
+            return { url, mime_type: 'image/png', size_bytes: 10 };
+          }
+          return null;
+        }),
+      },
+    });
+    const svc = mkService(deps);
+
+    await collect(
+      svc.judgeStream(
+        {
+          ...baseDto(),
+          questionId: 5,
+          figureUrls: ['/uploads/freeform/x/mine.png', '/uploads/freeform/x/other.png'],
+        },
+        9,
+      ),
+    );
+
+    const images = deps.capability.stream.mock.calls[0][0].images;
+    expect(images.map((i: any) => i.url)).toEqual(['/uploads/freeform/x/mine.png']);
+    // 无权图没有被读盘
+    expect(fsMock.readFile).toHaveBeenCalledTimes(1);
   });
 
   it('figureUrls 不是 /uploads/freeform/ 前缀 → 400/1001，不查库不读文件', async () => {

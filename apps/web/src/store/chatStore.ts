@@ -11,6 +11,9 @@ export interface ChatMessage {
   id?: number;
   role: 'user' | 'assistant';
   content: string;
+  /**
+   * 消息来源标记（预留）。目前所有消息都是真实收发内容。
+   */
   type?: string;
   images?: string[];
   reasoning?: string;

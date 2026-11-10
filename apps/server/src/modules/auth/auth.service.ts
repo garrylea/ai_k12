@@ -1,7 +1,8 @@
 import { Injectable, UnauthorizedException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { StudentsRepository } from '../../database/repositories/students.repo.js';
+import { StudentsRepository, type Student } from '../../database/repositories/students.repo.js';
+import { advanceGradeOnLogin } from '../../common/utils/grade.js';
 import { AdminsRepository } from '../../database/repositories/admins.repo.js';
 import { ParentsRepository } from '../../database/repositories/parents.repo.js';
 import { SubscriptionsService } from '../billing/subscriptions.service.js';
@@ -59,6 +60,8 @@ export class AuthService {
     if (student) {
       this.assertActive(student.isActive);
       await this.assertPassword(password, student.passwordHash);
+      // 每次登录校准年级/年龄（跨 9/1 升学、满 12 个月加岁）。写库失败不阻断登录。
+      const grade = await this.syncStudentGrade(student);
       const seq = await this.bumpSession('student', student.id);
       return {
         token: this.jwtService.sign({
@@ -73,7 +76,8 @@ export class AuthService {
           role: 'student' as const,
           name: student.name,
           username: student.username,
-          grade: student.grade,
+          // 同一次登录就返回校准后的年级，避免前端拿到旧值
+          grade,
           parentId: student.parentId,
         },
       };
@@ -102,6 +106,38 @@ export class AuthService {
       token: this.jwtService.sign({ sub: parentId, role: 'parent' as const, seq }),
       user: { id: parentId, role: 'parent' as const, name: dto.name ?? null, phone: dto.phone },
     };
+  }
+
+  /**
+   * 登录时的年级/年龄校准：跨过 9 月 1 日就升一级（封顶高三），满 12 个月年龄 +1。
+   * 只有真的变了才写库并刷新 `grade_updated_at`；**任何异常都只 warn**——
+   * 档案同步失败不该让学生登不进来。
+   */
+  private async syncStudentGrade(student: Student): Promise<string> {
+    const baseline = student.gradeUpdatedAt ?? student.createdAt;
+    if (!student.grade || !baseline) return student.grade ?? '';
+    try {
+      const result = advanceGradeOnLogin({
+        gradeLabel: student.grade,
+        schoolLevel: student.schoolLevel ?? '',
+        age: student.age ?? 0,
+        baselineAt: new Date(baseline),
+        now: new Date(),
+      });
+      if (result.changed) {
+        await this.studentsRepo.syncGrade(student.id, {
+          grade: result.gradeLabel,
+          schoolLevel: result.schoolLevel,
+          age: result.age,
+        });
+      }
+      return result.gradeLabel;
+    } catch (err) {
+      this.logger.warn(
+        `[grade-sync] 学生 ${student.id} 年级校准失败，登录继续：${err instanceof Error ? err.message : err}`,
+      );
+      return student.grade;
+    }
   }
 
   private assertActive(isActive: boolean) {

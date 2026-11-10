@@ -74,6 +74,12 @@ describe('ModelRouter', () => {
     expect(r.fallback).toBeUndefined();
   });
 
+  it('freeform_tutor 与判题同模型（千问）、无 fallback', () => {
+    const r = new ModelRouter().route({ scene: 'freeform_tutor', subject: 'math' });
+    expect(r.primary.modelId).toBe('qwen3.8-max');
+    expect(r.fallback).toBeUndefined();
+  });
+
   it('route() 给 primary/fallback 打 scene/subject/modelKey；fallback 额外带 isFallbackEntry', () => {
     const result = new ModelRouter().route({ scene: 'judgment', subject: 'math' });
     expect(result.primary.scene).toBe('judgment');

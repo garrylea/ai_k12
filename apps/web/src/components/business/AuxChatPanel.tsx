@@ -3,6 +3,7 @@ import { useChatStore, type ChatError } from '@/store/chatStore';
 import ReactMarkdown from 'react-markdown';
 import { ImageLightbox } from '@/components/base';
 import {
+  preprocessMarkdown,
   markdownRemarkPlugins,
   markdownRehypePlugins,
   MarkdownImg,
@@ -144,9 +145,11 @@ function deriveStageTitle(reasoning: string): string {
   return title;
 }
 
-// Markdown + LaTeX (KaTeX) rendering for assistant replies. math via $...$ / $$...$$.
+// Markdown + LaTeX (KaTeX) + HTML + SVG rendering for assistant replies.
+// preprocessMarkdown 负责 `\[…\]`→`$$…$$`、svg 围栏解包、残缺标签修补——
+// 否则模型用标准 LaTeX 定界符或 ```svg 包图时，聊天区会原样显示源码。
 const Markdown = ({ children }: { children: string }) => {
-  const display = stripTrailingJson(children);
+  const display = preprocessMarkdown(stripTrailingJson(children));
   return (
     <div className="chat-prose break-words">
     <ReactMarkdown
@@ -262,7 +265,7 @@ export default function AuxChatPanel({ isLoadingHistory = false, onRetry, onDele
   }, [messages]);
 
   return (
-    <div className="flex-1 overflow-auto p-6 space-y-4">
+    <div className="flex-1 min-h-0 overflow-auto p-6 space-y-4">
       {isLoadingHistory && messages.length === 0 ? (
         <div className="flex h-full items-center justify-center text-sm text-[#86868B]">
           加载中...

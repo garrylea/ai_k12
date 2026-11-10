@@ -2,6 +2,11 @@ import { useCallback, useRef } from 'react';
 import { createConversation, streamTutorEvents, type AttachmentRequest } from '@/services/api';
 import { useChatStore } from '@/store/chatStore';
 
+/** 做题页专有：学科（决定用哪个学科模块模板）。空值不写键。 */
+export interface FreeformTutorOptions {
+  subjectId?: number;
+}
+
 /**
  * 自由作答页的「问 AI」答疑（`POST /api/ai/tutor/stream`），scene = `aux_freeform`。
  *
@@ -31,6 +36,7 @@ export function useFreeformTutor() {
       text: string,
       attachments?: AttachmentRequest[],
       images?: string[],
+      opts?: FreeformTutorOptions,
     ) => {
       if (!text.trim() && !attachments?.length) return;
 
@@ -51,6 +57,9 @@ export function useFreeformTutor() {
             // 纯图片提问也要给后端一句非空 message（AIService 拒空）
             message: text.trim() || '帮我看一下这道题',
             attachments,
+            // 学习档案由服务端从 DB 取；前端只报学科。
+            // 只在有值时才写键：其它入口（辅线答疑）的请求体保持原样
+            ...(opts?.subjectId ? { subjectId: opts.subjectId } : {}),
           },
           ctrl.signal,
         )) {

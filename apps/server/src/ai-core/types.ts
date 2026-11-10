@@ -12,7 +12,7 @@ export function contentToText(content: string | ContentPart[]): string {
 
 // ========== Model Router Types (§3.1.2) ==========
 
-export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge' | 'chinese_meaning_judge' | 'handwriting' | 'freeform_split' | 'freeform_judge';
+export type Scene = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'safety' | 'structuring' | 'hint' | 'title' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge' | 'chinese_meaning_judge' | 'handwriting' | 'freeform_split' | 'freeform_judge' | 'freeform_tutor';
 /**
  * AI 路由学科档位。2026-11-01 起物理/化学/道法**各自成档**（此前共用 math）。
  * 生物/历史/地理仍无入口，由 `subjectCodeOf` 回落 math。
@@ -64,7 +64,7 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge' | 'chinese_meaning_judge' | 'freeform_split' | 'freeform_judge';
+export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge' | 'chinese_meaning_judge' | 'freeform_split' | 'freeform_judge' | 'freeform_tutor';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry' | 'solution';
 
@@ -457,6 +457,17 @@ export interface TutoringRequest {
                           // re-persisting the (already-stored) user message.
   forceFallback?: boolean; // 学生明确索要完整解析但题库查不到 -> 直接走 AI 兜底
                            // （完整解析），不再苏格拉底式追问。
+  /** 路由场景覆盖：做题入口的答疑固定走 `freeform_tutor`（千问），其余走 `tutoring`。 */
+  routeScene?: 'tutoring' | 'freeform_tutor';
+  /** 做题页学科（1=数学 4=物理 5=化学）：只用于选学科模块模板，不参与路由。 */
+  subjectId?: number;
+  /** 做题页学习档案：填进答疑提示词的年级/教材/已学内容/卡点。 */
+  learningProfile?: {
+    grade?: string;
+    textbook?: string;
+    learnedContent?: string;
+    stuckPoint?: string;
+  };
 }
 
 export interface Attachment {

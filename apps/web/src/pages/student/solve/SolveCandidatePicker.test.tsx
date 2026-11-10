@@ -103,15 +103,49 @@ describe('SolveCandidatePicker', () => {
     expect(payload.figureUrls).toEqual([]);
   });
 
+  it('点题干就地变源码框，点框外回到渲染并显示改后内容', () => {
+    renderPicker();
+    // 默认选中的是第一题：点它的题干即可编辑
+    fireEvent.click(screen.getAllByTestId('stem-render')[0]);
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(textarea.value).toBe(CANDIDATES[0].content);
+
+    fireEvent.change(textarea, { target: { value: '改后的 $x^2$ 题干' } });
+    fireEvent.blur(textarea);
+
+    // blur 后回到渲染态：源码框消失，渲染的是改后内容（KaTeX 生效），且不残留识别原文
+    expect(screen.queryByRole('textbox')).toBeNull();
+    const rendered = screen.getAllByTestId('stem-render')[0];
+    expect(rendered.textContent).toContain('改后的');
+    expect(rendered.textContent).not.toContain('题干一');
+    expect(rendered.querySelector('.katex'), '渲染态仍走 Markdown + KaTeX').not.toBeNull();
+  });
+
+  it('换题不进入编辑态（只有点选中卡的题干才编辑）', () => {
+    renderPicker();
+    fireEvent.click(screen.getByText('第 6 题'));
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getAllByTestId('stem-render')[1].textContent).toContain('题干二');
+  });
+
   it('编辑题干后可以恢复到识别结果', () => {
     renderPicker();
-    fireEvent.click(screen.getByRole('button', { name: '编辑题干' }));
-    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: '改过的题干' } });
-    expect(textarea.value).toBe('改过的题干');
+    fireEvent.click(screen.getAllByTestId('stem-render')[0]);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '改过的题干' } });
 
     fireEvent.click(screen.getByRole('button', { name: '恢复识别结果' }));
-    expect(textarea.value).toBe(CANDIDATES[0].content);
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(CANDIDATES[0].content);
+  });
+
+  it('题干清空后渲染态给占位提示，且「开始作答」不可点', () => {
+    renderPicker(CANDIDATES, []);
+    fireEvent.click(screen.getAllByTestId('stem-render')[0]);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '   ' } });
+    fireEvent.blur(screen.getByRole('textbox'));
+
+    expect(screen.getAllByTestId('stem-render')[0].textContent).toContain('题干为空');
+    expect((screen.getByRole('button', { name: '开始作答' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('题干为空或满分越界时不能提交', () => {
@@ -124,7 +158,7 @@ describe('SolveCandidatePicker', () => {
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '100' } });
     expect(submit.disabled).toBe(false);
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑题干' }));
+    fireEvent.click(screen.getAllByTestId('stem-render')[0]);
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '   ' } });
     // 只清文字不够：勾选的 a.jpg 会被补回题干，必须连配图一起取消才算空。
     fireEvent.click(screen.getByLabelText('a.jpg'));

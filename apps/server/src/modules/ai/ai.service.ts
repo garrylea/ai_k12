@@ -8,6 +8,8 @@ import {
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
 import { mapLLMErrorToClient } from '../../ai-core/infra/model-client/errors.js';
 import { fallbackConfig } from '../../ai-core/config.js';
+import { normalizeFreeFormSubjectId } from '../../ai-core/freeform.js';
+import { StudentScopeService, type StudentLearningScope } from './student-scope.service.js';
 import type { TutoringRequest, Attachment, StreamEvent, StructuredQuestionOutput } from '../../ai-core/types.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
 import { ConversationService } from '../../services/conversation/index.js';
@@ -35,6 +37,7 @@ export class AIService {
     private readonly subjectsRepo: SubjectsRepository,
     private readonly questionsRepo: QuestionsRepository,
     private readonly extractTasksRepo: ExtractTasksRepository,
+    private readonly studentScope: StudentScopeService,
   ) {}
 
   async tutor(dto: TutorDto, userId: number) {
@@ -42,12 +45,14 @@ export class AIService {
     const dialogueId = await this.resolveDialogue(dto, userId);
     // 做题入口的答疑/追问只答疑：不把模型顺带产出的结构化题写进题库与错题本
     // （追问不是练习，题库与错题本只收真正的提交判题）。
-    const isFreeform = await this.isFreeformDialogue(dialogueId);
+    const meta = await this.loadDialogueMeta(dialogueId);
+    const isFreeform = meta.isFreeform;
 
     // 辅线答疑：学生已来回 ≥N 轮且明确索要详细解析时——
     //   命中题库 -> 直接输出答案+思路+解析（不调模型）；
     //   题库查不到 -> 强制走 AI 完整解析兜底（不再苏格拉底追问）。
-    const resolved = await this.maybeStoredExplanation(dialogueId, userId, dto);
+    // 做题页不走这条路：那套文案不是教学法模板，会绕开「核心思路/详细过程/回顾」。
+    const resolved = isFreeform ? null : await this.maybeStoredExplanation(dialogueId, userId, dto);
     if (resolved?.kind === 'stored') {
       await this.persistStoredExplanation(dialogueId, dto, resolved.content);
       this.maybeUpdateTitle(dialogueId, userId, dto.message, resolved.content).catch(() => {});
@@ -68,7 +73,19 @@ export class AIService {
     // avoid creating duplicate rows in ai_messages.
 
     const attachments = await this.resolveAttachments(dto, userId);
-    const request = this.buildRequest(dto, userId, dialogueId, attachments, resolved?.kind === 'forceFallback');
+    const freeformSubjectId = isFreeform
+      ? normalizeFreeFormSubjectId(dto.subjectId) ?? meta.subjectId
+      : undefined;
+    const scope =
+      isFreeform && freeformSubjectId
+        ? await this.studentScope.resolve(userId, freeformSubjectId)
+        : undefined;
+    const request = this.buildRequest(
+      dto, userId, dialogueId, attachments, resolved?.kind === 'forceFallback',
+      isFreeform ? 'freeform_tutor' : 'tutoring',
+      freeformSubjectId,
+      scope,
+    );
 
     try {
       const response = await this.tutoring.tutor(request);
@@ -105,7 +122,10 @@ export class AIService {
     // 辅线答疑：命中「已满 N 轮 + 明确索要详细解析」时——
     //   题库命中 -> 直接输出题库内容（单条 content + done，不调模型）；
     //   查不到   -> forceFallback 走 AI 完整解析（不再苏格拉底追问）。
-    const resolved = await this.maybeStoredExplanation(dialogueId, userId, dto);
+    // 做题页跳过该快路径（理由同 tutor()）。
+    const meta = await this.loadDialogueMeta(dialogueId);
+    const isFreeform = meta.isFreeform;
+    const resolved = isFreeform ? null : await this.maybeStoredExplanation(dialogueId, userId, dto);
     if (resolved?.kind === 'stored') {
       await this.persistStoredExplanation(dialogueId, dto, resolved.content);
       yield { type: 'content', delta: resolved.content };
@@ -115,10 +135,22 @@ export class AIService {
     }
 
     const attachments = await this.resolveAttachments(dto, userId);
-    const request = this.buildRequest(dto, userId, dialogueId, attachments, resolved?.kind === 'forceFallback');
+    const freeformSubjectId = isFreeform
+      ? normalizeFreeFormSubjectId(dto.subjectId) ?? meta.subjectId
+      : undefined;
+    const scope =
+      isFreeform && freeformSubjectId
+        ? await this.studentScope.resolve(userId, freeformSubjectId)
+        : undefined;
+    const request = this.buildRequest(
+      dto, userId, dialogueId, attachments, resolved?.kind === 'forceFallback',
+      isFreeform ? 'freeform_tutor' : 'tutoring',
+      freeformSubjectId,
+      scope,
+    );
 
     try {
-      yield* this.tutorStage(dto, userId, request, signal);
+      yield* this.tutorStage(dto, userId, request, isFreeform, signal);
     } catch (err) {
       this.logger.error('tutorStream stage failed:', err instanceof Error ? err.stack ?? err.message : err);
       throw this.mapLLMError(err, dialogueId);
@@ -127,10 +159,15 @@ export class AIService {
 
   /** Socratic tutoring (multimodal qwen3.8-max when images are attached) - the
    *  existing streaming path. */
-  private async *tutorStage(dto: TutorDto, userId: number, request: TutoringRequest, signal?: AbortSignal): AsyncIterable<StreamEvent> {
+  private async *tutorStage(
+    dto: TutorDto,
+    userId: number,
+    request: TutoringRequest,
+    isFreeform: boolean,
+    signal?: AbortSignal,
+  ): AsyncIterable<StreamEvent> {
     const dialogueId = request.dialogueId!;
-    // 一次流里只查一次场景；做题入口的追问同样不写题库 / 错题本。
-    const isFreeform = await this.isFreeformDialogue(dialogueId);
+    // 场景已在入口查过一次（决定路由与是否入库），这里不再重复查库。
     let assistantContent = '';
     for await (const event of this.tutoring.tutorStream(request, signal)) {
       if (event.type === 'content') {
@@ -147,9 +184,12 @@ export class AIService {
   // ---------- shared helpers ----------
 
   /** 做题入口的会话（scene='aux_freeform'）：答疑/追问只答疑，不入题库、不入错题本。 */
-  private async isFreeformDialogue(dialogueId: string): Promise<boolean> {
+  private async loadDialogueMeta(dialogueId: string): Promise<{ isFreeform: boolean; subjectId?: number }> {
     const dialogue = await this.dialoguesRepo.findById(Number(dialogueId));
-    return dialogue?.scene === 'aux_freeform';
+    return {
+      isFreeform: dialogue?.scene === 'aux_freeform',
+      subjectId: normalizeFreeFormSubjectId(dialogue?.subject_id),
+    };
   }
 
   private validateDto(dto: TutorDto) {
@@ -304,9 +344,29 @@ export class AIService {
     return attachments;
   }
 
-  private buildRequest(dto: TutorDto, userId: number, dialogueId: string, attachments: Attachment[], forceFallback = false): TutoringRequest {
+  private buildRequest(
+    dto: TutorDto,
+    userId: number,
+    dialogueId: string,
+    attachments: Attachment[],
+    forceFallback = false,
+    routeScene: 'tutoring' | 'freeform_tutor' = 'tutoring',
+    subjectId?: number,
+    scope?: StudentLearningScope,
+  ): TutoringRequest {
+    const freeform = routeScene === 'freeform_tutor';
+    // 学习档案全部来自 DB（学生档案 + 学习配置 + 进度），前端不再上报
+    const learningProfile =
+      freeform && scope && (scope.gradeLabel || scope.textbookLabel || scope.learnedContent)
+        ? {
+            grade: scope.gradeLabel,
+            textbook: scope.textbookLabel,
+            learnedContent: scope.learnedContent,
+          }
+        : undefined;
     // studentId comes from the JWT (user.sub), not the dto.
     return {
+      routeScene,
       studentId: String(userId),
       mode: dto.mode,
       cardId: dto.cardId,
@@ -316,6 +376,8 @@ export class AIService {
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(dto.retry ? { retry: true } : {}),
       ...(forceFallback ? { forceFallback: true } : {}),
+      ...(freeform && subjectId ? { subjectId } : {}),
+      ...(learningProfile ? { learningProfile } : {}),
     };
   }
 

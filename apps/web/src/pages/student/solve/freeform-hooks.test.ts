@@ -9,7 +9,7 @@ import {
 import { useChatStore } from '@/store/chatStore';
 import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 import { useFreeformRecognize } from './useFreeformRecognize';
-import { useFreeformJudge } from './useFreeformJudge';
+import { JUDGE_INACTIVITY_MS, useFreeformJudge } from './useFreeformJudge';
 import { useFreeformTutor } from './useFreeformTutor';
 
 /**
@@ -120,12 +120,112 @@ describe('useFreeformRecognize', () => {
 describe('useFreeformJudge', () => {
   const body = { subjectId: 1, maxScore: 10, questionContent: '题', answer: '答' };
 
+  it('学生停止：标记 stopped、不报错、复位移流状态', async () => {
+    judgeStreamMock.mockImplementation(async function* (_b: unknown, signal?: AbortSignal) {
+      yield { type: 'start', dialogueId: '1', questionId: null };
+      await new Promise((_, reject) => {
+        const abort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        if (signal?.aborted) abort();
+        else signal?.addEventListener('abort', abort, { once: true });
+      });
+    });
+
+    const { result } = renderHook(() => useFreeformJudge());
+    await act(async () => {
+      const pending = result.current.submit(body);
+      await Promise.resolve();
+      result.current.stop();
+      await pending;
+    });
+
+    expect(result.current.stopped).toBe(true);
+    expect(result.current.submitting).toBe(false);
+    expect(useChatStore.getState().messages.at(-1)?.error).toBeUndefined();
+    expect(useChatStore.getState().isStreaming).toBe(false);
+  });
+
+  it('reset：清空 questionId/lastResult/消息，且不再复用旧 body', async () => {
+    judgeStreamMock.mockImplementation(async function* () {
+      yield { type: 'result', questionId: 7, totalScore: 7, maxScore: 10, verdict: 'partial', correctAnswer: 'x=1' };
+    });
+
+    const { result } = renderHook(() => useFreeformJudge());
+    await act(() => result.current.submit(body));
+    expect(result.current.lastResult).toBeTruthy();
+    expect(useChatStore.getState().messages.length).toBeGreaterThan(0);
+
+    act(() => result.current.reset());
+    expect(result.current.questionId).toBeNull();
+    expect(result.current.lastResult).toBeNull();
+    expect(result.current.submitting).toBe(false);
+    expect(result.current.stopped).toBe(false);
+    expect(useChatStore.getState().messages).toEqual([]);
+
+    // 旧 body 已清：retry 不会偷偷重发上一题
+    await act(() => result.current.retry());
+    expect(judgeStreamMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reset 在流中：中断旧流、不落错误、消息清空', async () => {
+    judgeStreamMock.mockImplementation(async function* (_b: unknown, signal?: AbortSignal) {
+      yield { type: 'reasoning', delta: '想' };
+      await new Promise((_, reject) => {
+        const abort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        if (signal?.aborted) abort();
+        else signal?.addEventListener('abort', abort, { once: true });
+      });
+    });
+
+    const { result } = renderHook(() => useFreeformJudge());
+    await act(async () => {
+      const pending = result.current.submit(body);
+      await Promise.resolve();
+      result.current.reset();
+      await pending;
+    });
+
+    expect(result.current.submitting).toBe(false);
+    expect(useChatStore.getState().messages).toEqual([]);
+    expect(useChatStore.getState().isStreaming).toBe(false);
+  });
+
+  it('判题流长时间没有任何事件 → 超时报错，不无限转圈', async () => {
+    vi.useFakeTimers();
+    try {
+      judgeStreamMock.mockImplementation(async function* (_b: unknown, signal?: AbortSignal) {
+        yield { type: 'start', dialogueId: '1', questionId: null };
+        await new Promise((_, reject) => {
+          signal?.addEventListener('abort', () =>
+            reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+          );
+        });
+      });
+
+      const { result } = renderHook(() => useFreeformJudge());
+      await act(async () => {
+        const pending = result.current.submit(body);
+        await vi.advanceTimersByTimeAsync(JUDGE_INACTIVITY_MS + 10);
+        await pending;
+      });
+
+      expect(useChatStore.getState().messages.at(-1)?.error).toMatchObject({
+        code: 1009,
+        stage: 'judge',
+        retryable: true,
+      });
+      expect(result.current.submitting).toBe(false);
+      expect(result.current.stopped).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('追加用户/助手消息，消费 reasoning/content/result 并记住 questionId', async () => {
     judgeStreamMock.mockImplementation(async function* () {
       yield { type: 'start', dialogueId: '1', questionId: null };
       yield { type: 'reasoning', delta: '想' };
       yield { type: 'content', delta: '报告' };
-      yield { type: 'result', questionId: 7, totalScore: 7, maxScore: 10, verdict: 'partial' };
+      yield { type: 'result', questionId: 7, totalScore: 7, maxScore: 10, verdict: 'partial', correctAnswer: 'x=1' };
       yield { type: 'done' };
     });
 
@@ -256,7 +356,7 @@ describe('useFreeformJudge', () => {
 
   it('重新判题时先清空上一轮的 questionId / lastResult', async () => {
     judgeStreamMock.mockImplementation(async function* () {
-      yield { type: 'result', questionId: 7, totalScore: 7, maxScore: 10, verdict: 'partial' };
+      yield { type: 'result', questionId: 7, totalScore: 7, maxScore: 10, verdict: 'partial', correctAnswer: 'x=1' };
       yield { type: 'done' };
     });
 
@@ -415,6 +515,20 @@ describe('useFreeformTutor', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(useAuxiliaryStore.getState().currentDialogueId).toBe(before.currentDialogueId);
     expect(useAuxiliaryStore.getState().conversations).toBe(before.conversations);
+  });
+
+  it('带学科时下发 subjectId（学习档案由服务端从 DB 取，前端不上报）', async () => {
+    tutorStreamMock.mockImplementation(async function* () {
+      yield { type: 'done' };
+    });
+
+    const { result } = renderHook(() => useFreeformTutor());
+    await act(() => result.current.send('42', '这题怎么做', undefined, undefined, { subjectId: 4 }));
+
+    expect(tutorStreamMock).toHaveBeenCalledWith(
+      { mode: 'auxiliary', dialogueId: '42', message: '这题怎么做', subjectId: 4 },
+      expect.any(AbortSignal),
+    );
   });
 
   it('纯图片提问时 message 兜底非空串，附件原样上行', async () => {

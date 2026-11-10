@@ -58,6 +58,7 @@ const ENTRY: TrainingErrorBookEntry = {
   questionId: 101,
   questionText: '1 + 1 = ?',
   type: 'choice',
+  fullScore: 10,
   level: 1,
   createdAt: '2026-09-01',
   kpIds: [],

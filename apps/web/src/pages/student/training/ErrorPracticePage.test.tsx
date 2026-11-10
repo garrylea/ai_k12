@@ -50,10 +50,11 @@ function renderAt(path: string) {
       { path: '/student/training/errors', element: <ErrorPracticePage /> },
       { path: '/student/training/errors/run', element: <div>错题练习作答页</div> },
       { path: '/student/training/variations/run', element: <div>变式作答页</div> },
+      { path: '/student/solve', element: <div>做题重练页</div> },
     ],
     { initialEntries: [path] },
   );
-  return render(<RouterProvider router={router} />);
+  return { router, ...render(<RouterProvider router={router} />) };
 }
 
 describe('ErrorPracticePage ?kpId= 预填', () => {
@@ -232,5 +233,87 @@ describe('ErrorPracticePage 变式入口（2026-10-11）', () => {
     // stopPropagation 的验证：点击是「入口按钮」自己处理的（checkbox 的 onChange 未被冒泡触发）。
     // 列表页已随导航卸载，无法再断言勾选态；勾选逻辑回归由「点击入口前未勾选」+ 条目 onChange
     // 只绑在 checkbox 上共同保证，这里钉住的是「点击入口能带着 errorBookId 进作答页」。
+  });
+});
+
+describe('ErrorPracticePage 做题错题重练入口（2026-11-10）', () => {
+  const FREE = {
+    errorBookId: 440,
+    questionId: 7091,
+    questionText: '已知 $x+1=2$',
+    type: 'short_answer',
+    fullScore: 10,
+    level: 1,
+    createdAt: '2026-11-10',
+    source: 'freeform',
+  };
+  const FREE_NULL_SCORE = {
+    ...FREE,
+    errorBookId: 441,
+    questionId: 7092,
+    questionText: '求 $1+1$',
+    fullScore: null,
+  };
+  const NORMAL = {
+    errorBookId: 1,
+    questionId: 1,
+    questionText: '普通题',
+    type: 'choice',
+    fullScore: 10,
+    level: 1,
+    createdAt: '2026-11-10',
+    source: 'practice',
+  };
+
+  it('单题「重练」写单题队列并进 ?redo=1', async () => {
+    const user = userEvent.setup();
+    getTrainingErrorBook.mockResolvedValue([NORMAL, FREE]);
+    const { router } = renderAt('/student/training/errors');
+
+    await user.click(await screen.findByTestId('redo-freeform-440'));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/solve'));
+    expect(router.state.location.search).toBe('?redo=1');
+    const queue = JSON.parse(sessionStorage.getItem('training:freeform-redo') ?? 'null');
+    expect(queue).toMatchObject({
+      subjectId: 1,
+      index: 0,
+      items: [{ errorBookId: 440, questionId: 7091, questionText: '已知 $x+1=2$', fullScore: 10 }],
+    });
+    expect(queue.items).toHaveLength(1);
+  });
+
+  it('批量「重练做题错题（N）」只收 freeform，且保留 fullScore=null', async () => {
+    const user = userEvent.setup();
+    getTrainingErrorBook.mockResolvedValue([NORMAL, FREE, FREE_NULL_SCORE]);
+    renderAt('/student/training/errors');
+
+    const batch = await screen.findByTestId('redo-all-freeform');
+    expect(batch).toHaveTextContent('重练做题错题（2）');
+    await user.click(batch);
+
+    const queue = JSON.parse(sessionStorage.getItem('training:freeform-redo') ?? 'null');
+    expect(queue.items.map((i: { errorBookId: number }) => i.errorBookId)).toEqual([440, 441]);
+    expect(queue.items[1].fullScore).toBeNull();
+  });
+
+  it('孤儿 freeform（questionId=null）不显示重练、不计入批量', async () => {
+    getTrainingErrorBook.mockResolvedValue([
+      { ...FREE, errorBookId: 442, questionId: null },
+    ]);
+    renderAt('/student/training/errors');
+
+    await screen.findByRole('checkbox');
+    expect(screen.queryByTestId('redo-freeform-442')).toBeNull();
+    expect(screen.queryByTestId('redo-all-freeform')).toBeNull();
+  });
+
+  it('普通错题不显示重练按钮', async () => {
+    getTrainingErrorBook.mockResolvedValue([NORMAL]);
+    renderAt('/student/training/errors');
+
+    expect(await screen.findByText('普通题')).toBeInTheDocument();
+    expect(screen.queryByTestId('redo-all-freeform')).toBeNull();
+    expect(screen.queryByText('重练')).toBeNull();
   });
 });

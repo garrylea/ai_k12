@@ -1,5 +1,5 @@
 /**
- * 做题入口（freeform）路由迁移：`freeform_split` / `freeform_judge` 两条 llm_routes。
+ * 做题入口（freeform）路由迁移：`freeform_split` / `freeform_judge` / `freeform_tutor` 三条 llm_routes。
  * 权威源是 tools/db/migrations/2026-11-08_freeform_routes.sql —— 本脚本只是它的等价镜像，
  * 供 CI / 管理端复用（不依赖 mysql 客户端）；改 SQL 时两边必须同步。
  * 幂等：路由走 ON DUPLICATE KEY UPDATE；索引先查 information_schema 再建。
@@ -18,6 +18,7 @@ dotenv.config({ path: join(__dirname, '../../.env') });
 const ROUTES = [
   { scene: 'freeform_split', primary: 'local', fallback: 'qwen3.8-max' },
   { scene: 'freeform_judge', primary: 'qwen3.8-max', fallback: null },
+  { scene: 'freeform_tutor', primary: 'qwen3.8-max', fallback: null },
 ] as const;
 
 async function main() {
@@ -36,7 +37,8 @@ async function main() {
       `INSERT INTO llm_routes (scene, subject, primary_model_key, fallback_model_key)
        VALUES
          ('freeform_split', '*', 'local', 'qwen3.8-max'),
-         ('freeform_judge', '*', 'qwen3.8-max', NULL) AS new
+         ('freeform_judge', '*', 'qwen3.8-max', NULL),
+         ('freeform_tutor', '*', 'qwen3.8-max', NULL) AS new
        ON DUPLICATE KEY UPDATE
          primary_model_key = new.primary_model_key,
          fallback_model_key = new.fallback_model_key`,

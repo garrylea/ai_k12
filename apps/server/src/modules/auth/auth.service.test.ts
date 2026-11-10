@@ -224,3 +224,98 @@ describe('AuthService.resetPassword', () => {
     expect(d.jwtService.sign).not.toHaveBeenCalled(); // 不失效/不新发 token
   });
 });
+
+describe('AuthService.login 年级/年龄自动校准', () => {
+  const baseStudent = {
+    ...student,
+    gradeUpdatedAt: new Date(2026, 2, 1), // 3/1
+    createdAt: new Date(2026, 2, 1),
+  };
+
+  it('跨过 9/1 → 登录写回新年级，且返回的 user.grade 是升后的值', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 2)); // 9/2
+    try {
+      const d = mkDeps({
+        studentsRepo: {
+          findByUsername: vi.fn().mockResolvedValue(baseStudent),
+          syncGrade: vi.fn().mockResolvedValue(undefined),
+        },
+      });
+      const r = await mkSvc(d).login('xiaoming', 'pw');
+
+      expect((d.studentsRepo as any).syncGrade).toHaveBeenCalledWith(7, {
+        grade: '初三',
+        schoolLevel: 'junior',
+        age: 13,
+      });
+      expect(r.user.grade).toBe('初三');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('没跨 9/1 也没满一年 → 不写库', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 30)); // 8/30
+    try {
+      const d = mkDeps({
+        studentsRepo: {
+          findByUsername: vi.fn().mockResolvedValue(baseStudent),
+          syncGrade: vi.fn().mockResolvedValue(undefined),
+        },
+      });
+      const r = await mkSvc(d).login('xiaoming', 'pw');
+      expect((d.studentsRepo as any).syncGrade).not.toHaveBeenCalled();
+      expect(r.user.grade).toBe('初二');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('校准写库失败不阻断登录（仍签发 token）', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 2));
+    try {
+      const d = mkDeps({
+        studentsRepo: {
+          findByUsername: vi.fn().mockResolvedValue(baseStudent),
+          syncGrade: vi.fn().mockRejectedValue(new Error('db down')),
+        },
+      });
+      const r = await mkSvc(d).login('xiaoming', 'pw');
+      expect(r.token).toBe('fake-token');
+      // 写库失败：库里仍是旧值，本次按库里的值返回（不清空登录，也不谎报新年级）
+      expect(r.user.grade).toBe('初二');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('历史写法「三年级」收敛成标准标签，并按跨过的 9/1 正常升级', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2027, 3, 1)); // 2027-04-01，距基线（2026-03-01）跨 1 个 9/1、满 1 年
+    try {
+      const d = mkDeps({
+        studentsRepo: {
+          findByUsername: vi.fn().mockResolvedValue({
+            ...baseStudent,
+            grade: '三年级',
+            schoolLevel: 'primary',
+            age: 9,
+          }),
+          syncGrade: vi.fn().mockResolvedValue(undefined),
+        },
+      });
+      const r = await mkSvc(d).login('xiaoming', 'pw');
+      expect((d.studentsRepo as any).syncGrade).toHaveBeenCalledWith(7, {
+        grade: '小学四年级',
+        schoolLevel: 'primary',
+        age: 10,
+      });
+      expect(r.user.grade).toBe('小学四年级');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

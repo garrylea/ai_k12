@@ -18,6 +18,8 @@ export interface ErrorBookEntryDto {
   questionId: number | null;
   questionText: string;
   type: string | null;
+  /** questions.full_score；做题错题重练时作为满分（null 时前端按 10）。 */
+  fullScore: number | null;
   level: number;
   createdAt: string;
   kpIds: number[];

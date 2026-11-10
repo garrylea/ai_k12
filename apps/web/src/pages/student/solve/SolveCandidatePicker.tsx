@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ImageLightbox } from '@/components/base';
 import {
@@ -13,7 +13,9 @@ import type { FreeformCandidate, FreeformFigure } from '@/services/api';
  * 状态 B · 选题（spec §8.4）。
  *
  * - 默认选中第一道题；配图默认预选该题的 `figureUrls`，可多选；
- * - 切题把题干 / 配图 / 学科一起重置为该题的建议值；
+ * - 题干是**可编辑字段**：点选中卡片里的题干 → 就地变 Markdown/LaTeX 源码框（自动聚焦），
+ *   点框外（blur）或按 Esc → 回到渲染态；渲染的就是「开始作答」交给判题的内容；
+ * - 切题把题干 / 配图 / 学科一起重置为该题的建议值（并退出编辑态）；
  * - 确认时按「勾选结果」重整题干 Markdown：未勾选的图连 Markdown 一起删掉，
  *   勾选但题干里没有的图追加到末尾；figureUrls 按配图展示顺序返回；
  *   该结果同时决定「开始作答」是否可点（空则禁用），避免按钮与提交内容错位；
@@ -43,16 +45,28 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
   const selected = candidates.find((c) => c.id === selectedId) ?? candidates[0];
   const [checked, setChecked] = useState<Set<string>>(new Set(selected?.figureUrls ?? []));
   const [content, setContent] = useState(selected?.content ?? '');
-  const [editing, setEditing] = useState(false);
+  // 就地编辑：点题干框进入源码编辑，点框外（blur）回到渲染。只对「当前选中」的题生效，
+  // 点别的卡片 = 换题（渲染态），避免换题时被动进入编辑。
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const stemRef = useRef<HTMLTextAreaElement | null>(null);
   const [subjectId, setSubjectId] = useState(subjectIdOf(selected?.suggestedSubject));
   const [maxScore, setMaxScore] = useState(10);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+
+  // 进入编辑后自动聚焦并把光标放到末尾：学生点题干就是要改字，不该再点一次。
+  useEffect(() => {
+    const el = stemRef.current;
+    if (!editingId || !el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [editingId]);
 
   const pick = (c: FreeformCandidate) => {
     setSelectedId(c.id);
     setChecked(new Set(c.figureUrls));
     setContent(c.content);
     setSubjectId(subjectIdOf(c.suggestedSubject));
+    setEditingId(null);
   };
 
   // 提交内容与 disabled 判定必须同源：只看原始 content 会漏掉「唯一内容是未勾选的图」。
@@ -76,35 +90,98 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
     <div className="w-full max-w-4xl">
       <h2 className="text-xl font-bold mb-4">识别到 {candidates.length} 道题</h2>
       <div className="grid gap-3">
-        {candidates.map((c) => (
-          <label
-            key={c.id}
-            className={`rounded-xl border p-3 cursor-pointer ${
-              c.id === selectedId
-                ? 'border-[#FF6B00] bg-[var(--brand-100)]'
-                : 'border-[#E5E5E5]'
-            }`}
-          >
-            <input
-              type="radio"
-              checked={c.id === selectedId}
-              onChange={() => pick(c)}
-              className="sr-only"
-            />
-            <div className="font-medium mb-1">第 {c.no || '?'} 题</div>
-            {/* 题干按 Markdown + LaTeX 渲染（与全站同一套 renderer）：MinerU 识别出的
-                $...$ / \[...\] 直接显示原文会看不清；配图另在下方的「配图（多选）」里选。 */}
-            <div className="md-prose text-sm text-[var(--text-primary)] max-h-48 overflow-y-auto">
-              <ReactMarkdown
-                remarkPlugins={markdownRemarkPluginsWithBreaks}
-                rehypePlugins={markdownRehypePlugins}
-                components={markdownComponents}
-              >
-                {preprocessMarkdown(stripMdImages(c.content))}
-              </ReactMarkdown>
+        {candidates.map((c) => {
+          const isSelected = c.id === selectedId;
+          const isEditing = editingId === c.id;
+          const shown = isSelected ? content : c.content;
+          return (
+            <div
+              key={c.id}
+              role="radio"
+              aria-checked={isSelected}
+              tabIndex={0}
+              onClick={() => (isSelected ? setEditingId(c.id) : pick(c))}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                if (isSelected) setEditingId(c.id);
+                else pick(c);
+              }}
+              className={`group rounded-xl border p-3 ${
+                isSelected ? 'border-[#FF6B00] bg-[var(--brand-100)]' : 'border-[#E5E5E5] cursor-pointer'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <div className="font-medium">第 {c.no || '?'} 题</div>
+                {/* 可点即改的提示：只在选中卡片上、悬停时出现一支笔，不占常驻空间 */}
+                {isSelected && !isEditing && (
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="w-4 h-4 text-[var(--brand-500)] opacity-0 group-hover:opacity-100 transition"
+                  >
+                    <path d="M4 20h4l10-10a2.83 2.83 0 10-4-4L4 16v4z" />
+                  </svg>
+                )}
+              </div>
+
+              {/* 题干 = 可编辑字段：点它变 Markdown/LaTeX 源码框，点框外 blur 回渲染。
+                  MinerU 的 $...$ / \[...\] 直接显示原文看不清，所以渲染态走全站同一套 renderer；
+                  配图另在下方的「配图（多选）」里选。 */}
+              {isEditing ? (
+                <div onClick={(e) => e.stopPropagation()}>
+                  <textarea
+                    ref={stemRef}
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    onBlur={() => setEditingId(null)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') e.currentTarget.blur();
+                    }}
+                    rows={8}
+                    aria-label="题干"
+                    className="w-full max-h-48 min-h-[7rem] resize-y rounded-lg border border-[#FF6B00] bg-white p-3 text-sm font-mono outline-none"
+                  />
+                  <div className="mt-1 flex justify-end">
+                    {/* onMouseDown 阻止默认：点「恢复」时别先 blur 回渲染态，否则按钮点了个空 */}
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setContent(selected?.content ?? '')}
+                      className="text-xs underline text-[#86868B]"
+                    >
+                      恢复识别结果
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  data-testid="stem-render"
+                  className={`md-prose text-sm text-[var(--text-primary)] max-h-48 overflow-y-auto ${
+                    isSelected ? 'cursor-text' : ''
+                  }`}
+                >
+                  {shown.trim() ? (
+                    <ReactMarkdown
+                      remarkPlugins={markdownRemarkPluginsWithBreaks}
+                      rehypePlugins={markdownRehypePlugins}
+                      components={markdownComponents}
+                    >
+                      {preprocessMarkdown(stripMdImages(shown))}
+                    </ReactMarkdown>
+                  ) : (
+                    <span className="text-[#86868B]">题干为空，点击填写</span>
+                  )}
+                </div>
+              )}
             </div>
-          </label>
-        ))}
+          );
+        })}
       </div>
 
       {figures.length > 0 && (
@@ -180,33 +257,7 @@ export function SolveCandidatePicker({ candidates, figures, onBack, onConfirm }:
             className="ml-2 w-20 h-9 rounded-lg border border-[#E5E5E5] px-2"
           />
         </label>
-        <button
-          type="button"
-          onClick={() => setEditing((v) => !v)}
-          className="h-9 px-3 rounded-lg border border-[#E5E5E5] text-sm"
-        >
-          {editing ? '完成编辑' : '编辑题干'}
-        </button>
       </div>
-
-      {editing && (
-        <div className="mt-3">
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={6}
-            aria-label="题干"
-            className="w-full rounded-lg border border-[#E5E5E5] p-3 text-sm font-mono"
-          />
-          <button
-            type="button"
-            onClick={() => setContent(selected?.content ?? '')}
-            className="mt-1 text-xs underline text-[#86868B]"
-          >
-            恢复识别结果
-          </button>
-        </div>
-      )}
 
       <div className="mt-5 flex justify-between">
         <button

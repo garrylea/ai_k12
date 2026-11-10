@@ -2,6 +2,9 @@ import { useCallback, useRef, useState } from 'react';
 import { streamFreeformJudge, type FreeformJudgeBody, type FreeformJudgeEvent } from '@/services/api';
 import { useChatStore } from '@/store/chatStore';
 
+/** 判题流多久没有任何事件就判定为「卡死」（后端模型空闲超时是 10s，这里只兜底真挂起）。 */
+export const JUDGE_INACTIVITY_MS = 120_000;
+
 /** 判题成功事件，页面用它的分数/判定渲染报告头。 */
 export type FreeformJudgeResult = Extract<FreeformJudgeEvent, { type: 'result' }>;
 
@@ -18,9 +21,13 @@ export type FreeformJudgeResult = Extract<FreeformJudgeEvent, { type: 'result' }
  */
 export function useFreeformJudge() {
   const [submitting, setSubmitting] = useState(false);
+  // 学生主动停止：与「失败」分开——不算错误，但也不能把界面打回编辑器装没事发生
+  const [stopped, setStopped] = useState(false);
   const [questionId, setQuestionId] = useState<number | null>(null);
   const [lastResult, setLastResult] = useState<FreeformJudgeResult | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timedOutRef = useRef(false);
   // 重试用的原始上行 body：与 display 分开存，重试不能再触发一次上传/用户气泡
   const lastBodyRef = useRef<FreeformJudgeBody | null>(null);
 
@@ -30,8 +37,20 @@ export function useFreeformJudge() {
     abortRef.current = ctrl;
     useChatStore.getState().setIsStreaming(true);
     setSubmitting(true);
+    setStopped(false);
+    timedOutRef.current = false;
+    // 每收到一条事件就续命：模型思考再久也没事，只有「完全没有数据」才算卡死
+    const armWatchdog = () => {
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
+      watchdogRef.current = setTimeout(() => {
+        timedOutRef.current = true;
+        ctrl.abort();
+      }, JUDGE_INACTIVITY_MS);
+    };
+    armWatchdog();
     try {
       for await (const event of streamFreeformJudge(body, ctrl.signal)) {
+        armWatchdog();
         if (event.type === 'reasoning') {
           useChatStore.getState().appendLastAssistant({ reasoning: event.delta });
         } else if (event.type === 'content') {
@@ -51,8 +70,18 @@ export function useFreeformJudge() {
         // start / done 不改 UI：流结束在 finally 里复位
       }
     } catch (err) {
-      // 学生主动点停止（AbortError）保留已流出的判题过程，不算错误
-      if (!(err instanceof Error && err.name === 'AbortError')) {
+      // 学生主动点停止（AbortError）保留已流出的判题过程，不算错误；
+      // 但静默超时导致的 abort 必须报错，否则页面会无限转圈。
+      if (err instanceof Error && err.name === 'AbortError') {
+        if (timedOutRef.current) {
+          useChatStore.getState().setLastAssistantError({
+            code: 1009,
+            message: 'AI 响应超时，请重试',
+            retryable: true,
+            stage: 'judge',
+          });
+        }
+      } else {
         useChatStore.getState().setLastAssistantError({
           code: 1012,
           message: '网络连接失败，请重试',
@@ -61,6 +90,10 @@ export function useFreeformJudge() {
         });
       }
     } finally {
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
       useChatStore.getState().setIsStreaming(false);
       setSubmitting(false);
       if (abortRef.current === ctrl) abortRef.current = null;
@@ -106,8 +139,27 @@ export function useFreeformJudge() {
   }, [runStream]);
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
+    if (!abortRef.current) return;
+    setStopped(true);
+    abortRef.current.abort();
   }, []);
 
-  return { submitting, questionId, lastResult, submit, retry, stop };
+  /** 换题（做题错题重练）用：中断旧流、清空判题状态与消息，不复用上一条 body。 */
+  const reset = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+    timedOutRef.current = false;
+    lastBodyRef.current = null;
+    setSubmitting(false);
+    setStopped(false);
+    setQuestionId(null);
+    setLastResult(null);
+    useChatStore.getState().reset();
+  }, []);
+
+  return { submitting, stopped, questionId, lastResult, submit, retry, stop, reset };
 }

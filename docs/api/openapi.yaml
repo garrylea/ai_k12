@@ -1731,7 +1731,7 @@ paths:
         - `data: {"type":"start","dialogueId":"123","questionId":null}`
         - `data: {"type":"reasoning","delta":"..."}`
         - `data: {"type":"content","delta":"..."}` / `{"type":"content","delta":"...","replace":true}`
-        - `data: {"type":"result","questionId":456,"totalScore":7,"maxScore":10,"verdict":"partial","errorBookId":789}`
+        - `data: {"type":"result","questionId":456,"totalScore":7,"maxScore":10,"verdict":"partial","correctAnswer":"x=1","errorBookId":789}`
         - `data: {"type":"error","code":5502,"message":"判题失败，请重试","retryable":true}`
         - `data: {"type":"done"}`
 
@@ -1762,7 +1762,7 @@ paths:
                   - `data: {"type":"start","dialogueId":"123","questionId":null}`
                   - `data: {"type":"reasoning","delta":"..."}`
                   - `data: {"type":"content","delta":"..."}`（`replace:true` = 整段替换）
-                  - `data: {"type":"result","questionId":456,"totalScore":7,"maxScore":10,"verdict":"partial","errorBookId":789}`
+                  - `data: {"type":"result","questionId":456,"totalScore":7,"maxScore":10,"verdict":"partial","correctAnswer":"x=1","errorBookId":789}`
                   - `data: {"type":"error","code":5502,"message":"...","retryable":true}`
                   - `data: {"type":"done"}`
 
@@ -2532,6 +2532,30 @@ paths:
       responses:
         '200':
           description: 重置成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /parent/students/{studentId}:
+    patch:
+      tags: [Parent]
+      summary: 编辑学生档案（姓名/年龄/年级；家长端是唯一手工入口）
+      operationId: updateStudentProfile
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStudentProfileRequest'
+      responses:
+        '200':
+          description: 更新成功，返回脱敏后的最新档案（school_level 由年级推导）
           content:
             application/json:
               schema:
@@ -8301,6 +8325,20 @@ components:
           maxLength: 32
       required: [newPassword]
 
+    UpdateStudentProfileRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          maxLength: 50
+        age:
+          type: integer
+          minimum: 3
+          maximum: 18
+        grade:
+          type: string
+          description: 年级中文标签（初一…高三 / 小学一年级…六年级）；后端推导 school_level
     SetStudentStatusRequest:
       type: object
       properties:
@@ -9056,6 +9094,12 @@ components:
                 description: PDF 提取任务 ID（type=file 且为 PDF 时传入）
         dialogueId:
           type: string
+        subjectId:
+          type: integer
+          enum: [1, 4, 5]
+          description: >-
+            仅做题页（scene=aux_freeform）使用：1=数学 4=物理 5=化学，决定答疑用哪个
+            学科模块模板；缺省时取会话 ai_dialogues.subject_id，再缺省按数学。
       required: [studentId, mode, message]
 
     TutorResponse:
@@ -10680,6 +10724,10 @@ components:
           type: string
           nullable: true
           description: 题型（questions.type；题目未入库为 null）
+        fullScore:
+          type: integer
+          nullable: true
+          description: questions.full_score（做题错题重练时作为满分；null 时前端按 10）
         level:
           type: integer
           description: 错题严重程度（重做仍错递增）

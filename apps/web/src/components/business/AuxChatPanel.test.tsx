@@ -71,3 +71,45 @@ describe('AuxChatPanel：Markdown 用户消息（自由答疑）', () => {
     expect(container.querySelector('.katex')).toBeNull();
   });
 });
+
+describe('AuxChatPanel：富文本渲染契约', () => {
+  it('标准 LaTeX 定界符、内联 SVG、HTML 表格都能渲染', () => {
+    const svg =
+      '<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="currentColor" fill="none" /></svg>';
+    useChatStore.setState({
+      messages: [
+        {
+          role: 'assistant',
+          content: `面积 \\[ S=\\pi r^2 \\]\n\n${svg}\n\n<table><tbody><tr><td>甲</td><td>乙</td></tr></tbody></table>`,
+        },
+      ],
+      isStreaming: false,
+    });
+
+    const { container } = render(<AuxChatPanel />);
+
+    // \[…\] 被归一为 $$…$$ 后由 KaTeX 出块级公式
+    expect(container.querySelector('.katex-display')).toBeTruthy();
+    // 原生 <svg> 不能被转义成文本
+    expect(container.querySelector('svg circle')).toBeTruthy();
+    // HTML 表格照常渲染
+    expect(container.querySelector('table td')?.textContent).toBe('甲');
+  });
+
+  it('```svg 围栏会解包成真实 SVG，而不是代码块', () => {
+    useChatStore.setState({
+      messages: [
+        {
+          role: 'assistant',
+          content: '```svg\n<svg viewBox="0 0 10 10"><rect width="10" height="10" /></svg>\n```',
+        },
+      ],
+      isStreaming: false,
+    });
+
+    const { container } = render(<AuxChatPanel />);
+
+    expect(container.querySelector('svg rect')).toBeTruthy();
+    expect(container.querySelector('pre code')).toBeNull();
+  });
+});

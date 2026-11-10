@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS students (
   age SMALLINT NOT NULL,
   grade VARCHAR(20) NOT NULL,
   school_level VARCHAR(10) NOT NULL,
+  grade_updated_at DATETIME(3) DEFAULT NULL COMMENT '上次年级/年龄校准时间；NULL 时按 created_at 兜底',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   avatar_url VARCHAR(500) DEFAULT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),

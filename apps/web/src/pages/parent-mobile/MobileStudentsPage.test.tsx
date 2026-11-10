@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import MobileStudentsPage from './MobileStudentsPage';
@@ -16,8 +16,9 @@ vi.mock('@/services/api', () => ({
   createStudent: vi.fn(),
   resetStudentPassword: vi.fn(),
   setStudentStatus: vi.fn(),
+  updateStudent: vi.fn(),
 }));
-import { createStudent, listMyStudents, resetStudentPassword, setStudentStatus } from '@/services/api';
+import { createStudent, listMyStudents, resetStudentPassword, setStudentStatus, updateStudent } from '@/services/api';
 
 const students = [
   { id: 1, parentId: 9, username: 'stu1', name: '小明', age: 10, grade: '四年级', schoolLevel: 'primary', isActive: true },
@@ -139,5 +140,34 @@ describe('MobileStudentsPage', () => {
     await userEvent.click(screen.getByTestId('student-status-toggle-1'));
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(setStudentStatus).toHaveBeenCalledWith(1, true));
+  });
+});
+
+describe('MobileStudentsPage · 编辑孩子资料', () => {
+  it('改年级/年龄后保存：调 updateStudent 并刷新列表', async () => {
+    vi.mocked(listMyStudents).mockResolvedValue(students as never);
+    vi.mocked(updateStudent).mockResolvedValue({ ...students[0], age: 13, grade: '初二' } as never);
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('student-edit-toggle-1'));
+    fireEvent.change(screen.getByLabelText('年龄'), { target: { value: '13' } });
+    fireEvent.change(screen.getByLabelText('年级'), { target: { value: '初二' } });
+    fireEvent.click(screen.getByTestId('student-edit-submit-1'));
+
+    await waitFor(() =>
+      expect(updateStudent).toHaveBeenCalledWith(1, { name: '小明', age: 13, grade: '初二' }),
+    );
+  });
+
+  it('年龄越界不发请求', async () => {
+    vi.mocked(listMyStudents).mockResolvedValue(students as never);
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('student-edit-toggle-1'));
+    fireEvent.change(screen.getByLabelText('年龄'), { target: { value: '30' } });
+    fireEvent.click(screen.getByTestId('student-edit-submit-1'));
+
+    expect(await screen.findByText('年龄需为 3-18 的整数')).toBeTruthy();
+    expect(updateStudent).not.toHaveBeenCalled();
   });
 });
