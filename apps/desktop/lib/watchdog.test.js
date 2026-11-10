@@ -93,6 +93,28 @@ describe('watchdog', () => {
     expect(after).toBe(before);
   });
 
+  it('只有脚本内容变了（plist 不变）→ 重写脚本并 bootout+bootstrap 让新内容生效', () => {
+    const scriptPath = path.join(home, 'Library', 'Application Support', 'k12-desktop', WATCHDOG_SCRIPT_NAME);
+    const plistPath = path.join(home, 'Library', 'LaunchAgents', `${WATCHDOG_LABEL}.plist`);
+    // 第一次安装：print 报错 = 未加载 → bootstrap。
+    install({ run: (file, args) => { calls.push([file, ...args]); throw new Error('not loaded'); } });
+    // 模拟升级前的旧脚本仍在磁盘上：plist 是 execPath 的纯函数，内容没变。
+    fs.writeFileSync(scriptPath, '#!/bin/sh\n# old\n');
+
+    calls = [];
+    const res = install(); // runOk：print 成功 = 已加载
+
+    expect(res.installed).toBe(true);
+    expect(res.bootstrapped).toBe(true);
+    // 运行中的 /bin/sh 仍执行旧内容，必须 bootout 让 launchd 用新脚本重启。
+    expect(calls).toEqual([
+      ['launchctl', 'print', `gui/501/${WATCHDOG_LABEL}`],
+      ['launchctl', 'bootout', `gui/501/${WATCHDOG_LABEL}`],
+      ['launchctl', 'bootstrap', 'gui/501', plistPath],
+    ]);
+    expect(fs.readFileSync(scriptPath, 'utf8')).toBe(buildWatchdogScript());
+  });
+
   it('App 路径变了 → 重写 plist，先 bootout 再 bootstrap', () => {
     install({ run: (file, args) => { calls.push([file, ...args]); throw new Error('not loaded'); } });
     calls = [];

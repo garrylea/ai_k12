@@ -134,7 +134,10 @@ function installWatchdog({ platform, execPath, homeDir, uid, log = () => {}, run
     loaded = false;
   }
 
-  if (plistChanged && loaded) {
+  // 脚本内容变了也必须重载：正在运行的 /bin/sh 已把旧脚本读进内存，只重写文件它不会重读，
+  // 且 plist 是 execPath 的纯函数、升级时通常不变 —— 只看 plistChanged 会漏掉这种最常见的情况。
+  const dirty = changed || plistChanged;
+  if (dirty && loaded) {
     try {
       run('launchctl', ['bootout', `gui/${resolvedUid}/${WATCHDOG_LABEL}`]);
     } catch {
@@ -152,7 +155,14 @@ function installWatchdog({ platform, execPath, homeDir, uid, log = () => {}, run
   } catch (err) {
     log(`[guard] watchdog-bootstrap-error err=${err && err.message}`);
     // 文件已落地：下次登录 RunAtLoad 仍会拉起；只是本次运行期没有保活。
-    return { installed: true, scriptPath, plistPath, bootstrapped: false };
+    // 写明这次重写过文件（或首次写入），不能复述成 'unchanged'。
+    return {
+      installed: true,
+      reason: dirty ? 'updated' : 'bootstrap-failed',
+      scriptPath,
+      plistPath,
+      bootstrapped: false,
+    };
   }
 }
 
