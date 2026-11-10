@@ -825,6 +825,8 @@ Expected: FAIL —— `render-process-gone` 不存在。
   // 而"窗口还在、kiosk 还在"会骗过看门狗。首次崩溃就地 reload；60 秒内再来一次
   // 说明这个页面/进程起不来，直接重建窗口（重建后由 ready-to-show 重新进 kiosk）。
   win.webContents.on('render-process-gone', (_event, details) => {
+    // 正常关闭/kill 也会触发，别把它当崩溃去"复活"窗口。
+    if (details && details.reason === 'clean-exit') return;
     const now = Date.now();
     const repeated = now - rendererCrashAt < 60_000;
     rendererCrashAt = now;
@@ -832,12 +834,14 @@ Expected: FAIL —— `render-process-gone` 不存在。
       `[guard] render-process-gone reason=${details && details.reason} repeated=${repeated}`,
     );
     try {
+      if (!win || win.isDestroyed()) return;
       if (repeated) {
         const old = win;
-        win = null;
+        // 不要先把 win 置 null：`closed` 处理器会按窗口身份判断（见下面的 `thisWindow`），
+        // 由它负责收尾，否则会漏掉 stopRetry / kioskGuard.stop。
         old.destroy(); // destroy 绕过 close 拦截（拦截是给学生的，不是给恢复逻辑的）
         createWindow();
-      } else if (win && !win.isDestroyed()) {
+      } else {
         win.webContents.reload();
       }
     } catch (err) {
@@ -851,6 +855,27 @@ Expected: FAIL —— `render-process-gone` 不存在。
       `[guard] child-process-gone type=${details && details.type} reason=${details && details.reason}`,
     );
   });
+```
+
+**同时必须给 `closed` 处理器加窗口身份判断**（否则重建窗口时，旧窗口的 `closed` 会把新窗口的模块级
+`win` 置 null，守护从此找不到窗口）：
+
+```js
+  win.on('closed', () => {
+    // 恢复逻辑会 destroy 旧窗口再建新的；旧窗口的 closed 晚到一步时，
+    // 不能把 `win` 里已经装好的新窗口抹掉。
+    if (win !== thisWindow) return;
+    stopRetry();
+    kioskGuard.stop();
+    keyboardHook.setEnabled(false);
+    win = null;
+  });
+```
+
+并在 `createWindow()` 里、创建窗口之后立刻捕获引用：
+
+```js
+  const thisWindow = win;
 ```
 
 在 `main.js` 模块级（`let appWasInactive = false;` 下方）加：
