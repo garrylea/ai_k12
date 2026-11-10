@@ -54,6 +54,12 @@ export default function StudentStayLayout() {
   // 两页互跳时把来源原样带过去，否则切一次 tab 来源就丢了
   const carriedReturnState = buildStayReturnState(back.to, back.state);
 
+  // 三个 tab 是兄弟路由，路由会复用本外壳；用 key 强制 reveal 重挂，切 tab 才重新显示 3 秒。
+  // 详情页归到 practice-history 这一段：列表 → 详情不重挂，避免学生看记录时被闪一下（spec §2.2）。
+  const staySection = location.pathname.startsWith('/student/practice-history')
+    ? '/student/practice-history'
+    : location.pathname;
+
   return (
     <div
       data-theme="student-day"
@@ -63,10 +69,11 @@ export default function StudentStayLayout() {
       {/* 剩余时长浮层：锁定态由上层 `LearningSessionShell` 经 context 下发，
           没有上下文 / 未锁定时它自己渲染 null。三个 tab 是**兄弟路由**，React Router
           在它们之间导航时会**复用**本外壳（同位置、同类型，不会重挂），所以必须用
-          `key={location.pathname}` 强制 reveal 重挂 —— 否则它的 `visible` 状态跨 tab
-          存活，3 秒自动显示只在第一次进入浅停留区时出现一次。浮层全是 `fixed`，
-          DOM 顺序不影响绘制。 */}
-      <LockedPillReveal key={location.pathname} />
+          `key={staySection}` 强制 reveal 重挂 —— 否则它的 `visible` 状态跨 tab
+          存活，3 秒自动显示只在第一次进入浅停留区时出现一次。key 只精确到 tab 段、
+          不是完整 pathname：练习记录列表 → 详情不重挂，详情页进入时不自动弹
+          （spec §2.2，避免学生看记录时被闪一下）。浮层全是 `fixed`，DOM 顺序不影响绘制。 */}
+      <LockedPillReveal key={staySection} />
       {/* 顶部全局栏：学生端统一 token，但无日夜切换 */}
       {/* 三栏网格：左右各 1fr、中间胶囊 auto —— 左「返回」删除后胶囊仍停在原来的正中间，
           不能退回 justify-between（那会让胶囊左移，2026-11-06 用户指出）。 */}

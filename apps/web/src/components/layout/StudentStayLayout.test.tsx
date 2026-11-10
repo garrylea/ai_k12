@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { createMemoryRouter, Link, RouterProvider } from 'react-router-dom';
 import StudentStayLayout from './StudentStayLayout';
 import { buildStayReturnState, STAY_FALLBACK_PATH } from '@/utils/stayReturn';
 import { LearningLockContext } from '@/kiosk/learningLockContext';
@@ -130,7 +130,11 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
  * 按层级「列表→个人中心、详情→列表」；但那是给左侧「返回」定的。左侧按钮删除后，
  * 唯一出口「退出本页」的语义是「从哪进回哪」—— 三个 tab 同权，练习记录也回最初来源。
  */
-function renderPracticeHistory(initialPath: string, state?: unknown) {
+function renderPracticeHistory(
+  initialPath: string,
+  state?: unknown,
+  lock: { locked: boolean; remainingMs: number } | null = null,
+) {
   const router = createMemoryRouter(
     [
       { path: '/student/star-map', element: <div>知识星图</div> },
@@ -144,14 +148,26 @@ function renderPracticeHistory(initialPath: string, state?: unknown) {
         path: '/student/practice-history',
         element: <StudentStayLayout />,
         children: [
-          { index: true, element: <div>练习记录列表</div> },
+          {
+            index: true,
+            element: (
+              <div>
+                练习记录列表
+                <Link to="/student/practice-history/exam/44">第 1 条记录</Link>
+              </div>
+            ),
+          },
           { path: ':source/:sessionId', element: <div>练习详情内容</div> },
         ],
       },
     ],
     { initialEntries: [{ pathname: initialPath, state }] },
   );
-  render(<RouterProvider router={router} />);
+  render(
+    <LearningLockContext.Provider value={lock}>
+      <RouterProvider router={router} />
+    </LearningLockContext.Provider>,
+  );
   return router;
 }
 
@@ -239,5 +255,32 @@ describe('StudentStayLayout 切 tab 重新触发剩余时长显示', () => {
     // 先确认真的切页了，否则下一条断言证明不了「切 tab 重新显示」
     expect(router.state.location.pathname).toBe('/student/rewards');
     expect(screen.getByTestId('locked-pill')).toHaveAttribute('data-visible', 'true');
+  });
+});
+
+/**
+ * 详情页边界（spec §2.2 第 76 行）：「练习记录详情页进入时不自动弹，避免学生正在看记录时
+ * 被闪一下」。列表 → 详情属于**同一 tab 段内**导航，reveal 不得因 pathname 变化而重挂。
+ *
+ * 用完整 pathname 作 key 时这条会挂：点进详情 key 变化 → reveal 重挂 → 立刻又显示 3 秒。
+ * 所以 key 必须是「所属主 tab 段」而不是完整 pathname。
+ */
+describe('StudentStayLayout 练习记录详情页不自动弹剩余时长', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('列表进入显示 3 秒收起，点进详情后不再自动显示', () => {
+    const router = renderPracticeHistory(
+      '/student/practice-history',
+      undefined,
+      { locked: true, remainingMs: 30 * 60_000 },
+    );
+
+    act(() => { vi.advanceTimersByTime(3000); });
+    expect(screen.getByTestId('locked-pill')).toHaveAttribute('data-visible', 'false');
+
+    act(() => { fireEvent.click(screen.getByRole('link', { name: '第 1 条记录' })); });
+    expect(router.state.location.pathname).toBe('/student/practice-history/exam/44');
+    expect(screen.getByTestId('locked-pill')).toHaveAttribute('data-visible', 'false');
   });
 });
