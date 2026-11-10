@@ -220,6 +220,11 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
 - **看护是用户级**：学生 `launchctl bootout gui/$(id -u)/com.local.sysmon` 仍能摘掉。它挡的是
   Siri / 活动监视器顺手关，不承诺「绝对关不掉」；要那一步得 root 级 `LaunchDaemon` 或受监督设备
   Single App Mode（未立项）。名字与产品无关只是降低被注意的概率，`launchctl list` / 活动监视器可见。
+- **被看护拉起的 App 必须自己抢前台（2026-11-10 实测）**：launchd/`nohup` 启动是「后台启动」，
+  macOS 不会自动激活，窗口会停在别的应用后面、`setKiosk(true)` 也不生效 —— 日志表现为
+  `appActive=false fullscreen=false`、窗口 1440x900@240,90，守护每秒重进一次永远进不去。
+  `main.js` 因此在 `ready-to-show` 里 `win.show() + app.focus({steal:true})`，
+  且 `applyStudentMode(true)` 里**先激活再 `setKiosk`**（顺序不能反）。
 - 单实例锁 `app.requestSingleInstanceLock()` 是看护的配套：没有它，「看护拉起 + 用户双击」会双开；
   第二实例还必须跳过 `markCleanExit`，否则会删掉正在运行实例的 `running.flag`。
 - `lib/exit-audit.js` 用 `running.flag` 判「上次是否非正常结束」，只在 `kiosk-guard.log` 记一行

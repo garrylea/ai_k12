@@ -266,6 +266,15 @@ function createWindow() {
   // 本次创建的窗口。`closed` 处理器靠它区分「旧窗口晚到的 closed」与「当前窗口」。
   const thisWindow = win;
 
+  // 窗口就绪后主动激活：看护/launchd 拉起的进程是「后台启动」，macOS 不会自己把它带到前台，
+  // 于是窗口停在别的应用后面、kiosk 也进不去（2026-11-10 用户实测：日志里 appActive=false、
+  // fullscreen=false，守护每秒重试）。这里统一抢一次前台，家长模式下也保证窗口可见。
+  win.once('ready-to-show', () => {
+    if (!win || win.isDestroyed()) return;
+    win.show();
+    app.focus({ steal: true });
+  });
+
   // 「偏向多锁」：上次是学生模式就一开机就进 kiosk，不等渲染层（spec §4.3、§6-7）。
   // 在首页真正显示出来之前应用，避免「先普通窗口、再全屏」的可见闪动。
   if (studentMode) {
@@ -524,6 +533,14 @@ function applyStudentMode(on) {
   if (!win || win.isDestroyed()) {
     kioskGuard.stop();
     return;
+  }
+  // ⚠️ 顺序：**先激活再加 kiosk**。被看护/launchd 拉起时 App 是后台启动，
+  // 未激活的窗口调 setKiosk 不会生效（表现为窗口 1440x900 停在屏幕中间、
+  // fullscreen 恒为 false，守护每秒重进一次）。
+  if (studentMode) {
+    if (!win.isVisible()) win.show();
+    app.focus({ steal: true });
+    win.focus();
   }
   win.setKiosk(studentMode);
   win.setClosable(!studentMode);
