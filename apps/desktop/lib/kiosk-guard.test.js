@@ -341,4 +341,59 @@ describe('createKioskGuard', () => {
     expect(logs.some((line) => line.includes('reenter-error reason=boom'))).toBe(true);
     expect(logs.some((line) => line.includes('native window gone'))).toBe(true);
   });
+
+  // 2026-11-10：锁屏 / 显示器休眠时被看护拉起，AppKit 的全屏过渡永远完不成。
+  // 旧行为是每秒重排一次恢复，窗口永远停在过渡态（页面加载了但全白）。
+  it('连续抢不到全屏 → 退出卡住的过渡、退避，不再每秒重试', () => {
+    const { guard, calls, state, logs, win } = createHarness({ initial: { fullscreen: false } });
+    // 模拟「无论怎么调，窗口都进不了全屏」（锁屏时的真实表现）。
+    win.setKiosk = (on) => {
+      calls.push(`setKiosk:${on}`);
+      state.kiosk = on;
+    };
+    win.setFullScreen = (on) => {
+      calls.push(`setFullScreen:${on}`);
+      state.fullscreen = false;
+    };
+
+    for (let i = 0; i < 3; i += 1) {
+      guard.schedule('watchdog');
+      vi.advanceTimersByTime(2000); // 调度 300 + 轮询 100 + 进入动画 1200
+    }
+
+    expect(logs.some((line) => line.includes('fullscreen-unavailable'))).toBe(true);
+    // 退避动作：保证窗口处在「能显示」的普通窗口（抬到最前；不可见时补 show）
+    expect(calls).toContain('moveTop');
+
+    const before = calls.length;
+    guard.schedule('watchdog');
+    guard.scheduleReassert('did-become-active');
+    guard.restore('blur');
+    vi.advanceTimersByTime(5000);
+    expect(calls.length).toBe(before); // 退避期内不再动窗口
+  });
+
+  it('解锁 → notifyUnlocked 立刻清掉退避并重进', () => {
+    const { guard, calls, state, win } = createHarness({ initial: { fullscreen: false } });
+    win.setKiosk = (on) => {
+      calls.push(`setKiosk:${on}`);
+      state.kiosk = on;
+    };
+    win.setFullScreen = (on) => {
+      calls.push(`setFullScreen:${on}`);
+      state.fullscreen = false;
+    };
+
+    for (let i = 0; i < 3; i += 1) {
+      guard.schedule('watchdog');
+      vi.advanceTimersByTime(2000);
+    }
+    const beforeRetry = calls.length;
+    guard.notifyUnlocked('unlock-screen');
+
+    // 环境变了：解锁后必须立即可用（不能等 30 秒退避到期）
+    vi.advanceTimersByTime(3000);
+    expect(calls.length).toBeGreaterThan(beforeRetry);
+    expect(calls.slice(beforeRetry).some((c) => c.startsWith('setKiosk'))).toBe(true);
+  });
 });

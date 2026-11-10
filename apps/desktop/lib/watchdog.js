@@ -201,4 +201,51 @@ function installWatchdog({ platform, execPath, homeDir, uid, log = () => {}, run
   }
 }
 
-module.exports = { WATCHDOG_LABEL, WATCHDOG_SCRIPT_NAME, buildWatchdogScript, buildWatchdogPlist, installWatchdog };
+/**
+ * 卸载看护（2026-11-10，用户裁决「先关掉看护，等有签名再开」）。
+ *
+ * **为什么必须卸载而不只是不装**：看护一旦装过就常驻 launchd（`KeepAlive`），
+ * 只停止安装新的是拔不掉的。而它现在会**害学生** ——
+ * macOS 27 的「本地网络」权限按**责任进程**归属：终端拉起的 App 记在终端名下（已被授权），
+ * launchd 拉起的记在 App 自己名下。包没签名 → 授权按 cdhash 记、每次重打包就作废 →
+ * 看护拉起后 App 连不上 `192.168.1.5:5173`，Chromium 报 `-109 (ERR_ADDRESS_UNREACHABLE)`
+ * （2026-11-10 在第二台 Mac 上 A/B 实测：同二进制、同分钟，终端=200 / launchd=-109）。
+ *
+ * 幂等：没装过、`launchctl` 报错、文件不存在都算成功。绝不抛错、绝不阻断启动。
+ */
+function removeWatchdog({ platform, homeDir, uid, log = () => {}, run = defaultRun }) {
+  if (platform !== 'darwin') return { removed: false, reason: 'platform' };
+  const resolvedUid =
+    typeof uid === 'number' ? uid : typeof process.getuid === 'function' ? process.getuid() : null;
+  if (resolvedUid === null) return { removed: false, reason: 'uid' };
+
+  const scriptPath = path.join(homeDir, 'Library', 'Application Support', APP_SUPPORT_DIR, WATCHDOG_SCRIPT_NAME);
+  const plistPath = path.join(homeDir, 'Library', 'LaunchAgents', `${WATCHDOG_LABEL}.plist`);
+
+  try {
+    run('launchctl', ['bootout', `gui/${resolvedUid}/${WATCHDOG_LABEL}`]);
+  } catch {
+    // 没加载 / 已经 bootout 过 —— 都是正常路径。
+  }
+
+  let touched = false;
+  for (const file of [plistPath, scriptPath]) {
+    try {
+      fs.unlinkSync(file);
+      touched = true;
+    } catch {
+      // ENOENT：本来就没有。
+    }
+  }
+  if (touched) log('[guard] watchdog-removed');
+  return { removed: touched, plistPath, scriptPath };
+}
+
+module.exports = {
+  WATCHDOG_LABEL,
+  WATCHDOG_SCRIPT_NAME,
+  buildWatchdogScript,
+  buildWatchdogPlist,
+  installWatchdog,
+  removeWatchdog,
+};

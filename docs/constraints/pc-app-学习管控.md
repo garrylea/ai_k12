@@ -17,8 +17,10 @@
 - **家长下发命令的主防线 = 「没有进行中会话就 409/1001、不写命令」**；惰性过期只是兜底。命令认领与 `unlocked_at` 落库**必须同一事务**。
 - **做不到的别当缺陷修**：`Ctrl+Alt+Del` / 强制退出 / 系统级手势应用层无解；**macOS 的 `Cmd+Tab` 与 Windows 的 `Alt+Tab` 已各自处理** —— macOS 靠 kiosk（见下文 2026-11-09），Windows 靠应用内全局键盘钩子（见下文「Windows 键盘钩子」）；**不区分异常退出**（指不据异常退出做功能处理：不结束会话、不上报家长；只落 `reason=abnormal-exit` 日志，见下文「被关掉之后的保活」）；真·隔离靠 OS 级单应用模式（macOS 受监督设备 Single App Mode / Windows 企业版 Shell Launcher；**家庭版无系统级 kiosk**）。**非目标**：自动更新（属 ④）、签名/公证、Web 端管控、`force_close`、云端部署（壳留 `K12_WEB_URL` 接缝）。
   （**更正 2026-09-27**：安装包**已移出**上面这份清单 —— 交付形态就是安装包，见本文末「打包与分发（③）」；自动更新仍属 ④。）
-  **2026-11-10 补**：被 SIGKILL 后由 launchd 托管的看护进程拉回（`lib/watchdog.js`，
-  仅学生模式、5 秒一轮）；这不是"挡住了强杀"，只是"关掉后能自己回来"；学生仍可 `launchctl bootout`。
+  **2026-11-10 补（同日关闭）**：曾做「被 SIGKILL 后由 launchd 托管的看护进程拉回」
+  （`lib/watchdog.js`，仅学生模式、5 秒一轮），**当日按用户裁决关闭** —— 没有稳定签名时它反而
+  让学生打不开页面（原因见下文「被关掉之后的保活」节首）。**现在没有看护**：被强杀就是关掉了，
+  重启才回来。
 
 ## 壳生产化（2026-09-26，②）
 
@@ -195,12 +197,26 @@ Windows 上 Electron 的 kiosk **只是无边框全屏**，`Alt+Tab` / `Win` 完
   识别区只有 10px 高：tab 栏从约 16px 起（可点 tab 本体从 20px 起），右上「退出本页」从约 11px 起
   （`p-2.5` + 20px 图标 + 边框 = 42px，居中于 64px 顶栏），识别区与它只有约 1px 间隙 —— 改识别区高度前必须重新量。
 
-## 被关掉之后的保活（2026-11-10）
+## 被关掉之后的保活（2026-11-10，**当日关闭**）
+
+> **当前状态：关闭。** `main.js` 的 `WATCHDOG_ENABLED = false`；打包版启动时会**卸载**已安装的看护
+> （`removeWatchdog`：`launchctl bootout` + 删 plist 与脚本），不再拉起。`installWatchdog` 的代码与
+> 测试**保留**，重新开启时把常量改回 `true` 即可。
+>
+> **重新打开的唯一前提：有稳定签名。** 没签名时 macOS 27 的「本地网络」权限按**责任进程**归属 ——
+> 终端拉起记在终端名下（早已授权），launchd 拉起记在 App 自己名下；而授权按 cdhash 记，
+> **每次重打包就作废** → 看护拉起后 App 连不上服务器（`did-fail-load code=-109
+> ERR_ADDRESS_UNREACHABLE`），学生直接进不去。2026-11-10 第二台 Mac A/B 实测：同一二进制、同一分钟，
+> 终端上下文页面 200 / launchd 上下文 App `-109`，而 launchd 上下文的 `curl` 也是 200
+> （命令行工具不进这条 TCC 名单）→ 锁定为「权限归属」而非网络。装完新包必须手动起一次 App
+> 并在弹窗/系统设置里允许「本地网络」，且**每次重装都要重来**。
+>
+> 以下为实现细节，保留作为重新开启时的依据。
 
 **先记结论，别再当缺陷重查**：`before-quit` 拦得住优雅退出（AppleScript `quit` / `kill -TERM` 都会被
 Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强杀/强制退出）** —— 应用层无解。
 
-- 真正的缺口是「被关掉后没人拉起」：`lib/watchdog.js` 首次启动（仅 `app.isPackaged && darwin`）写
+- （关闭前实现）真正的缺口是「被关掉后没人拉起」：`lib/watchdog.js` 首次启动（仅 `app.isPackaged && darwin`）写
   `~/Library/Application Support/k12-desktop/sysmon.sh`（0755）与
   `~/Library/LaunchAgents/com.local.sysmon.plist`（这是**看护脚本**的 `RunAtLoad` + `KeepAlive` +
   `ThrottleInterval=10`，**不是 App 的** —— App 直管方案已被否决），

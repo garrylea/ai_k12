@@ -8,6 +8,71 @@
 
 ---
 
+## 2026-11-10 PC App：**关闭看护（watchdog）**，等有签名再开
+
+**用户裁决**：「先关掉起守护进程这个功能，等以后有自己的签名之后再打开，不能因为这个影响学生学习」。
+
+**为什么必须关**（第二台 Mac 实测，A/B 同一二进制同一分钟）：
+- 终端 `nohup "$EXE" &` 拉起 → 页面 200；
+- `launchctl submit`（launchd 上下文）拉起同一个文件 → `did-fail-load code=-109 (ERR_ADDRESS_UNREACHABLE)`；
+- 而 launchd 上下文里的 `curl` 也是 200 —— 命令行工具不进 TCC 名单，所以「网络通」不等于「App 通」。
+
+根因是 macOS 27 的**「本地网络」权限按责任进程归属**：终端拉起时算终端（早已授权），launchd 拉起时
+算 App 自己；包没签名 → 授权按 cdhash 记、**每次重打包就作废** → 看护拉起的 App 直接连不上服务器。
+也就是说：**没签名时看护不是保护，是把学生关在门外。**
+
+**改了**：
+- `main.js` 新增常量 `WATCHDOG_ENABLED = false`；打包版启动时走 `removeWatchdog` 而不是 `installWatchdog`
+  —— **老版本装进 launchd 的看护会被主动卸掉**（`launchctl bootout` + 删 plist/脚本），不能只停止安装。
+- `lib/watchdog.js` 新增 `removeWatchdog`（幂等：没装过 / launchctl 报错 / 文件不存在都算成功，绝不抛）。
+- `installWatchdog` 与两条模板的代码、测试**保留**（重新开启时改回常量即可；届时前提是**有稳定签名**）。
+- 文档：`docs/constraints/pc-app-学习管控.md` 的「被关掉之后的保活」节首加「当前状态：关闭」+ 重开前提，
+  旧实现细节保留为重新开启的依据。
+
+**测试**：`apps/desktop` 132 用例绿（新增 2 条：卸载幂等 / launchctl 报错也照删不抛）。
+
+**顺带保留的独立修复**（与看护无关，仍然有效）：kiosk 抢不到全屏时退避 30s 并保证窗口可见、
+解锁即刻重进；`did-finish-load` 后空壳自动重载（`blank-root reload`）。
+
+---
+
+## 2026-11-10 PC App：`kill -9` 后看护拉起 → 窗口白屏（页面其实已加载）
+
+**用户现场**：远端 SSH 到机器 → `kill -9` 杀 App → 看护拉起 → **窗口出现但内容全白**。
+
+**实测证据**（本机 5 轮复现 + `sample` + CGWindow）：
+- **锁屏时**（`IOConsoleLocked=Yes`，前台 `loginwindow`）：App 起来了、页面也 commit 了
+  （CGWindow 里窗口标题 = `K12 智学系统`），但 **AppKit 的全屏进入过渡永远完不成** ——
+  主线程卡在 `_NSFullScreenSpace(Transitions) startTransition`，日志每 ~1.4 秒一轮
+  `restore → reenter-start → reenter-done exitedFullscreen=true fullscreen=false appActive=false`，
+  CGWindow 里堆着 4 个 1920×30 的过渡残窗，主进程常驻 ~9% CPU。窗口停在过渡态 → **白屏**。
+- **解锁时**：同一套 kill/拉起，页面正常渲染（CDP 截图可证）。所以白屏不是"页面没加载"，
+  是"抢全屏把窗口卡住了"。
+- 附带发现：磁盘上的 `~/Library/Application Support/k12-desktop/sysmon.sh` 是**生成物**，
+  手工把 `nohup`/`open` 两行注释掉会变成 `if … then <空> else` 的语法错 → launchd 每 10s 起一次、
+  `last exit code = 2`，看护等于完全失效；App 每次启动会用包内模板重写它。
+  想停看护请 `launchctl bootout gui/$(id -u)/com.local.sysmon`，别改文件。
+
+**修法**：
+1. `lib/kiosk-guard.js`：连续 `fullscreenFailLimit`（3）轮「重进后仍不是全屏」就判定
+   `fullscreen-unavailable` —— 退出卡住的过渡、确保窗口 `show()` + `moveTop()`（回到能显示的普通窗口），
+   然后退避 `fullscreenBackoffMs`（30s）再试；退避期内 `schedule/restore/scheduleReassert` 全部空转。
+2. 新增 `notifyUnlocked()`：`powerMonitor` 的 `unlock-screen` / `resume` 走它 —— 环境变了就清掉退避、
+   立刻无条件重进一次（否则学生解锁后要干等 30 秒）。
+3. `main.js`：`did-finish-load` 后 3 秒检查 `#root` 有没有子节点，空壳（HTML 到了、React 没挂载）
+   记一行 `blank-root reload` 到 `load-error.log` 并重载，每窗口最多 2 次
+   —— `did-fail-load` 覆盖不到这种"加载成功但界面没出来"的形态。
+
+**验证**：`apps/desktop` 130 用例绿（新增 2 条：退避后不再每秒重试 / 解锁清退避）；
+源码真跑（dev + CDP）确认学生态 kiosk 正常、页面非白屏、新逻辑无误触发。
+
+**未完成**：本机到 GitHub 不通，`tools/app-build.sh --check` 取 Electron 发行包超时；
+可用 `ELECTRON_MIRROR=https://cdn.npmmirror.com/binaries/electron/` 绕过（已实测镜像可达）。
+**装的那份 `/Applications/K12 智学.app` 是 19:54 的旧包**（`lib/watchdog.js` 还带 `open -a` 回退），
+必须重出包 + 重装后本修复才生效。
+
+---
+
 ## 2026-11-10 PC App：剩余时长胶囊遮挡 tab + 被关掉后不自动恢复
 
 **问题 1**：锁定胶囊 `fixed top-3`（距顶 12px）落在 64px 顶栏内，整块压住个人中心的

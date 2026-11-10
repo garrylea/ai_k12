@@ -44,6 +44,21 @@ const DEFAULT_ENTER_SETTLE_MS = 1200;
 /** 轮询「退出全屏动画结束」的间隔与超时。 */
 const REENTER_POLL_MS = 100;
 const REENTER_TIMEOUT_MS = 4000;
+/**
+ * 连续多少轮「重进全屏」失败就放弃抢全屏（2026-11-10）。
+ *
+ * **要解决的问题**：机器**锁屏 / 显示器休眠**时被看护拉起（`kill -9` 后的常见路径），
+ * AppKit 的全屏进入过渡**永远完不成**（App 拿不到激活，`NSApplication run` 卡在
+ * `_NSFullScreenSpace startTransition`）。旧行为是看门狗每秒重排一次恢复，
+ * 于是每 ~1.4 秒新建一个全屏过渡 overlay 窗口、永不结束 —— 用户解锁后看到的是
+ * **一个内容全白的窗口**（页面其实 commit 了，但窗口停在过渡态里没合成）。
+ * 实测：主进程常驻 ~9% CPU，CGWindow 里堆着 4 个 1920×30 的过渡残窗。
+ *
+ * 所以：连续失败到此数就退出卡住的过渡、保证窗口是**可见的普通窗口**，
+ * 然后退避一段时间再试（解锁/唤醒会立刻重置）。
+ */
+const DEFAULT_FULLSCREEN_FAIL_LIMIT = 3;
+const DEFAULT_FULLSCREEN_BACKOFF_MS = 30000;
 
 /**
  * @param {object} deps
@@ -63,6 +78,8 @@ const REENTER_TIMEOUT_MS = 4000;
  * @param {number} [deps.watchdogMs] 看门狗间隔
  * @param {number} [deps.cooldownMs] 两次恢复之间的最小间隔
  * @param {number} [deps.enterSettleMs] 进入全屏后等待动画结束的时间
+ * @param {number} [deps.fullscreenFailLimit] 连续失败多少轮就放弃抢全屏
+ * @param {number} [deps.fullscreenBackoffMs] 放弃后多久再试
  */
 function createKioskGuard({
   isEnabled,
@@ -76,6 +93,8 @@ function createKioskGuard({
   watchdogMs = DEFAULT_WATCHDOG_MS,
   cooldownMs = DEFAULT_COOLDOWN_MS,
   enterSettleMs = DEFAULT_ENTER_SETTLE_MS,
+  fullscreenFailLimit = DEFAULT_FULLSCREEN_FAIL_LIMIT,
+  fullscreenBackoffMs = DEFAULT_FULLSCREEN_BACKOFF_MS,
 }) {
   const setTimeoutFn = timers.setTimeout || setTimeout;
   const clearTimeoutFn = timers.clearTimeout || clearTimeout;
@@ -95,6 +114,14 @@ function createKioskGuard({
   /** 重进流程里的两个定时器：stop() 必须一并清掉，否则家长登录后还会被回调钉窗口能力。 */
   let reenterPollTimer = null;
   let reenterSettleTimer = null;
+  /** 连续「重进全屏后仍不是全屏」的轮数，以及退避截止时间（锁屏拉起的保护，见常量注释）。 */
+  let fullscreenFailures = 0;
+  let fullscreenBackoffUntil = 0;
+
+  /** 是否处于「抢不到全屏」的退避期：期间任何恢复都不做（解锁/唤醒会提前清除）。 */
+  function inFullscreenBackoff() {
+    return now() < fullscreenBackoffUntil;
+  }
 
   function snapshot() {
     const win = getWindow();
@@ -128,6 +155,41 @@ function createKioskGuard({
     } catch { /* ignore */ }
     if (!state) return `state=null${extra}`;
     return `visible=${state.visible} focused=${state.focused} kiosk=${state.kiosk} fullscreen=${state.fullscreen}${extra}`;
+  }
+
+  /**
+   * 记一次「重进结果」：**只有真的进到全屏才算成功**。
+   *
+   * 失败到上限就退出卡住的过渡窗口并退避（见 `DEFAULT_FULLSCREEN_FAIL_LIMIT`）。
+   * 这里绝不能让「抢全屏」把窗口留在过渡态 —— 宁可这一段时间是普通窗口（页面看得见），
+   * 也不能是白屏。
+   */
+  function noteFullscreenOutcome(win, reason) {
+    let fullscreen = false;
+    try {
+      fullscreen = win.isFullScreen();
+    } catch {
+      fullscreen = false;
+    }
+    if (fullscreen) {
+      fullscreenFailures = 0;
+      return;
+    }
+
+    fullscreenFailures += 1;
+    if (fullscreenFailures < fullscreenFailLimit) return;
+
+    fullscreenFailures = 0;
+    fullscreenBackoffUntil = now() + fullscreenBackoffMs;
+    log(
+      `[guard] fullscreen-unavailable reason=${reason} retry-in=${fullscreenBackoffMs}ms ${describe(snapshot())}`,
+    );
+    try {
+      // 退出「进了半截」的全屏过渡：目的不是 kiosk，而是让窗口回到能正常显示的普通窗口。
+      if (win.isFullScreen()) win.setFullScreen(false);
+      if (!win.isVisible()) win.show();
+      win.moveTop();
+    } catch { /* 恢复动作失败也不能抛 */ }
   }
 
   /**
@@ -179,6 +241,7 @@ function createKioskGuard({
         log(
           `[guard] reenter-done reason=${reason} exitedFullscreen=${exitedFullscreen} ${describe(snapshot())}`,
         );
+        noteFullscreenOutcome(win, reason);
       }, enterSettleMs);
     }
 
@@ -232,6 +295,7 @@ function createKioskGuard({
    */
   function schedule(reason) {
     if (!isEnabled() || reentering) return;
+    if (inFullscreenBackoff()) return;
     const state = snapshot();
     if (!state || healthy(state)) return;
     if (restoreTimer) return;
@@ -256,6 +320,7 @@ function createKioskGuard({
    */
   function scheduleReassert(reason) {
     if (!isEnabled() || reentering || restoreTimer) return;
+    if (inFullscreenBackoff()) return;
     if (now() < restoreUntil) return;
     restoreUntil = now() + cooldownMs; // 与 restore 共用冷却，避免两条路径同时抢窗口
 
@@ -281,6 +346,7 @@ function createKioskGuard({
   /** 立即执行一次恢复（仍受冷却期约束）。 */
   function restore(reason) {
     if (!isEnabled() || reentering) return;
+    if (inFullscreenBackoff()) return;
     if (now() < restoreUntil) return;
     const state = snapshot();
     if (!state || healthy(state)) return;
@@ -326,6 +392,18 @@ function createKioskGuard({
     }
   }
 
+  /**
+   * 解锁 / 唤醒 / 登录会话恢复：**环境变了，立刻清掉全屏退避并强制重进一次**。
+   *
+   * 锁屏期间抢全屏必然失败（`DEFAULT_FULLSCREEN_FAIL_LIMIT` 那段注释），退避中的
+   * 定时重试可能要 30 秒后才轮到 —— 学生解锁后等不起，所以这里直接重置并重进。
+   */
+  function notifyUnlocked(reason) {
+    fullscreenFailures = 0;
+    fullscreenBackoffUntil = 0;
+    scheduleReassert(reason);
+  }
+
   /** 看门狗的一拍：任何一项不健康就排队恢复（覆盖没有事件可听的打断方式）。 */
   function tick() {
     if (!isEnabled() || reentering) return;
@@ -361,10 +439,21 @@ function createKioskGuard({
     }
     pendingReason = null;
     restoreUntil = 0;
+    fullscreenFailures = 0;
+    fullscreenBackoffUntil = 0;
     reentering = false;
   }
 
-  return { start, stop, schedule, scheduleReassert, restore, tick, isRunning: () => watchdogTimer !== null };
+  return {
+    start,
+    stop,
+    schedule,
+    scheduleReassert,
+    notifyUnlocked,
+    restore,
+    tick,
+    isRunning: () => watchdogTimer !== null,
+  };
 }
 
 module.exports = {
@@ -373,4 +462,6 @@ module.exports = {
   DEFAULT_WATCHDOG_MS,
   DEFAULT_COOLDOWN_MS,
   DEFAULT_ENTER_SETTLE_MS,
+  DEFAULT_FULLSCREEN_FAIL_LIMIT,
+  DEFAULT_FULLSCREEN_BACKOFF_MS,
 };

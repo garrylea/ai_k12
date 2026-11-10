@@ -11,6 +11,7 @@ const {
   buildWatchdogScript,
   buildWatchdogPlist,
   installWatchdog,
+  removeWatchdog,
 } = require('./watchdog.js');
 const { writeStudentMode, STATE_FILE_NAME } = require('./shell-state.js');
 
@@ -169,5 +170,32 @@ describe('watchdog', () => {
     expect(raw).toContain('"studentMode":true');
     expect(buildWatchdogScript()).toContain('"studentMode":true');
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('卸载看护：bootout + 删 plist/脚本，幂等', () => {
+    install();
+    const plist = path.join(home, 'Library', 'LaunchAgents', `${WATCHDOG_LABEL}.plist`);
+    const script = path.join(home, 'Library', 'Application Support', 'k12-desktop', WATCHDOG_SCRIPT_NAME);
+    expect(fs.existsSync(plist)).toBe(true);
+    expect(fs.existsSync(script)).toBe(true);
+
+    removeWatchdog({ platform: 'darwin', homeDir: home, uid: 501, log, run: runOk });
+    expect(calls.some((c) => c[0] === 'launchctl' && c[1] === 'bootout')).toBe(true);
+    expect(fs.existsSync(plist)).toBe(false);
+    expect(fs.existsSync(script)).toBe(false);
+    expect(logLines.some((line) => line.includes('watchdog-removed'))).toBe(true);
+
+    // 再卸一次不许抛（现场升级时本来就可能没装过）
+    expect(() => removeWatchdog({ platform: 'darwin', homeDir: home, uid: 501, log, run: runOk })).not.toThrow();
+  });
+
+  it('卸载看护：launchctl 报错也照样删文件、不抛', () => {
+    install();
+    const boom = (file, args) => {
+      calls.push([file, ...args]);
+      throw new Error('not loaded');
+    };
+    expect(() => removeWatchdog({ platform: 'darwin', homeDir: home, uid: 501, log, run: boom })).not.toThrow();
+    expect(fs.existsSync(path.join(home, 'Library', 'LaunchAgents', `${WATCHDOG_LABEL}.plist`))).toBe(false);
   });
 });

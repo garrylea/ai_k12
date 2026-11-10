@@ -9,8 +9,22 @@ const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
 const { createKioskGuard } = require('./lib/kiosk-guard.js');
 const { createKeyboardHook } = require('./lib/keyboard-hook.js');
 const { markRunning, wasAbnormalExit, markCleanExit } = require('./lib/exit-audit.js');
-const { installWatchdog } = require('./lib/watchdog.js');
+const { installWatchdog, removeWatchdog } = require('./lib/watchdog.js');
 const { markAlive, clearAlive } = require('./lib/app-heartbeat.js');
+
+/**
+ * 看护（学生强杀后自动拉起）**总开关 —— 2026-11-10 用户裁决：先关闭**。
+ *
+ * 关闭原因（真机实测，两台 Mac 都复现）：macOS 27 的「本地网络」权限按**责任进程**归属。
+ * 终端拉起的 App 记在终端名下（早已授权）→ 正常；launchd（看护）拉起的记在 App 名下，
+ * 而包没签名 → 授权按 cdhash 记、**每次重打包就作废** → 拉起来也连不上服务器
+ * （`did-fail-load code=-109 ERR_ADDRESS_UNREACHABLE`），学生直接进不去。
+ *
+ * 重新打开的前提只有一条：**有稳定签名**（Apple Developer ID）。届时把它改回 true，
+ * 并确认 `lib/watchdog.js` 里的脚本模板仍是「直接 exec、绝不回退 open -a」。
+ */
+const WATCHDOG_ENABLED = false;
+
 
 /**
  * **全局禁用代理**（spec §4.7）。
@@ -298,10 +312,47 @@ function createWindow() {
     startRetry();
   });
 
+  /**
+   * 「页面加载完了、但界面是白的」兜底（2026-11-10，看护拉起后的高发形态）。
+   *
+   * 为什么必须有：`did-fail-load` 只覆盖「导航失败」。HTML 拿到了、React 没挂载时
+   * **一个事件都不会来** —— 窗口有标题、内容全白，`did-finish-load` 也照常触发，
+   * 用户看到的就是「拉起来了但没加载页面」。用 `#root` 是否有子节点判定 SPA 是否挂上，
+   * 空壳就重载（每个窗口最多 2 次，避免把真的坏页面刷成死循环）。
+   */
+  let blankReloads = 0;
+  function checkPageRendered() {
+    if (!win || win.isDestroyed() || blankReloads >= 2) return;
+    setTimeout(() => {
+      if (!win || win.isDestroyed()) return;
+      const wc = win.webContents;
+      wc.executeJavaScript(
+        '(() => { const el = document.getElementById("root"); return el ? el.childElementCount : -1; })()',
+        true,
+      )
+        .then((count) => {
+          // -1 = 没有 #root（本地离线页等），不是白屏，别动它。
+          if (typeof count !== 'number' || count !== 0) return;
+          if (!win || win.isDestroyed()) return;
+          blankReloads += 1;
+          const line = `[${new Date().toISOString()}] blank-root reload #${blankReloads} url=${wc.getURL()}\n`;
+          console.error(`[shell] ${line.trim()}`);
+          try {
+            fs.appendFileSync(path.join(app.getPath('userData'), 'load-error.log'), line);
+          } catch { /* 日志写失败绝不影响主流程 */ }
+          wc.reload();
+        })
+        .catch(() => { /* 渲染进程正在切换：这一轮放弃，下一轮 did-finish-load 再来 */ });
+    }, 3000);
+  }
+
   win.webContents.on('did-finish-load', () => {
     if (!win || win.isDestroyed()) return;
     // 主 frame 加载完成且当前不是本地页（file:）→ 说明连上了，停表
-    if (!win.webContents.getURL().startsWith('file:')) stopRetry();
+    if (!win.webContents.getURL().startsWith('file:')) {
+      stopRetry();
+      checkPageRendered();
+    }
   });
 
   // 崩溃自恢复（spec 2026-11-10 §3.2）：界面没了 = 学生看到的是死窗口，
@@ -453,13 +504,16 @@ app.whenReady().then(() => {
   // 首次启动看起来就是「双击了没反应」。两者没有顺序依赖。
   createWindow();
 
-  // 首启安装看护：学生模式被强杀后 5 秒内拉回 kiosk；家长模式它空转。
-  // 只在真 `.app` 里装：`app.getAppPath()` 的 asar 形态是打包后的判据，
-  // 万一形态变了（解包目录 / 别处的 Resources），装一个指向错误路径的 plist
-  // 只会让看护反复拉起失败 —— 宁可跳过并留痕。
+  // ⚠️ 开关是**常量**而不是配置：这是产品裁决，不是给现场调的。
+  // 重新打开的前提是「包有稳定签名」—— 否则每重打包一次 cdhash 就变，macOS 27 的
+  // 「本地网络」授权随之作废，看护拉起的 App 直接连不上服务器（-109）。
   if (app.isPackaged) {
     const appBundle = app.getAppPath().replace(/\/Contents\/Resources\/app\.asar$/, '');
-    if (appBundle.endsWith('.app')) {
+    if (!WATCHDOG_ENABLED) {
+      // 关闭态也必须动手：老版本已经装进 launchd 的看护不会自己消失，
+      // 它仍会按旧逻辑拉起学生端 → 必须在这里卸载。
+      removeWatchdog({ platform: process.platform, homeDir: app.getPath('home'), log: appendKioskLog });
+    } else if (appBundle.endsWith('.app')) {
       installWatchdog({
         platform: process.platform,
         execPath: appBundle,
@@ -482,9 +536,17 @@ app.whenReady().then(() => {
   });
 
   // 睡眠唤醒 / 解锁后，系统可能重建窗口与全屏状态（macOS 上尤其明显）。
-  // 只调度，不直接改窗口 —— 恢复逻辑与节流统一在 kiosk-guard 里。
-  powerMonitor.on('resume', () => kioskGuard.schedule('power-resume'));
-  powerMonitor.on('unlock-screen', () => kioskGuard.schedule('unlock-screen'));
+  // **走 notifyUnlocked 而不是 schedule**：锁屏期间抢全屏必然失败，kiosk-guard 会进入
+  // 退避期（`fullscreen-unavailable`，30s 才重试一次）。解锁是环境变化的明确信号，
+  // 必须立刻清掉退避、无条件重进一次 —— 否则学生解锁后要干等半分钟才回到全屏。
+  powerMonitor.on('resume', () => {
+    appendKioskLog('[guard] reason=power-resume');
+    kioskGuard.notifyUnlocked('power-resume');
+  });
+  powerMonitor.on('unlock-screen', () => {
+    appendKioskLog('[guard] reason=unlock-screen');
+    kioskGuard.notifyUnlocked('unlock-screen');
+  });
 
   // Siri / 通知把 App 顶到后台后，系统把它切回前台会走这里（与窗口的 focus/blur 不同：
   // 那是窗口级，这是 App 级）。**只要之前确实离开过前台，就无条件重进 kiosk** ——
