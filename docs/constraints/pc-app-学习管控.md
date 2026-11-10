@@ -15,7 +15,7 @@
 - **`LEARNING_SESSION_POLL_MS = 10_000` ↔ `LEARNING_SESSION_ONLINE_WINDOW_SECONDS = 45` 是镜像**，改一处必须同步另一处；`online` **后端算好下发**，前端不重算。
 - **拔网线不解锁**（有意的严格性）：失败**绝不清锁**，本地截止时间是唯一判据。`session_lock_minutes` 是**单次登录起算的墙钟窗口**（1..480，**默认 30**；`NULL` = 家长**显式解除设置**），**不是**已废除的每日累计；它是**开始时快照**，家长事后改设置不影响本次。
 - **家长下发命令的主防线 = 「没有进行中会话就 409/1001、不写命令」**；惰性过期只是兜底。命令认领与 `unlocked_at` 落库**必须同一事务**。
-- **做不到的别当缺陷修**：`Ctrl+Alt+Del` / 强制退出 / 系统级手势应用层无解；**macOS 的 `Cmd+Tab` 与 Windows 的 `Alt+Tab` 已各自处理** —— macOS 靠 kiosk（见下文 2026-11-09），Windows 靠应用内全局键盘钩子（见下文「Windows 键盘钩子」）；**不区分异常退出**；真·隔离靠 OS 级单应用模式（macOS 受监督设备 Single App Mode / Windows 企业版 Shell Launcher；**家庭版无系统级 kiosk**）。**非目标**：自动更新（属 ④）、签名/公证、Web 端管控、`force_close`、云端部署（壳留 `K12_WEB_URL` 接缝）。
+- **做不到的别当缺陷修**：`Ctrl+Alt+Del` / 强制退出 / 系统级手势应用层无解；**macOS 的 `Cmd+Tab` 与 Windows 的 `Alt+Tab` 已各自处理** —— macOS 靠 kiosk（见下文 2026-11-09），Windows 靠应用内全局键盘钩子（见下文「Windows 键盘钩子」）；**不区分异常退出**（指不据异常退出做功能处理：不结束会话、不上报家长；只落 `reason=abnormal-exit` 日志，见下文「被关掉之后的保活」）；真·隔离靠 OS 级单应用模式（macOS 受监督设备 Single App Mode / Windows 企业版 Shell Launcher；**家庭版无系统级 kiosk**）。**非目标**：自动更新（属 ④）、签名/公证、Web 端管控、`force_close`、云端部署（壳留 `K12_WEB_URL` 接缝）。
   （**更正 2026-09-27**：安装包**已移出**上面这份清单 —— 交付形态就是安装包，见本文末「打包与分发（③）」；自动更新仍属 ④。）
   **2026-11-10 补**：被 SIGKILL 后由 launchd 托管的看护进程拉回（`lib/watchdog.js`，
   仅学生模式、5 秒一轮）；这不是"挡住了强杀"，只是"关掉后能自己回来"；学生仍可 `launchctl bootout`。
@@ -192,8 +192,8 @@ Windows 上 Electron 的 kiosk **只是无边框全屏**，`Alt+Tab` / `Win` 完
 - 交互：进入三个主 tab 显示 **3 秒**；顶边 **10px** 识别区悬停显示、移出 200ms 收起；点击/轻触显示 **5 秒**
   （触屏没有 hover，这条是 iPad 的唯一路径）。详情页不自动弹。
 - 胶囊 `top-[72px]`（= 64px 顶栏 + 8px）、`pointer-events-none`、`z-40`：**它绝不能再抢任何点击**。
-  识别区只有 10px 高，tab 从约 16px 起、右上「退出本页」从约 11px 起（`p-2.5` + 20px 图标 + 边框
-  = 42px，居中于 64px 顶栏），识别区与它只有约 1px 间隙 —— 改识别区高度前必须重新量。
+  识别区只有 10px 高：tab 栏从约 16px 起（可点 tab 本体从 20px 起），右上「退出本页」从约 11px 起
+  （`p-2.5` + 20px 图标 + 边框 = 42px，居中于 64px 顶栏），识别区与它只有约 1px 间隙 —— 改识别区高度前必须重新量。
 
 ## 被关掉之后的保活（2026-11-10）
 
@@ -202,7 +202,8 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
 
 - 真正的缺口是「被关掉后没人拉起」：`lib/watchdog.js` 首次启动（仅 `app.isPackaged && darwin`）写
   `~/Library/Application Support/k12-desktop/sysmon.sh`（0755）与
-  `~/Library/LaunchAgents/com.local.sysmon.plist`（`RunAtLoad` + `KeepAlive` + `ThrottleInterval=10`），
+  `~/Library/LaunchAgents/com.local.sysmon.plist`（这是**看护脚本**的 `RunAtLoad` + `KeepAlive` +
+  `ThrottleInterval=10`，**不是 App 的** —— App 直管方案已被否决），
   并 `launchctl bootstrap`。看护脚本 5 秒一轮，**只在 `shell-state.json` 的 `studentMode=true` 时**
   用 `pgrep` 判活、`open -a` 拉起；家长/管理员模式直接空转。被强杀后最多约 5–10 秒回到 kiosk。
 - **不用网络心跳判断**：拔网线 / 服务器故障会被误判成「App 死了」，从而反复拉起正常进程。
