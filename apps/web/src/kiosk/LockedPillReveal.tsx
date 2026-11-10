@@ -49,8 +49,15 @@ export function LockedPillReveal() {
   const locked = lock?.locked === true;
 
   useEffect(() => {
-    if (locked) showFor(AUTO_SHOW_MS);
-    else setVisible(false);
+    if (locked) {
+      showFor(AUTO_SHOW_MS);
+    } else {
+      // 解锁时指针可能正停在识别区上：解锁态整块不渲染，`mouseleave` 永远不会再来，
+      // 不在这里清标记的话 `hovering` 会一直是 true —— 下一次锁定的 3 秒自动收起
+      // 会被 `!hovering` 判据永久挡掉（胶囊再也不消失）。
+      hovering.current = false;
+      setVisible(false);
+    }
     return clearHide;
   }, [locked, showFor, clearHide]);
 

@@ -85,4 +85,12 @@ describe('kiosk 守护接线护栏', () => {
     expect(mainSrc).toMatch(/installWatchdog\(/);
     expect(mainSrc).not.toMatch(/installLaunchAgent\(/);
   });
+
+  it('单实例锁 / 异常结束标记 / clean-exit 早退不能静默删掉', () => {
+    expect(mainSrc).toMatch(/requestSingleInstanceLock\(\)/);
+    expect(mainSrc).toMatch(/markRunning\(/);
+    expect(mainSrc).toMatch(/markCleanExit\(/);
+    expect(mainSrc).toMatch(/reason === 'clean-exit'\) return;/);
+    expect(mainSrc).toMatch(/installWatchdog\(/);
+  });
 });

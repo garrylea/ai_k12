@@ -12,6 +12,7 @@ const {
   buildWatchdogPlist,
   installWatchdog,
 } = require('./watchdog.js');
+const { writeStudentMode, STATE_FILE_NAME } = require('./shell-state.js');
 
 let home;
 let calls;
@@ -142,5 +143,14 @@ describe('watchdog', () => {
     };
     expect(() => install({ run: boom })).not.toThrow();
     expect(logLines.some((line) => line.includes('watchdog-bootstrap-error'))).toBe(true);
+  });
+
+  it('脚本的 studentMode 判据与 shell-state 的实际写法一致', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'k12-state-'));
+    writeStudentMode(dir, true);
+    const raw = fs.readFileSync(path.join(dir, STATE_FILE_NAME), 'utf8');
+    expect(raw).toContain('"studentMode":true');
+    expect(buildWatchdogScript()).toContain('"studentMode":true');
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

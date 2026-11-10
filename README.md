@@ -182,7 +182,8 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
 - 改完**必须重启 App** 才生效（启动时读取）
   - ⚠️ **如果窗口关不掉**：学生处于 kiosk（学生模式）时，壳会自己拦掉关闭 / 最小化 / `Cmd+Q` / `Alt+F4`。
     此时用系统的**强制退出**（macOS `Cmd+Opt+Esc`；Windows 任务管理器；Linux 等价方式）
-    或**直接重启这台机器**，再打开壳。**这是唯一能绕过壳自身拦截的出口** —— 别在窗口上反复点关闭
+    或**直接重启这台机器**：学生模式下看护进程会在约 10 秒内把 App 拉回来，**这已经不再是一个"出口"**。
+    要**彻底**退出，先按下面「看护进程与卸载」摘掉看护，再强制退出 —— 别在窗口上反复点关闭
 - 必须是合法 JSON，且 `serverUrl` 是 `http(s)://` 开头的完整地址；
   **不合法时会被忽略并回退到 `server-url.js` 的默认值，不会让 App 卡住启动**
   （启动日志里会有一行 `warn` 说明为什么忽略）
@@ -191,6 +192,21 @@ K12_WEB_URL 环境变量  >  userData/config.json 的 serverUrl  >  apps/desktop
 
 学生打开壳若连不上，会看到一张本地页：「暂时连不上学习服务器，正在重试…」+ 当前地址 +
 「立即重试」按钮。壳**每 5 秒自动探测一次，探测通了就自动进入**，学生不需要做任何事。
+
+#### 看护进程与卸载
+
+学生模式下，打包后的 App 会在**当前用户**下装一个看护：launchd 用户级 LaunchAgent `com.local.sysmon`，
+执行 `~/Library/Application Support/k12-desktop/sysmon.sh`，**5 秒一轮** —— 发现 App 不在运行就把它拉起。
+家长/管理员模式（`studentMode=false`）它空转，不会阻止退出。
+
+- 它**不是隐藏手段**：`launchctl list` / 活动监视器都能看到；标准用户随时可以摘掉。
+- 卸载（一行）：
+
+```bash
+launchctl bootout gui/$(id -u)/com.local.sysmon; rm -f ~/Library/LaunchAgents/com.local.sysmon.plist "$HOME/Library/Application Support/k12-desktop/sysmon.sh"
+```
+
+- ⚠️ **卸载 App 之前先执行上面这条**，否则看护会继续尝试拉起一个已被删除的 App。
 
 #### 已知边界
 

@@ -297,7 +297,10 @@ function createWindow() {
   // 崩溃自恢复（spec 2026-11-10 §3.2）：界面没了 = 学生看到的是死窗口，
   // 而"窗口还在、kiosk 还在"会骗过看门狗。首次崩溃就地 reload；60 秒内再来一次
   // 说明这个页面/进程起不来，直接重建窗口（重建后由 ready-to-show 重新进 kiosk）。
-  win.webContents.on('render-process-gone', (_event, details) => {
+  win.webContents.on('render-process-gone', (event, details) => {
+    // 旧渲染进程的迟到事件不能动当前窗口：它可能已经被重建后的新窗口取代，
+    // 拿它去 reload/destroy 会把正在用的窗口打掉。
+    if (win && event.sender !== win.webContents) return;
     // 正常关闭/kill 也会触发，别把它当崩溃去"复活"窗口。
     if (details && details.reason === 'clean-exit') return;
     const now = Date.now();
@@ -432,17 +435,29 @@ app.whenReady().then(() => {
   // 建窗口时就进 kiosk，不等渲染层。
   studentMode = readStudentMode(app.getPath('userData'));
 
-  // 首次启动（打包后）装看护：学生模式被强杀后 5 秒内拉回 kiosk；家长模式它空转。
+  // ⚠️ 看护必须在**窗口出来之后**再装：`installWatchdog` 内部的 `launchctl` 是同步的
+  // （每次最多 3 秒超时 × 最多三次）—— 放在前面最坏情况要等约 9 秒才见到窗口，
+  // 首次启动看起来就是「双击了没反应」。两者没有顺序依赖。
+  createWindow();
+
+  // 首启安装看护：学生模式被强杀后 5 秒内拉回 kiosk；家长模式它空转。
+  // 只在真 `.app` 里装：`app.getAppPath()` 的 asar 形态是打包后的判据，
+  // 万一形态变了（解包目录 / 别处的 Resources），装一个指向错误路径的 plist
+  // 只会让看护反复拉起失败 —— 宁可跳过并留痕。
   if (app.isPackaged) {
-    installWatchdog({
-      platform: process.platform,
-      execPath: app.getAppPath().replace(/\/Contents\/Resources\/app\.asar$/, ''),
-      homeDir: app.getPath('home'),
-      log: appendKioskLog,
-    });
+    const appBundle = app.getAppPath().replace(/\/Contents\/Resources\/app\.asar$/, '');
+    if (appBundle.endsWith('.app')) {
+      installWatchdog({
+        platform: process.platform,
+        execPath: appBundle,
+        homeDir: app.getPath('home'),
+        log: appendKioskLog,
+      });
+    } else {
+      appendKioskLog('[guard] watchdog-skip reason=not-app-bundle');
+    }
   }
 
-  createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();

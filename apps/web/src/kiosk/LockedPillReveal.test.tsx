@@ -57,6 +57,27 @@ describe('LockedPillReveal', () => {
     expect(screen.queryByTestId('locked-pill')).not.toBeInTheDocument();
   });
 
+  it('悬停中解锁再锁定：仍按 3 秒自动收起（悬停标记必须被清掉）', () => {
+    const { rerender } = renderReveal({ locked: true, remainingMs: 42 * 60_000 });
+    fireEvent.mouseEnter(screen.getByTestId('pill-reveal-zone'));
+    // 悬停期间组件不渲染胶囊之外的识别区；解锁 → 解锁态整块不渲染，mouseleave 不会再来。
+    rerender(
+      <LearningLockContext.Provider value={null}>
+        <LockedPillReveal />
+      </LearningLockContext.Provider>,
+    );
+    expect(screen.queryByTestId('pill-reveal-zone')).not.toBeInTheDocument();
+
+    rerender(
+      <LearningLockContext.Provider value={{ locked: true, remainingMs: 42 * 60_000 }}>
+        <LockedPillReveal />
+      </LearningLockContext.Provider>,
+    );
+    expect(screen.getByTestId('locked-pill')).toHaveAttribute('data-visible', 'true');
+    act(() => { vi.advanceTimersByTime(3000); });
+    expect(screen.getByTestId('locked-pill')).toHaveAttribute('data-visible', 'false');
+  });
+
   it('锁定解除时立即收起', () => {
     const { rerender } = renderReveal({ locked: true, remainingMs: 42 * 60_000 });
     expect(screen.getByTestId('locked-pill')).toHaveAttribute('data-visible', 'true');
