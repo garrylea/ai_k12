@@ -1036,6 +1036,23 @@ describe('watchdog', () => {
     ]);
   });
 
+  it('只有脚本内容变了 → 也要 bootout 再 bootstrap（plist 是纯函数，升级时通常不变）', () => {
+    install({ run: (file, args) => { calls.push([file, ...args]); throw new Error('not loaded'); } });
+    const scriptPath = path.join(home, 'Library', 'Application Support', 'k12-desktop', WATCHDOG_SCRIPT_NAME);
+    fs.writeFileSync(scriptPath, '#!/bin/sh\n# old\n');
+    calls = [];
+    const res = install(); // print 成功 = 已加载
+    const plistPath = path.join(home, 'Library', 'LaunchAgents', `${WATCHDOG_LABEL}.plist`);
+    expect(res.installed).toBe(true);
+    expect(res.bootstrapped).toBe(true);
+    expect(calls).toEqual([
+      ['launchctl', 'print', `gui/501/${WATCHDOG_LABEL}`],
+      ['launchctl', 'bootout', `gui/501/${WATCHDOG_LABEL}`],
+      ['launchctl', 'bootstrap', 'gui/501', plistPath],
+    ]);
+    expect(fs.readFileSync(scriptPath, 'utf8')).toBe(buildWatchdogScript());
+  });
+
   it('非 darwin 完全不碰磁盘', () => {
     const res = install({ platform: 'win32' });
     expect(res.reason).toBe('platform');
@@ -1197,11 +1214,14 @@ function installWatchdog({ platform, execPath, homeDir, uid, log = () => {}, run
     loaded = false;
   }
 
-  if (plistChanged && loaded) {
+  // 脚本内容变了也必须重载：正在运行的 /bin/sh 已把旧脚本读进内存，只重写文件它不会重读，
+  // 且 plist 是 execPath 的纯函数、升级时通常不变 —— 只看 plistChanged 会漏掉这种最常见的情况。
+  const dirty = changed || plistChanged;
+  if (dirty && loaded) {
     try {
       run('launchctl', ['bootout', `gui/${resolvedUid}/${WATCHDOG_LABEL}`]);
     } catch {
-      // 没加载过就是正常路径。
+      // bootout 失败也继续尝试 bootstrap（launchd 可能已经把 job 摘了）。
     }
     loaded = false;
   }
@@ -1215,7 +1235,14 @@ function installWatchdog({ platform, execPath, homeDir, uid, log = () => {}, run
   } catch (err) {
     log(`[guard] watchdog-bootstrap-error err=${err && err.message}`);
     // 文件已落地：下次登录 RunAtLoad 仍会拉起；只是本次运行期没有保活。
-    return { installed: true, scriptPath, plistPath, bootstrapped: false };
+    // 这次写过文件就不能复述成 'unchanged'。
+    return {
+      installed: true,
+      reason: dirty ? 'updated' : 'bootstrap-failed',
+      scriptPath,
+      plistPath,
+      bootstrapped: false,
+    };
   }
 }
 
@@ -1225,7 +1252,7 @@ module.exports = { WATCHDOG_LABEL, WATCHDOG_SCRIPT_NAME, buildWatchdogScript, bu
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd apps/desktop && npx vitest run lib/watchdog.test.js`
-Expected: PASS（7 passed）。
+Expected: PASS（8 passed）。
 
 - [ ] **Step 5: 删除上一版实现**
 
