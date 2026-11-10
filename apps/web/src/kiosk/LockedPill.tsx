@@ -1,22 +1,24 @@
 import { formatRemaining } from './learningLock';
 
 /**
- * 锁定中的剩余时间提示（spec §6.4）。
+ * 锁定中的剩余时间提示（spec 2026-11-10 §2）。
  *
- * **为什么要它**：仓库纪律「界面优先于文字提示」——剩余时间要被**看到**，
- * 而不是只在学生点了登出、被拒绝时才解释。学生知道还有多久，就不会去试各种逃逸路径。
- *
- * 定位用 fixed + 顶部居中：沉浸页自己的顶栏在右上角已经有 `LogoutButton`，
- * 贴右上会撞在一起。**人工冒烟时确认它与各页顶栏不重叠**；若重叠，这是纯展示层调整，
- * 改 className 即可，不要动状态机。
+ * **不再常驻**：由 `LockedPillReveal` 控制可见性（进入浅停留页 3 秒 / 顶边悬停 / 点击 5 秒）。
+ * 放在**顶栏下方 8px**（`top-[72px]`）：顶栏高 64px，胶囊若贴 `top-3` 会整块压住
+ * 个人中心/奖励册/练习记录三个 tab（2026-11-10 用户实测，学生点不到练习记录）。
+ * `pointer-events-none` 是硬要求：它只是展示，任何点击都要落到下面。
  */
-export function LockedPill({ remainingMs }: { remainingMs: number }) {
+export function LockedPill({ remainingMs, visible }: { remainingMs: number; visible: boolean }) {
   return (
     <div
       data-testid="locked-pill"
+      data-visible={visible ? 'true' : 'false'}
       role="status"
       aria-live="polite"
-      className="fixed left-1/2 top-3 z-50 -translate-x-1/2 rounded-full border border-[var(--brand-500)] bg-[var(--brand-100)] px-4 py-1.5 text-sm font-medium text-[var(--brand-600)] shadow-sm"
+      aria-hidden={!visible}
+      className={`fixed left-1/2 top-[72px] z-40 -translate-x-1/2 rounded-full border border-[var(--brand-500)] bg-[var(--brand-100)] px-4 py-1.5 text-sm font-medium text-[var(--brand-600)] shadow-sm pointer-events-none transition-opacity duration-200 ${
+        visible ? 'opacity-100' : 'opacity-0'
+      }`}
     >
       {formatRemaining(remainingMs)} · 本次学习时长未满，需家长解除后才能退出
     </div>
