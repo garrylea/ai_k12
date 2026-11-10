@@ -80,4 +80,9 @@ describe('kiosk 守护接线护栏', () => {
   it('子进程崩溃只记日志，不重建窗口', () => {
     expect(mainSrc).toMatch(/webContents\.on\(\s*'child-process-gone'/);
   });
+
+  it('首启安装看护进程（不再直管 App 的 KeepAlive）', () => {
+    expect(mainSrc).toMatch(/installWatchdog\(/);
+    expect(mainSrc).not.toMatch(/installLaunchAgent\(/);
+  });
 });

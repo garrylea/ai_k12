@@ -9,7 +9,7 @@ const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
 const { createKioskGuard } = require('./lib/kiosk-guard.js');
 const { createKeyboardHook } = require('./lib/keyboard-hook.js');
 const { markRunning, wasAbnormalExit, markCleanExit } = require('./lib/exit-audit.js');
-const { installLaunchAgent } = require('./lib/launch-agent.js');
+const { installWatchdog } = require('./lib/watchdog.js');
 
 /**
  * **全局禁用代理**（spec §4.7）。
@@ -45,7 +45,7 @@ app.commandLine.appendSwitch('no-proxy-server');
 app.setPath('userData', path.join(app.getPath('appData'), 'k12-desktop'));
 
 /**
- * 单实例（spec 2026-11-10 §4.2）：launchd 的 KeepAlive 与"用户双击图标"可能撞在一起。
+ * 单实例（spec 2026-11-10 §4.2）：看护进程的 `open -a` 与「用户双击图标」可能撞在一起。
  * 拿不到锁的进程直接退出（此时 studentMode 还是 false，不会被 before-quit 拦）。
  */
 const singleInstance = app.requestSingleInstanceLock();
@@ -432,11 +432,11 @@ app.whenReady().then(() => {
   // 建窗口时就进 kiosk，不等渲染层。
   studentMode = readStudentMode(app.getPath('userData'));
 
-  // 首次启动（打包后）装用户级保活：被 Siri/活动监视器关掉后能自己回到 kiosk。
+  // 首次启动（打包后）装看护：学生模式被强杀后 5 秒内拉回 kiosk；家长模式它空转。
   if (app.isPackaged) {
-    installLaunchAgent({
+    installWatchdog({
       platform: process.platform,
-      execPath: process.execPath,
+      execPath: app.getAppPath().replace(/\/Contents\/Resources\/app\.asar$/, ''),
       homeDir: app.getPath('home'),
       log: appendKioskLog,
     });
