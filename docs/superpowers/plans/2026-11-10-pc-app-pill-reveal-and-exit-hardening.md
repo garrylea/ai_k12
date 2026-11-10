@@ -1435,5 +1435,5 @@ git commit -m "docs(desktop): 胶囊浮层与保活的口径与边界"
 
 - **Spec 覆盖**：§2 → Task 1–4；§3.1 → Task 5；§3.2 → Task 6；§4 → Task 7；§5 文件清单 → 各任务 Files；§7 旧表述 → Task 1 注释整段替换 + Task 8 约束文档；§8 验收 → Task 8 Step 4。
 - **占位符**：无 TBD / "适当处理"；每个代码步骤都给了完整代码。
-- **类型一致**：`LearningLockValue` 在 Task 2 定义，Task 3/4 按 `{ locked, remainingMs }` 使用；`LockedPill` 的 `visible` 在 Task 1 定义，Task 3 传参一致；`installLaunchAgent` 的返回字段在 Task 7 测试与实现中一致。
+- **类型一致**：`LearningLockValue` 在 Task 2 定义，Task 3/4 按 `{ locked, remainingMs }` 使用；`LockedPill` 的 `visible` 在 Task 1 定义，Task 3 传参一致；`installWatchdog` 的返回字段在 Task 7 测试与实现中一致。
 - **已知偏差**：spec §6 写"`LearningSessionShell.test.tsx` 原 4 条断言改为断言 context"——Task 2 Step 2 已按 4 处逐条落地（未设锁 / 到点解除 / 锁定中 / 未锁定时）。
