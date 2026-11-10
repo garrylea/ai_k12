@@ -4,7 +4,7 @@
 
 **Goal:** 让锁定剩余时长胶囊只在浅停留三页按需出现、永不遮挡 tab；并让被强制关闭的 App 可观测、可自愈、能被 launchd 拉回 kiosk。
 
-**Architecture:** 胶囊的锁定状态由 `LearningSessionShell` 经 React Context 下发，`StudentStayLayout` 内的新组件负责"自动显示 3 秒 / 顶边悬停 / 点击 5 秒"；壳侧新增 `exit-audit`（异常结束判定 + 退出日志）、`launch-agent`（用户级 KeepAlive）两个纯 Node 模块，`main.js` 只做接线。
+**Architecture:** 胶囊的锁定状态由 `LearningSessionShell` 经 React Context 下发，`StudentStayLayout` 内的新组件负责"自动显示 3 秒 / 顶边悬停 / 点击 5 秒"；壳侧新增 `exit-audit`（异常结束判定 + 退出日志）、`watchdog`（launchd 托管的看护脚本，只在学生模式下拉起 App）两个纯 Node 模块，`main.js` 只做接线。
 
 **Tech Stack:** React 18 + React Router 6 + Zustand（Web）；Electron 44 + Node（壳）；Vitest + @testing-library/react。
 
