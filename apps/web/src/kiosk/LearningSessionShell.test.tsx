@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import LearningSessionShell from './LearningSessionShell';
 import { LEARNING_SESSION_STORAGE_KEY, readPersistedSession, writePersistedSession } from './learningLock';
 import { openStudentLearningSession, pollStudentDeviceCommands } from '@/services/api';
+import { useLearningLock } from './learningLockContext';
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
@@ -35,7 +36,7 @@ function renderShell() {
     <MemoryRouter initialEntries={['/student/course-detail']}>
       <Routes>
         <Route element={<LearningSessionShell />}>
-          <Route path="/student/course-detail" element={<div>学习页</div>} />
+          <Route path="/student/course-detail" element={<><LockProbe /><div>学习页</div></>} />
           <Route path="/student/star-map" element={<div>星图</div>} />
         </Route>
       </Routes>
@@ -50,6 +51,16 @@ function NavProbe() {
     <button type="button" onClick={() => navigate('/student/star-map')}>
       去星图
     </button>
+  );
+}
+
+/** 把 context 值渲染成文本：pill 已移出本组件，这里断言"状态有没有下发对"。 */
+function LockProbe() {
+  const lock = useLearningLock();
+  return (
+    <div data-testid="lock-probe">
+      {lock ? `locked:${lock.locked}:${Math.round(lock.remainingMs / 60_000)}` : 'none'}
+    </div>
   );
 }
 
@@ -151,7 +162,15 @@ describe('LearningSessionShell：建立会话', () => {
     expect(readPersistedSession(9)).toMatchObject({ lockExpiresAt: null });
     // 家长没设时长 ≠ 学生可以随便切应用：仍要进 kiosk（只是允许登出、不显示 pill）
     expect(lockCalls).toEqual([true]);
-    expect(screen.queryByTestId('locked-pill')).not.toBeInTheDocument();
+    expect(screen.getByTestId('lock-probe')).toHaveTextContent('none');
+  });
+  it('本地有锁定快照但**不是壳（浏览器）→ 不下发**（"需家长解除"是壳的语义）', async () => {
+    delete (window as unknown as { k12Desktop?: unknown }).k12Desktop;
+    writePersistedSession({ studentId: 9, id: 7, lockExpiresAt: LATER, unlockedAt: null });
+    renderShell();
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByTestId('lock-probe')).toHaveTextContent('none');
   });
 });
 
@@ -201,20 +220,20 @@ describe('LearningSessionShell：轮询与解锁', () => {
 
     // 到期只解除「禁止登出」与 pill；kiosk 由角色决定，不该跟着退出
     expect(lockCalls[lockCalls.length - 1]).toBe(true);
-    expect(screen.queryByTestId('locked-pill')).not.toBeInTheDocument();
+    expect(screen.getByTestId('lock-probe')).toHaveTextContent('none');
   });
 
-  it('锁定中渲染剩余时间 pill；解锁后消失', async () => {
+  it('锁定中下发 locked=true 与剩余分钟；解锁后归零', async () => {
     vi.useFakeTimers();
     renderShell();
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByTestId('locked-pill')).toBeInTheDocument();
+    expect(screen.getByTestId('lock-probe')).toHaveTextContent('locked:true:60');
 
     await act(async () => { vi.advanceTimersByTime(61 * 60_000); });
-    expect(screen.queryByTestId('locked-pill')).not.toBeInTheDocument();
+    expect(screen.getByTestId('lock-probe')).toHaveTextContent('none');
   });
 
-  it('未锁定时不渲染 pill', async () => {
+  it('未锁定时不下发锁定态', async () => {
     openMock.mockResolvedValue({
       id: 7,
       startedAt: '2026-09-23T01:00:00.000Z',
@@ -225,7 +244,7 @@ describe('LearningSessionShell：轮询与解锁', () => {
     renderShell();
     await act(async () => { await Promise.resolve(); });
 
-    expect(screen.queryByTestId('locked-pill')).not.toBeInTheDocument();
+    expect(screen.getByTestId('lock-probe')).toHaveTextContent('none');
   });
 });
 

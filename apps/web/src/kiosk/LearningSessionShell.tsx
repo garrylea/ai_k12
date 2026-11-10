@@ -13,7 +13,7 @@ import {
   writePersistedSession,
 } from './learningLock';
 import { isDesktopShell, setDesktopStudentMode } from './desktopBridge';
-import { LockedPill } from './LockedPill';
+import { LearningLockContext } from './learningLockContext';
 import { getAuthItem } from '@/services/authStorage';
 
 interface LockState {
@@ -44,7 +44,8 @@ function initialLockState(): LockState | null {
  *
  * 职责四件事：① 学生 + 壳 → 取或建会话；② 把锁定态推给主进程；
  * ③ 每 10 秒轮询（兼心跳）并处理 `unlock`；④ 到点自动解除。
- * 剩余时间 pill 的渲染也在这里——只有它有 `locked` 与倒计时。
+ * 锁定态（`locked` + 剩余毫秒）经 `LearningLockContext` 下发给浅停留页——只有它有倒计时；
+ * 胶囊本身由消费方（`LockedPillReveal`）渲染，本组件不再直接画 UI。
  */
 export default function LearningSessionShell() {
   const location = useLocation();
@@ -123,6 +124,15 @@ export default function LearningSessionShell() {
   const locked = lock !== null && computeLocked(lock, nowMs);
 
   /**
+   * 下发给浅停留页的锁定态。**加 `isDesktopShell()` 闸门**：浏览器里即使本地躺着
+   * 上一台设备的锁定快照，也不该显示"需家长解除"（那是壳的语义）。
+   */
+  const lockValue =
+    isDesktopShell() && locked && lock?.lockExpiresAt
+      ? { locked: true, remainingMs: remainingMs(lock.lockExpiresAt, nowMs) }
+      : null;
+
+  /**
    * ② 学生模式 → Electron 主进程（**唯一出口**）。`resolved` 之前不推，避免先退出再进 kiosk。
    *
    * ⚠️ **推的是 `resolved && isStudent`，不是 `locked`**：kiosk 由**角色**决定（spec §3 裁决 2、
@@ -176,11 +186,8 @@ export default function LearningSessionShell() {
   }, [locked]);
 
   return (
-    <>
-      {locked && lock?.lockExpiresAt && (
-        <LockedPill remainingMs={remainingMs(lock.lockExpiresAt, nowMs)} />
-      )}
+    <LearningLockContext.Provider value={lockValue}>
       <Outlet />
-    </>
+    </LearningLockContext.Provider>
   );
 }
