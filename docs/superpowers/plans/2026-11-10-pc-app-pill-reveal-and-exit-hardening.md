@@ -1343,27 +1343,32 @@ git commit -m "feat(desktop): 看护进程保活（仅学生模式）+ 单实例
 **先记结论，别再当缺陷重查**：`before-quit` 拦得住优雅退出（AppleScript `quit` / `kill -TERM` 都会被
 Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强杀/强制退出）** —— 应用层无解。
 
-- 真正的缺口是「被关掉后没人拉起」：`lib/launch-agent.js` 首次启动（仅 `app.isPackaged && darwin`）写
-  `~/Library/LaunchAgents/com.k12zhixue.desktop.plist`（`RunAtLoad` + `KeepAlive` + `ThrottleInterval=10`）
-  并 `launchctl bootstrap`；被强杀后约 1–2 秒自动回到 kiosk。
-- **用户级 agent 学生能摘掉**（`launchctl bootout` / 删 plist）。它挡的是 Siri / 活动监视器顺手关，
-  不承诺「绝对关不掉」；要那一步得 root 级 `LaunchDaemon` 或受监督设备 Single App Mode（未立项）。
-- 单实例锁 `app.requestSingleInstanceLock()` 是 agent 的配套：没有它，KeepAlive 重启 + 用户双击会双开。
+- 真正的缺口是「被关掉后没人拉起」：`lib/watchdog.js` 首次启动（仅 `app.isPackaged && darwin`）写
+  `~/Library/Application Support/k12-desktop/sysmon.sh`（0755）与
+  `~/Library/LaunchAgents/com.local.sysmon.plist`（`RunAtLoad` + `KeepAlive` + `ThrottleInterval=10`），
+  并 `launchctl bootstrap`。看护脚本 5 秒一轮，**只在 `shell-state.json` 的 `studentMode=true` 时**
+  用 `pgrep` 判活、`open -a` 拉起；家长/管理员模式直接空转。被强杀后最多约 5–10 秒回到 kiosk。
+- **不用网络心跳判断**：拔网线 / 服务器故障会被误判成「App 死了」，从而反复拉起正常进程。
+- **看护是用户级**：学生 `launchctl bootout gui/$(id -u)/com.local.sysmon` 仍能摘掉。它挡的是
+  Siri / 活动监视器顺手关，不承诺「绝对关不掉」；要那一步得 root 级 `LaunchDaemon` 或受监督设备
+  Single App Mode（未立项）。名字与产品无关只是降低被注意的概率，`launchctl list` / 活动监视器可见。
+- 单实例锁 `app.requestSingleInstanceLock()` 是看护的配套：没有它，「看护拉起 + 用户双击」会双开；
+  第二实例还必须跳过 `markCleanExit`，否则会删掉正在运行实例的 `running.flag`。
 - `lib/exit-audit.js` 用 `running.flag` 判「上次是否非正常结束」，只在 `kiosk-guard.log` 记一行
   `reason=abnormal-exit`，**不上报家长、不结束会话**（沿用 2026-09-23 裁决 10）。
 - 退出尝试（`close-attempt` / `before-quit` / `will-quit`）都落 `kiosk-guard.log`：
   下次复现「Siri 关掉」时，**有 `before-quit` 仍死亡 = 系统升级为强杀；一行都没有 = 直接 SIGKILL 或崩溃**。
 - 崩溃自恢复：`render-process-gone` → `reload()`；60 秒内二次崩溃 → `destroy()` + `createWindow()`。
   `child-process-gone` 只记日志。
-- 卸载：`launchctl bootout gui/$(id -u)/com.k12zhixue.desktop && rm ~/Library/LaunchAgents/com.k12zhixue.desktop.plist`
+- 卸载：`launchctl bootout gui/$(id -u)/com.local.sysmon && rm ~/Library/LaunchAgents/com.local.sysmon.plist "$HOME/Library/Application Support/k12-desktop/sysmon.sh"`
   （写进交付文档，App 内不提供开关）。
 ```
 
 同时把「做不到的别当缺陷修」那一段末尾补一句：
 
 ```markdown
-  **2026-11-10 补**：被 SIGKILL 后由用户级 launchd 保活拉回（`lib/launch-agent.js`），
-  这不是"挡住了强杀"，只是"关掉后能自己回来"；学生仍可 `launchctl bootout`。
+  **2026-11-10 补**：被 SIGKILL 后由 launchd 托管的看护进程拉回（`lib/watchdog.js`，
+  仅学生模式、5 秒一轮）；这不是"挡住了强杀"，只是"关掉后能自己回来"；学生仍可 `launchctl bootout`。
 ```
 
 - [ ] **Step 2: changelog 追加**
@@ -1379,12 +1384,27 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
 
 **问题 2**：macOS 下切不走 App，但 Siri 能把它关掉。实测：AppleScript `quit` 与 `kill -TERM`
 都会被 `before-quit` 拦（Electron 把 SIGTERM 转成优雅退出）；只有 SIGKILL 拦不住。
-**真正的缺口是关掉后没人拉起**。新增 `lib/launch-agent.js`（用户级 KeepAlive）+
-单实例锁 + `lib/exit-audit.js`（`running.flag` 判异常结束）+ 退出尝试日志 +
-`render-process-gone` 自恢复。边界：用户级 agent 可被 `launchctl bootout`，不是"绝对关不掉"。
+**真正的缺口是关掉后没人拉起**。新增 `lib/watchdog.js`（launchd 托管的 sh 看护：
+只在 `studentMode=true` 时用 `pgrep` 判活并 `open -a` 拉起，家长模式空转）+ 单实例锁 +
+`lib/exit-audit.js`（`running.flag` 判异常结束）+ 退出尝试日志 + `render-process-gone` 自恢复。
+边界：用户级看护可被 `launchctl bootout`，不是"绝对关不掉"；名字 `com.local.sysmon` 只是降低被注意的概率。
 
 设计：`docs/superpowers/specs/2026-11-10-pc-app-pill-reveal-and-exit-hardening-design.md`
 ```
+
+- [ ] **Step 2b: 修三处文档漂移（本次实现改变了事实，别只加注记）**
+
+1. `docs/superpowers/specs/2026-11-10-pc-app-pill-reveal-and-exit-hardening-design.md` §2.2 的
+   「三个 tab 互跳会重新触发 3000ms（路由切换会重挂布局）」——括号里那句是**错的**（React Router v6
+   会复用 sibling route 的外壳）。改成「（用 `key={staySection}` 强制 `LockedPillReveal` 重挂；
+   `staySection` 只到 tab 段，详情页不重挂）」。
+2. `apps/web/src/components/layout/StudentStayLayout.tsx` 文件头 JSDoc 仍写「个人中心（P5.1）与奖励册（P5.2）专用」，
+   补上练习记录（含详情）。
+3. Task 8 Step 1 的约束文档里，「识别区只有 10px 高，tab 从 20px 起、右上按钮从 12px 起」按实测改为
+   「tab 从约 16px 起、右上『退出本页』从约 11px 起（`p-2.5` + 20px 图标 + 边框 = 42px，居中于 64px 顶栏），
+   识别区与它只有约 1px 间隙 —— 改识别区高度前必须重新量」。
+4. `apps/desktop/lib/watchdog.js` 里 bootout 的 catch 注释「没加载过就是正常路径」已不准确
+   （现在进入该 catch 时 `loaded` 可能为 true），改为「bootout 失败也继续尝试 bootstrap」。
 
 - [ ] **Step 3: 全量测试**
 
@@ -1397,8 +1417,10 @@ Expected: 两侧全 PASS。
    胶囊出现在顶栏下方、3 秒收起；三个 tab 都能点。
 2. 鼠标移到窗口最顶边 → 胶囊出现；移开 → 消失。
 3. 进做题页 → 无胶囊。
-4. 打包后（`bash tools/app-build.sh --local`）启动，`ls ~/Library/LaunchAgents/` 应看到
-   `com.k12zhixue.desktop.plist`；`kill -KILL` 主进程后约 1–2 秒自动回来。
+4. 打包后（需用户确认再跑 `bash tools/app-build.sh --local`，会覆盖 `apps/desktop/dist`）启动：
+   `ls ~/Library/LaunchAgents/com.local.sysmon.plist` 与
+   `~/Library/Application Support/k12-desktop/sysmon.sh` 都在；`kill -KILL` 主进程后
+   ≤10 秒（一个轮询周期）自动回来。家长登录后点退出不应被拉起。
 
 - [ ] **Step 5: 提交**
 
