@@ -1118,7 +1118,8 @@ while :; do
       if [ -x "$EXE" ]; then
         nohup "$EXE" >/dev/null 2>&1 &
       else
-        open -a "$APP" >/dev/null 2>&1
+        # 绝不回退 open -a（未签名包会加载不出页面），记一行放弃
+        echo "[$(date '+%F %T')] skip: no executable $EXE" >>"$LOGFILE" 2>/dev/null
       fi
     fi
   fi

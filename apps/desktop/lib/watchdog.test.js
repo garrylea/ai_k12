@@ -66,8 +66,9 @@ describe('watchdog', () => {
     const script = buildWatchdogScript();
     expect(script).toContain('EXE="$APP/Contents/MacOS/$NAME"');
     expect(script).toContain('nohup "$EXE"');
-    // open -a 只作为「可执行文件不存在」时的回退
-    expect(script).toMatch(/if \[ -x "\$EXE" \]; then[\s\S]*?nohup "\$EXE"[\s\S]*?else[\s\S]*?open -a "\$APP"/);
+    // 绝不回退到 open -a —— 未签名包经 LaunchServices 启动会加载不出页面
+    expect(script).not.toMatch(/^\s*open -a/m);
+    expect(script).toContain('skip: no executable');
   });
 
   it('plist 带 KeepAlive / RunAtLoad / ThrottleInterval / 脚本与 App 两个参数', () => {

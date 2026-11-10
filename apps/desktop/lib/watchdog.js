@@ -40,6 +40,7 @@ NAME="$(/usr/bin/basename "$APP" .app)"
 EXE="$APP/Contents/MacOS/$NAME"
 STATE="$HOME/Library/Application Support/k12-desktop/shell-state.json"
 PIDFILE="$HOME/Library/Application Support/k12-desktop/app.pid"
+LOGFILE="$HOME/Library/Application Support/k12-desktop/watchdog.log"
 
 # 判活优先级：心跳文件（App 启动时写 pid）→ 进程名兜底。
 # ⚠️ 不能用「包路径」判活：从 dist 启动、装到 /Applications 之后再从旧位置启动、
@@ -59,10 +60,15 @@ while :; do
   if [ -f "$STATE" ] && grep -q '"studentMode":true' "$STATE" 2>/dev/null; then
     if ! alive; then
       if [ -x "$EXE" ]; then
+        # 只记一行，便于事后判断「到底有没有拉起过」；日志超过 64KB 就清空。
+        [ -f "$LOGFILE" ] && [ "$(wc -c <"$LOGFILE" 2>/dev/null || echo 0)" -gt 65536 ] && : >"$LOGFILE"
+        echo "[$(date '+%F %T')] launch $EXE" >>"$LOGFILE" 2>/dev/null
         # nohup + 后台：App 不能是看护脚本的子进程，否则 bootout 本任务时会连带杀掉 App。
         nohup "$EXE" >/dev/null 2>&1 &
       else
-        open -a "$APP" >/dev/null 2>&1
+        # ⚠️ 绝不回退到 open -a：未签名的包经 LaunchServices 启动会加载不出页面
+        # （2026-11-10 用户实测），看起来像「拉起来了但进不去」。这里只记一行放弃。
+        echo "[$(date '+%F %T')] skip: no executable $EXE" >>"$LOGFILE" 2>/dev/null
       fi
     fi
   fi

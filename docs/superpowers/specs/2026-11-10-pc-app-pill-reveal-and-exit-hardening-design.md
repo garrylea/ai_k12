@@ -147,8 +147,8 @@ locked=false                → 不渲染（连识别区一起不渲染）
 2. `studentMode=true` 且判活失败（先看 `userData/app.pid` 的 pid 是否 `kill -0` 存活，再用
    `pgrep -x "<name>"` 兜底 —— **不能按包路径判活**，否则 dist/Applications 混用会反复拉起）→ **直接执行**
    `<App>/Contents/MacOS/<name>`（`nohup` 后台，脱离看护的进程组）。
-   ⚠️ **不走 `open -a`**：产物未签名/未公证，LaunchServices 启动在部分机器上会被 Gatekeeper 静默拒绝；
-   `open -a` 只作为「可执行文件不存在」时的回退。
+   ⚠️ **绝不走 `open -a`，也不保留它做回退**：产物未签名/未公证时，经 LaunchServices 启动会
+   加载不出页面（用户实测）；可执行文件不存在就只写一行 `watchdog.log` 放弃。
 
 `studentMode=false` 或文件不存在 → **什么都不做**（家长/管理员可正常退出，不会被拉起）。
 脚本内**不 embed App 路径**：路径由 plist 的 `ProgramArguments` 传入，App 挪位置只改 plist。
