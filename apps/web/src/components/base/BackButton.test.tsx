@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
@@ -80,5 +80,37 @@ describe('BackButton：不传 to 的返回上一页模式', () => {
 
     expect(screen.getByRole('button', { name: '返回上一页' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument();
+  });
+});
+
+describe('BackButton：自定义 onClick（重练「先清队列再返回」用）', () => {
+  it('只执行 onClick，不再叠加默认导航', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    const router = createMemoryRouter(
+      [
+        { path: '/student/start', element: <BackButton to="/student/entry" onClick={onClick} /> },
+        { path: '/student/entry', element: <div>入口选择页</div> },
+      ],
+      { initialEntries: ['/student/start'] },
+    );
+    render(<RouterProvider router={router} />);
+
+    await user.click(screen.getByRole('button', { name: '返回' }));
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+    // 调用方自己负责导航：这里没有 navigate，页面不能自己跳走
+    expect(router.state.location.pathname).toBe('/student/start');
+  });
+
+  it('ariaLabel 只改可访问名，不渲染可见文字', () => {
+    const router = createMemoryRouter(
+      [{ path: '/student/start', element: <BackButton to="/student/entry" ariaLabel="返回错题本" /> }],
+      { initialEntries: ['/student/start'] },
+    );
+    render(<RouterProvider router={router} />);
+
+    expect(screen.getByRole('button', { name: '返回错题本' })).toBeInTheDocument();
+    expect(screen.queryByText('返回错题本')).toBeNull();
   });
 });

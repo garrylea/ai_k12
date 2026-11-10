@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
 
@@ -43,5 +44,26 @@ describe('PageHeader 右侧操作区', () => {
     const slot = screen.getByTestId('page-header-actions');
     expect(slot).toBeInTheDocument();
     expect(slot).toContainElement(screen.getByRole('button', { name: '账号区' }));
+  });
+});
+
+describe('PageHeader：onBack 自定义返回', () => {
+  it('点击返回只执行 onBack，caption/title 仍是上下两行', async () => {
+    const user = userEvent.setup();
+    const onBack = vi.fn();
+    renderAt(
+      <PageHeader
+        onBack={onBack}
+        backAriaLabel="返回错题本"
+        caption="返回错题本"
+        title="错题重练"
+      />,
+    );
+
+    expect(screen.getByText('返回错题本')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '错题重练' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '返回错题本' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 });

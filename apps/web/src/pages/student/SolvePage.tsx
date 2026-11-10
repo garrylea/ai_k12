@@ -11,7 +11,7 @@
 //   尺寸只有那一处真源，别再在本页另写全屏布局。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { BackButton } from '@/components/base';
+import { PageHeader } from '@/components/base';
 import { StudentAccountActions } from '@/components/business';
 import { toast } from '@/components/base/Toast';
 import { uploadFile, type AttachmentRequest } from '@/services/api';
@@ -372,44 +372,23 @@ export default function SolvePage() {
       }
     >
       <div className="relative flex flex-1 min-h-0 flex-col p-4 sm:p-5 text-[var(--text-primary)]">
-        <header className="flex shrink-0 min-h-[44px] items-center justify-between border-b border-[var(--bg-subtle)] pb-3">
-          <div className="flex items-center gap-3">
-            {redoMode ? (
-              <button
-                type="button"
-                onClick={exitRedo}
-                title="返回错题本"
-                aria-label="返回错题本"
-                className="inline-flex items-center gap-1.5 text-slate-600"
-              >
-                <span className="inline-flex items-center justify-center p-2.5 rounded-full bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors">
-                  <svg
-                    className="w-5 h-5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <polyline points="15 18 9 12 15 6" />
-                  </svg>
+        <PageHeader
+          to={redoMode ? undefined : '/student/entry'}
+          onBack={redoMode ? exitRedo : undefined}
+          backAriaLabel={redoMode ? '返回错题本' : undefined}
+          caption={redoMode ? '返回错题本' : '返回入口'}
+          title={redoMode ? '错题重练' : '做题'}
+          actions={
+            <div className="flex items-center gap-3">
+              {redoMode && redo && (
+                <span className="text-sm text-[var(--text-tertiary)]">
+                  第 {redo.index + 1}/{redo.items.length} 题
                 </span>
-                <span className="text-sm font-medium">返回错题本</span>
-              </button>
-            ) : (
-              <BackButton to="/student/entry" label="返回入口" />
-            )}
-            <h1 className="text-lg font-bold">{redoMode ? '错题重练' : '做题'}</h1>
-            {redoMode && redo && (
-              <span className="text-sm text-[var(--text-tertiary)]">
-                第 {redo.index + 1}/{redo.items.length} 题
-              </span>
-            )}
-          </div>
-          <StudentAccountActions />
-        </header>
+              )}
+              <StudentAccountActions />
+            </div>
+          }
+        />
 
         {stage === 'input' && (
           <main className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 pb-10">

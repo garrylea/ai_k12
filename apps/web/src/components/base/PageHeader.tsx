@@ -3,8 +3,12 @@ import clsx from 'clsx';
 import { BackButton } from './BackButton';
 
 interface PageHeaderProps {
-  /** 返回目标路径 */
-  to: string;
+  /** 返回目标路径（与 onBack 二选一；传 onBack 时由调用方自己导航） */
+  to?: string;
+  /** 自定义返回动作（如先清队列再导航）；传了就不再走 to */
+  onBack?: () => void;
+  /** 返回按钮的可访问名（不显示文字；默认「返回」/「返回上一页」） */
+  backAriaLabel?: string;
   /** 大标题上方的小字说明（返回去向 / 学科名），如「返回训练」 */
   caption?: string;
   /** 页面大标题 */
@@ -28,6 +32,8 @@ interface PageHeaderProps {
  */
 export function PageHeader({
   to,
+  onBack,
+  backAriaLabel,
   caption,
   title,
   state,
@@ -44,7 +50,7 @@ export function PageHeader({
         className,
       )}
     >
-      <BackButton to={to} state={state} />
+      <BackButton to={to} onClick={onBack} ariaLabel={backAriaLabel} state={state} />
       <div className="min-w-0">
         {caption ? (
           <div className="text-sm font-semibold tracking-wide text-[#ff6b35]">

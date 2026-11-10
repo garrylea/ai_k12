@@ -12,6 +12,8 @@ interface BackButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   to?: string;
   /** Optional destination label, shown next to the icon + used for title / aria-label */
   label?: string;
+  /** 仅覆盖可访问名（不显示文字）；与 label 同时传时 ariaLabel 优先 */
+  ariaLabel?: string;
   /** Optional navigation state (e.g. { subjectId })；仅在传了 `to` 时有意义 */
   state?: unknown;
 }
@@ -53,14 +55,20 @@ const ArrowLeftIcon = () => (
  * 在 browser history 下又只对生产生效（`history.state.idx === 0` 这类探测），
  * 属过度设计；真正需要确定落点的场景就传 `to`（模式 1）。
  */
-export function BackButton({ to, label, state, className, ...rest }: BackButtonProps) {
+export function BackButton({ to, label, ariaLabel, state, className, onClick, ...rest }: BackButtonProps) {
   const navigate = useNavigate();
-  const accessibleLabel = label || (to === undefined ? '返回上一页' : '返回');
+  const accessibleLabel = ariaLabel || label || (to === undefined ? '返回上一页' : '返回');
   return (
     <button
       {...rest}
       type="button"
-      onClick={() => {
+      onClick={(e) => {
+        // 传了 onClick 就由调用方负责导航（如「先清重练队列再跳错题本」），
+        // 不再叠加默认 navigate，避免一次点击跳两次。
+        if (onClick) {
+          onClick(e);
+          return;
+        }
         if (to === undefined) {
           navigate(-1);
           return;
