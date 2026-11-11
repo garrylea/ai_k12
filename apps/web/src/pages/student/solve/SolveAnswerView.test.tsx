@@ -143,6 +143,17 @@ describe('SolveAnswerView', () => {
     expect(onUploadingChange).toHaveBeenLastCalledWith(false);
   });
 
+  it('底部按钮不参与压缩：窄卡下「答疑/提交」保持单行（不被压成竖排）', () => {
+    renderView();
+    for (const name of ['答疑', '提交']) {
+      const btn = screen.getByRole('button', { name });
+      // 底部栏是三等分 grid，中列在窄卡（草稿展开）时只有 ~140px；
+      // 缺 nowrap/shrink-0 时按钮会被 flex 压窄，两个汉字各占一行（2026-11-11 报告）。
+      expect(btn.className).toContain('whitespace-nowrap');
+      expect(btn.className).toContain('shrink-0');
+    }
+  });
+
   it('题干经 preprocessMarkdown 归一：\\[…\\] 渲染成 KaTeX 而非字面方括号', () => {
     const { container } = renderView({ questionContent: '已知 \\[x=1\\]，求 x。' });
 

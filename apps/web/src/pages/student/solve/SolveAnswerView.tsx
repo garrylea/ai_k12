@@ -95,12 +95,15 @@ export function SolveAnswerView(props: SolveAnswerViewProps) {
             附上草稿
           </label>
         )}
+        {/* 按钮组不参与压缩：grid 的三等分列在窄卡（如草稿展开后的大卡）只有 ~140px，
+            按钮允许收缩的话「答疑/提交」会被压成两字竖排。nowrap 保住一行，
+            组仍居中于中列（= 卡片中心），不足时向两侧空白溢出而不是换行。 */}
         <div className="flex items-center justify-center gap-3">
           <button
             type="button"
             onClick={props.onAskHelp}
             disabled={props.submitting || props.streaming}
-            className="h-10 px-5 rounded-lg border border-[var(--brand-500)] text-[var(--brand-500)] text-sm disabled:opacity-50"
+            className="h-10 px-5 rounded-lg border border-[var(--brand-500)] text-[var(--brand-500)] text-sm whitespace-nowrap shrink-0 disabled:opacity-50"
           >
             答疑
           </button>
@@ -108,7 +111,7 @@ export function SolveAnswerView(props: SolveAnswerViewProps) {
             type="button"
             onClick={props.onSubmit}
             disabled={props.submitting || props.streaming}
-            className="h-10 px-6 rounded-lg bg-[var(--brand-500)] text-white text-sm disabled:opacity-50 inline-flex items-center gap-2"
+            className="h-10 px-6 rounded-lg bg-[var(--brand-500)] text-white text-sm whitespace-nowrap shrink-0 disabled:opacity-50 inline-flex items-center gap-2"
           >
             {props.submitting && (
               <svg
