@@ -63,13 +63,14 @@ describe('watchdog', () => {
     expect(script).not.toContain('pgrep -f');
   });
 
-  it('未签名包必须直接 exec 包内可执行文件，而不是走 LaunchServices 的 open -a', () => {
+  it('用 open -a 走 LaunchServices 拉起（签名产物），不再直接 exec 包内二进制', () => {
     const script = buildWatchdogScript();
-    expect(script).toContain('EXE="$APP/Contents/MacOS/$NAME"');
-    expect(script).toContain('nohup "$EXE"');
-    // 绝不回退到 open -a —— 未签名包经 LaunchServices 启动会加载不出页面
-    expect(script).not.toMatch(/^\s*open -a/m);
-    expect(script).toContain('skip: no executable');
+    // 2026-11-11：产物已签名，LaunchServices 启动不再加载不出页面 → 改回 open -a
+    expect(script).toContain('/usr/bin/open -a "$APP"');
+    expect(script).toContain('rc=$?');
+    // 直接 exec 那条路已删：exec 出来的进程不登记 LaunchServices，前台激活与双击不一致
+    expect(script).not.toContain('nohup "$EXE"');
+    expect(script).not.toContain('$APP/Contents/MacOS/$NAME');
   });
 
   it('plist 带 KeepAlive / RunAtLoad / ThrottleInterval / 脚本与 App 两个参数', () => {

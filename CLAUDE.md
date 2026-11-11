@@ -103,4 +103,5 @@ pip install -r requirements.txt && pytest   # 测试在 tests/test_*.py；网络
 - **`input_tokens` / `output_tokens` 可为 NULL，NULL = 量不到**：量不到就写 NULL，**绝不写 0**（否则报表分不清「缺口」与「真实读数」；本期只记 token，不记价格/成本）。
 - **不用 WebSocket**（2026-09-21 用户裁决）：全仓无 WS 实现、也不再引入。AI 流式一律走 **SSE**（`POST /api/ai/tutor/stream`、`GET /api/refinery/tasks/{taskId}/stream`、`POST /api/admin/chat/stream`）；家长端预警靠 **30s 轮询**（`GET /api/parent/alerts/unread`）。
 - **埋点（behavior_events）写入一律经 `EventsService`**：`EVENT_TIER` 字典写时定 tier（调用方不可覆盖）、未登记事件拒写、`track()` 吞一切异常只 warn；**家长端查询硬过滤 `tier='parent'`**（隐私三道锁，守卫测试 `parent-analytics.privacy-guard.test.ts`，admin `/events` 全 tier 是有意豁免）。
+- **PC App 打包必须走华为云镜像下载 Electron**（2026-11-11 用户要求，硬约束）：`tools/app-build.sh` 里默认导出的 `ELECTRON_MIRROR=https://mirrors.huaweicloud.com/electron/` 与 `ELECTRON_CUSTOM_DIR={{ version }}`（华为云路径**版本前没有 `v`**，去掉会 404）**不许删、不许改回直连**；也不要绕过脚本直接跑 `electron-builder`（本机到 GitHub CDN 约 200KB/s，双架构会卡 20 分钟并 `ECONNRESET`；实测同一批包镜像 16 秒下完）。细节见 `docs/constraints/pc-app-学习管控.md`「打包与分发」。
 

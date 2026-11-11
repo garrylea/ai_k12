@@ -29,15 +29,14 @@ function buildWatchdogScript() {
 # sysmon —— 本地看护（spec 2026-11-10 §4）。
 # 只在 studentMode=true 时工作：发现 App 不在运行就拉起；家长/管理员模式什么都不做。
 #
-# ⚠️ 拉起方式：**直接执行包内可执行文件**（$APP/Contents/MacOS/<name>），不用 \`open -a\`。
-# 本项目产物未签名/未公证，LaunchServices 启动在部分机器上会被 Gatekeeper 静默拒绝；
-# 直接 exec 包内二进制不经过 LaunchServices 检查，未签名包也能起来。
-# 可执行文件名取 .app 包名去后缀（electron-builder 的 productName 即此名）；
-# 文件不存在时才回退到 \`open -a\`（例如将来换成带签名的正式产物）。
+# 拉起方式：\`/usr/bin/open -a "$APP"\`（LaunchServices，与双击同一条路径）。
+# 2026-11-11 起产物用 Apple Development 签名，「经 LaunchServices 启动加载不出页面」那个前提已经消失
+# （未签名时才会：2026-11-10 实测），所以改回 open -a —— 它会把 App 正确登记进 LaunchServices，
+# 前台激活 / Dock / 单实例行为都与双击一致。
+# 拉起失败不再静默：open 的退出码写进 watchdog.log（App 被删/改名时能看到）。
 APP="$1"
 [ -n "$APP" ] || exit 0
 NAME="$(/usr/bin/basename "$APP" .app)"
-EXE="$APP/Contents/MacOS/$NAME"
 STATE="$HOME/Library/Application Support/k12-desktop/shell-state.json"
 PIDFILE="$HOME/Library/Application Support/k12-desktop/app.pid"
 LOGFILE="$HOME/Library/Application Support/k12-desktop/watchdog.log"
@@ -59,17 +58,11 @@ alive() {
 while :; do
   if [ -f "$STATE" ] && grep -q '"studentMode":true' "$STATE" 2>/dev/null; then
     if ! alive; then
-      if [ -x "$EXE" ]; then
-        # 只记一行，便于事后判断「到底有没有拉起过」；日志超过 64KB 就清空。
-        [ -f "$LOGFILE" ] && [ "$(wc -c <"$LOGFILE" 2>/dev/null || echo 0)" -gt 65536 ] && : >"$LOGFILE"
-        echo "[$(date '+%F %T')] launch $EXE" >>"$LOGFILE" 2>/dev/null
-        # nohup + 后台：App 不能是看护脚本的子进程，否则 bootout 本任务时会连带杀掉 App。
-        nohup "$EXE" >/dev/null 2>&1 &
-      else
-        # ⚠️ 绝不回退到 open -a：未签名的包经 LaunchServices 启动会加载不出页面
-        # （2026-11-10 用户实测），看起来像「拉起来了但进不去」。这里只记一行放弃。
-        echo "[$(date '+%F %T')] skip: no executable $EXE" >>"$LOGFILE" 2>/dev/null
-      fi
+      # 只记一行，便于事后判断「到底有没有拉起过」；日志超过 64KB 就清空。
+      [ -f "$LOGFILE" ] && [ "$(wc -c <"$LOGFILE" 2>/dev/null || echo 0)" -gt 65536 ] && : >"$LOGFILE"
+      /usr/bin/open -a "$APP" >/dev/null 2>&1
+      rc=$?
+      echo "[$(date '+%F %T')] launch open -a $APP rc=$rc" >>"$LOGFILE" 2>/dev/null
     fi
   fi
   sleep 5

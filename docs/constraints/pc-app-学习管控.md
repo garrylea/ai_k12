@@ -197,49 +197,45 @@ Windows 上 Electron 的 kiosk **只是无边框全屏**，`Alt+Tab` / `Win` 完
   识别区只有 10px 高：tab 栏从约 16px 起（可点 tab 本体从 20px 起），右上「退出本页」从约 11px 起
   （`p-2.5` + 20px 图标 + 边框 = 42px，居中于 64px 顶栏），识别区与它只有约 1px 间隙 —— 改识别区高度前必须重新量。
 
-## 被关掉之后的保活（2026-11-10，**当日关闭**）
+## 被关掉之后的保活（2026-11-10 关闭 → **2026-11-11 重新打开**）
 
-> **当前状态：关闭。** `main.js` 的 `WATCHDOG_ENABLED = false`；打包版启动时会**卸载**已安装的看护
-> （`removeWatchdog`：`launchctl bootout` + 删 plist 与脚本），不再拉起。`installWatchdog` 的代码与
-> 测试**保留**，重新开启时把常量改回 `true` 即可。
+> **当前状态：打开。** `main.js` 的 `WATCHDOG_ENABLED = true`；打包版启动时安装/更新看护
+> （`installWatchdog`）。脚本内容变了会自动 `bootout` + `bootstrap`，不需要用户重装。
 >
-> **重新打开的唯一前提：有稳定签名。** 没签名时 macOS 27 的「本地网络」权限按**责任进程**归属 ——
-> 终端拉起记在终端名下（早已授权），launchd 拉起记在 App 自己名下；而授权按 cdhash 记，
-> **每次重打包就作废** → 看护拉起后 App 连不上服务器（`did-fail-load code=-109
-> ERR_ADDRESS_UNREACHABLE`），学生直接进不去。2026-11-10 第二台 Mac A/B 实测：同一二进制、同一分钟，
-> 终端上下文页面 200 / launchd 上下文 App `-109`，而 launchd 上下文的 `curl` 也是 200
-> （命令行工具不进这条 TCC 名单）→ 锁定为「权限归属」而非网络。装完新包必须手动起一次 App
-> 并在弹窗/系统设置里允许「本地网络」，且**每次重装都要重来**。
+> **为什么现在能开**：产物改用 Apple Development 签名（见下文「打包与分发」）→ macOS 27 的
+> 「本地网络」授权绑证书的 designated requirement、**跨重打包稳定**，launchd 拉起的 App 不再丢授权。
+> 之前关闭的原因（未签名 → 授权按 cdhash 记、重打包即作废 → 看护拉起的 App `-109`）只对
+> **未签名产物**成立：CI（`desktop-release.yml`）出的包仍不签名，**混装 CI 包时这个问题会回来**。
 >
-> 以下为实现细节，保留作为重新开启时的依据。
+> **拉起方式已改回 `open -a`**（2026-11-11 用户要求）：未签名时才需要「直接 exec 包内二进制」
+> 绕开 LaunchServices（2026-11-10 实测：未签名包经 LaunchServices 启动页面加载不出来）。
+> 签名后那条前提消失，而 `open -a` 会把 App 正常登记进 LaunchServices —— 前台激活、Dock、
+> 单实例行为都与双击一致。脚本仍记录 `open` 的退出码到 `watchdog.log`（`launch open -a <APP> rc=<n>`）。
 
 **先记结论，别再当缺陷重查**：`before-quit` 拦得住优雅退出（AppleScript `quit` / `kill -TERM` 都会被
 Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强杀/强制退出）** —— 应用层无解。
 
-- （关闭前实现）真正的缺口是「被关掉后没人拉起」：`lib/watchdog.js` 首次启动（仅 `app.isPackaged && darwin`）写
+- 真正的缺口是「被关掉后没人拉起」：`lib/watchdog.js` 首次启动（仅 `app.isPackaged && darwin`）写
   `~/Library/Application Support/k12-desktop/sysmon.sh`（0755）与
   `~/Library/LaunchAgents/com.local.sysmon.plist`（这是**看护脚本**的 `RunAtLoad` + `KeepAlive` +
   `ThrottleInterval=10`，**不是 App 的** —— App 直管方案已被否决），
   并 `launchctl bootstrap`。看护脚本 5 秒一轮，**只在 `shell-state.json` 的 `studentMode=true` 时**
-  **直接 exec** `<App>/Contents/MacOS/<name>` 拉起（`nohup` 后台）；家长/管理员模式直接空转。
-  被强杀后最多约 5–10 秒回到 kiosk。
+  拉起（`/usr/bin/open -a "<App>"`）；家长/管理员模式直接空转。被强杀后最多约 5–10 秒回到 kiosk。
 - **判活不能认包路径**（2026-11-10 用户实测「App 被反复拉起」）：`pgrep -f "<包路径>/Contents/MacOS/"`
   只认 plist 里那一个路径，从 `dist` 启动、装到 `/Applications` 后又从旧位置启动、开发态 `npm start`，
   三种都会把「已经在跑」判成「没在跑」→ 每 5 秒拉起一次。现在的判据是：
   ① App 启动时写 `userData/app.pid`（`lib/app-heartbeat.js`），脚本用 `kill -0 <pid>` 判活
   （被杀即失效，不会像时间戳心跳那样假阳性）；② 文件缺失/被删时用 `pgrep -x "<name>"` 兜底。
   注意这是**进程级心跳**，不是网络心跳 —— 拔网线/后端掉线绝不能触发重启。
-- **拉起绝不能走 `open -a`**（2026-11-10 用户实测）：产物未签名/未公证时，经 LaunchServices 启动
-  页面加载不出来（看起来像"拉起来了但进不去"）；直接 exec 包内二进制才正常。所以脚本里**没有**
-  `open` 回退：可执行文件不存在就只写一行 `watchdog.log` 放弃，绝不换启动方式。
-  可执行文件名 = `.app` 包名去后缀
-  （即 `productName`）。
+- **`open -a` 只在「已签名产物」下可用**（2026-11-10 反向实测 / 2026-11-11 改回）：未签名/未公证时
+  经 LaunchServices 启动页面加载不出来（看起来像"拉起来了但进不去"），那时必须直接 exec 包内二进制。
+  若将来回退到未签名产物，**必须同时**把 `WATCHDOG_ENABLED` 改回 `false`，别只改脚本。
 - **不用网络心跳判断**：拔网线 / 服务器故障会被误判成「App 死了」，从而反复拉起正常进程。
 - **看护是用户级**：学生 `launchctl bootout gui/$(id -u)/com.local.sysmon` 仍能摘掉。它挡的是
   Siri / 活动监视器顺手关，不承诺「绝对关不掉」；要那一步得 root 级 `LaunchDaemon` 或受监督设备
   Single App Mode（未立项）。名字与产品无关只是降低被注意的概率，`launchctl list` / 活动监视器可见。
-- **被看护拉起的 App 必须自己抢前台（2026-11-10 实测）**：launchd/`nohup` 启动是「后台启动」，
-  macOS 不会自动激活，窗口会停在别的应用后面、`setKiosk(true)` 也不生效 —— 日志表现为
+- **被看护拉起的 App 必须自己抢前台（2026-11-10 实测）**：launchd 拉起是「后台启动」，
+  `open -a` 也不保证把窗口带到最前，窗口会停在别的应用后面、`setKiosk(true)` 也不生效 —— 日志表现为
   `appActive=false fullscreen=false`、窗口 1440x900@240,90，守护每秒重进一次永远进不去。
   `main.js` 因此在 `ready-to-show` 里 `win.show() + app.focus({steal:true})`，
   且 `applyStudentMode(true)` 里**先激活再 `setKiosk`**（顺序不能反）。

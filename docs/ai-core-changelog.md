@@ -8,6 +8,28 @@
 
 ---
 
+## 2026-11-11 PC App：**重新打开看护**，拉起方式改回 `open -a`
+
+**用户裁决**：「把守护进程打开，我再试一下；另外把之前 terminal 启动的方式改成 `open -a`」。
+
+**为什么现在可以**：同日已接 Apple Development 签名 → 「本地网络」授权绑 DR、跨重打包稳定，
+2026-11-10 关闭看护的那个前提（未签名 → 授权按 cdhash 记 → 看护拉起的 App `-109`）不再成立。
+
+**改了**：
+- `main.js`：`WATCHDOG_ENABLED = true`；注释改成新口径，并写明「若回退未签名产物必须改回 false」。
+- `lib/watchdog.js` 脚本模板：拉起方式由「`nohup <App>/Contents/MacOS/<name>` 直接 exec」改为
+  `/usr/bin/open -a "$APP"`，退出码记进 `watchdog.log`（`launch open -a <APP> rc=<n>`），
+  起不来时能一眼看出；删除 `EXE` 与 `skip: no executable` 分支。
+  理由：未签名时 LaunchServices 启动会「起来了但进不去」（2026-11-10 实测），签名后该前提消失，
+  而 `open -a` 会把 App 登记进 LaunchServices，前台激活/Dock/单实例与双击一致。
+- 测试：`lib/watchdog.test.js` 那条反向断言改成「必须用 `open -a`、不得再出现 nohup/EXE」。
+- 文档：`docs/constraints/pc-app-学习管控.md`「被关掉之后的保活」整节改成「打开」并重写拉起方式；
+  spec `2026-11-10-pc-app-pill-reveal-and-exit-hardening-design.md` 加口径变更注记。
+
+**已知前提**：只对本机签名的包成立；CI 产物仍不签名，装 CI 包时看护拉起照样丢授权。
+
+---
+
 ## 2026-11-11 PC App：接入 **Apple Development 签名**（本地网络权限不再随重打包丢失）
 
 **为什么**：前一条（2026-11-10）的结论是「没签名 → 授权按 cdhash 记 → 重打包作废」。用户装了 Xcode，

@@ -13,17 +13,22 @@ const { installWatchdog, removeWatchdog } = require('./lib/watchdog.js');
 const { markAlive, clearAlive } = require('./lib/app-heartbeat.js');
 
 /**
- * 看护（学生强杀后自动拉起）**总开关 —— 2026-11-10 用户裁决：先关闭**。
+ * 看护（学生强杀后自动拉起）**总开关 —— 2026-11-11 重新打开**。
  *
- * 关闭原因（真机实测，两台 Mac 都复现）：macOS 27 的「本地网络」权限按**责任进程**归属。
+ * 为什么之前关（2026-11-10，两台 Mac 实测）：macOS 27 的「本地网络」权限按**责任进程**归属。
  * 终端拉起的 App 记在终端名下（早已授权）→ 正常；launchd（看护）拉起的记在 App 名下，
  * 而包没签名 → 授权按 cdhash 记、**每次重打包就作废** → 拉起来也连不上服务器
  * （`did-fail-load code=-109 ERR_ADDRESS_UNREACHABLE`），学生直接进不去。
  *
- * 重新打开的前提只有一条：**有稳定签名**（Apple Developer ID）。届时把它改回 true，
- * 并确认 `lib/watchdog.js` 里的脚本模板仍是「直接 exec、绝不回退 open -a」。
+ * 为什么现在能开：产物改用 Apple Development 证书签名（`tools/app-build.sh`），
+ * 权限绑 designated requirement、跨重打包稳定（2026-11-11 实测两次构建 DR 逐字相同）。
+ * 同时 `lib/watchdog.js` 的拉起方式改回 `open -a`（走 LaunchServices，与双击一致）——
+ * 未签名时才需要「直接 exec 包内二进制」绕开它，签名后没有这个必要。
+ *
+ * ⚠️ 前提只对本机签的包成立：CI（desktop-release.yml）产物仍不签名，
+ * 装 CI 包时看护拉起的 App 仍会因身份变化丢授权。要么给 CI 配证书，要么只用本机出包。
  */
-const WATCHDOG_ENABLED = false;
+const WATCHDOG_ENABLED = true;
 
 
 /**
@@ -505,8 +510,10 @@ app.whenReady().then(() => {
   createWindow();
 
   // ⚠️ 开关是**常量**而不是配置：这是产品裁决，不是给现场调的。
-  // 重新打开的前提是「包有稳定签名」—— 否则每重打包一次 cdhash 就变，macOS 27 的
-  // 「本地网络」授权随之作废，看护拉起的 App 直接连不上服务器（-109）。
+  // 现行口径（2026-11-11）：已用 Apple Development 签名 → 打开；脚本用 `open -a` 拉起。
+  // 若将来回到未签名产物，必须把 WATCHDOG_ENABLED 改回 false —— 否则每重打包一次
+  // cdhash 就变，macOS 27 的「本地网络」授权随之作废，看护拉起的 App 直接连不上（-109）。
+  // `!WATCHDOG_ENABLED` 那条分支保留：关闭态要能主动卸掉老版本装进 launchd 的看护。
   if (app.isPackaged) {
     const appBundle = app.getAppPath().replace(/\/Contents\/Resources\/app\.asar$/, '');
     if (!WATCHDOG_ENABLED) {

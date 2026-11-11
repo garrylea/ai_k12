@@ -145,10 +145,14 @@ locked=false                → 不渲染（连识别区一起不渲染）
 
 1. 读 `~/Library/Application Support/k12-desktop/shell-state.json` 的 `studentMode`；
 2. `studentMode=true` 且判活失败（先看 `userData/app.pid` 的 pid 是否 `kill -0` 存活，再用
-   `pgrep -x "<name>"` 兜底 —— **不能按包路径判活**，否则 dist/Applications 混用会反复拉起）→ **直接执行**
-   `<App>/Contents/MacOS/<name>`（`nohup` 后台，脱离看护的进程组）。
-   ⚠️ **绝不走 `open -a`，也不保留它做回退**：产物未签名/未公证时，经 LaunchServices 启动会
-   加载不出页面（用户实测）；可执行文件不存在就只写一行 `watchdog.log` 放弃。
+   `pgrep -x "<name>"` 兜底 —— **不能按包路径判活**，否则 dist/Applications 混用会反复拉起）→
+   **`/usr/bin/open -a "<App>"` 拉起**（2026-11-11 改；原文是「直接执行
+   `<App>/Contents/MacOS/<name>`（`nohup` 后台）」）。
+   ⚠️ 原文写「**绝不走 `open -a`**：产物未签名/未公证时经 LaunchServices 启动会加载不出页面」——
+   该结论只对**未签名产物**成立。2026-11-11 起产物用 Apple Development 签名，前提消失，
+   `open -a` 反而能把 App 正确登记进 LaunchServices（前台激活/Dock/单实例与双击一致），
+   所以改回 `open -a` 并记录其退出码到 `watchdog.log`。**若回退到未签名产物，必须同时把
+   `WATCHDOG_ENABLED` 改回 false 并改回直接 exec。**
 
 `studentMode=false` 或文件不存在 → **什么都不做**（家长/管理员可正常退出，不会被拉起）。
 脚本内**不 embed App 路径**：路径由 plist 的 `ProgramArguments` 传入，App 挪位置只改 plist。
