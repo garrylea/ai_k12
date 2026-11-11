@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { MineruRunner, FreeformMineruError, MineruLimiter } from './mineru-runner.js';
+import type { MineruRunConfig } from './mineru-runner.js';
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock('node:child_process', () => ({ spawn: spawnMock }));
@@ -8,9 +9,14 @@ vi.mock('node:child_process', () => ({ spawn: spawnMock }));
 afterEach(() => {
   spawnMock.mockReset();
   vi.useRealTimers();
-  delete process.env.MINERU_TOKEN;
-  delete process.env.MINERU_TIMEOUT_MS;
-  delete process.env.MINERU_BIN;
+});
+
+/** 配置由 MineruConfigService 解析后显式传入，runner 不再读 process.env。 */
+const cfg = (over: Partial<MineruRunConfig> = {}): MineruRunConfig => ({
+  bin: 'mineru-open-api',
+  token: 'sk-test',
+  timeoutMs: 90000,
+  ...over,
 });
 
 function fakeChild() {
@@ -24,13 +30,16 @@ function fakeChild() {
 it('按顺序传文件、设置 token、不带 shell', async () => {
   const child = fakeChild();
   spawnMock.mockReturnValue(child);
-  process.env.MINERU_TOKEN = 'sk-test';
-  const p = new MineruRunner().run(['/tmp/page_01.jpg', '/tmp/page_02.jpg'], '/tmp/out');
+  const p = new MineruRunner().run(
+    ['/tmp/page_01.jpg', '/tmp/page_02.jpg'],
+    '/tmp/out',
+    cfg({ bin: 'my-mineru' }),
+  );
   child.emit('close', 0);
   await p;
   expect(spawnMock).toHaveBeenCalledTimes(1);
   const [bin, args, opts] = spawnMock.mock.calls[0];
-  expect(bin).toBe(process.env.MINERU_BIN ?? 'mineru-open-api');
+  expect(bin).toBe('my-mineru');
   // argv 契约钉死（顺序、形状、默认 --timeout=90），防止静默漂移
   expect(args).toEqual([
     'extract',
@@ -47,12 +56,10 @@ it('按顺序传文件、设置 token、不带 shell', async () => {
   expect(opts.env.MINERU_TOKEN).toBe('sk-test');
 });
 
-it('MINERU_TIMEOUT_MS 按秒四舍五入传入 --timeout', async () => {
+it('timeoutMs 按秒四舍五入传入 --timeout', async () => {
   const child = fakeChild();
   spawnMock.mockReturnValue(child);
-  process.env.MINERU_TOKEN = 'sk-test';
-  process.env.MINERU_TIMEOUT_MS = '45000';
-  const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out');
+  const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out', cfg({ timeoutMs: 45000 }));
   child.emit('close', 0);
   await p;
   const [, args] = spawnMock.mock.calls[0];
@@ -62,8 +69,7 @@ it('MINERU_TIMEOUT_MS 按秒四舍五入传入 --timeout', async () => {
 it('非 0 退出抛 FreeformMineruError，且 stderr 不含 token', async () => {
   const child = fakeChild();
   spawnMock.mockReturnValue(child);
-  process.env.MINERU_TOKEN = 'sk-secret';
-  const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out');
+  const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out', cfg({ token: 'sk-secret' }));
   child.stderr.emit('data', Buffer.from('401 sk-secret bad token'));
   child.emit('close', 1);
   await expect(p).rejects.toBeInstanceOf(FreeformMineruError);
@@ -71,8 +77,10 @@ it('非 0 退出抛 FreeformMineruError，且 stderr 不含 token', async () => 
 });
 
 describe('MineruRunner 边界', () => {
-  it('缺 MINERU_TOKEN 直接抛错且不 spawn', async () => {
-    await expect(new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out')).rejects.toBeInstanceOf(FreeformMineruError);
+  it('token 为空直接抛错且不 spawn', async () => {
+    await expect(
+      new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out', cfg({ token: '' })),
+    ).rejects.toBeInstanceOf(FreeformMineruError);
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
@@ -80,10 +88,13 @@ describe('MineruRunner 边界', () => {
     vi.useFakeTimers();
     const child = fakeChild();
     spawnMock.mockReturnValue(child);
-    process.env.MINERU_TOKEN = 'sk-test';
-    process.env.MINERU_TIMEOUT_MS = '100';
     const controller = new AbortController();
-    const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out', controller.signal);
+    const p = new MineruRunner().run(
+      ['/tmp/a.jpg'],
+      '/tmp/out',
+      cfg({ timeoutMs: 100 }),
+      controller.signal,
+    );
     const assertion = expect(p).rejects.toBeInstanceOf(FreeformMineruError);
     vi.advanceTimersByTime(100 + 5000);
     await assertion;
@@ -94,20 +105,19 @@ describe('MineruRunner 边界', () => {
   });
 
   it('signal 已 abort 时直接拒绝，不 spawn', async () => {
-    process.env.MINERU_TOKEN = 'sk-test';
     const controller = new AbortController();
     controller.abort();
-    await expect(new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out', controller.signal)).rejects.toBeInstanceOf(
-      FreeformMineruError,
-    );
+    await expect(
+      new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out', cfg(), controller.signal),
+    ).rejects.toBeInstanceOf(FreeformMineruError);
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('abort 时 kill 并拒绝', async () => {    const child = fakeChild();
+  it('abort 时 kill 并拒绝', async () => {
+    const child = fakeChild();
     spawnMock.mockReturnValue(child);
-    process.env.MINERU_TOKEN = 'sk-test';
     const controller = new AbortController();
-    const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out', controller.signal);
+    const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out', cfg(), controller.signal);
     const assertion = expect(p).rejects.toBeInstanceOf(FreeformMineruError);
     controller.abort();
     await assertion;
@@ -118,8 +128,7 @@ describe('MineruRunner 边界', () => {
   it('stderr 只保留最后 500 字符', async () => {
     const child = fakeChild();
     spawnMock.mockReturnValue(child);
-    process.env.MINERU_TOKEN = 'sk-test';
-    const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out');
+    const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out', cfg());
     child.stderr.emit('data', Buffer.from('x'.repeat(2000) + 'TAIL'));
     child.emit('close', 2);
     const err = (await p.catch((e) => e)) as Error;
@@ -132,12 +141,11 @@ describe('MineruRunner 边界', () => {
   it('spawn 失败也转成 FreeformMineruError', async () => {
     const child = fakeChild();
     spawnMock.mockReturnValue(child);
-    process.env.MINERU_TOKEN = 'sk-test';
-    const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out');
-    child.emit('error', new Error('ENOENT spawn sk-test'));
+    const p = new MineruRunner().run(['/tmp/a.jpg'], '/tmp/out', cfg({ token: 'sk-secret' }));
+    child.emit('error', new Error('ENOENT spawn sk-secret'));
     const err = (await p.catch((e) => e)) as Error;
     expect(err).toBeInstanceOf(FreeformMineruError);
-    expect(err.message).not.toContain('sk-test');
+    expect(err.message).not.toContain('sk-secret');
   });
 });
 
@@ -176,6 +184,35 @@ describe('MineruLimiter', () => {
     const limiter = new MineruLimiter(1);
     await expect(limiter.run(async () => { throw new Error('boom'); })).rejects.toThrow('boom');
     await expect(limiter.run(async () => 'ok')).resolves.toBe('ok');
+  });
+
+  it('setMax 热改后立即按新上限放行', async () => {
+    const limiter = new MineruLimiter(2);
+    limiter.setMax(1);
+    let running = 0;
+    let peak = 0;
+    const started: number[] = [];
+    const gates: Array<() => void> = [];
+    const task = (id: number) =>
+      limiter.run(async () => {
+        started.push(id);
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise<void>((r) => gates.push(r));
+        running -= 1;
+      });
+
+    const ps = [task(1), task(2), task(3)];
+    await vi.waitFor(() => expect(started).toEqual([1]));
+    gates.shift()!();
+    await vi.waitFor(() => expect(started).toEqual([1, 2]));
+    expect(peak).toBe(1);
+
+    gates.shift()!();
+    await vi.waitFor(() => expect(started).toEqual([1, 2, 3]));
+    gates.shift()!();
+    await Promise.all(ps);
+    expect(peak).toBe(1);
   });
 
   it('3 个任务、并发 2：名额交接期间也不会瞬时超卖', async () => {

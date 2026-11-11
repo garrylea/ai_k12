@@ -8,8 +8,12 @@ import {
   setAdminModelStatus,
   saveAdminRoutes,
   validateModelConnection,
+  getAdminMineruConfig,
+  saveAdminMineruConfig,
+  validateMineruConfig,
   type AdminModelItem,
   type AdminRouteItem,
+  type AdminMineruConfig,
 } from '@/services/api';
 
 const PROVIDER_TYPES = ['kimi', 'qwen', 'deepseek', 'gemini', 'openai_compatible', 'local'];
@@ -40,6 +44,32 @@ const emptyModelForm: ModelFormState = {
 const fieldCls =
   'w-full px-3 py-2 text-sm border border-gray-200 rounded-md bg-white focus:border-[var(--brand-500)] outline-none';
 
+interface MineruFormState {
+  enabled: boolean;
+  bin: string;
+  token: string;
+  timeoutMs: string;
+  concurrency: string;
+}
+
+const emptyMineruForm: MineruFormState = {
+  enabled: true,
+  bin: 'mineru-open-api',
+  token: '',
+  timeoutMs: '90000',
+  concurrency: '2',
+};
+
+function toMineruForm(cfg: AdminMineruConfig): MineruFormState {
+  return {
+    enabled: cfg.enabled,
+    bin: cfg.bin,
+    token: '',
+    timeoutMs: String(cfg.timeoutMs),
+    concurrency: String(cfg.concurrency),
+  };
+}
+
 export default function AdminModelsPage() {
   const [models, setModels] = useState<AdminModelItem[]>([]);
   const [routes, setRoutes] = useState<AdminRouteItem[]>([]);
@@ -56,6 +86,11 @@ export default function AdminModelsPage() {
   const [newRule, setNewRule] = useState({ scene: '', subject: 'math', primaryModelKey: '', fallbackModelKey: '' });
   const [routesSaving, setRoutesSaving] = useState(false);
 
+  const [mineru, setMineru] = useState<AdminMineruConfig | null>(null);
+  const [mineruForm, setMineruForm] = useState<MineruFormState>(emptyMineruForm);
+  const [mineruSaving, setMineruSaving] = useState(false);
+  const [mineruValidating, setMineruValidating] = useState(false);
+
   const loadModels = async () => {
     try {
       setModels(await listAdminModels());
@@ -64,16 +99,28 @@ export default function AdminModelsPage() {
     }
   };
 
+  const loadMineru = async () => {
+    const cfg = await getAdminMineruConfig();
+    setMineru(cfg);
+    setMineruForm(toMineruForm(cfg));
+  };
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [modelList, routeData] = await Promise.all([listAdminModels(), listAdminRoutes()]);
+        const [modelList, routeData, mineruCfg] = await Promise.all([
+          listAdminModels(),
+          listAdminRoutes(),
+          getAdminMineruConfig(),
+        ]);
         if (cancelled) return;
         setModels(modelList);
         setRoutes(routeData.routes);
         setScenes(routeData.scenes);
         setProviderTypes(routeData.providerTypes);
+        setMineru(mineruCfg);
+        setMineruForm(toMineruForm(mineruCfg));
         setNewRule((r) => ({ ...r, scene: r.scene || routeData.scenes[0] || '' }));
       } catch (err: unknown) {
         toast('error', err instanceof Error ? err.message : '加载失败');
@@ -249,12 +296,62 @@ export default function AdminModelsPage() {
     }
   };
 
+  // --- 识图（MinerU） ---
+
+  const handleSaveMineru = async () => {
+    const timeoutMs = Number(mineruForm.timeoutMs);
+    const concurrency = Number(mineruForm.concurrency);
+    if (!mineruForm.bin.trim()) {
+      toast('error', '请填写 MinerU CLI 路径');
+      return;
+    }
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 5000 || timeoutMs > 600000) {
+      toast('error', '超时需为 5000–600000 之间的整数（毫秒）');
+      return;
+    }
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) {
+      toast('error', '并发需为 1–8 之间的整数');
+      return;
+    }
+    setMineruSaving(true);
+    try {
+      await saveAdminMineruConfig({
+        enabled: mineruForm.enabled,
+        bin: mineruForm.bin.trim(),
+        // token 留空 = 不修改
+        ...(mineruForm.token ? { token: mineruForm.token } : {}),
+        timeoutMs,
+        concurrency,
+      });
+      toast('success', '识图配置已生效');
+      // 刷新失败不该把「已保存」的成功提示顶成错误；下次进页面会重新拉。
+      await loadMineru().catch(() => undefined);
+    } catch (err: unknown) {
+      toast('error', err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setMineruSaving(false);
+    }
+  };
+
+  const handleValidateMineru = async () => {
+    setMineruValidating(true);
+    try {
+      const res = await validateMineruConfig();
+      if (res.ok) toast('success', `连通成功 · ${res.latencyMs}ms`);
+      else toast('error', res.sample || '连接失败');
+    } catch (err: unknown) {
+      toast('error', err instanceof Error ? err.message : '连接失败');
+    } finally {
+      setMineruValidating(false);
+    }
+  };
+
   if (loading && models.length === 0) {
     return (
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--text-primary)' }}>模型配置</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>管理模型池与场景路由，保存即生效。</p>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>管理模型池、场景路由与识图配置，保存即生效。</p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-200 p-8 text-sm" style={{ color: 'var(--text-secondary)' }}>
           加载中...
@@ -267,7 +364,7 @@ export default function AdminModelsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--text-primary)' }}>模型配置</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>管理模型池与场景路由，保存即生效。</p>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>管理模型池、场景路由与识图配置，保存即生效。</p>
       </div>
 
       {/* 上半：模型池 */}
@@ -446,6 +543,96 @@ export default function AdminModelsPage() {
             </select>
           </div>
           <Button variant="primary" size="sm" onClick={handleAddRule}>添加规则</Button>
+        </div>
+      </div>
+
+      {/* 识图（MinerU）：做题入口拍照识题的外部服务配置 */}
+      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>识图（MinerU）</h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+              做题入口拍照识题用；保存即生效，无需重启后端。「测试连接」使用已保存的配置。
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <Button variant="secondary" size="sm" loading={mineruValidating} onClick={handleValidateMineru}>
+              测试连接
+            </Button>
+            <Button variant="primary" size="sm" loading={mineruSaving} onClick={handleSaveMineru}>
+              保存配置
+            </Button>
+          </div>
+        </div>
+        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="mineru-config">
+          <div>
+            <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>启用识图</label>
+            <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
+              <input
+                type="checkbox"
+                checked={mineruForm.enabled}
+                onChange={(e) => setMineruForm({ ...mineruForm, enabled: e.target.checked })}
+              />
+              关闭后，学生上传图片会直接提示改用手动输入
+            </label>
+          </div>
+          <div>
+            <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>MinerU Token</label>
+            <input
+              type="password"
+              value={mineruForm.token}
+              onChange={(e) => setMineruForm({ ...mineruForm, token: e.target.value })}
+              placeholder={mineru?.tokenMasked ? `当前：${mineru.tokenMasked}（留空则不修改）` : '尚未配置，输入 sk- 开头的 Token'}
+              maxLength={500}
+              className={fieldCls}
+              data-testid="mineru-token"
+            />
+            <p className="text-[11px] mt-1" style={{ color: 'var(--text-secondary)' }}>
+              {mineru?.tokenSource === 'db'
+                ? '已加密保存在数据库；留空则沿用当前 Token。'
+                : mineru?.tokenSource === 'env'
+                  ? '当前来自 .env（还未写库）；保存后以数据库为准。'
+                  : '尚未配置：图片识题会直接提示手动输入。'}
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>CLI 路径</label>
+            <input
+              value={mineruForm.bin}
+              onChange={(e) => setMineruForm({ ...mineruForm, bin: e.target.value })}
+              placeholder="mineru-open-api"
+              maxLength={255}
+              className={fieldCls}
+            />
+            <p className="text-[11px] mt-1" style={{ color: 'var(--text-secondary)' }}>
+              需已安装在本机且可直接执行；改错会导致识图失败。
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>超时（毫秒）</label>
+              <input
+                type="number"
+                value={mineruForm.timeoutMs}
+                onChange={(e) => setMineruForm({ ...mineruForm, timeoutMs: e.target.value })}
+                min={5000}
+                max={600000}
+                step={1000}
+                className={fieldCls}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>并发上限</label>
+              <input
+                type="number"
+                value={mineruForm.concurrency}
+                onChange={(e) => setMineruForm({ ...mineruForm, concurrency: e.target.value })}
+                min={1}
+                max={8}
+                className={fieldCls}
+              />
+            </div>
+          </div>
         </div>
       </div>
 

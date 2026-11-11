@@ -117,6 +117,7 @@ function makeService(
     mineru?: any;
     split?: any;
     files?: any;
+    mineruConfig?: any;
   } = {},
 ) {
   const mineru = overrides.mineru ?? { run: vi.fn().mockResolvedValue(undefined) };
@@ -127,8 +128,20 @@ function makeService(
       findByIdAndOwner: vi.fn().mockResolvedValue(JPEG_ROW),
       create: vi.fn().mockResolvedValue(1),
     };
-  const svc = new FreeformRecognizeService(mineru, split, files);
-  return { svc, mineru, split, files };
+  const mineruConfig =
+    overrides.mineruConfig ??
+    {
+      get: vi.fn().mockResolvedValue({
+        enabled: true,
+        bin: 'mineru-open-api',
+        token: 'sk-test',
+        timeoutMs: 90000,
+        concurrency: 2,
+        tokenSource: 'db',
+      }),
+    };
+  const svc = new FreeformRecognizeService(mineru, split, files, mineruConfig);
+  return { svc, mineru, split, files, mineruConfig };
 }
 
 /** 断言抛出 HttpException，并核对 HTTP 状态码与业务 code。 */
@@ -394,6 +407,76 @@ describe('图片流程', () => {
     );
     expect(err.getResponse()).toMatchObject({ message: '最多 6 张题图' });
     expect(files.findByIdAndOwner).not.toHaveBeenCalled();
+  });
+
+  it('识图已停用 → 503 / code 5503，不查文件也不碰磁盘', async () => {
+    const files = { findByIdAndOwner: vi.fn(), create: vi.fn() };
+    const mineruConfig = {
+      get: vi.fn().mockResolvedValue({
+        enabled: false,
+        bin: 'mineru-open-api',
+        token: 'sk-test',
+        timeoutMs: 90000,
+        concurrency: 2,
+        tokenSource: 'db',
+      }),
+    };
+    const { svc, mineru } = makeService({ files, mineruConfig });
+
+    const err = await expectHttpError(svc.recognize({ fileIds: ['1'] }, 1), 503, 5503);
+
+    expect(err.getResponse()).toMatchObject({ message: '识图功能未启用，请手动输入题目' });
+    expect(files.findByIdAndOwner).not.toHaveBeenCalled();
+    expect(mineru.run).not.toHaveBeenCalled();
+    expect(fsMock.mkdir).not.toHaveBeenCalled();
+  });
+
+  it('未配置 token → 503 / code 5503（与 5501「解析失败」区分开）', async () => {
+    const mineruConfig = {
+      get: vi.fn().mockResolvedValue({
+        enabled: true,
+        bin: 'mineru-open-api',
+        token: '',
+        timeoutMs: 90000,
+        concurrency: 2,
+        tokenSource: 'none',
+      }),
+    };
+    const { svc, mineru } = makeService({ mineruConfig });
+
+    const err = await expectHttpError(svc.recognize({ fileIds: ['1'] }, 1), 503, 5503);
+
+    expect(err.getResponse()).toMatchObject({
+      message: '识图功能未配置，请联系管理员或手动输入题目',
+    });
+    expect(mineru.run).not.toHaveBeenCalled();
+  });
+
+  it('有效配置原样交给 runner（bin/token/超时不再由 runner 读 env）', async () => {
+    const mineru = { run: vi.fn().mockResolvedValue(undefined) };
+    const mineruConfig = {
+      get: vi.fn().mockResolvedValue({
+        enabled: true,
+        bin: '/opt/mineru/bin/mineru-open-api',
+        token: 'sk-db',
+        timeoutMs: 45000,
+        concurrency: 1,
+        tokenSource: 'db',
+      }),
+    };
+    const { svc } = makeService({ mineru, mineruConfig });
+
+    await svc.recognize({ fileIds: ['1'] }, 1);
+
+    expect(mineru.run).toHaveBeenCalledWith(
+      [expect.stringMatching(/page_01\.jpg$/)],
+      expect.stringMatching(/freeform-recognize-[0-9a-f-]{36}\/out$/),
+      expect.objectContaining({
+        bin: '/opt/mineru/bin/mineru-open-api',
+        token: 'sk-db',
+        timeoutMs: 45000,
+      }),
+    );
   });
 
   it('文件不存在或不属于该学生 → 400 / code 1001', async () => {

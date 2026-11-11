@@ -10,6 +10,7 @@ import type { AdminNotificationsService } from './admin-notifications.service.js
 import type { AdminChatService } from './admin-chat.service.js';
 import type { AdminDashboardService } from './admin-dashboard.service.js';
 import type { AdminAlertsService } from './admin-alerts.service.js';
+import type { MineruConfigService } from '../freeform/mineru-config.service.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 
@@ -32,6 +33,18 @@ function makeController(over: { preview?: MockFn; purge?: MockFn } = {}) {
     purge: vi.fn().mockResolvedValue({ retentionDays: 30, cutoff: 'x', deleted: 0 }),
     ...over,
   };
+  const mineru = {
+    view: vi.fn().mockResolvedValue({
+      enabled: true,
+      bin: 'mineru-open-api',
+      tokenMasked: 'sk-***ken',
+      tokenSource: 'db',
+      timeoutMs: 90000,
+      concurrency: 2,
+    }),
+    save: vi.fn().mockResolvedValue(undefined),
+    validate: vi.fn().mockResolvedValue({ ok: true, latencyMs: 5, sample: '# 1+1=?' }),
+  };
   const stub = () => vi.fn();
   const controller = new AdminController(
     stub() as unknown as AdminModelsService,
@@ -41,8 +54,9 @@ function makeController(over: { preview?: MockFn; purge?: MockFn } = {}) {
     stub() as unknown as AdminChatService,
     stub() as unknown as AdminDashboardService,
     alerts as unknown as AdminAlertsService,
+    mineru as unknown as MineruConfigService,
   );
-  return { controller, alerts };
+  return { controller, alerts, mineru };
 }
 
 describe('AdminController 预警端点：路由形状', () => {
@@ -93,5 +107,67 @@ describe('AdminController 预警端点：委派', () => {
     await expect(controller.purgeExpiredAlerts()).resolves.toBe(payload);
     expect(alerts.purge).toHaveBeenCalledTimes(1);
     expect(alerts.preview).not.toHaveBeenCalled();
+  });
+});
+
+describe('AdminController 识图（MinerU）配置端点', () => {
+  it('GET/PUT 挂 /mineru，validate 挂 /mineru/validate，method 正确', () => {
+    expect(Reflect.getMetadata(PATH_METADATA, AdminController.prototype.getMineruConfig)).toBe(
+      'mineru',
+    );
+    expect(Reflect.getMetadata(METHOD_METADATA, AdminController.prototype.getMineruConfig)).toBe(
+      RequestMethod.GET,
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, AdminController.prototype.saveMineruConfig)).toBe(
+      'mineru',
+    );
+    expect(Reflect.getMetadata(METHOD_METADATA, AdminController.prototype.saveMineruConfig)).toBe(
+      RequestMethod.PUT,
+    );
+    expect(Reflect.getMetadata(PATH_METADATA, AdminController.prototype.validateMineruConfig)).toBe(
+      'mineru/validate',
+    );
+    expect(Reflect.getMetadata(METHOD_METADATA, AdminController.prototype.validateMineruConfig)).toBe(
+      RequestMethod.POST,
+    );
+  });
+
+  it('GET 委派 view()，PUT 校验后委派 save()（token 可省略）', async () => {
+    const { controller, mineru } = makeController();
+
+    await expect(controller.getMineruConfig()).resolves.toMatchObject({ tokenMasked: 'sk-***ken' });
+    expect(mineru.view).toHaveBeenCalledTimes(1);
+
+    await controller.saveMineruConfig({
+      enabled: true,
+      bin: 'mineru-open-api',
+      timeoutMs: 90000,
+      concurrency: 2,
+    });
+    expect(mineru.save).toHaveBeenCalledWith({
+      enabled: true,
+      bin: 'mineru-open-api',
+      timeoutMs: 90000,
+      concurrency: 2,
+    });
+  });
+
+  it('PUT 越界值被拒（不落库）', async () => {
+    const { controller, mineru } = makeController();
+    await expect(
+      controller.saveMineruConfig({
+        enabled: true,
+        bin: 'mineru-open-api',
+        timeoutMs: 1000,
+        concurrency: 99,
+      }),
+    ).rejects.toBeTruthy();
+    expect(mineru.save).not.toHaveBeenCalled();
+  });
+
+  it('POST validate 委派 validate()', async () => {
+    const { controller, mineru } = makeController();
+    await expect(controller.validateMineruConfig()).resolves.toMatchObject({ ok: true });
+    expect(mineru.validate).toHaveBeenCalledTimes(1);
   });
 });

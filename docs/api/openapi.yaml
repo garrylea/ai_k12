@@ -1718,6 +1718,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '503':
+          description: >-
+            识图未启用或未配置 MinerU Token（code=5503）。配置真源为数据库
+            mineru_config（后台「模型配置 → 识图（MinerU）」），空值回落 .env 的
+            MINERU_*；配置态问题与 5501「解析失败」区分。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /freeform/judge/stream:
     post:
@@ -4578,6 +4587,66 @@ paths:
       responses:
         '200':
           description: OK
+  /admin/mineru:
+    get:
+      tags: [Admin]
+      summary: 识图（MinerU）配置（token 只回掩码与来源）
+      operationId: getAdminMineruConfig
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  bin: { type: string, example: mineru-open-api }
+                  tokenMasked: { type: string, example: 'sk-***ken' }
+                  tokenSource: { type: string, enum: [db, env, none] }
+                  timeoutMs: { type: integer, example: 90000 }
+                  concurrency: { type: integer, example: 2 }
+    put:
+      tags: [Admin]
+      summary: 保存识图配置（token 留空=不改；库优先、保存即生效）
+      operationId: saveAdminMineruConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                bin: { type: string, minLength: 1, maxLength: 255 }
+                token: { type: string, maxLength: 500, description: 省略或空串=不修改 }
+                timeoutMs: { type: integer, minimum: 5000, maximum: 600000 }
+                concurrency: { type: integer, minimum: 1, maximum: 8 }
+              required: [enabled, bin, timeoutMs, concurrency]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/mineru/validate:
+    post:
+      tags: [Admin]
+      summary: 识图探活（真跑一次内置小图的 extract，不落库）
+      operationId: validateMineruConfig
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  latencyMs: { type: integer }
+                  sample: { type: string, description: '成功时是解析出的 Markdown 片段；失败时是原因' }
+
   /admin/parents:
     get:
       tags: [Admin]

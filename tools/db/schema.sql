@@ -1145,6 +1145,19 @@ CREATE TABLE IF NOT EXISTS llm_routes (
   CONSTRAINT fk_llm_routes_primary FOREIGN KEY (primary_model_key) REFERENCES llm_models (model_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 做题入口识题（MinerU）运行时配置：单行表（id 固定 1）。
+-- token 与 llm_models.api_key 同款 AES-GCM 加密；DB 优先，无行/空值回落 .env 的 MINERU_*。
+CREATE TABLE IF NOT EXISTS mineru_config (
+  id TINYINT UNSIGNED NOT NULL DEFAULT 1 PRIMARY KEY,
+  is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  bin VARCHAR(255) NOT NULL DEFAULT 'mineru-open-api',
+  token VARCHAR(500) NOT NULL DEFAULT '',
+  timeout_ms INT NOT NULL DEFAULT 90000,
+  concurrency TINYINT UNSIGNED NOT NULL DEFAULT 2,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS parent_messages (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   parent_id BIGINT DEFAULT NULL,

@@ -8,6 +8,24 @@
 
 ---
 
+## 2026-11-11 识图（MinerU）配置迁入数据库 + 后台可配
+
+**事故起因**：做题入口上传图片一律报「图片解析失败，请重试或手动输入题目」。真实原因是后端进程（`node dist/main.js`，nohup 启动、父进程已是 launchd）环境里没有 `MINERU_TOKEN`：token 只存在于 `~/.zshrc` 的 `export` 与 `tools/data-refinery/.env`，`apps/server/.env` 从来没有 —— 旧进程恰好从加载了 zshrc 的交互终端启动才一直能用，这次重启换了启动环境就静默失效。`freeform-recognize.service.ts` 当时 `catch {}` 吞掉了原因，前端只能看到笼统的 5501。
+
+**用户裁决**：按模型配置同一套做法，把 MinerU 也搬进数据库 + 后台。
+
+**改了**：
+- 新表 `mineru_config`（单行，id=1）：`is_enabled` / `bin` / `token`（AES-GCM 加密，复用 `api-key-crypto`）/ `timeout_ms` / `concurrency`；迁移 `tools/db/migrations/2026-11-11_mineru_config.sql`（幂等，只建表+默认行，不播种 token）；`schema.sql` 同步。
+- `MineruConfigRepository`（加解密只在仓储层）+ `MineruConfigService`：**库优先、空值回落 `.env` 的 `MINERU_*`**；30s 缓存 + `save()` 失效（保存即生效，无需重启）；读库失败只 warn 并按 env 继续（表没迁移也不能让识题整体不可用）；`onModuleInit` 缺 token 打 error、停用打 warn。
+- `MineruRunner.run(files, outDir, config, signal?)`：bin/token/超时改为显式入参，**不再读 `process.env`**；`MineruLimiter.setMax()` 支持热改并发上限。模块改为 `MineruModule`（供 freeform 与 admin 共用）。
+- 识题服务：配置态提前拦截 —— 停用/无 token 返回 **503 / 5503**（与 5501「解析失败」区分），不建目录；MinerU 失败时把真实原因写进服务端日志。
+- 后台：`GET/PUT /api/admin/mineru` + `POST /api/admin/mineru/validate`（用内置 2.3KB 小图真跑一次 `extract` 探活，约 10–14s；token 只回掩码与来源 db/env/none）；`AdminModelsPage` 增「识图（MinerU）」配置块。
+- 文档：API 文档（错误码 5503、后台端点、§4.30 配置真源说明）、`openapi.yaml`（新路径 + 503）、`docs/constraints/ai-core.md`。`tools/freeform/setup.sh` 的预检改为查库、库空回落 env。
+
+**验证**：后端 `tsc --noEmit` 通过；单测 `mineru-runner`(15) / `mineru-config.service`(11) / `freeform-recognize.service`(24) / `admin.controller`(9)、前端 `AdminModelsPage`(5) 全绿；CLI 实测：真实图片 + 小 HTML 均 exit 0。
+
+**遗留**：本机 `apps/server/.env` 仍保留一份 `MINERU_TOKEN` 作兜底（gitignore）；后台保存后以库为准，`.env` 可择机删除。
+
 ## 2026-11-11 PC App：**重新打开看护**，拉起方式改回 `open -a`
 
 **用户裁决**：「把守护进程打开，我再试一下；另外把之前 terminal 启动的方式改成 `open -a`」。

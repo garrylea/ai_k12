@@ -10,6 +10,7 @@ import { ModelConfigRegistry, getModelConfigRegistry } from '../../ai-core/infra
 import { ModelClient } from '../../ai-core/infra/model-client/index.js';
 import { CommonModule } from '../../common/common.module.js';
 import { SafetyAlertsModule } from '../safety/safety-alerts.module.js';
+import { MineruModule } from '../freeform/mineru.module.js';
 import { AdminController } from './admin.controller.js';
 import { AdminModelsService } from './admin-models.service.js';
 import { AdminAccountsService } from './admin-accounts.service.js';
@@ -25,7 +26,7 @@ import { AdminPapersService } from './admin-papers.service.js';
 @Module({
   // `SafetyAlertsModule` 只 import 不重复 provide：它的注释明确警告重复 provide
   // `SafetyAlertsRepository` 会分裂实例、破坏预警去重语义。这里只要它导出的仓储。
-  imports: [CommonModule, SafetyAlertsModule],
+  imports: [CommonModule, SafetyAlertsModule, MineruModule],
   controllers: [AdminController, AdminPapersController],
   providers: [
     LlmModelsRepository,

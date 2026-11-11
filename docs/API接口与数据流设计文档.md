@@ -101,6 +101,7 @@
 | 3005 | 档位不存在（家长批量保存分值时某个 `(taskCode, tierKey)` 查不到） |
 | 5000 | 服务内部异常（HTTP 异常过滤器的未知错误兜底；SSE 链路以 `error` 事件下发） |
 | 5501 | 图片解析失败（MinerU 失败 / 超时 / 缺页，HTTP 502；做题入口） |
+| 5503 | 识图未启用 / 未配置 MinerU Token（HTTP 503；做题入口，配置态问题不算「解析失败」） |
 | 5502 | AI 上游处理失败或结果解析失败（HTTP 502；SSE 链路以 `error` 事件下发，可重试） |
 
 > **2026-09-17 实现注（积分错误码语义）**：`3001`–`3005` 由 `points` 模块抛出（§4.20 / §4.21）。凡「不满足条件」的拒绝都发生在事务之前，失败时**零写入**（不会留下半张兑换单/半批规则）；入参格式错误仍沿用 `1001`、资源不存在沿用 `1002`。
@@ -455,6 +456,9 @@
 | GET | `/api/admin/routes` | 场景路由表列表（含 `scenes`/`providerTypes` 枚举） | MVP |
 | PUT | `/api/admin/routes` | 全量保存路由表（事务替换，保存即生效） | MVP |
 | POST | `/api/admin/routes/validate-connection` | 模型连通性测试（探活，10s 超时，不落库；失败返回 `1009` 含 provider 原始错误） | MVP |
+| GET | `/api/admin/mineru` | 识图（MinerU）配置：`enabled/bin/tokenMasked/tokenSource/timeoutMs/concurrency`，明文 token 不出服务端 | MVP |
+| PUT | `/api/admin/mineru` | 保存识图配置（`token` 留空=不修改；库优先、保存即生效，无需重启） | MVP |
+| POST | `/api/admin/mineru/validate` | 识图探活：用内置 2.3KB 小图真跑一次 `extract`（token 错 / CLI 缺失都会暴露），不落库 | MVP |
 | GET | `/api/admin/parents?search=` | 家长列表（搜索用户名/手机号，`passwordHash` 已脱敏） | MVP |
 | PATCH | `/api/admin/parents/{id}/status` | 封禁/解封家长（`{isActive}`；封=连带其名下所有学生即时被拒） | MVP |
 | GET | `/api/admin/students?search=` | 学生列表（搜索用户名，`passwordHash` 已脱敏） | MVP |
@@ -788,6 +792,8 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 | POST | `/api/files/upload?source=freeform` | 扩展现有上传端点：`source` query 白名单 `auxiliary\|freeform`，缺省 `auxiliary`（原题图 / 作答图 / 草稿合成图走 `freeform`）。**201**（Nest 默认） | MVP |
 | POST | `/api/conversations` | 扩展：`scene` 增加 `aux_freeform`，新增可选 `title`（≤100 字）。**201**（Nest 默认） | MVP |
 
+**识图配置真源（2026-11-11）**：MinerU 的 `bin` / `token` / 超时 / 并发存在 `mineru_config`（单行表，后台「模型配置 → 识图（MinerU）」维护），**数据库优先、空值回落 `.env` 的 `MINERU_*`**；保存即生效（30s 缓存 + 保存失效），不再依赖进程启动环境。配置态问题（停用 / 无 token）返回 **503 / 5503**，与「解析失败」5501 区分。
+
 **答疑端点扩展（2026-11-09 修订）**：`POST /api/ai/tutor/stream` 新增一个**仅做题页生效**的可选字段 ——
 `subjectId`（`1|4|5`，决定学科模块模板；缺省取会话 `subject_id`，再缺省按数学）。
 年级 / 教材版本 / 已学内容**不再由前端上报**（原 `learningProfile` 入参已删除）：服务端在 `scene='aux_freeform'` 时
@@ -833,6 +839,7 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 |---|---|---|
 | 入参 / 张数 / 格式 / 大小 / 归属 | 400 / 1001 | 参数校验失败 |
 | MinerU 失败 / 超时 / 缺页 | 502 / 5501 | 「图片解析失败，请重试或手动输入题目」 |
+| 识图已停用 / 未配置 Token | 503 / 5503 | 「识图功能未启用，请手动输入题目」/「识图功能未配置，请联系管理员或手动输入题目」 |
 | 切题模型失败（本地 + 千问都失败） | 502 / 5502 | 「题目切分失败，请重试或手动输入题目」 |
 | 服务内部异常 | 500 / 5000 | 「AI 服务异常」 |
 
@@ -2286,6 +2293,7 @@ judge/stream（HTTP 200，text/event-stream）
 |---|---|---|
 | 上传 / 识别入参（文字、fileIds、归属、格式、大小、张数） | 400 / 1001 | 参数校验失败 |
 | MinerU 失败 / 超时 / 缺页 | 502 / 5501 | 「图片解析失败，请重试或手动输入题目」 |
+| 识图已停用 / 未配置 Token | 503 / 5503 | 「识图功能未启用，请手动输入题目」/「识图功能未配置，请联系管理员或手动输入题目」 |
 | 切题模型失败（本地 + 千问都失败） | 502 / 5502 | 「题目切分失败，请重试或手动输入题目」 |
 | 识别服务内部异常 | 500 / 5000 | 「AI 服务异常」 |
 | 判题 `dialogueId` 不存在 / 非本人 | SSE `error` / 1002 | 对话不存在（HTTP 仍 200） |

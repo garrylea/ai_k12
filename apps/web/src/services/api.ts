@@ -941,6 +941,25 @@ export function validateModelConnection(modelKey: string): Promise<{ ok: boolean
   return fetchApi('/admin/routes/validate-connection', { method: 'POST', body: JSON.stringify({ modelKey }) });
 }
 
+// --- Admin: 识图（MinerU）配置 ---
+export interface AdminMineruConfig {
+  enabled: boolean;
+  bin: string;
+  tokenMasked: string;
+  tokenSource: 'db' | 'env' | 'none';
+  timeoutMs: number;
+  concurrency: number;
+}
+export function getAdminMineruConfig(): Promise<AdminMineruConfig> {
+  return fetchApi('/admin/mineru');
+}
+export function saveAdminMineruConfig(req: { enabled: boolean; bin: string; token?: string; timeoutMs: number; concurrency: number }): Promise<null> {
+  return fetchApi('/admin/mineru', { method: 'PUT', body: JSON.stringify(req) });
+}
+export function validateMineruConfig(): Promise<{ ok: boolean; latencyMs: number; sample: string }> {
+  return fetchApi('/admin/mineru/validate', { method: 'POST' });
+}
+
 // --- Admin: accounts ---
 export interface AdminParentItem { id: number; phone: string; name: string | null; isActive: boolean; studentCount: number; createdAt: string; }
 export function searchParents(search: string): Promise<AdminParentItem[]> { return fetchApi(`/admin/parents?search=${encodeURIComponent(search)}`); }

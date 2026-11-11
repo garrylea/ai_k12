@@ -8,6 +8,7 @@ import { UploadedFilesRepository } from '../../database/repositories/uploaded-fi
 import type { UploadedFileRow } from '../../database/repositories/types.js';
 import { FreeformSplitCapability } from '../../ai-core/capabilities/freeform-split.capability.js';
 import { MineruRunner, mineruLimiter } from './mineru-runner.js';
+import { MineruConfigService } from './mineru-config.service.js';
 import { rewriteFigureRefs } from './freeform-figures.js';
 
 export interface FreeformRecognizeResult {
@@ -32,12 +33,15 @@ const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_MARKDOWN = 24000;
 
 const MINERU_FAILED = { code: 5501, message: '图片解析失败，请重试或手动输入题目' } as const;
+/** 配置态问题（停用 / 缺 token）：让学生直接改走手动输入，不要伪装成「解析失败」。 */
+const MINERU_UNCONFIGURED = { code: 5503, message: '识图功能未启用，请手动输入题目' } as const;
 
 /**
  * 自由输入做题第一步：题图/文字 → MinerU Markdown → 候选题。
  *
  * 纯文字完全短路（不碰磁盘、不调模型）。图片流程把题图按 `fileIds` 顺序复制成
- * `page_01.jpg` 再交给 MinerU，配图落到 `UPLOAD_DIR/freeform/<jobId>/` 并登记
+ * `page_01.jpg` 再交给 MinerU（bin/token/超时/并发来自 `MineruConfigService`：
+ * 数据库优先、env 兜底），配图落到 `UPLOAD_DIR/freeform/<jobId>/` 并登记
  * `uploaded_files`（source=freeform_figure），这样后续判题/重做能按 URL 找到图。
  * 临时目录无论如何都在 finally 清掉。
  */
@@ -51,6 +55,7 @@ export class FreeformRecognizeService {
     private readonly mineru: MineruRunner,
     private readonly split: FreeformSplitCapability,
     private readonly files: UploadedFilesRepository,
+    private readonly mineruConfig: MineruConfigService,
   ) {}
 
   async recognize(
@@ -79,6 +84,16 @@ export class FreeformRecognizeService {
         ],
         figures: [],
       };
+    }
+
+    // 配置态问题提前拦：不建目录、不碰磁盘，直接让学生改走手动输入。
+    const mineruCfg = await this.mineruConfig.get();
+    if (!mineruCfg.enabled) throw new HttpException(MINERU_UNCONFIGURED, 503);
+    if (!mineruCfg.token) {
+      throw new HttpException(
+        { code: 5503, message: '识图功能未配置，请联系管理员或手动输入题目' },
+        503,
+      );
     }
 
     const rows: UploadedFileRow[] = [];
@@ -119,8 +134,10 @@ export class FreeformRecognizeService {
       }
 
       try {
-        await mineruLimiter.run(() => this.mineru.run(pages, out));
-      } catch {
+        await mineruLimiter.run(() => this.mineru.run(pages, out, mineruCfg));
+      } catch (err) {
+        // 前端只看到笼统的 5501，真正原因（缺 token / 超时 / CLI 非 0 退出）必须留在服务端日志里。
+        this.logger.warn(`MinerU 解析失败：${(err as Error).message}`);
         throw new HttpException(MINERU_FAILED, 502);
       }
 

@@ -21,5 +21,6 @@
 - **答案变更必须作废解析**：`questions.explanation` 是按**当时那条 answer** 生成的，答案一改旧解析就变成「答案 C、解析通篇在证 D」。`answer_importer` 的 `build_update_sql` 在 `answer` 变化且记录未带新 `explanation` 时置 `explanation = NULL`，等下次判错重新生成；手改答案别绕过它。
 - **判题体系分层**：`choice`/`true_false` 程序比对；`fill_blank`/`calculation` 归一化比对 + AI 等价判断；`short_answer`/`proof` 由 `JUDGE_SUBJECTIVE_MODE` 控制（默认 `self_assess`：不判对错、学生自评）。空答案不计对错。**语文（`subject_id=2`）非客观题例外，不看 env**：填空/简答一律 `self_assess`（2026-10-28 裁决——语文参考答案多为「示例：…」，归一化全等不可靠；AI 判题提示词只有数学，硬走会误判）。该分支必须排在 `fill_blank` 归一化判等之前，否则语文填空「恰好与参考答案逐字相同」会被判成 exact。设计见 `docs/superpowers/specs/2026-09-09-judging-rework-design.md`。
 - **`npm run build` 经 `scripts/copy-assets.mjs` 把 `ai-core/*.yaml` 与 `prompts/` 复制进 `dist/ai-core`**，使 `node dist/main.js` 与 `tsx src/...` 读到同一份配置。
+- **识图（MinerU）配置真源是数据库 `mineru_config`**（2026-11-11）：`bin` / `token` / 超时 / 并发在后台「模型配置 → 识图（MinerU）」维护，**DB 优先、空值回落 `.env` 的 `MINERU_*`**；token 与 `llm_models.api_key` 同款 AES-GCM 加密。**不要只改 `.env` 就断定识图配置没问题** —— 进程不继承 shell 的 `export` 时 token 会静默丢失（2026-11-11 事故：后端由未加载 zshrc 的 shell 重启，全部图片识别报 5501）。配置态问题（停用 / 无 token）返回 **503 / 5503**，服务端日志会打印真实原因（缺 token / 超时 / CLI 退出码）。
 
 **已知限制与历史实现细节**（metrics 未接入 capability、ConversationService 内存存储无上限、gemini 流式未实现、多模态图片直送、辅线「详细解析」走题库、会话标题路由等）已迁至 `docs/ai-core-changelog.md`。

@@ -8,8 +8,16 @@ export class FreeformMineruError extends Error {
   }
 }
 
-const DEFAULT_BIN = 'mineru-open-api';
-const DEFAULT_TIMEOUT_MS = 90000;
+export const DEFAULT_MINERU_BIN = 'mineru-open-api';
+export const DEFAULT_MINERU_TIMEOUT_MS = 90000;
+export const DEFAULT_MINERU_CONCURRENCY = 2;
+
+/** 调用参数由 `MineruConfigService` 解析后显式传入（DB 优先、env 兜底），runner 不再直接读环境变量。 */
+export interface MineruRunConfig {
+  bin: string;
+  token: string;
+  timeoutMs: number;
+}
 /** CLI 自身已有 --timeout，本地定时器多给 5s 宽限，避免与子进程超时抢跑。 */
 const TIMEOUT_GRACE_MS = 5000;
 const STDERR_TAIL = 500;
@@ -22,14 +30,21 @@ function redact(text: string, token: string): string {
 }
 
 export class MineruRunner {
-  async run(files: string[], outDir: string, signal?: AbortSignal): Promise<void> {
-    const bin = process.env.MINERU_BIN ?? DEFAULT_BIN;
-    const token = process.env.MINERU_TOKEN;
+  async run(
+    files: string[],
+    outDir: string,
+    config: MineruRunConfig,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const bin = config.bin || DEFAULT_MINERU_BIN;
+    const token = config.token;
     if (!token) throw new FreeformMineruError('MINERU_TOKEN 未配置');
     if (signal?.aborted) throw new FreeformMineruError('MinerU 已取消');
-    const configuredTimeout = Number(process.env.MINERU_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
+    const configuredTimeout = Number(config.timeoutMs);
     const timeoutMs =
-      Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : DEFAULT_TIMEOUT_MS;
+      Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? configuredTimeout
+        : DEFAULT_MINERU_TIMEOUT_MS;
 
     // 文件、输出目录都走 argv 数组，shell:false —— 不经过 shell，无注入面。
     const args = [
@@ -107,11 +122,19 @@ export class MineruRunner {
 /** 进程内并发限制：最多 N 个 MinerU 任务同时跑；超出的排队。 */
 export class MineruLimiter {
   private active = 0;
-  private readonly max: number;
+  private max: number;
   private readonly queue: Array<() => void> = [];
 
   constructor(max: number) {
     this.max = Math.max(1, max);
+  }
+
+  /**
+   * 并发上限来自数据库配置，可热改。调小到低于当前 active 时不打断在跑的任务，
+   * 新任务等 active 回落到新上限以下才放行（随后由 release() 交接）。
+   */
+  setMax(max: number): void {
+    this.max = Math.max(1, Math.floor(max));
   }
 
   async run<T>(fn: () => Promise<T>): Promise<T> {
@@ -145,8 +168,13 @@ export class MineruLimiter {
   }
 }
 
-/** 模块级单例：并发数读 MINERU_CONCURRENCY，默认 2（配置非法时回落到默认值，避免 0 导致永久排队）。 */
-const concurrency = Number(process.env.MINERU_CONCURRENCY ?? 2);
+/**
+ * 模块级单例：MinerU 只在图片识题时使用，且真源是数据库（`mineru_config`），
+ * 这里仅用 env 作初始值 —— `MineruConfigService` 每次取到有效配置后会 `setMax()` 覆盖。
+ */
+const concurrency = Number(process.env.MINERU_CONCURRENCY ?? DEFAULT_MINERU_CONCURRENCY);
 export const mineruLimiter = new MineruLimiter(
-  Number.isFinite(concurrency) && concurrency >= 1 ? Math.floor(concurrency) : 2,
+  Number.isFinite(concurrency) && concurrency >= 1
+    ? Math.floor(concurrency)
+    : DEFAULT_MINERU_CONCURRENCY,
 );

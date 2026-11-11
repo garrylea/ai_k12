@@ -8,6 +8,8 @@ import { AdminNotificationsService } from './admin-notifications.service.js';
 import { AdminChatService } from './admin-chat.service.js';
 import { AdminDashboardService } from './admin-dashboard.service.js';
 import { AdminAlertsService } from './admin-alerts.service.js';
+// 值导入：`import type` 会被擦除，design:paramtypes 变成 Object，Nest 启动时找不到 token（CLAUDE.md DI 坑）。
+import { MineruConfigService } from '../freeform/mineru-config.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -41,6 +43,15 @@ const MessageSchema = z.object({
   parentId: z.number().int().positive().optional(),
 });
 
+// token 留空=不修改（与模型 apiKey 同语义）；范围防止把超时/并发配成不可用值。
+const MineruConfigSchema = z.object({
+  enabled: z.boolean(),
+  bin: z.string().min(1).max(255),
+  token: z.string().max(500).optional(),
+  timeoutMs: z.number().int().min(5_000).max(600_000),
+  concurrency: z.number().int().min(1).max(8),
+});
+
 @Controller('api/admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin')
@@ -53,6 +64,7 @@ export class AdminController {
     private chatService: AdminChatService,
     private dashboardService: AdminDashboardService,
     private alertsService: AdminAlertsService,
+    private mineruConfig: MineruConfigService,
   ) {}
 
   @Get('dashboard') dashboard() { return this.dashboardService.get(); }
@@ -97,6 +109,17 @@ export class AdminController {
   }
 
   @Get('routes') listRoutes() { return this.modelsService.listRoutes(); }
+
+  /** 识图（MinerU）配置：token 只回掩码 + 来源（db/env/none），明文不出服务端。 */
+  @Get('mineru') getMineruConfig() { return this.mineruConfig.view(); }
+
+  @Put('mineru') async saveMineruConfig(@Body() b: unknown) {
+    await this.mineruConfig.save(MineruConfigSchema.parse(b));
+    return null;
+  }
+
+  /** 真跑一次 `extract` 探活（内置 2.3KB 小图），token 错 / CLI 缺失都会暴露；不落库。 */
+  @Post('mineru/validate') validateMineruConfig() { return this.mineruConfig.validate(); }
 
   @Put('routes') async saveRoutes(@Body() b: unknown) {
     const { routes } = RoutesSchema.parse(b);
