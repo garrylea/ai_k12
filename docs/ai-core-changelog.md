@@ -8,6 +8,46 @@
 
 ---
 
+## 2026-11-11 PC App：接入 **Apple Development 签名**（本地网络权限不再随重打包丢失）
+
+**为什么**：前一条（2026-11-10）的结论是「没签名 → 授权按 cdhash 记 → 重打包作废」。用户装了 Xcode，
+决定用免费 Apple ID 签，先解掉这条再谈看护。
+
+**证书侧的坑（花了一轮排查，下次直接照做）**：`security find-identity -v -p codesigning` 报
+**0 valid identities**，`codesign` 报 `unable to build chain to self-signed root` —— 证书本身是好的
+（日期、私钥都在），缺的是 **WWDR G3 中间证书**：机器上只有 2013 年那张（**2023-02-07 已过期**），
+而新证书由 G3 签发。补装即可：
+
+```
+curl -O https://images.apple.com/certificateauthority/AppleWWDRCAG3.cer
+security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db
+```
+
+- `www.apple.com/certificateauthority/...` 会 **403**；`images.apple.com` 可用（同一文件）。
+- Xcode 自带的只有 **G6**，其 SKI 与本机证书的 AKI（`09:FE:C0:…`）对不上，装了也不解决。
+- 装完立刻从 `0 valid identities` 变 `1 valid identities`，试签 `/tmp` 里的副本通过。
+
+**改了**：
+- `tools/app-build.sh`：新增 `signing_identity` / `require_identity` / `verify_signature`。
+  `--check` 与 `--local` 都先探测证书（**没有就直接报错，不出未签名的包**），用
+  `--config.mac.identity=` 注入；出包后逐个校验**主程序 + 4 个 Helper + Electron Framework**
+  是同一身份，并跑 `codesign --verify --deep --strict`。
+- `--online` 新增警告：CI 仍不签名（runner 无证书），产物与本机包身份不同，换装会重问授权。
+- `electron-builder.yml`：`identity: null` **保留**（无证书时的显式默认），注释改为新口径；
+  签名不使用 `codesign --deep` 手签（已废弃，Electron Helper 会签不对）。
+- 文档：`docs/constraints/pc-app-学习管控.md`「打包与分发」签名条重写（含上面的 G3 坑）、
+  spec `2026-09-27-pc-app-packaging-design.md` 裁决 2 加口径变更注记。
+
+**顺带修的出包卡点**：`--local` 在 GitHub 上下载 Electron 发行包 20 分钟没下完、最后 `ECONNRESET`
+（报错堆栈是 got/TLS 内部帧，看不出是下载）。改为默认走**华为云镜像**：`ELECTRON_MIRROR=
+https://mirrors.huaweicloud.com/electron/` + `ELECTRON_CUSTOM_DIR={{ version }}`（华为云路径版本前
+没有 `v`），同一批包 **16 秒**下完。已在 `tools/app-build.sh` 里设默认值，显式设置时不覆盖。
+
+**未做 / 待人验**：真机（第二台 Mac）上「签名包连上服务器、且重打包后授权仍在」尚未验收；
+watchdog 仍关闭（重开是单独裁决）；CI 签名未接。
+
+---
+
 ## 2026-11-10 PC App：**关闭看护（watchdog）**，等有签名再开
 
 **用户裁决**：「先关掉起守护进程这个功能，等以后有自己的签名之后再打开，不能因为这个影响学生学习」。

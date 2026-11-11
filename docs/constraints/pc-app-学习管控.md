@@ -270,8 +270,29 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
 - **`artifactName` 必须全 ASCII**（`k12-desktop-${version}-${arch}.${ext}`）：默认模板带中文
   `productName` 与空格，会污染 `/download/` 的 URL
 - **`appId` 发布后改不得**（`com.k12zhixue.desktop`）：装过的机器按它认身份，④ 的更新也按它认
-- **`mac.identity: null` + `CSC_IDENTITY_AUTO_DISCOVERY=false`** 都是有意的（不签不公证，spec §3-2）；
-  别「顺手」打开签名 —— 会产出本机/CI 不一致的产物
+- **签名（2026-11-11 起：本机出包必签）**：macOS 26/27 的「本地网络」权限对**未签名**的 App 按
+  **cdhash** 记 —— 重打包就作废（设置页开关还开着、系统实际拒绝，`did-fail-load -109`）。
+  签名后权限绑的是证书的 **designated requirement**，跨重打包稳定。
+  - 证书 = Xcode 免费的 **Apple Development**（Settings → Accounts → 登录 Apple ID →
+    Manage Certificates → + → Apple Development），不需要 99 美元会员。
+  - `electron-builder.yml` 的 `mac.identity: null` 是「**没证书时的显式默认**」，别删；
+    `tools/app-build.sh` 出包时探测证书并用 `--config.mac.identity=` 覆盖，出包后
+    由 `verify_signature` 逐个校验**主程序 + 4 个 Helper + Electron Framework 同一身份**，
+    没签上直接红（不靠人看日志）。
+  - **别手写 `codesign --deep`**：`--deep` 已被 Apple 标废弃，Electron 的 Helper 会签不对；
+    交给 electron-builder 自内向外逐层签。
+  - **踩过的坑（2026-11-11）**：证书建好后 `security find-identity -v -p codesigning` 仍报
+    **0 valid identities**、`codesign` 报 `unable to build chain to self-signed root` ——
+    不是证书没建好，而是 Apple Development 证书由 **WWDR G3** 签发，而机器上只有 2013 年那张
+    **已于 2023-02-07 过期**的旧 WWDR 中间证书。补装 G3 即可（装进登录钥匙串，不需要 sudo）：
+    `curl -O https://images.apple.com/certificateauthority/AppleWWDRCAG3.cer` 然后
+    `security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db`。
+    注意 `www.apple.com/certificateauthority/...` 会 **403**，`images.apple.com` 可用；
+    Xcode 自带的是 **G6**（SKI 与本机证书的 AKI 对不上，装了也没用）。
+  - **CI 仍不签名**（`desktop-release.yml` 里 `CSC_IDENTITY_AUTO_DISCOVERY=false`，runner 无证书）
+    → CI 产物与本机包**签名身份不同**，同一台机换装会重新要一次授权。已知缺口，
+    `--online` 会打警告；要补齐得把证书私钥导入 runner。
+  - **不公证**（没有 Developer ID）这条不变：首次打开仍需「系统设置 → 隐私与安全性 → 仍要打开」。
 - **`electron-builder.yml` 里故意不写 `publish`**：地址的唯一真源是 `apps/desktop/server-url.js`，
   CI 与 `tools/publish-installer.sh` 都从它推导。**别把 URL 抄进 yml**（那就是第二处、必然漂移）
 - **mac 包只能在 macOS runner 上构建**（`pkg` 走 `productbuild`，macOS 自带）；win/linux 只出 x64。
@@ -292,6 +313,12 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
   `distribution.xml`，文件名不含架构）互踩竞态，**静默**产出装不上 Intel 机器的坏包
   （x64 包里是 arm64 主程序），时序性出现、无任何报错。所以 yml 的 mac target 用 `dir` 只出 .app，
   pkg 封装收口到 `tools/app-build.sh` 与 CI 的 `pkgbuild`，且封装前用 `file` 校验主二进制架构
+- **下载 Electron 发行包默认走华为云镜像（2026-11-11 实测）**：本机到 GitHub CDN 只有 ~200KB/s，
+  双架构出包会卡在下载 20+ 分钟并偶发 `read ECONNRESET`（报错堆栈全是 got/TLS 内部帧，看不出是下载）。
+  `tools/app-build.sh` 默认导出 `ELECTRON_MIRROR=https://mirrors.huaweicloud.com/electron/` 与
+  `ELECTRON_CUSTOM_DIR={{ version }}`（华为云路径**版本前没有 v**，@electron/get 默认拼 `v<版本>` 会 404；
+  实测同样两个包：GitHub 20 分钟未下完 → 华为云 16 秒）。已显式设置时脚本不覆盖。
+  ⚠️ 这只覆盖 `tools/app-build.sh`；CI（runner 在海外）直连 GitHub，不需要镜像。
 - **不签名 → pkg 双击首次仍被 Gatekeeper 拦一次**：交付文档给「系统设置 → 隐私与安全性 → 仍要打开」
   （GUI）；`xattr` 终端命令只作为旧 dmg 包的兜底说明保留
 

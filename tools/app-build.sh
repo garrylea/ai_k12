@@ -26,6 +26,14 @@ DESKTOP_DIR="$ROOT/apps/desktop"
 BUILDER="$DESKTOP_DIR/node_modules/.bin/electron-builder"
 CONFIG="$DESKTOP_DIR/electron-builder.yml"
 
+# Electron 发行包默认走**华为云镜像**（2026-11-11 实测）：本机到 GitHub CDN 只有 ~200KB/s，
+# 双架构出包会卡在下载 20+ 分钟并偶发 `read ECONNRESET`（就是 run_builder 那条警告）。
+# 华为云的目录结构是 `<base>/<版本>/electron-v<版本>-<平台>-<架构>.zip`（版本前**没有** v），
+# 所以要同时把 ELECTRON_CUSTOM_DIR 设成 `{{ version }}` —— @electron/get 默认拼 `v<版本>`，会 404。
+# 已显式设置时一律不覆盖（换镜像/换网络自己定）。
+export ELECTRON_MIRROR="${ELECTRON_MIRROR:-https://mirrors.huaweicloud.com/electron/}"
+export ELECTRON_CUSTOM_DIR="${ELECTRON_CUSTOM_DIR:-{{ version }}}"
+
 log()  { printf '[app-build] %s\n' "$*"; }
 warn() { printf '[app-build] [WARN] %s\n' "$*" >&2; }
 die()  { printf '[app-build] [ERROR] %s\n' "$*" >&2; exit 1; }
@@ -48,6 +56,63 @@ run_tests() {
 verify_asar() {
   log "asar 自检（必需资源是否齐全、有无测试文件混进包）…"
   ( cd "$DESKTOP_DIR" && node scripts/verify-asar.js )
+}
+
+# ── 代码签名（2026-11-11）──────────────────────────────────────────────────────
+# 为什么必须签：macOS 26/27 的「本地网络」权限对**未签名**的 App 是按 cdhash（二进制指纹）记的
+# —— 每次重打包指纹就变，设置页里那个开关还开着、系统却按新指纹拒绝，连不上服务器。
+# 用证书签上后，权限绑的是证书的 designated requirement（含 bundle id + 证书），
+# 跨重打包不变，这也是「装一次、以后升级都不再问」的前提。
+#
+# 证书从哪来（免费）：Xcode → Settings → Accounts → 登录 Apple ID →
+#   Manage Certificates → + → Apple Development。不需要 99 美元的 Developer Program。
+#
+# ⚠️ 不要自己写 `codesign --deep` 手签：--deep 已被 Apple 标废弃，Electron 的 Helper 会签不对
+#    （表面成功、运行时会单独被系统拒）。交给 electron-builder 自内向外逐层签，
+#    identity 由这里用 CLI `--config.mac.identity=` 注入。
+# ⚠️ yml 里保留 `identity: null`：它是「没证书时的显式默认」，防止本机钥匙串里恰好有别的证书
+#    时静默签出不一致的产物。签没签上由 verify_signature 逐个兜底，不靠人看日志。
+SIGN_APP="K12 智学"
+
+signing_identity() {
+  security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/^ *[0-9]*) [0-9A-F][0-9A-F]* "\(Apple Development: .*\)"$/\1/p' \
+    | head -1
+}
+
+require_identity() {
+  IDENTITY="$(signing_identity)"
+  if [ -z "${IDENTITY}" ]; then
+    warn "钥匙串里没有 Apple Development 证书，出不了带签名的包。"
+    die "用 Xcode 生成一次：Settings → Accounts → 登录 Apple ID → Manage Certificates → + → Apple Development"
+  fi
+  log "签名身份：${IDENTITY}"
+}
+
+# 主程序 + 每个嵌套件都必须是同一张证书签的（Helper 漏签 = 运行时被系统单独拒）。
+# `--deep --strict` 只证明完整性，不证明「是不是同一个身份」，所以两者都要查。
+verify_signature() {
+  local app target actual apps=0
+  # --check 只出本机架构（--dir 不带 arch 清单），--local 出双架构 —— 所以这里按「存在的就验」，
+  # 但一个都没有要报错（否则一次空循环会假绿）。
+  for app in "$DESKTOP_DIR/dist/mac-arm64/${SIGN_APP}.app" "$DESKTOP_DIR/dist/mac/${SIGN_APP}.app"; do
+    [ -d "${app}" ] || continue
+    apps=$((apps + 1))
+    codesign --verify --deep --strict "${app}" || die "签名完整性校验失败：${app}"
+    for target in "${app}" \
+                  "${app}/Contents/Frameworks/Electron Framework.framework" \
+                  "${app}/Contents/Frameworks/${SIGN_APP} Helper.app" \
+                  "${app}/Contents/Frameworks/${SIGN_APP} Helper (GPU).app" \
+                  "${app}/Contents/Frameworks/${SIGN_APP} Helper (Plugin).app" \
+                  "${app}/Contents/Frameworks/${SIGN_APP} Helper (Renderer).app"; do
+      [ -e "${target}" ] || die "缺 ${target} —— 包结构不对，无法验证签名"
+      actual="$(codesign -dv --verbose=4 "${target}" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
+      [ "${actual}" = "${IDENTITY}" ] \
+        || die "签名身份不一致：${target} 是「${actual}」，期望「${IDENTITY}」"
+    done
+  done
+  [ "${apps}" -gt 0 ] || die "dist 下没有找到任何 .app —— 无法验证签名（electron-builder 没产出？）"
+  log "签名校验通过（${apps} 个 .app）：主程序 + 4 个 Helper + Electron Framework 同一身份，--verify --deep --strict 绿"
 }
 
 # 把 electron-builder 收在一处调用：失败时把它那句看不出所以然的报错翻译成可执行的提示。
@@ -88,13 +153,16 @@ PC App 出包入口
 用法: bash tools/app-build.sh <模式> [选项]
 
 模式（一次只能选一个）：
-  --check              快速门禁：跑测试 + 最小出包（--dir，只产出 .app，约 10s）+ asar 自检。
+  --check              快速门禁：跑测试 + 最小出包（--dir，只产出 .app）+ asar 自检 + 签名校验。
                        不产出安装包、不清空 dist（只删旧的 dist/mac* 里的 .app）、不碰 web 层。
                        改完壳先跑这个。
   --local              本机出 mac 安装包：先清空 apps/desktop/dist，再出 x64 + arm64 两个 .app
-                       （electron-builder --dir）并用 pkgbuild 封装成两个 pkg（约 1min），最后跑 asar 自检。
+                       （electron-builder --dir）并用 pkgbuild 封装成两个 pkg（约 1min），
+                       最后跑 asar 自检与签名校验。
   --online             GitHub Actions 出三平台包（mac pkg / win exe / linux AppImage）。
-                       默认只做预检并打印要执行的命令；加 --yes 才真的打 tag 并推。
+                       ⚠️ CI 出的 mac 包**不签名**（与本机 --local 的包身份不同，装同一台机
+                       会重新要一次本地网络授权）。默认只做预检并打印要执行的命令；
+                       加 --yes 才真的打 tag 并推。
   --publish <文件...>  发布安装包到本机服务器 /download/ —— 转发给 tools/publish-installer.sh
                        （因此也接受它的 --no-build）。注意：会重建 web，替换 :5173 正在服务的 dist/
   --win | --linux      本机出不了（NSIS 要 wine、AppImage 要 docker），这里只说明原因与出路。
@@ -114,6 +182,8 @@ PC App 出包入口
   bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-<版本>-arm64.pkg
 
 本机限制：mac 包只能在本机出（封装要 pkgbuild，macOS 自带）；Windows/Linux 产物只能靠 --online。
+前提：--check / --local 都要求钥匙串里有 Apple Development 证书（Xcode → Settings → Accounts →
+Manage Certificates → +）；没有就直接报错，不会静默出未签名的包。
 打包需要能访问 GitHub（见 README 的说明）；发布到服务器会重建 web 并替换正在服务的 dist/。
 USAGE
 }
@@ -121,20 +191,23 @@ USAGE
 mode_check() {
   require_builder
   run_tests
+  require_identity
   # 只清掉上次的 .app 目录（安装包保留）：verify-asar 会扫 dist 下所有 app.asar，
   # 上一次构建的旧包会被按**当前**白名单判红（2026-11-09 实测：新增必需文件后
   # 陈旧的 dist/mac 让 --check 假失败）。这里不碰 *.pkg。
   log "清理上次的 .app 目录（dist/mac*, 不动安装包）…"
   rm -rf "$DESKTOP_DIR/dist/mac" "$DESKTOP_DIR/dist/mac-arm64"
   log "最小出包（--dir：只产出 .app，不打包成 pkg）…"
-  run_builder --mac --dir
+  run_builder --mac --dir "--config.mac.identity=${IDENTITY}"
   verify_asar
-  log "--check 通过：测试绿 + 壳能装起来 + 包内资源白名单完整。（本次未产出安装包）"
+  verify_signature
+  log "--check 通过：测试绿 + 壳能装起来 + 包内资源白名单完整 + 签名身份一致。（本次未产出安装包）"
 }
 
 mode_local() {
   require_builder
-  local args=( --mac )
+  require_identity
+  local args=( --mac "--config.mac.identity=${IDENTITY}" )
   if [ "$MANIFEST" -eq 1 ]; then
     [ -f "$DESKTOP_DIR/server-url.js" ] || die "找不到 $DESKTOP_DIR/server-url.js（服务器地址的唯一真源）"
     local url
@@ -177,6 +250,7 @@ mode_local() {
              --install-location /Applications \
              "$out"
   done
+  verify_signature
   list_dist
   if [ "$MANIFEST" -eq 0 ]; then
     warn "本次没有更新清单 —— mac 产物为 pkg 本就不产出 latest-mac.yml（与是否加 --manifest 无关）"
@@ -190,6 +264,11 @@ mode_online() {
 
   log "本地版本 $ver → 目标 tag desktop-v$ver"
   tag="desktop-v$ver"
+
+  # CI 的 mac 包仍是不签名的（desktop-release.yml 里 CSC_IDENTITY_AUTO_DISCOVERY=false，
+  # runner 上没有证书）。它和本机 --local 出的包**身份不同** —— 同一台机换装会重新要一次
+  # 「本地网络」授权，这是已知缺口，别把 CI 包当成本机包的等价替换。
+  warn "CI 出的 mac 包没有签名（runner 上没证书）：与本机 --local 的包身份不同，换装会重新要本地网络授权"
 
   # 预检 0：从哪个分支发（只告警，不阻塞）—— 从特性分支推 tag，CI 出的产物就**不对应主线**，
   # 拿到的安装包会是一份没合进 main 的构建。（2026-09-28 真的这么发生过一次。）

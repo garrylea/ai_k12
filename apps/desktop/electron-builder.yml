@@ -45,8 +45,12 @@ mac:
   #    请求不需要 NSBonjourServices。事故与定位见 docs/constraints/pc-app-学习管控.md。
   extendInfo:
     NSLocalNetworkUsageDescription: 本应用需要访问局域网，以连接学校的学习服务器。
-  # 显式关闭签名（spec §3-2：不签不公证）。比只依赖 CSC_IDENTITY_AUTO_DISCOVERY 环境变量可靠：
-  # 本机跑 --mac 时也不会因为钥匙串里恰好有 Developer ID 就签出**不一致的产物**。
+  # 签名（2026-11-11 起本机出包都要签）：macOS 26/27 的「本地网络」权限对未签名的 App 按
+  # cdhash 记，重打包就会作废（设置里开关还开着、系统实际拒绝）。签上后绑证书身份，跨重打包稳定。
+  # 证书由 `tools/app-build.sh` 探测并注入（`--config.mac.identity=`），这里保留 null 作为
+  # 「没证书时的显式默认」，防止本机钥匙串里恰好有别的证书时静默签出不一致的产物。
+  # ⚠️ 出包后由 app-build.sh 的 verify_signature 逐个校验主程序与 Helper，没签上直接红。
+  # ⚠️ CI（desktop-release.yml）仍是不签名，产物与本机包身份不同 —— 已知缺口。
   identity: null
   # pkg 替代 dmg（2026-10-07 spec）：Installer.app 不向产物传播 quarantine（实测见 spec §2），
   # 「装完连不上服务器」的事故从机制上消失；dmg 拖拽 + 手跑 xattr 的家长路径废止。

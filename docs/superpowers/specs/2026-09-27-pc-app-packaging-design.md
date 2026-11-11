@@ -104,6 +104,13 @@
 > ① 主推 `xattr -dr com.apple.quarantine "/Applications/K12 智学.app"`；② GUI 备选是
 > 「系统设置 → 隐私与安全性 → **仍要打开**」。**不要再写「右键→打开」**（家长会卡住，甚至看到「已损坏」）。
 
+> **裁决 2 的口径变更（2026-11-11）**：macOS 26/27 的「本地网络」权限对**未签名**的 App 按 cdhash 记，
+> **重打包就作废**（开关还开着、系统实际拒绝）。因此 `tools/app-build.sh --check / --local` 改为用
+> 免费 **Apple Development** 证书签名：脚本探测证书并注入 `--config.mac.identity=`，yml 里的
+> `identity: null` 保留为「无证书时的显式默认」，出包后逐件校验主程序与 Helper 的签名身份。
+> **公证仍不做**（无 Developer ID），首次打开仍需「仍要打开」。**CI 仍不签名**（runner 无证书），
+> 产物与本机包身份不同 —— 已知缺口，见 `docs/constraints/pc-app-学习管控.md`「打包与分发」。
+
 ## 4. 设计
 
 ### 4.0 ⚠️ 阻断项：根 `.gitignore` 的 `*.yml` 会静默吃掉本设计的两个新文件
