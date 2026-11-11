@@ -8,6 +8,18 @@
 
 ---
 
+## 2026-11-11 流式首包超时 3s → 15s（做题答疑误报超时）
+
+**事故起因**：做题页点「答疑」偶发报「AI 响应超时，请重试」。`llm_call_logs` 显示 `freeform_tutor` / `qwen3.8-max` 在 3009ms 处以 `TimeoutError`(408) 失败（2026-11-09、2026-11-11 各一次），即首包（首个流式数据块）没在 `retry.yaml` 的 `streaming.firstTokenTimeoutMs: 3000` 内到达。同场景的辅助答疑（`tutoring`）也发生过 1 次 3013ms 的同类超时——两个入口读的是同一处配置，不存在「辅助答疑超时更长」。
+
+**为什么做题侧更容易踩线**：同一模型下，`freeform_tutor` 平均输入 2.5k / 输出 13.2k tokens（最大 37.6k）、平均耗时 319s；`tutoring` 平均输入 1.4k / 输出 1.6k、平均 34s。提示词更重、生成计划更长，首包尾延迟更容易超过 3s。SSE 路径不走 `callWithRetry`（避免重复吐字），`freeform_tutor` 也没有 fallback 路由，单次首包抖动会直接上抛 1009。
+
+**改了**：`retry.yaml` 的 `streaming.firstTokenTimeoutMs` 由 3000 上调到 **15000**（全局，两个答疑入口一致；`interTokenTimeoutMs` 仍为 10000）。同步 `docs/constraints/ai-core.md`、`docs/K12智学系统-AI-Agent中枢设计文档.md` §C.2 示例值。
+
+**未做（留有需要再上）**：首包未吐字时的自动重试、`freeform_tutor` 配 fallback 模型、前端做题页答疑错误气泡的「重试」按钮（当前只有判题错误接了 `onRetry`）。
+
+**生效方式**：`retry.yaml` 在进程启动时读入，改后需 `npm run build`（copy-assets 把 yaml 复制进 `dist/ai-core`）并重启后端。
+
 ## 2026-11-11 识图（MinerU）配置迁入数据库 + 后台可配
 
 **事故起因**：做题入口上传图片一律报「图片解析失败，请重试或手动输入题目」。真实原因是后端进程（`node dist/main.js`，nohup 启动、父进程已是 launchd）环境里没有 `MINERU_TOKEN`：token 只存在于 `~/.zshrc` 的 `export` 与 `tools/data-refinery/.env`，`apps/server/.env` 从来没有 —— 旧进程恰好从加载了 zshrc 的交互终端启动才一直能用，这次重启换了启动环境就静默失效。`freeform-recognize.service.ts` 当时 `catch {}` 吞掉了原因，前端只能看到笼统的 5501。

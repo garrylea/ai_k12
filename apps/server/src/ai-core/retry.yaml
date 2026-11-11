@@ -19,5 +19,7 @@ timeout:
   english_word_judge: 30000
 
 streaming:
-  firstTokenTimeoutMs: 3000
+  # 首包 15s（2026-11-11 由 3s 上调）：qwen3.8-max 带思考，做题答疑（freeform_tutor）
+  # 提示词重、生成长，偶发首包 >3s 会被误判超时（llm_call_logs 中 3009ms 的 TimeoutError）。
+  firstTokenTimeoutMs: 15000
   interTokenTimeoutMs: 10000

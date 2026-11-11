@@ -3067,7 +3067,7 @@ timeout:                      # 非流式 per-scene 请求超时（provider.chat
   structuring: 45000
 
 streaming:                    # OpenAI 兼容流式的「空闲超时」（收到数据即重置）
-  firstTokenTimeoutMs: 3000   # 首字节到达前允许的等待
+  firstTokenTimeoutMs: 15000  # 首字节到达前允许的等待（2026-11-11 由 3s 上调）
   interTokenTimeoutMs: 10000  # 收到首字节后，两次数据间的最大间隔
 ```
 
