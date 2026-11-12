@@ -71,7 +71,11 @@
 > **2026-10-08 实测定稿修订**（v2 落地后用户实测微调，本节数字以此为准）：线宽 `INK_WIDTH=1`（原 3，用户实测 3px 太粗、小字写不清晰）；导出 `scale=4`（2880×1440，原 2——线细字小后需更高像素密度保识别率）；**画布 CSS 宽随容器自适应**（`w-full max-w-[720px]` + `aspectRatio 720/360`，书写坐标按「逻辑坐标/实际显示宽」等比换算；原写死 720px 会在窄容器溢出）。另新增 `toolbarRight` 可选插槽（工具行右侧，承载调用方切换图标）。
 
 - 文件：`HandwritingPad.tsx`；demo 页改用它，`pages/dev/DemoSketchPad.tsx` 删除（避免双份漂移）。
-- 逻辑不变：720×360 逻辑 px、dpr 一次缩放、笔/橡皮/清空、二次贝塞尔平滑、ref 句柄 `{ exportImage(): string | null; clear(): void }`、`onStrokesChange?: (count: number) => void`。
+- 逻辑不变：720×360 逻辑 px、dpr 一次缩放、笔/橡皮/撤销/重做/清空、二次贝塞尔平滑、ref 句柄 `{ exportImage(): string | null; clear(): void }`、`onStrokesChange?: (count: number) => void`。
+- **2026-11-12 增补：撤销/重做**（用户反馈「某一笔写错只能整板清空，波及范围太大」）。工具行左侧仍是 笔/橡皮/清空，**右侧**（`ml-auto` 分组，与调用方的【键盘】切换图标同组）放两枚**线性 SVG 图标按钮**（`handwriting/icons.tsx` 的 `UndoIcon` / `RedoIcon`，32×32 按钮、禁用态 `opacity-40`，`title`/`aria-label` 带快捷键）；快捷键 `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` / `Ctrl+Y`（焦点在 input/textarea 时全部放行，让浏览器原生撤销文字）。
+  - 实现是**笔画数组快照**（存变更前的数组，栈上限 50 步）：画笔迹、橡皮擦除、工具栏清空都可撤销；**一次橡皮拖拽擦掉多笔只记一步**（`eraseBeforeRef` 在 pointerdown 存快照、pointerup 比对引用后登记）；手势进行中不响应撤销。
+  - 全部写操作改为**写时复制**（`strokesRef.current = [...prev, stroke]`）——原地 `push` 会连历史快照里的同一个数组一起改，撤销会「没反应」（同 DraftWhiteboard 的坑）。
+  - `clear()` 仍是**提交式**：识别成功后面板清空时**连同撤销栈一起清**，防止撤销把笔迹找回来、诱发重复追加；工具栏「清空」（含二次确认）走 `clearWithUndo()`，可撤销。
 - 两处调整：
   1. **屏显笔迹颜色随主题**：重绘时读主题 CSS 变量（同 DraftWhiteboard 的做法，不存色值）。注：两个接入页是训练轨全屏页、硬编码 student-day 不进夜间，此项当前为面向未来的无害能力（勘误见 §9/changelog）。
   2. **导出恒白底黑字**（#FFFFFF 底 + #111827 笔迹，scale 4）：识别最稳，不随主题。

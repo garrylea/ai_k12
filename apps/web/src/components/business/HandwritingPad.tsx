@@ -1,9 +1,10 @@
 // apps/web/src/components/business/HandwritingPad.tsx
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import { useThemeStore } from '@/store/themeStore';
+import { RedoIcon, UndoIcon } from './handwriting/icons';
 
 /**
- * 手写面板（原手写识别调研 demo 的 DemoSketchPad 泛化）：DraftWhiteboard 精简复制（笔/橡皮/清空），
+ * 手写面板（原手写识别调研 demo 的 DemoSketchPad 泛化）：DraftWhiteboard 精简复制（笔/橡皮/撤销/重做/清空），
  * 固定 720×360，导出白底黑字 PNG（识别模型对白底黑字最稳，导出不随主题，spec §4.3）。
  * 有意不 import draft-store：无题目隔离需求，笔迹只存组件内。
  */
@@ -16,6 +17,8 @@ const BOARD_H = 360;
 /** 笔迹线宽（逻辑 px）：2026-10-12 用户要求在 1px 基础上加粗一倍，墨迹更接近真实笔迹观感 */
 const INK_WIDTH = 2;
 const ERASER_HIT_SLOP = 8;
+/** 撤销栈上限：快照只存笔画数组（每笔几十个点），50 步足够写完一句诗又不至于无限涨 */
+const MAX_HISTORY = 50;
 
 /** 二次贝塞尔平滑渲染（逻辑同 DraftWhiteboard.strokePath，去掉 center 标记分支） */
 function strokePath(ctx: CanvasRenderingContext2D, stroke: DemoStroke): void {
@@ -67,6 +70,7 @@ function hitStroke(stroke: DemoStroke, x: number, y: number, threshold: number):
 
 export interface HandwritingPadHandle {
   exportImage(): string | null;
+  /** 识别成功后的提交式清空：连同撤销栈一起清掉（笔迹已变成文字，不该再撤回） */
   clear(): void;
 }
 
@@ -84,26 +88,20 @@ const HandwritingPad = forwardRef<
     // 清空两段式确认：第一次点击进入待确认态（按钮变「确认清空」），3s 内再点才真清空，超时自动还原
     const [confirmingClear, setConfirmingClear] = useState(false);
 
+    // 撤销/重做：存「变更前」的笔画数组快照。快照里的笔画对象落定后不再改动，
+    // 因此浅拷贝数组即可；所有写操作一律换新数组（写时复制），绝不原地 push。
+    const historyRef = useRef<DemoStroke[][]>([]);
+    const futureRef = useRef<DemoStroke[][]>([]);
+    const [canUndo, setCanUndo] = useState(false);
+    const [canRedo, setCanRedo] = useState(false);
+    // 橡皮一次拖拽的起始快照：拖拽期间会连续擦掉多笔，抬手时只登记一步
+    const eraseBeforeRef = useRef<DemoStroke[] | null>(null);
+
     useEffect(() => {
       if (!confirmingClear) return;
       const timer = window.setTimeout(() => setConfirmingClear(false), 3000);
       return () => window.clearTimeout(timer);
     }, [confirmingClear]);
-
-    // 笔/橡皮快捷键：p → 笔，e → 橡皮。焦点在输入类元素上时放行（不干扰正常打字/IME 组字）
-    useEffect(() => {
-      const onKey = (e: KeyboardEvent) => {
-        if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-        const el = e.target as HTMLElement | null;
-        // target 可能是非 Element（如 window），closest 仅在 Element 上可用
-        if (el && typeof el.closest === 'function' && el.closest('input, textarea, select, [contenteditable]')) return;
-        const key = e.key.toLowerCase();
-        if (key === 'p') setTool('pen');
-        else if (key === 'e') setTool('eraser');
-      };
-      window.addEventListener('keydown', onKey);
-      return () => window.removeEventListener('keydown', onKey);
-    }, []);
 
     const themeMode = useThemeStore((s) => s.mode);
 
@@ -145,6 +143,67 @@ const HandwritingPad = forwardRef<
       notifyCount();
     }, [notifyCount]);
 
+    const syncHistoryFlags = useCallback(() => {
+      setCanUndo(historyRef.current.length > 0);
+      setCanRedo(futureRef.current.length > 0);
+    }, []);
+
+    const applyStrokes = useCallback((next: DemoStroke[]) => {
+      strokesRef.current = next;
+      notifyCount();
+      redraw();
+    }, [notifyCount, redraw]);
+
+    /** 登记一步历史（传入变更前的快照），任何新动作都会作废重做栈 */
+    const recordHistory = useCallback((before: DemoStroke[]) => {
+      historyRef.current.push(before);
+      if (historyRef.current.length > MAX_HISTORY) historyRef.current.shift();
+      futureRef.current = [];
+      syncHistoryFlags();
+    }, [syncHistoryFlags]);
+
+    const undo = useCallback(() => {
+      // 手势进行中不响应：半截笔迹/橡皮拖拽会让快照错位
+      if (drawingRef.current || eraseBeforeRef.current) return;
+      const prev = historyRef.current.pop();
+      if (!prev) return;
+      futureRef.current.push(strokesRef.current);
+      applyStrokes(prev);
+      syncHistoryFlags();
+    }, [applyStrokes, syncHistoryFlags]);
+
+    const redo = useCallback(() => {
+      if (drawingRef.current || eraseBeforeRef.current) return;
+      const next = futureRef.current.pop();
+      if (!next) return;
+      historyRef.current.push(strokesRef.current);
+      applyStrokes(next);
+      syncHistoryFlags();
+    }, [applyStrokes, syncHistoryFlags]);
+
+    // 快捷键：p → 笔、e → 橡皮、Ctrl/Cmd+Z → 撤销、Ctrl/Cmd+Shift+Z / Ctrl+Y → 重做。
+    // 焦点在输入类元素上时全部放行（让浏览器原生撤销输入框里的文字，也不干扰打字/IME 组字）
+    useEffect(() => {
+      const onKey = (e: KeyboardEvent) => {
+        if (e.defaultPrevented) return;
+        const el = e.target as HTMLElement | null;
+        // target 可能是非 Element（如 window），closest 仅在 Element 上可用
+        if (el && typeof el.closest === 'function' && el.closest('input, textarea, select, [contenteditable]')) return;
+        const key = e.key.toLowerCase();
+        if (e.metaKey || e.ctrlKey) {
+          if (e.altKey) return;
+          if (key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
+          if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); redo(); }
+          return;
+        }
+        if (e.altKey) return;
+        if (key === 'p') setTool('pen');
+        else if (key === 'e') setTool('eraser');
+      };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }, [undo, redo]);
+
     const pointFromEvent = (e: React.PointerEvent<HTMLCanvasElement>): DemoPoint => {
       const rect = e.currentTarget.getBoundingClientRect();
       // 画布 CSS 宽度随容器自适应（≤720），书写坐标按「逻辑坐标/实际显示宽」等比换算；
@@ -158,12 +217,11 @@ const HandwritingPad = forwardRef<
     };
 
     const eraseAt = (x: number, y: number) => {
-      const before = strokesRef.current.length;
-      strokesRef.current = strokesRef.current.filter((s) => !hitStroke(s, x, y, s.size + ERASER_HIT_SLOP));
-      if (strokesRef.current.length !== before) {
-        notifyCount();
-        redraw();
-      }
+      const prev = strokesRef.current;
+      const next = prev.filter((s) => !hitStroke(s, x, y, s.size + ERASER_HIT_SLOP));
+      // 没擦到东西就保持原数组引用（抬手时据此判断这次拖拽是否算一步历史）
+      if (next.length === prev.length) return;
+      applyStrokes(next);
     };
 
     const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -171,6 +229,7 @@ const HandwritingPad = forwardRef<
       e.currentTarget.setPointerCapture(e.pointerId);
       const p = pointFromEvent(e);
       if (toolRef.current === 'eraser') {
+        eraseBeforeRef.current = strokesRef.current;
         eraseAt(p.x, p.y);
         return;
       }
@@ -191,14 +250,28 @@ const HandwritingPad = forwardRef<
     };
 
     const handlePointerUp = () => {
-      if (!drawingRef.current) return;
-      drawingRef.current = false;
-      if (drawingStrokeRef.current) {
-        strokesRef.current.push(drawingStrokeRef.current);
+      if (drawingRef.current) {
+        drawingRef.current = false;
+        const stroke = drawingStrokeRef.current;
         drawingStrokeRef.current = null;
-        notifyCount();
+        if (stroke) {
+          recordHistory(strokesRef.current);
+          strokesRef.current = [...strokesRef.current, stroke];
+          notifyCount();
+        }
+        redraw();
+        return;
       }
-      redraw();
+      // 橡皮拖拽结束：一次拖拽擦掉 N 笔也只算一步撤销
+      const before = eraseBeforeRef.current;
+      eraseBeforeRef.current = null;
+      if (before && before !== strokesRef.current) recordHistory(before);
+    };
+
+    /** 工具栏「清空」：可撤销（与识别后的提交式 clear 不同） */
+    const clearWithUndo = () => {
+      recordHistory(strokesRef.current);
+      applyStrokes([]);
     };
 
     useImperativeHandle(ref, () => ({
@@ -222,15 +295,18 @@ const HandwritingPad = forwardRef<
         return off.toDataURL('image/png');
       },
       clear(): void {
+        // 识别成功后调用：笔迹已变成输入框里的文字，历史一并作废（否则「撤销」会让残影回来、诱发重复追加）
         strokesRef.current = [];
-        notifyCount();
-        redraw();
+        historyRef.current = [];
+        futureRef.current = [];
+        applyStrokes([]);
+        syncHistoryFlags();
       },
     }));
 
     return (
       <div className="block w-full max-w-[720px] rounded-[var(--radius-card)] border border-[var(--bg-subtle)] bg-white p-2">
-        <div className="mb-2 flex items-center gap-2">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
           <button
             type="button"
             title="笔（快捷键 P）"
@@ -257,15 +333,35 @@ const HandwritingPad = forwardRef<
                 return;
               }
               setConfirmingClear(false);
-              strokesRef.current = [];
-              notifyCount();
-              redraw();
+              clearWithUndo();
             }}
             className={`rounded-[var(--radius-button)] px-3 py-1 text-sm ${confirmingClear ? 'bg-[var(--error)] text-white' : 'bg-[var(--bg-subtle)] text-[var(--text-primary)]'}`}
           >
             {confirmingClear ? '确认清空' : '清空'}
           </button>
-          {toolbarRight != null && <div className="ml-auto flex items-center gap-2">{toolbarRight}</div>}
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              title="撤销（Ctrl+Z）"
+              aria-label="撤销（Ctrl+Z）"
+              onClick={undo}
+              disabled={!canUndo}
+              className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-subtle)] text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <UndoIcon />
+            </button>
+            <button
+              type="button"
+              title="重做（Ctrl+Shift+Z）"
+              aria-label="重做（Ctrl+Shift+Z）"
+              onClick={redo}
+              disabled={!canRedo}
+              className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-subtle)] text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <RedoIcon />
+            </button>
+            {toolbarRight != null && <div className="flex items-center gap-2">{toolbarRight}</div>}
+          </div>
         </div>
         <canvas
           ref={canvasRef}

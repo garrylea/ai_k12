@@ -8,6 +8,18 @@
 
 ---
 
+## 2026-11-12 手写板加撤销/重做（写错一笔不用整板清空）
+
+**用户反馈**：古诗文手写作答时「某个字/某一笔写错了，现在的清空影响范围太大」。
+
+**改了**（仅前端 `apps/web/src/components/business/HandwritingPad.tsx`，判题/识别链路零改动）：
+- 工具行左侧仍是 笔/橡皮/清空；**右侧**加【撤销】【重做】两枚**线性 SVG 图标按钮**（`handwriting/icons.tsx` 新增 `UndoIcon`/`RedoIcon`，32×32、与「切换键盘」图标同组排在 `ml-auto` 分组里，禁用态 `opacity-40`，`title`/`aria-label` 带快捷键）。快捷键 `Ctrl/Cmd+Z`、`Ctrl/Cmd+Shift+Z`、`Ctrl+Y`；焦点在 input/textarea/select/contenteditable 时整体放行，交给浏览器原生撤销文字。
+- 历史 = **笔画数组快照栈**（上限 50 步）+ 重做栈。画笔迹、橡皮擦除、工具栏清空都可撤销；**一次橡皮拖拽擦掉 N 笔只登记一步**（pointerdown 存快照，pointerup 用数组引用比对判断这次拖拽有没有真擦到东西）；手势进行中不响应撤销/重做。
+- 追加笔画改成**写时复制**（`strokesRef.current = [...prev, stroke]`）。原实现是原地 `push`，会把历史快照里的同一个数组一起改掉，撤销会「没反应」——与 `DraftWhiteboard` line 829 是同一个坑。
+- `clear()` 保持**提交式**语义（识别成功后清板同时清历史），工具栏「清空」改走 `clearWithUndo()` 因此可撤销；两段式确认保留。
+
+**验证**：`HandwritingPad.test.tsx` 新增 5 个用例（撤销/重做/新笔画作废重做栈、撤销清空、橡皮拖拽一步、快捷键与输入框放行、提交式 clear 清历史），web 全量 `vitest run` 1712 用例全绿；`tsc -b` + `eslint` 干净。
+
 ## 2026-11-11 流式首包超时 3s → 15s（做题答疑误报超时）
 
 **事故起因**：做题页点「答疑」偶发报「AI 响应超时，请重试」。`llm_call_logs` 显示 `freeform_tutor` / `qwen3.8-max` 在 3009ms 处以 `TimeoutError`(408) 失败（2026-11-09、2026-11-11 各一次），即首包（首个流式数据块）没在 `retry.yaml` 的 `streaming.firstTokenTimeoutMs: 3000` 内到达。同场景的辅助答疑（`tutoring`）也发生过 1 次 3013ms 的同类超时——两个入口读的是同一处配置，不存在「辅助答疑超时更长」。
