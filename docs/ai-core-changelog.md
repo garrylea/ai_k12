@@ -8,6 +8,28 @@
 
 ---
 
+## 2026-11-12 单点登录互踢卡在考试页（PC App 被别处登录后没被踢）
+
+**用户反馈**：学生在 PC App 上考试时，同账号在 Web 端再登录，App 端没有被踢下线，
+仍停在考试页 → 多台设备可同时用同一账号学习。
+
+**根因**：服务端互踢本身正常（1013 正常下发），坏在客户端跳转被吞：
+1. 考试页挂了 `RunExitGuard` 的 `blockBeforeUnload`（刷新/关窗防丢答案，产品需求）；
+2. 1013 后 `window.location.assign('/login?kicked=1')` 触发 `beforeunload`，
+   而 **Electron 对被 beforeunload 取消的 unload 是静默放弃导航**（不弹框、不报错，
+   本机用真 Electron + 用户手势最小复现：导航前后 URL 都是原页）；
+3. `clearAuthSession()` 在跳转前已执行 → 之后请求只剩 401/1003（1003 按既有约定不跳转），
+   页面永远回不到登录页，学生可以继续看/答，交卷才失败。
+
+**修复**（`apps/web`，壳与后端零改动）：
+- `authStorage.ts` 加进程内「已被踢」标记 `markSessionRevoked()` / `isSessionRevoked()`，
+  **只在登录成功（`saveAuthSession`）复位**，`clearAuthSession` 不碰（避免顺序依赖）；
+- `api.ts` 1013 分支先置标记再清 token + 跳转；
+- `RunExitGuard` 的 `beforeunload` 看到标记即让路。
+
+**验证**：新增 `RunExitGuard.test.tsx` 3 条 + `authStorage.test.ts` 2 条 + `api.test.ts` 1013/1003 断言；
+`apps/web` 全量 176 文件 / 1728 用例通过。
+
 ## 2026-11-12 PC App 家长解锁后考试页出现返回入口（专注模式紧急退出）
 
 **用户反馈**：学生进入考试等专注模式后遇紧急情况出不去；家长在家长端点【解除锁定】，
@@ -29,6 +51,11 @@
 **明确不做**：断网兜底、锁到期后的考试页出口、其它答题页的解锁提示、自动关窗。
 
 **验证**：`apps/web` 新增 6 条用例（壳 4 条、考试页 2 条）+ 全量 `npm test` / `npm run build` / `npm run lint`。
+
+**2026-11-12 验收后调整（用户打回位置）**：首版把 `BackButton` 放进 `QuestionRunner` 的 `headerExtra`
+（标题行右侧的「已答 x/y + 倒计时」区），位置不对。现改为新增 `headerLeading` 插槽，渲染在标题行
+**最左侧（左上角）**、「第 N 题」之前；并传 `label="退出"`（图标右侧显示「退出」二字）、
+`aria-label="退出考试"`。回归钉子：`ExamRunPage.test.tsx` 断言入口在标题之前且含可见文字「退出」。
 
 ## 2026-11-12 PC App 首屏连不上时不再把人锁在 kiosk 里（只能断电的“流氓”状态）
 

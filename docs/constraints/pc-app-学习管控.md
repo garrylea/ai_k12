@@ -79,12 +79,27 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
 - **「解除锁定」只放开登出，不改窗口锁定**：`studentMode` 仍为 true、仍是 kiosk、仍拦 `close`。
   学生必须走完「登出」（`releaseOnLogout()` → `setStudentMode(false)`）窗口才可关。**别把解锁做成关窗**。
 - 考试页原本零出口（`ExamRunPage` 注释「考试无页内退出」）。现仅在**桌面壳 + 当前学生本次会话的 `unlockedAt !== null`**
-  时于标题行显示 `BackButton`（`aria-label="返回考试列表"`），点击仍走 `RunExitGuard` 确认。
+  时于**标题行最左侧（左上角）**显示退出入口：图标**右侧带可见文字「退出」**（`aria-label="退出考试"`），
+  点击仍走 `RunExitGuard` 确认。位置靠 `QuestionRunner` 的 `headerLeading` 插槽，**不要塞进 `headerExtra`**
+  （那是靠右的倒计时/已答计数区，2026-11-12 首版放错位置被用户打回）。
 - **判定通道是 `ParentUnlockContext`，不是 `LearningLockContext`**：后者只在锁定中才非 null，
   塞进去要放宽给值条件、会推翻 5 条「未锁定时不下发锁定态」的回归钉子。
   **禁止**在页面里读 `localStorage` 自判。
 - **不扩到其它答题页**：专项/错题/变式/补偿/语文/英语页已有 X 或「退出」，学生能退到列表页登出。
 - **锁自然到期不算解锁**：到期后考试页仍无出口（已知遗留，需要时另立）。**断网不解锁**这一条不变。
+
+### 单点登录互踢 × 考试页 `beforeunload`（2026-11-12）
+
+- **Electron 对被 `beforeunload` 取消的 unload 是「静默放弃导航」**：不弹确认框、不报错、
+  URL 原样不动（本机用真 Electron + 用户手势实测）。所以任何「靠整页跳转完成」的全局
+  动作（当前是 1013 被踢 → `/login?kicked=1`）都会被考试页的 `blockBeforeUnload` 吞掉。
+- 修法：1013 分支先 `markSessionRevoked()`（`services/authStorage.ts`），
+  `RunExitGuard` 的 `beforeunload` 处理器看到该标记就 `return`、不 `preventDefault`。
+  **标记只在登录成功（`saveAuthSession`）复位**，`clearAuthSession` 不碰它 ——
+  1013 分支是「先 mark 再 clear」，若 clear 顺手复位，守卫又会挡住跳转。
+- ⚠️ **别把 `blockBeforeUnload` 删掉来「修」这个问题**：它是刷新/关窗防丢答案的产品需求；
+  也**别改成只做前端遮罩**——token 已被清，页面仍在，学生仍可继续作答。
+- 回归钉子：`RunExitGuard.test.tsx`（有/无标记两条）+ `api.test.ts` 1013 用例。
 
 ### 系统打断后的全屏恢复（2026-11-04）
 
