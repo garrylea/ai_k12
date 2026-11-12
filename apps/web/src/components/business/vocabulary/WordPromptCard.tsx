@@ -31,7 +31,9 @@ interface Props {
  * （中→英、看音标写单词）点开 `+` 就等于直接把答案递给学生。
  * 后端在这两种题上也不会返回 hasFamily，这里是第二道闸门。
  *
- * 回车即提交（背单词是快节奏过词，不该要求每词都去点按钮）。
+ * 回车即提交（背单词是快节奏过词，不该要求每词都去点按钮），但**空输入的回车一律
+ * 当误触**：不提交、不翻页。否则手一抖连按回车就把后面的词按空答案记成 unanswered，
+ * 与主动点「不认识」混为一谈，成绩与错题统计都被污染。
  */
 export default function WordPromptCard({
   question,
@@ -111,7 +113,13 @@ export default function WordPromptCard({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') onSubmit();
+          if (e.key !== 'Enter') return;
+          // 输入法选候选词时的回车是「确认候选」，不是提交；不拦会把半截拼音交上去
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+          // 什么都没写就回车 → 误触（含连按回车连跳好几题），不提交也不翻页；
+          // 真想跳过请点「不认识」，那里才会明确记为 unanswered
+          if (!value.trim()) return;
+          onSubmit();
         }}
         placeholder={ANSWER_PLACEHOLDER[question.promptKind]}
         data-testid="answer-input"

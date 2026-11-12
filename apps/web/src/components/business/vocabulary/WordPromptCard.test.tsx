@@ -155,10 +155,35 @@ describe('WordPromptCard — 题面与作答', () => {
     expect(props.onChange).toHaveBeenCalledWith('照顾');
   });
 
-  it('回车即提交（背单词不该要求每词都去点按钮）', () => {
-    const props = renderCard();
+  it('有输入时回车即提交（背单词不该要求每词都去点按钮）', () => {
+    const props = renderCard({ value: '照顾' });
     fireEvent.keyDown(screen.getByTestId('answer-input'), { key: 'Enter' });
     expect(props.onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it('空输入回车不提交、不翻页（误触不该按空答案记 unanswered）', () => {
+    // 翻页后输入框保持聚焦、草稿清空，学生连按回车会连续跳过后面好几题；
+    // 空输入必须原地不动，跳过只能走「不认识」。
+    const props = renderCard({ value: '' });
+    fireEvent.keyDown(screen.getByTestId('answer-input'), { key: 'Enter' });
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('纯空白也算空输入', () => {
+    const props = renderCard({ value: '   ' });
+    fireEvent.keyDown(screen.getByTestId('answer-input'), { key: 'Enter' });
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('输入法组合态的回车是确认候选，不提交', () => {
+    // 英→中要打中文，按回车确认候选词不该把半截拼音交上去
+    const props = renderCard({ value: 'zhao' });
+    fireEvent.keyDown(screen.getByTestId('answer-input'), {
+      key: 'Enter',
+      keyCode: 229,
+      isComposing: true,
+    });
+    expect(props.onSubmit).not.toHaveBeenCalled();
   });
 
   it('点「不认识」走 onSkip（服务端记 unanswered，不计对错）', () => {
