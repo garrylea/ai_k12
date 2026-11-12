@@ -1,5 +1,5 @@
 import type { ClientState, EndReason, HiddenReason } from '@/analytics/types';
-import { clearAuthSession, getAuthToken } from '@/services/authStorage';
+import { clearAuthSession, getAuthToken, markSessionRevoked } from '@/services/authStorage';
 
 const API_BASE = '/api';
 
@@ -54,6 +54,11 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     if (json.code === 1013) {
       // 单点登录互踢（2026-10-10）：该账号已在别处重新登录。清本地登录态并回登录页，
       // kicked=1 供登录页展示提示。与 2001 同惯例：返回永不 resolve 的 Promise，页面即将整体跳走。
+      //
+      // 必须先置「已被踢」标记（2026-11-12）：考试页挂 beforeunload 守卫，而 Electron 对
+      // 被 beforeunload 取消的 unload 是**静默放弃导航**（不弹框），整页跳 /login 会被吞掉。
+      // 标记让守卫在这一次让路；否则 token 已清、后续只会收到 1003，页面再也回不到登录页。
+      markSessionRevoked();
       clearAuthSession();
       window.location.assign('/login?kicked=1');
       return new Promise<T>(() => {});

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
   cancelBillingOrder,
@@ -25,6 +25,8 @@ import {
   setRedemptionStatus,
   startStudySession,
 } from './api';
+
+import { clearSessionRevoked, isSessionRevoked } from './authStorage';
 
 /**
  * `fetchApi` 把 HTTP 状态码带进 `ApiError.status`（终审修复 Finding 6 的地基）。
@@ -461,7 +463,10 @@ describe('1013 全局拦截（单点登录互踢）', () => {
     return assign;
   }
 
-  it('code=1013 → 清登录态 + window.location.assign 到 /login?kicked=1，Promise 永不 resolve', async () => {
+  // 标记是模块级单例：上一个用例置过位会影响下一个用例。
+  beforeEach(() => clearSessionRevoked());
+
+  it('code=1013 → 置「已被踢」标记 + 清登录态 + window.location.assign 到 /login?kicked=1，Promise 永不 resolve', async () => {
     const assign = stubLocationAssign();
     localStorage.setItem('token', 't');
     sessionStorage.setItem('userRole', 'student');
@@ -476,15 +481,18 @@ describe('1013 全局拦截（单点登录互踢）', () => {
     await vi.waitFor(() => expect(assign).toHaveBeenCalledWith('/login?kicked=1'));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(outcome).toBe('pending');
+    // 页面退出守卫（考试页 beforeunload）据此让路，否则 Electron 会静默吞掉整页跳转
+    expect(isSessionRevoked()).toBe(true);
     // 两个 storage 的鉴权键都被清掉
     expect(localStorage.getItem('token')).toBeNull();
     expect(sessionStorage.getItem('userRole')).toBeNull();
   });
 
-  it('code=1003（token 过期）→ 行为不变，仍抛 ApiError', async () => {
+  it('code=1003（token 过期）→ 行为不变，仍抛 ApiError，也不置「已被踢」标记', async () => {
     const assign = stubLocationAssign();
     stubFetch(401, { code: 1003, message: '未登录或 token 已过期', data: null });
     await expect(getMyPoints()).rejects.toMatchObject({ code: 1003 });
     expect(assign).not.toHaveBeenCalled();
+    expect(isSessionRevoked()).toBe(false);
   });
 });

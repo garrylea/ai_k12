@@ -42,8 +42,34 @@ export function getAuthToken(): string | null {
   return getAuthItem('token');
 }
 
+/**
+ * 「本次登录已被别处踢下线」的进程内标记（单点登录互踢，2026-11-12 补）。
+ *
+ * 为什么需要它：1013 后的整页跳转 `/login?kicked=1` 依赖页面 unload，而考试页挂了
+ * `beforeunload` 守卫。Electron 对「被 beforeunload 取消的 unload」是**静默放弃导航**
+ * （不弹确认框），跳转被吞掉；此时 token 已被清，后续请求只会 401/1003（不再触发 1013
+ * 跳转），App 会永久停在被踢前的页面。守卫据此标记在「被踢」时让路。
+ *
+ * 生命周期：只有登录成功（saveAuthSession）才复位——普通登出/清 token 不碰它，
+ * 避免 1013 分支「mark 后再 clear」的顺序依赖。
+ */
+let sessionRevoked = false;
+
+export function markSessionRevoked(): void {
+  sessionRevoked = true;
+}
+
+export function isSessionRevoked(): boolean {
+  return sessionRevoked;
+}
+
+export function clearSessionRevoked(): void {
+  sessionRevoked = false;
+}
+
 export function saveAuthSession(session: AuthSession, remember: boolean): void {
   clearAuthSession();
+  clearSessionRevoked();
   const storage = safeStorage(remember ? 'local' : 'session');
   if (!storage) return;
   storage.setItem('token', session.token);

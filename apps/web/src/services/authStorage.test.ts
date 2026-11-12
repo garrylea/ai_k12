@@ -1,15 +1,19 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  clearAuthSession,
+  clearSessionRevoked,
   getAuthItem,
   getAuthToken,
+  isSessionRevoked,
+  markSessionRevoked,
   saveAuthSession,
-  clearAuthSession,
 } from './authStorage';
 
 describe('authStorage', () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+    clearSessionRevoked();
   });
 
   it('getAuthItem：sessionStorage 优先于 localStorage', () => {
@@ -81,5 +85,30 @@ describe('authStorage', () => {
       expect(localStorage.getItem(key)).toBeNull();
       expect(sessionStorage.getItem(key)).toBeNull();
     }
+  });
+
+  /**
+   * 「已被踢」标记（2026-11-12）：考试页 beforeunload 守卫据此让路。
+   * 复位只能发生在**登录成功**；普通清 token（登出）不能顺手清掉——
+   * 1013 分支是「先 mark 再 clearAuthSession」，清了标记跳转又会被守卫挡住。
+   */
+  it('markSessionRevoked 置位、clearSessionRevoked 复位', () => {
+    expect(isSessionRevoked()).toBe(false);
+    markSessionRevoked();
+    expect(isSessionRevoked()).toBe(true);
+    clearSessionRevoked();
+    expect(isSessionRevoked()).toBe(false);
+  });
+
+  it('clearAuthSession 不清「已被踢」标记；登录成功（saveAuthSession）才复位', () => {
+    markSessionRevoked();
+    clearAuthSession();
+    expect(isSessionRevoked()).toBe(true);
+
+    saveAuthSession(
+      { token: 'jwt', username: '小明', userId: '9', userRole: 'student' },
+      false,
+    );
+    expect(isSessionRevoked()).toBe(false);
   });
 });

@@ -7,6 +7,7 @@
 import { useEffect } from 'react';
 import { useBlocker } from 'react-router-dom';
 import { Modal } from '@/components/base';
+import { isSessionRevoked } from '@/services/authStorage';
 
 interface RunExitGuardProps {
   /** 守卫开关 ref（页面持有，初值 true）：置 false 时放行导航（确认退出后同步赋值再 navigate）。结构化类型而非 RefObject——其 current 含 null，useBlocker 谓词不收 */
@@ -32,6 +33,10 @@ export function RunExitGuard({
   useEffect(() => {
     if (!blockBeforeUnload) return;
     const handler = (e: BeforeUnloadEvent) => {
+      // 被踢下线（1013 的整页跳登录页）时必须让路（2026-11-12）：Electron 对被
+      // beforeunload 取消的 unload 是静默放弃导航、不弹确认框——挡住就等于把「踢下线」
+      // 吞掉，学生停在被踢前的考试页，而 token 已清，再也回不到登录页。
+      if (isSessionRevoked()) return;
       e.preventDefault();
     };
     window.addEventListener('beforeunload', handler);
