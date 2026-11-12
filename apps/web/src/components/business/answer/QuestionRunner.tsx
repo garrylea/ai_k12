@@ -93,6 +93,8 @@ export interface QuestionRunnerProps {
   onFinish: (results: Record<string, RunnerAnswerRecord>) => void;
   /** 考试倒计时等插槽：渲染在标题行右侧 */
   headerExtra?: ReactNode;
+  /** 标题行最左侧插槽（考试页家长解锁后的「退出」）：渲染在「第 N 题」之前。缺省时标题照旧贴左 */
+  headerLeading?: ReactNode;
   /** 顶部标题：固定文案或随题位变化的函数（CleanupPhase「错题巩固 — 第 i/n 题」）；默认「第 {i+1}/{n} 题」 */
   title?: string | ((index: number, total: number) => string);
   /** 初始题位（AnswerModal 续答语义）；默认 0 */
@@ -132,6 +134,7 @@ export function QuestionRunner({
   onSelfAssess,
   onFinish,
   headerExtra,
+  headerLeading,
   title,
   startIndex,
   onClose,
@@ -506,21 +509,24 @@ export function QuestionRunner({
   // ========== ANSWERING 态 ==========
   const answeringView = (
     <div className="flex-1 min-h-0 flex flex-col gap-3">
-      {/* 标题行：默认「第 i/n 题」，headerExtra（考试倒计时等）靠右 */}
+      {/* 标题行：默认「第 i/n 题」，headerLeading（考试页「退出」）贴左，headerExtra（考试倒计时等）靠右 */}
       <div className="shrink-0 flex items-center justify-between gap-3">
-        <h1 className="font-bold" style={{ fontSize: 'var(--fs-learn-h1)', lineHeight: '1.75rem', color: 'var(--learn-heading-1)' }}>
-          {typeof title === 'function' ? title(idx, total) : (title ?? `第 ${idx + 1}/${total} 题`)}
-          {typeLabel && (
-            <span
-              data-testid="question-type"
-              className={`ml-2 align-middle text-sm font-medium ${
-                isMultiType ? 'text-[var(--brand-500)]' : 'text-[var(--text-tertiary)]'
-              }`}
-            >
-              （{typeLabel}）
-            </span>
-          )}
-        </h1>
+        <div className="flex min-w-0 items-center gap-3">
+          {headerLeading}
+          <h1 className="font-bold" style={{ fontSize: 'var(--fs-learn-h1)', lineHeight: '1.75rem', color: 'var(--learn-heading-1)' }}>
+            {typeof title === 'function' ? title(idx, total) : (title ?? `第 ${idx + 1}/${total} 题`)}
+            {typeLabel && (
+              <span
+                data-testid="question-type"
+                className={`ml-2 align-middle text-sm font-medium ${
+                  isMultiType ? 'text-[var(--brand-500)]' : 'text-[var(--text-tertiary)]'
+                }`}
+              >
+                （{typeLabel}）
+              </span>
+            )}
+          </h1>
+        </div>
         {headerExtra}
       </div>
 

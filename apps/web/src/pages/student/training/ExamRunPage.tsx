@@ -266,14 +266,21 @@ export default function ExamRunPage() {
               // 「第8题」实际是题9（2026-11-03 汇文事故）。用题号后，隐藏题
               // 只会让题号跳号（学生知道该题没进本次考试），不会张冠李戴。
               title={(idx) => `第 ${questions[idx]?.n ?? idx + 1} 题`}
+              onQuestionChange={setCurrentQ}
+              initialAnswers={initialAnswers}
+              // 家长解锁后的出口：贴标题行最左侧（左上角），图标右侧带「退出」二字。
+              // 只在这里给入口——未解锁时学生没有任何可见出口（既有设计）。
+              headerLeading={
+                unlockedByParent ? (
+                  <BackButton
+                    to={`/student/training/exam?subjectId=${subjectId}`}
+                    label="退出"
+                    ariaLabel="退出考试"
+                  />
+                ) : null
+              }
               headerExtra={
                 <div className="flex shrink-0 items-center gap-4">
-                  {unlockedByParent && (
-                    <BackButton
-                      to={`/student/training/exam?subjectId=${subjectId}`}
-                      ariaLabel="返回考试列表"
-                    />
-                  )}
                   <span className="text-sm text-[var(--text-secondary)]">
                     已答 {answeredNs.size}/{questions.length}
                   </span>
@@ -288,8 +295,6 @@ export default function ExamRunPage() {
               }
               onSubmit={handleSubmit}
               onFinish={handleFinish}
-              onQuestionChange={setCurrentQ}
-              initialAnswers={initialAnswers}
             />
           </div>
           {draftOpen && currentQ && (

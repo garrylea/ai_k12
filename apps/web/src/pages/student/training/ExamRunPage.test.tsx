@@ -147,18 +147,25 @@ describe('ExamRunPage 家长解锁后的返回入口（spec 2026-11-12）', () =
     sessionStorage.setItem('exam:session', JSON.stringify(SESSION));
   });
 
-  it('家长未解锁 → 不渲染返回入口', async () => {
+  it('家长未解锁 → 不渲染退出入口', async () => {
     renderPage(false);
     await waitFor(() => expect(screen.getByText('第 1 题')).toBeInTheDocument());
 
-    expect(screen.queryByLabelText('返回考试列表')).toBeNull();
+    expect(screen.queryByLabelText('退出考试')).toBeNull();
   });
 
-  it('家长已解锁 → 出现返回入口；点击弹「离开考试」确认，确认后回到考试列表', async () => {
+  it('家长已解锁 → 左上角出现「退出」入口（图标 + 文字）；点击弹「离开考试」确认，确认后回到考试列表', async () => {
     const router = renderPage(true, '?subjectId=2');
-    await waitFor(() => expect(screen.getByLabelText('返回考试列表')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('退出考试')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByLabelText('返回考试列表'));
+    // 位置口径（2026-11-12 用户验收）：入口在标题行**最左侧**（DOM 上先于「第 N 题」），
+    // 图标右侧带可见文字「退出」。
+    const exitButton = screen.getByLabelText('退出考试');
+    const heading = screen.getByRole('heading', { name: /第 1 题/ });
+    expect(exitButton.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(exitButton).toHaveTextContent('退出');
+
+    fireEvent.click(exitButton);
 
     // 必须仍然被 RunExitGuard 拦住（不能绕过确认直接走）
     await waitFor(() => expect(screen.getByText('离开考试')).toBeInTheDocument());
