@@ -13,6 +13,8 @@ import {
 } from '@/services/api';
 import { normalizeOptions } from './normalizeOptions';
 import { parseSubjectId } from '@/constants';
+import { BackButton } from '@/components/base';
+import { useParentUnlocked } from '@/kiosk/parentUnlockContext';
 
 /** 列表页开考时写入的会话键（读后即删，防止刷新后重复消费旧会话）。 */
 const SESSION_KEY = 'exam:session';
@@ -41,7 +43,8 @@ const SPINNER_SVG = (
 
 /**
  * 考试进行页：限时答题 + 倒计时 + 续考恢复 + 归零自动交卷。
- * 无 BackButton（考试中不可返回）；答完末题即视为交卷（QuestionRunner onFinish）。
+ * 常规不做页内退出；**家长主动解除锁定后**才在标题行给一个返回考试列表的入口
+ * （spec 2026-11-12，PC App 专注模式下紧急退出）。答完末题即视为交卷（QuestionRunner onFinish）。
  */
 export default function ExamRunPage() {
   const { sessionId } = useParams();
@@ -63,6 +66,8 @@ export default function ExamRunPage() {
   const submittingRef = useRef(false);
   // 交卷成功跳结果页前放行导航（同步置 ref.current=false 再 navigate，绕开 RunExitGuard 拦截——ref 是同步生效的）
   const guardRef = useRef(true);
+  /** 家长主动解除锁定后，本页才给返回入口（未解锁时学生没有任何可见出口，这是既有设计）。 */
+  const unlockedByParent = useParentUnlocked();
   // StrictMode 下 effect 会跑两次：ref 守卫保证 sessionStorage「读 + 删」只执行一次，
   // 否则第二次读到空会误判为无会话（走服务端拉取虽然也能恢复，但语义上应消费新开卷数据）。
   const bootstrappedRef = useRef(false);
@@ -263,6 +268,12 @@ export default function ExamRunPage() {
               title={(idx) => `第 ${questions[idx]?.n ?? idx + 1} 题`}
               headerExtra={
                 <div className="flex shrink-0 items-center gap-4">
+                  {unlockedByParent && (
+                    <BackButton
+                      to={`/student/training/exam?subjectId=${subjectId}`}
+                      ariaLabel="返回考试列表"
+                    />
+                  )}
                   <span className="text-sm text-[var(--text-secondary)]">
                     已答 {answeredNs.size}/{questions.length}
                   </span>

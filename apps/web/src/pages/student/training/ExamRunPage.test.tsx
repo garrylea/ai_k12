@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import ExamRunPage from './ExamRunPage';
+import { ParentUnlockContext } from '@/kiosk/parentUnlockContext';
 import {
   getExamSession,
   submitExamAnswer,
@@ -43,11 +44,19 @@ const SESSION: ExamSessionInfo = {
   questions: [{ questionId: 101, questionNo: 1, text: '1 + 1 = ?', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null }],
 };
 
-/** RunExitGuard 用 useBlocker —— 必须是 data router；结果页给个占位元素。 */
-function renderPage() {
+/** RunExitGuard 用 useBlocker —— 必须是 data router；结果页与列表页给占位元素。 */
+function renderPage(unlockedByParent = false) {
   const router = createMemoryRouter(
     [
-      { path: '/student/training/exam/run/:sessionId', element: <ExamRunPage /> },
+      {
+        path: '/student/training/exam/run/:sessionId',
+        element: (
+          <ParentUnlockContext.Provider value={unlockedByParent}>
+            <ExamRunPage />
+          </ParentUnlockContext.Provider>
+        ),
+      },
+      { path: '/student/training/exam', element: <div>考试列表占位</div> },
       { path: '/student/training/exam/result/:sessionId', element: <div>结果页占位</div> },
     ],
     { initialEntries: ['/student/training/exam/run/77'] },
@@ -125,5 +134,40 @@ describe('ExamRunPage 交卷发分交接', () => {
     // 必须显示"第 3 题"（卷内题号），而不是顺序位的"第 1/1 题"
     await waitFor(() => expect(screen.getByText('第 3 题')).toBeTruthy());
     expect(screen.queryByText('第 1/1 题')).toBeNull();
+  });
+});
+
+describe('ExamRunPage 家长解锁后的返回入口（spec 2026-11-12）', () => {
+  beforeEach(() => {
+    sessionMock.mockReset();
+    answerMock.mockReset();
+    submitMock.mockReset();
+    answerMock.mockResolvedValue({ saved: true });
+    sessionMock.mockResolvedValue(SESSION);
+    sessionStorage.setItem('exam:session', JSON.stringify(SESSION));
+  });
+
+  it('家长未解锁 → 不渲染返回入口', async () => {
+    renderPage(false);
+    await waitFor(() => expect(screen.getByText('第 1 题')).toBeInTheDocument());
+
+    expect(screen.queryByLabelText('返回考试列表')).toBeNull();
+  });
+
+  it('家长已解锁 → 出现返回入口；点击弹「离开考试」确认，确认后回到考试列表', async () => {
+    const router = renderPage(true);
+    await waitFor(() => expect(screen.getByLabelText('返回考试列表')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText('返回考试列表'));
+
+    // 必须仍然被 RunExitGuard 拦住（不能绕过确认直接走）
+    await waitFor(() => expect(screen.getByText('离开考试')).toBeInTheDocument());
+    expect(router.state.location.pathname).toBe('/student/training/exam/run/77');
+
+    fireEvent.click(screen.getByRole('button', { name: '确认离开' }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/training/exam'));
+    // 落点是考试列表，并带上当前学科（默认数学 = 1）
+    expect(router.state.location.search).toBe('?subjectId=1');
   });
 });
