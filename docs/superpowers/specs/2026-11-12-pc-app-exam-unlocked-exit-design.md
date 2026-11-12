@@ -75,38 +75,40 @@
 **为什么不看 `isLocked()`**：锁到期、家长未设锁都会让 `isLocked()` 为 false，但这两类都不是
 「家长解除」；按用户裁决只认 `unlockedAt`。
 
-### 2.2 状态来源：扩展 `LearningLockContext`
+### 2.2 状态来源：新增 `ParentUnlockContext`（不扩 `LearningLockContext`）
 
-现状：`LearningLockContext` 的类型是 `LearningLockValue | null`，且 provider **只在「锁定中」时给非 null 值**
-（`LearningSessionShell` 的 `lockValue`）。而 `unlockedAt !== null` 恰恰意味着「不锁」，所以必须放宽 provider 的给值条件。
-
-改法（最小、明确）：
+**为什么不是「给 `LearningLockContext` 加一个字段」**：该 context 的值**只在锁定中才非 null**
+（`LearningSessionShell` 的 `lockValue`）。而 `unlockedAt !== null` 恰恰意味着「不锁」，要下发它就必须
+放宽给值条件 —— 那会让 `LearningSessionShell.test.tsx` 里 5 条断言「未锁定时 `lock-probe` 为 `none`」
+全部失效，而这些断言正是「未锁定时不下发锁定态、pill 不该出现」的回归钉子。因此改成**新增一个独立 context**：
 
 ```ts
-// learningLockContext.ts
-export interface LearningLockValue {
-  locked: boolean;
-  remainingMs: number;
-  /** 家长主动点过【解除锁定】（`unlocked_at` 非空）。锁到期 / 从未设锁都不算。 */
-  unlockedByParent: boolean;
-}
+// 新建 apps/web/src/kiosk/parentUnlockContext.ts
+import { createContext, useContext } from 'react';
 
-// LearningSessionShell.tsx
-const lockValue =
-  isDesktopShell() && lock !== null
-    ? {
-        locked,                                        // 与现在的判定完全一致
-        remainingMs: lock.lockExpiresAt ? remainingMs(lock.lockExpiresAt, nowMs) : 0,
-        unlockedByParent: lock.unlockedAt !== null,
-      }
-    : null;
+/** 家长是否主动点过【解除锁定】（`unlocked_at` 非空）。锁到期 / 从未设锁都不算。 */
+export const ParentUnlockContext = createContext<boolean>(false);
+
+export function useParentUnlocked(): boolean {
+  return useContext(ParentUnlockContext);
+}
 ```
 
-- **`locked` 的语义不变**（仍是 `isDesktopShell() && 有截止时间 && 未解除 && 未到期`），
-  所以现有唯一消费方 `LockedPillReveal` 不受影响 —— 它自己用 `lock?.locked === true` /
-  `!lock?.locked` 守卫，给值范围放宽后行为一致（该文件第 49/64 行）。实现后需跑它的既有测试确认。
-- provider 由「锁定时才有值」变成「桌面壳且有会话就有值」，但 `remainingMs` 在无锁时为 0，
-  没有消费方会在未锁定时读它。
+```tsx
+// LearningSessionShell.tsx：仍由它做唯一真源，包在 Outlet 外层（与锁 context 并列）
+const unlockedByParent = isDesktopShell() && lock !== null && lock.unlockedAt !== null;
+
+return (
+  <LearningLockContext.Provider value={lockValue}>
+    <ParentUnlockContext.Provider value={unlockedByParent}>
+      <Outlet />
+    </ParentUnlockContext.Provider>
+  </LearningLockContext.Provider>
+);
+```
+
+- 两个 context 都由 `LearningSessionShell` 的同一个 `lock` 派生，**仍是单一真源**；`LearningLockContext`
+  的类型、给值条件、`locked` 语义**一个字不改**，`LockedPillReveal` 与既有测试零影响。
 - **禁止**在页面里再 `localStorage.getItem` 自判 —— `docs/constraints/pc-app-学习管控.md`
   明确「锁定态经 `learningLockContext` 下发，禁止在页面里再读一次 localStorage」。
 
