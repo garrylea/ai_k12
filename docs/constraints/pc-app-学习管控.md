@@ -74,6 +74,18 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
 - 已接受的代价：「断网 + 重启」可以换来一个可关闭的普通窗口。这是拿回可用性付的代价 ——
   用户 2026-11-12 裁决：服务器不通时全屏且关不掉、只能断电，等于流氓软件。
 
+### 家长解锁后考试页的返回入口（2026-11-12）
+
+- **「解除锁定」只放开登出，不改窗口锁定**：`studentMode` 仍为 true、仍是 kiosk、仍拦 `close`。
+  学生必须走完「登出」（`releaseOnLogout()` → `setStudentMode(false)`）窗口才可关。**别把解锁做成关窗**。
+- 考试页原本零出口（`ExamRunPage` 注释「考试无页内退出」）。现仅在**桌面壳 + `unlockedAt !== null`**
+  时于标题行显示 `BackButton`（`aria-label="返回考试列表"`），点击仍走 `RunExitGuard` 确认。
+- **判定通道是 `ParentUnlockContext`，不是 `LearningLockContext`**：后者只在锁定中才非 null，
+  塞进去要放宽给值条件、会推翻 5 条「未锁定时不下发锁定态」的回归钉子。
+  **禁止**在页面里读 `localStorage` 自判。
+- **不扩到其它答题页**：专项/错题/变式/补偿/语文/英语页已有 X 或「退出」，学生能退到列表页登出。
+- **锁自然到期不算解锁**：到期后考试页仍无出口（已知遗留，需要时另立）。**断网不解锁**这一条不变。
+
 ### 系统打断后的全屏恢复（2026-11-04）
 
 学生用 Siri / 通知 / Mission Control / 切 Space / Esc 打断 kiosk 后，**不能让它停在非全屏**。

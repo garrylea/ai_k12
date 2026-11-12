@@ -8,6 +8,28 @@
 
 ---
 
+## 2026-11-12 PC App 家长解锁后考试页出现返回入口（专注模式紧急退出）
+
+**用户反馈**：学生进入考试等专注模式后遇紧急情况出不去；家长在家长端点【解除锁定】，
+学生端仍然没有任何变化、也没有可点的出口，窗口又关不掉 → 死局。
+
+**核查结论**：
+1. 「解锁」只写 `unlocked_at`，唯一消费者是 `LogoutButton`（放开登出）；壳完全不知情，仍是 kiosk、仍拦 `close`；
+2. 逐页核对后**只有考试页是零出口**（`ExamRunPage` 明写「考试无页内退出」），专项/错题/变式/补偿/语文/英语
+   都有 X 或「退出」能退回列表页登出；
+3. 所以缺陷是「解锁后考试页无任何可见变化」，不是「所有答题页都没出口」。
+
+**修复**：
+- 新增 `apps/web/src/kiosk/parentUnlockContext.ts`（`ParentUnlockContext` / `useParentUnlocked`）；
+- `LearningSessionShell` 从既有 `lock` 派生 `unlockedByParent = isDesktopShell() && lock?.unlockedAt !== null` 下发；
+  **不扩 `LearningLockContext`**（会放宽给值条件，推翻 5 条 pill 回归钉子）；
+- `ExamRunPage` 在标题行渲染 `BackButton`（`aria-label="返回考试列表"`），点击经 `RunExitGuard` 确认后回考试列表；
+- 壳、后端、API 文档均零改动；Web 端行为不变（`isDesktopShell()` 为假时恒不渲染）。
+
+**明确不做**：断网兜底、锁到期后的考试页出口、其它答题页的解锁提示、自动关窗。
+
+**验证**：`apps/web` 新增 6 条用例（壳 4 条、考试页 2 条）+ 全量 `npm test` / `npm run build` / `npm run lint`。
+
 ## 2026-11-12 PC App 首屏连不上时不再把人锁在 kiosk 里（只能断电的“流氓”状态）
 
 **用户实测反馈**：App 启动时加载不出登录页（只有「暂时连不上学习服务器，正在重试…」），
