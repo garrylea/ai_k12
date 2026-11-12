@@ -311,7 +311,7 @@ export default function ExamRunPage() {
           </div>
         )}
 
-        {/* 考试无页内退出；拦截浏览器返回/刷新（计时不停，可续考） */}
+        {/* 常规无页内退出；家长解锁后标题行有返回入口。拦截浏览器返回/刷新（计时不停，可续考） */}
         <RunExitGuard
           guardRef={guardRef}
           blockBeforeUnload

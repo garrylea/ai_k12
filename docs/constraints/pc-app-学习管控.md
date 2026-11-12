@@ -78,7 +78,7 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
 
 - **「解除锁定」只放开登出，不改窗口锁定**：`studentMode` 仍为 true、仍是 kiosk、仍拦 `close`。
   学生必须走完「登出」（`releaseOnLogout()` → `setStudentMode(false)`）窗口才可关。**别把解锁做成关窗**。
-- 考试页原本零出口（`ExamRunPage` 注释「考试无页内退出」）。现仅在**桌面壳 + `unlockedAt !== null`**
+- 考试页原本零出口（`ExamRunPage` 注释「考试无页内退出」）。现仅在**桌面壳 + 当前学生本次会话的 `unlockedAt !== null`**
   时于标题行显示 `BackButton`（`aria-label="返回考试列表"`），点击仍走 `RunExitGuard` 确认。
 - **判定通道是 `ParentUnlockContext`，不是 `LearningLockContext`**：后者只在锁定中才非 null，
   塞进去要放宽给值条件、会推翻 5 条「未锁定时不下发锁定态」的回归钉子。

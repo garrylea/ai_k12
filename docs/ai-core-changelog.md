@@ -21,7 +21,7 @@
 
 **修复**：
 - 新增 `apps/web/src/kiosk/parentUnlockContext.ts`（`ParentUnlockContext` / `useParentUnlocked`）；
-- `LearningSessionShell` 从既有 `lock` 派生 `unlockedByParent = isDesktopShell() && lock?.unlockedAt !== null` 下发；
+- `LearningSessionShell` 从既有 `lock` 派生 `unlockedByParent = isDesktopShell() && lock !== null && lock.unlockedAt !== null` 下发；
   **不扩 `LearningLockContext`**（会放宽给值条件，推翻 5 条 pill 回归钉子）；
 - `ExamRunPage` 在标题行渲染 `BackButton`（`aria-label="返回考试列表"`），点击经 `RunExitGuard` 确认后回考试列表；
 - 壳、后端、API 文档均零改动；Web 端行为不变（`isDesktopShell()` 为假时恒不渲染）。

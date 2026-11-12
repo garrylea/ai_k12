@@ -45,7 +45,7 @@ const SESSION: ExamSessionInfo = {
 };
 
 /** RunExitGuard 用 useBlocker —— 必须是 data router；结果页与列表页给占位元素。 */
-function renderPage(unlockedByParent = false) {
+function renderPage(unlockedByParent = false, search = '') {
   const router = createMemoryRouter(
     [
       {
@@ -59,7 +59,7 @@ function renderPage(unlockedByParent = false) {
       { path: '/student/training/exam', element: <div>考试列表占位</div> },
       { path: '/student/training/exam/result/:sessionId', element: <div>结果页占位</div> },
     ],
-    { initialEntries: ['/student/training/exam/run/77'] },
+    { initialEntries: [`/student/training/exam/run/77${search}`] },
   );
   render(<RouterProvider router={router} />);
   return router;
@@ -155,7 +155,7 @@ describe('ExamRunPage 家长解锁后的返回入口（spec 2026-11-12）', () =
   });
 
   it('家长已解锁 → 出现返回入口；点击弹「离开考试」确认，确认后回到考试列表', async () => {
-    const router = renderPage(true);
+    const router = renderPage(true, '?subjectId=2');
     await waitFor(() => expect(screen.getByLabelText('返回考试列表')).toBeInTheDocument());
 
     fireEvent.click(screen.getByLabelText('返回考试列表'));
@@ -167,7 +167,7 @@ describe('ExamRunPage 家长解锁后的返回入口（spec 2026-11-12）', () =
     fireEvent.click(screen.getByRole('button', { name: '确认离开' }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/student/training/exam'));
-    // 落点是考试列表，并带上当前学科（默认数学 = 1）
-    expect(router.state.location.search).toBe('?subjectId=1');
+    // 落点是考试列表，并原样带上当前学科（钉住 subjectId 透传，不再依赖默认值）
+    expect(router.state.location.search).toBe('?subjectId=2');
   });
 });

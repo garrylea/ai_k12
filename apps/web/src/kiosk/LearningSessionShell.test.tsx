@@ -83,6 +83,35 @@ function renderShellWithNav() {
   );
 }
 
+function NavTo({ to, label }: { to: string; label: string }) {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(to)}>
+      {label}
+    </button>
+  );
+}
+
+/** 两条路由都挂解锁探针，用来模拟「学生 9 登出 → 学生 10 登录」而壳不卸载。 */
+function renderShellForRelogin() {
+  return render(
+    <MemoryRouter initialEntries={['/student/course-detail']}>
+      <Routes>
+        <Route element={<LearningSessionShell />}>
+          <Route
+            path="/student/course-detail"
+            element={<><UnlockProbe /><NavTo to="/student/star-map" label="去星图" /></>}
+          />
+          <Route
+            path="/student/star-map"
+            element={<><UnlockProbe /><NavTo to="/student/course-detail" label="回详情" /></>}
+          />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   localStorage.clear();
   installBridge();
@@ -181,10 +210,11 @@ describe('LearningSessionShell：建立会话', () => {
 });
 
 describe('LearningSessionShell：轮询与解锁', () => {
-  it('轮询取到 unlock 命令 → 解锁并落 unlockedAt（学生模式不变，仍 kiosk）', async () => {
+  it('轮询取到 unlockedAt → 解锁并落 unlockedAt（学生模式不变，仍 kiosk）', async () => {
     vi.useFakeTimers();
+    // 壳不读 commands，真实驱动是 lock.unlockedAt
     pollMock.mockResolvedValue({
-      commands: [{ id: 3, command: 'unlock' }],
+      commands: [],
       lock: { sessionId: 7, lockExpiresAt: LATER, unlockedAt: '2026-09-23T01:20:00.000Z' },
     });
     renderShell();
@@ -321,8 +351,9 @@ describe('LearningSessionShell：锁的可靠性（2026-09-24 用户实测报回
 describe('LearningSessionShell：家长解锁态下发', () => {
   it('轮询拿到 unlockedAt → 下发 true', async () => {
     vi.useFakeTimers();
+    // 壳不读 commands，真实驱动是 lock.unlockedAt
     pollMock.mockResolvedValue({
-      commands: [{ id: 3, command: 'unlock' }],
+      commands: [],
       lock: { sessionId: 7, lockExpiresAt: LATER, unlockedAt: '2026-09-23T01:20:00.000Z' },
     });
     renderShell();
@@ -351,8 +382,11 @@ describe('LearningSessionShell：家长解锁态下发', () => {
     });
     renderShell();
     await act(async () => { await Promise.resolve(); });
+    // 到期前确实锁着（否则「到期后 none」是假绿）
+    expect(screen.getByTestId('lock-probe').textContent).toMatch(/^locked:true:/);
     await act(async () => { vi.advanceTimersByTime(3_000); });
 
+    expect(screen.getByTestId('lock-probe')).toHaveTextContent('none');
     expect(screen.getByTestId('unlock-probe')).toHaveTextContent('false');
   });
 
@@ -365,6 +399,34 @@ describe('LearningSessionShell：家长解锁态下发', () => {
       unlockedAt: '2026-09-23T01:20:00.000Z',
     });
     renderShell();
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByTestId('unlock-probe')).toHaveTextContent('false');
+  });
+
+  it('**换学生登录：上一位学生的解锁态不残留**（陈旧解锁会 fail-open）', async () => {
+    vi.useFakeTimers();
+    pollMock.mockResolvedValue({
+      commands: [],
+      lock: { sessionId: 7, lockExpiresAt: LATER, unlockedAt: '2026-09-23T01:20:00.000Z' },
+    });
+    renderShellForRelogin();
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('unlock-probe')).toHaveTextContent('true');
+
+    // 学生 9 登出：客户端只改 localStorage + 路由，壳不卸载、内存里的 unlockedAt 本来会留着
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('userId');
+    fireEvent.click(screen.getByRole('button', { name: '去星图' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('unlock-probe')).toHaveTextContent('false');
+
+    // 学生 10 登录，且建会话请求永不返回：新会话真值回来之前也不能沿用旧解锁
+    localStorage.setItem('userRole', 'student');
+    localStorage.setItem('userId', '10');
+    openMock.mockReturnValue(new Promise(() => {}) as never);
+    fireEvent.click(screen.getByRole('button', { name: '回详情' }));
     await act(async () => { await Promise.resolve(); });
 
     expect(screen.getByTestId('unlock-probe')).toHaveTextContent('false');

@@ -90,6 +90,9 @@ export default function LearningSessionShell() {
     if (getAuthItem('userRole') !== 'student') {
       // 家长/管理员登入（或学生已登出）：壳必须回到普通窗口，否则家长也用不了这台机器。
       setIsStudent(false);
+      // 登出是客户端导航、壳不会卸载，内存里的锁必须一起清：陈旧锁最多 fail-closed（多锁一会儿），
+      // 但陈旧 unlockedAt 会 fail-open（换学生后仍显示「已解锁」），所以宁可退回「无锁」重新拉真值。
+      setLock(null);
       setResolved(true);
       return;
     }
@@ -99,6 +102,9 @@ export default function LearningSessionShell() {
       setResolved(true); // 已有本地会话 → 交给轮询对账，不重复建
       return;
     }
+    // 没有当前学生的本地会话（换学生 / 快照被清）：先清掉上一位学生留在内存里的锁，
+    // 否则 open 返回前 unlockedByParent 仍是旧值 → 新学生没解锁也能看到考试页返回入口。
+    setLock(null);
 
     let cancelled = false;
     openStudentLearningSession()
