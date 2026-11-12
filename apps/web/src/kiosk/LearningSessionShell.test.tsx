@@ -112,6 +112,29 @@ function renderShellForRelogin() {
   );
 }
 
+/**
+ * 模拟「学生 9 登出 → 同一学生 9 重新登录」而壳不卸载。
+ * `/login` 代表非学生路由：登出后导航到它，壳会走「非学生」分支并清内存锁。
+ */
+function renderShellForSameStudentRelogin() {
+  return render(
+    <MemoryRouter initialEntries={['/student/course-detail']}>
+      <Routes>
+        <Route element={<LearningSessionShell />}>
+          <Route
+            path="/student/course-detail"
+            element={<><LockProbe /><NavTo to="/login" label="去登录页" /></>}
+          />
+          <Route
+            path="/login"
+            element={<><LockProbe /><NavTo to="/student/course-detail" label="回学习页" /></>}
+          />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   localStorage.clear();
   installBridge();
@@ -430,5 +453,42 @@ describe('LearningSessionShell：家长解锁态下发', () => {
     await act(async () => { await Promise.resolve(); });
 
     expect(screen.getByTestId('unlock-probe')).toHaveTextContent('false');
+  });
+
+  it('**重新登录同一学生 → 按本地快照回填内存锁**（否则轮询/心跳不启动、pill 不显示）', async () => {
+    vi.useFakeTimers();
+    writePersistedSession({ studentId: 9, id: 7, lockExpiresAt: LATER, unlockedAt: null });
+    pollMock.mockResolvedValue({
+      commands: [],
+      lock: { sessionId: 7, lockExpiresAt: LATER, unlockedAt: null },
+    });
+    // 快照还在 → 不会重新建会话；这里仍设为永不返回，防止意外走建会话分支掩盖问题
+    openMock.mockReturnValue(new Promise(() => {}) as never);
+
+    renderShellForSameStudentRelogin();
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('lock-probe').textContent).toMatch(/^locked:true:/);
+
+    // 学生 9 登出：客户端只改 localStorage + 路由，壳不卸载 → 内存锁被清
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('userId');
+    fireEvent.click(screen.getByRole('button', { name: '去登录页' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId('lock-probe')).toHaveTextContent('none');
+
+    // 同一学生重新登录（本地快照仍在）→ 进入「有快照」的提前 return 分支
+    localStorage.setItem('userRole', 'student');
+    localStorage.setItem('userId', '9');
+    fireEvent.click(screen.getByRole('button', { name: '回学习页' }));
+    await act(async () => { await Promise.resolve(); });
+
+    // ① 锁已按快照回填：pill 有数据（回归钉子：这里曾是 none）
+    expect(screen.getByTestId('lock-probe').textContent).toMatch(/^locked:true:/);
+
+    // ② 轮询（兼心跳）恢复：10 秒后再调一次
+    const before = pollMock.mock.calls.length;
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(pollMock.mock.calls.length).toBeGreaterThan(before);
   });
 });

@@ -98,7 +98,15 @@ export default function LearningSessionShell() {
     }
     setIsStudent(true);
     const expectedStudentId = Number(getAuthItem('userId'));
-    if (readPersistedSession(expectedStudentId) !== null) {
+    const persisted = readPersistedSession(expectedStudentId);
+    if (persisted !== null) {
+      // 内存锁可能已被上一次登出清空（客户端导航不卸载本壳），这里按当前学生回填：
+      // 既不会把上一位学生的解锁态带过来，也能让轮询/pill 在重新登录后照常工作。
+      setLock({
+        id: persisted.id,
+        lockExpiresAt: persisted.lockExpiresAt,
+        unlockedAt: persisted.unlockedAt,
+      });
       setResolved(true); // 已有本地会话 → 交给轮询对账，不重复建
       return;
     }
