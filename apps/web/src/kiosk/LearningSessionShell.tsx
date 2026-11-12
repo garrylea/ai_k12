@@ -14,6 +14,7 @@ import {
 } from './learningLock';
 import { isDesktopShell, setDesktopStudentMode } from './desktopBridge';
 import { LearningLockContext } from './learningLockContext';
+import { ParentUnlockContext } from './parentUnlockContext';
 import { getAuthItem } from '@/services/authStorage';
 
 interface LockState {
@@ -185,9 +186,18 @@ export default function LearningSessionShell() {
     return () => window.clearInterval(timer);
   }, [locked]);
 
+  /**
+   * 家长是否**主动**解除过本次锁定。与 `locked` 是两件事：
+   * 到期/从未设锁也会让 `locked` 为 false，但只有 `unlockedAt` 非空才算「家长放行」。
+   * 仅桌面壳有意义（浏览器里没有 kiosk 可逃）——与 `lockValue` 用的是同一个闸门。
+   */
+  const unlockedByParent = isDesktopShell() && lock !== null && lock.unlockedAt !== null;
+
   return (
     <LearningLockContext.Provider value={lockValue}>
-      <Outlet />
+      <ParentUnlockContext.Provider value={unlockedByParent}>
+        <Outlet />
+      </ParentUnlockContext.Provider>
     </LearningLockContext.Provider>
   );
 }

@@ -5,6 +5,7 @@ import LearningSessionShell from './LearningSessionShell';
 import { LEARNING_SESSION_STORAGE_KEY, readPersistedSession, writePersistedSession } from './learningLock';
 import { openStudentLearningSession, pollStudentDeviceCommands } from '@/services/api';
 import { useLearningLock } from './learningLockContext';
+import { useParentUnlocked } from './parentUnlockContext';
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
@@ -31,12 +32,17 @@ function installBridge() {
   };
 }
 
+/** 家长解锁态探针：验证壳有没有把 unlockedByParent 下发对。 */
+function UnlockProbe() {
+  return <div data-testid="unlock-probe">{String(useParentUnlocked())}</div>;
+}
+
 function renderShell() {
   return render(
     <MemoryRouter initialEntries={['/student/course-detail']}>
       <Routes>
         <Route element={<LearningSessionShell />}>
-          <Route path="/student/course-detail" element={<><LockProbe /><div>学习页</div></>} />
+          <Route path="/student/course-detail" element={<><LockProbe /><UnlockProbe /><div>学习页</div></>} />
           <Route path="/student/star-map" element={<div>星图</div>} />
         </Route>
       </Routes>
@@ -309,5 +315,58 @@ describe('LearningSessionShell：锁的可靠性（2026-09-24 用户实测报回
     await act(async () => { await Promise.resolve(); });
 
     expect(readPersistedSession(9)).toMatchObject({ id: 20, lockExpiresAt: LATER });
+  });
+});
+
+describe('LearningSessionShell：家长解锁态下发', () => {
+  it('轮询拿到 unlockedAt → 下发 true', async () => {
+    vi.useFakeTimers();
+    pollMock.mockResolvedValue({
+      commands: [{ id: 3, command: 'unlock' }],
+      lock: { sessionId: 7, lockExpiresAt: LATER, unlockedAt: '2026-09-23T01:20:00.000Z' },
+    });
+    renderShell();
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByTestId('unlock-probe')).toHaveTextContent('true');
+  });
+
+  it('未解锁 → 下发 false', async () => {
+    renderShell();
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByTestId('unlock-probe')).toHaveTextContent('false');
+  });
+
+  it('**锁自然到期 → 仍是 false**（到期不等于家长解除）', async () => {
+    vi.useFakeTimers();
+    const soon = new Date(Date.now() + 2_000).toISOString();
+    openMock.mockResolvedValue({
+      id: 7,
+      startedAt: '2026-09-23T01:00:00.000Z',
+      lockMinutes: 1,
+      lockExpiresAt: soon,
+      unlockedAt: null,
+    });
+    renderShell();
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { vi.advanceTimersByTime(3_000); });
+
+    expect(screen.getByTestId('unlock-probe')).toHaveTextContent('false');
+  });
+
+  it('**非壳（浏览器）→ false**，即使本地快照带 unlockedAt', async () => {
+    delete (window as unknown as { k12Desktop?: unknown }).k12Desktop;
+    writePersistedSession({
+      studentId: 9,
+      id: 7,
+      lockExpiresAt: LATER,
+      unlockedAt: '2026-09-23T01:20:00.000Z',
+    });
+    renderShell();
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByTestId('unlock-probe')).toHaveTextContent('false');
   });
 });
