@@ -31,6 +31,7 @@ const REQUIRED = [
   'lib/resolve-server-url.js',
   'lib/probe-server.js',
   'lib/shell-state.js',
+  'lib/offline-release.js',
   'lib/kiosk-guard.js',
   'lib/keyboard-hook.js',
   'lib/exit-audit.js',

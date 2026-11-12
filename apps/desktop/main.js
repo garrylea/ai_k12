@@ -6,6 +6,7 @@ const { readServerUrlFromFile } = require('./lib/config-file.js');
 const { resolveServerUrl } = require('./lib/resolve-server-url.js');
 const { probeServer } = require('./lib/probe-server.js');
 const { readStudentMode, writeStudentMode } = require('./lib/shell-state.js');
+const { markOfflineRelease, clearOfflineRelease } = require('./lib/offline-release.js');
 const { createKioskGuard } = require('./lib/kiosk-guard.js');
 const { createKeyboardHook } = require('./lib/keyboard-hook.js');
 const { markRunning, wasAbnormalExit, markCleanExit } = require('./lib/exit-audit.js');
@@ -97,6 +98,31 @@ if (!singleInstance) app.quit();
  */
 let studentMode = false;
 let win = null;
+
+/**
+ * 窗口**当前是否真的处于锁定**（kiosk + 关不掉），与 `studentMode`（学生模式意图）分开。
+ *
+ * **为什么要分**（2026-11-12，用户实测反馈）：启动时按上次的学生模式先锁，但如果首屏
+ * 连不上服务器，渲染层不会执行，**没有任何人能再把学生模式推回 `false`** —— 用户既用不了
+ * 也退不出去（全屏、关不掉、Cmd+Q / Cmd+Opt+Esc / Cmd+Tab 全被 kiosk 挡），只能断电。
+ *
+ * 所以学生模式只是「意图」，`shell-state.json` 保留它；真正拦 close / before-quit /
+ * minimize、启动守护的判据是这个变量。首屏失败时它被放行（见 `releaseLockdownForOffline`），
+ * 页面真正加载成功后再按学生模式补锁。
+ */
+let windowLocked = false;
+
+/**
+ * 本次窗口是否成功加载过真实的 Web 页面（`file:` 本地离线页不算）。
+ * 与 `offlineReleased` 都是**每个窗口一份**，`createWindow()` 里重置。
+ */
+let pageLoadedOnce = false;
+
+/**
+ * 本次窗口是否已因「首屏连不上」放开锁定。
+ * 一旦为 true，`ready-to-show` 的启动锁定要跳过；页面加载成功后复位。
+ */
+let offlineReleased = false;
 /**
  * App 是否刚从「非前台」回到前台（2026-11-09）。
  *
@@ -147,7 +173,7 @@ function appendKioskLog(message) {
  * 详见 `lib/kiosk-guard.js` 文件头。
  */
 const kioskGuard = createKioskGuard({
-  isEnabled: () => studentMode,
+  isEnabled: () => windowLocked,
   getWindow: () => win,
   platform: process.platform,
   focusApp: () => {
@@ -267,6 +293,13 @@ function isSameOrigin(url) {
 }
 
 function createWindow() {
+  // 新窗口从「未锁定、未放行」开始：只有确认页面真的加载出来才会进 kiosk。
+  // ⚠️ 不能沿用上一个窗口的 `windowLocked`：崩溃重建后新窗口是普通窗口，
+  // 若状态还是 true，用户既关不掉它、也没人再给它上全屏。
+  pageLoadedOnce = false;
+  offlineReleased = false;
+  windowLocked = false;
+
   win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -296,8 +329,13 @@ function createWindow() {
 
   // 「偏向多锁」：上次是学生模式就一开机就进 kiosk，不等渲染层（spec §4.3、§6-7）。
   // 在首页真正显示出来之前应用，避免「先普通窗口、再全屏」的可见闪动。
+  // ⚠️ **但首屏已经失败过就不能再锁**（`offlineReleased`）：那会把用户关在离线页里，
+  // 既用不了也退不出去（2026-11-12）。等页面真正加载成功后由 `did-finish-load` 补锁。
   if (studentMode) {
-    win.once('ready-to-show', () => applyStudentMode(studentMode));
+    win.once('ready-to-show', () => {
+      if (!win || win.isDestroyed() || offlineReleased) return;
+      applyStudentMode(studentMode);
+    });
   }
 
   win.loadURL(WEB_URL);
@@ -313,6 +351,9 @@ function createWindow() {
     try {
       fs.appendFileSync(path.join(app.getPath('userData'), 'load-error.log'), line);
     } catch { /* 日志写失败绝不影响主流程 */ }
+    // 首屏从未加载成功 → 本次运行放开锁定（2026-11-12 用户裁决）。
+    // 学生模式下渲染层不会执行，没有人能再把学生模式推回 false；不放行就是「既用不了也退不出」。
+    if (!pageLoadedOnce) releaseLockdownForOffline(`did-fail-load code=${errorCode}`);
     showOfflinePage();
     startRetry();
   });
@@ -353,11 +394,17 @@ function createWindow() {
 
   win.webContents.on('did-finish-load', () => {
     if (!win || win.isDestroyed()) return;
-    // 主 frame 加载完成且当前不是本地页（file:）→ 说明连上了，停表
-    if (!win.webContents.getURL().startsWith('file:')) {
-      stopRetry();
-      checkPageRendered();
-    }
+    // 本地离线页也是 did-finish-load，不能拿它当「连上了」（离线页本身也走这条）
+    if (win.webContents.getURL().startsWith('file:')) return;
+
+    stopRetry();
+    pageLoadedOnce = true;
+    // 连上了 → 本次运行的「离线放行」作废：清标记（看护恢复），并按学生模式补上启动时
+    // 被跳过的锁定。渲染层随后还会按真实角色推一次，家长/登出会把它关掉。
+    offlineReleased = false;
+    clearOfflineRelease(app.getPath('userData'));
+    if (studentMode && !windowLocked) applyStudentMode(true);
+    checkPageRendered();
   });
 
   // 崩溃自恢复（spec 2026-11-10 §3.2）：界面没了 = 学生看到的是死窗口，
@@ -405,13 +452,15 @@ function createWindow() {
     if (!isSameOrigin(url)) event.preventDefault();
   });
 
-  // 学生模式下关不掉 / 最小化不了（kiosk 就该是这样）。家长/管理员登录时 studentMode=false，窗口完全正常。
+  // 学生模式下关不掉 / 最小化不了（kiosk 就该是这样）。家长/管理员登录时 windowLocked=false，窗口完全正常。
+  // ⚠️ 判据是 `windowLocked` 而不是 `studentMode`：首屏连不上时已放行（见 `releaseLockdownForOffline`），
+  // 此时学生模式意图仍在，但不能因此拦住关闭 —— 那正是「用不了还退不出去」的成因。
   win.on('close', (event) => {
-    appendKioskLog(`[guard] close-attempt student-mode=${studentMode}`);
-    if (studentMode) event.preventDefault();
+    appendKioskLog(`[guard] close-attempt student-mode=${studentMode} window-locked=${windowLocked}`);
+    if (windowLocked) event.preventDefault();
   });
   win.on('minimize', (event) => {
-    if (studentMode) {
+    if (windowLocked) {
       event.preventDefault();
       kioskGuard.schedule('minimize');
     }
@@ -457,13 +506,14 @@ app.on('second-instance', () => {
   win.show();
   // 与守护层同一套抢前台手段（app.focus 才激活 App，win.focus 不够）。
   app.focus({ steal: true });
-  if (studentMode) kioskGuard.scheduleReassert('second-instance');
+  if (windowLocked) kioskGuard.scheduleReassert('second-instance');
 });
 
 // 拦 before-quit：否则 Cmd+Q / Alt+F4 能绕过上面那个 close 拦截。
+// 判据同 close：首屏连不上已放行时必须让用户退出。
 app.on('before-quit', (event) => {
-  appendKioskLog(`[guard] before-quit student-mode=${studentMode}`);
-  if (studentMode) event.preventDefault();
+  appendKioskLog(`[guard] before-quit student-mode=${studentMode} window-locked=${windowLocked}`);
+  if (windowLocked) event.preventDefault();
 });
 
 // 进程要退出时一定摘钩子：钩子回调指向本模块的代码，不能带着它退出。
@@ -501,7 +551,11 @@ app.whenReady().then(() => {
   // 补洞（spec §1.4 / §4.3）：kiosk 由页面里的渲染层经 IPC 驱动，而**离线时页面
   // 根本加载不出来** → 渲染层不执行 → studentMode 恒为 false → 窗口不是 kiosk
   // → 学生「关 Wi-Fi + 杀进程 + 重启」就能逃逸。所以先把上次的状态读回来，
-  // 建窗口时就进 kiosk，不等渲染层。
+  // **页面显示出来之前**就先锁定（ready-to-show），不等渲染层。
+  //
+  // ⚠️ 2026-11-12 修正：如果首屏根本加载不出来，这个「先锁」必须撤回本次运行
+  // （见 `releaseLockdownForOffline`），否则用户被关在离线页里，关不掉也退不出。
+  // 修正只撤窗口锁定，`shell-state.json` 里的 `studentMode` 保留，下次连得上照常锁。
   studentMode = readStudentMode(app.getPath('userData'));
 
   // ⚠️ 看护必须在**窗口出来之后**再装：`installWatchdog` 内部的 `launchctl` 是同步的
@@ -535,7 +589,7 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
-    } else if (studentMode) {
+    } else if (windowLocked) {
       // Dock 图标被点击 = App 曾被切到后台。guard 可能因窗口 closed 停过，这里补回。
       kioskGuard.start();
       kioskGuard.schedule('app-activate');
@@ -584,7 +638,62 @@ app.on('window-all-closed', () => {
 });
 
 /**
- * 应用学生模式：落盘 + 驱动窗口的 kiosk 三件套。
+ * 真正驱动窗口的锁定外观：kiosk / 可关闭 / 可最小化 / Windows 键盘钩子 / 守护。
+ *
+ * **不落盘**：学生模式意图由 `applyStudentMode` 负责。首屏连不上时只动窗口
+ * （`releaseLockdownForOffline`），`shell-state.json` 必须保持原样，下次连得上仍预先锁定。
+ */
+function driveWindowLockdown(on) {
+  windowLocked = Boolean(on);
+
+  // ⚠️ 必须在窗口判空**之前**：启动恢复学生模式时窗口可能还没建好，
+  // 放到后面会让「开机即学生模式」这一路永远不装 Windows 钩子。
+  keyboardHook.setEnabled(windowLocked);
+
+  if (!win || win.isDestroyed()) {
+    kioskGuard.stop();
+    return;
+  }
+  // ⚠️ 顺序：**先激活再加 kiosk**。被看护/launchd 拉起时 App 是后台启动，
+  // 未激活的窗口调 setKiosk 不会生效（表现为窗口 1440x900 停在屏幕中间、
+  // fullscreen 恒为 false，守护每秒重进一次）。
+  if (windowLocked) {
+    if (!win.isVisible()) win.show();
+    app.focus({ steal: true });
+    win.focus();
+  }
+  win.setKiosk(windowLocked);
+  win.setClosable(!windowLocked);
+  // setMinimizable 在 macOS 上是 no-op；Windows/Linux 上有效。不是错误，别加平台分支。
+  win.setMinimizable(!windowLocked);
+
+  // 学生模式才守护；家长/管理员登录后必须彻底停下，否则会把普通窗口也拽回全屏。
+  if (windowLocked) kioskGuard.start();
+  else kioskGuard.stop();
+}
+
+/**
+ * 首屏连不上 → **本次运行**放开锁定（2026-11-12 用户裁决）。
+ *
+ * 触发条件由调用方保证：主 frame 加载失败，且本窗口**从未成功加载过真实页面**。
+ * 中途断网不放开（`did-fail-load` 里用 `pageLoadedOnce` 挡），等重连即可。
+ *
+ * 三件事，缺一不可：
+ *  1. 退出 kiosk、恢复可关闭 / 可最小化（`driveWindowLockdown(false)`）；
+ *  2. 落 `offline-release.json` 让看护停手 —— 否则用户关掉后 5 秒又被 `open -a` 拉起来，
+ *     仍然是「退不出去」；
+ *  3. **不写 `shell-state.json`**：学生模式是意图，保留它，下次连得上仍会预先锁定。
+ */
+function releaseLockdownForOffline(reason) {
+  if (!studentMode || offlineReleased) return;
+  offlineReleased = true;
+  appendKioskLog(`[guard] offline-release reason=${reason}（本次运行不锁：关闭/退出已放行）`);
+  markOfflineRelease(app.getPath('userData'));
+  if (windowLocked) driveWindowLockdown(false);
+}
+
+/**
+ * 应用学生模式：落盘 + 驱动窗口锁定。
  *
  * **启动路径（补洞）与 IPC 路径必须走同一段代码**（spec §4.3）—— 两处各写一套必然漂移，
  * 而漂移的后果是「某个入口忘了落盘」或「某个入口忘了全屏」，正是这次要修的洞。
@@ -595,30 +704,14 @@ function applyStudentMode(on) {
   writeStudentMode(app.getPath('userData'), studentMode);
   appendKioskLog(`[guard] student-mode=${studentMode}`);
 
-  // ⚠️ 必须在窗口判空**之前**：启动恢复学生模式时窗口可能还没建好，
-  // 放到后面会让「开机即学生模式」这一路永远不装 Windows 钩子。
-  keyboardHook.setEnabled(studentMode);
-
-  if (!win || win.isDestroyed()) {
-    kioskGuard.stop();
-    return;
-  }
-  // ⚠️ 顺序：**先激活再加 kiosk**。被看护/launchd 拉起时 App 是后台启动，
-  // 未激活的窗口调 setKiosk 不会生效（表现为窗口 1440x900 停在屏幕中间、
-  // fullscreen 恒为 false，守护每秒重进一次）。
+  // 角色明确是学生 → 首屏连不上时的临时放行作废。走到这里说明渲染层已经跑起来
+  // （IPC 路径）或页面已成功加载（启动补锁），清掉标记让看护恢复。
   if (studentMode) {
-    if (!win.isVisible()) win.show();
-    app.focus({ steal: true });
-    win.focus();
+    offlineReleased = false;
+    clearOfflineRelease(app.getPath('userData'));
   }
-  win.setKiosk(studentMode);
-  win.setClosable(!studentMode);
-  // setMinimizable 在 macOS 上是 no-op；Windows/Linux 上有效。不是错误，别加平台分支。
-  win.setMinimizable(!studentMode);
 
-  // 学生模式才守护；家长/管理员登录后必须彻底停下，否则会把普通窗口也拽回全屏。
-  if (studentMode) kioskGuard.start();
-  else kioskGuard.stop();
+  driveWindowLockdown(studentMode);
 }
 
 // 渲染层 → 主进程：学生模式开关。`setKiosk` 是真全屏 + 锁定（比 fullscreen 更彻底）。

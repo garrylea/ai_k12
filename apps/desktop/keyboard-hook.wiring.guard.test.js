@@ -38,13 +38,16 @@ describe('Windows 键盘钩子接线护栏', () => {
     expect(fn.indexOf("platform !== 'win32'")).toBeLessThan(fn.indexOf('load()'));
   });
 
-  it('学生模式开关驱动钩子，且在窗口判空之前（否则开机恢复学生模式永远不装钩）', () => {
-    const fn = mainSrc.slice(mainSrc.indexOf('function applyStudentMode'));
-    const callAt = fn.indexOf('keyboardHook.setEnabled(studentMode)');
+  it('窗口锁定驱动钩子，且在窗口判空之前（否则开机恢复学生模式永远不装钩）', () => {
+    const fn = mainSrc.slice(mainSrc.indexOf('function driveWindowLockdown'));
+    const callAt = fn.indexOf('keyboardHook.setEnabled(windowLocked)');
     const earlyReturnAt = fn.indexOf('if (!win || win.isDestroyed()) {');
     expect(callAt).toBeGreaterThan(-1);
     expect(earlyReturnAt).toBeGreaterThan(-1);
     expect(callAt).toBeLessThan(earlyReturnAt);
+    // 钩子跟随窗口实际锁定（2026-11-12）：首屏连不上放行时必须一起关，
+    // 否则普通窗口还要被 Win 键钩子吞键。不能再按学生模式意图直接驱动。
+    expect(mainSrc).not.toMatch(/keyboardHook\.setEnabled\(studentMode\)/);
   });
 
   it('窗口关闭 / 进程退出会摘钩子', () => {

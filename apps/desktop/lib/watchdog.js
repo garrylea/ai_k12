@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { OFFLINE_RELEASE_FILE_NAME } = require('./offline-release.js');
 
 /**
  * 看护进程（spec 2026-11-10 §4，仅 macOS，仅打包后）。
@@ -10,6 +11,8 @@ const { execFileSync } = require('node:child_process');
  * **为什么不是把 App 交给 launchd KeepAlive**（2026-11-10 用户裁决）：那样家长点了退出
  * 也会被立刻拉回来，只能去终端摘。所以改成「launchd 托管一个极小的 sh 看护脚本」：
  * 脚本只在 `shell-state.json` 的 `studentMode === true` 时工作，家长/管理员模式直接空转。
+ * **例外**：首屏连不上时主进程会落 `offline-release.json`（本次运行已放行锁定），
+ * 脚本见到它也不拉起 —— 否则用户关掉后 5 秒又被弹出来，等于没放行（2026-11-12）。
  *
  * **判据用进程存在性（pgrep），不用网络心跳**：心跳会被拔网线 / 服务器故障误判成
  * "App 死了"，进而反复拉起一个本来正常的程序。
@@ -27,7 +30,8 @@ const APP_SUPPORT_DIR = 'k12-desktop';
 function buildWatchdogScript() {
   return `#!/bin/sh
 # sysmon —— 本地看护（spec 2026-11-10 §4）。
-# 只在 studentMode=true 时工作：发现 App 不在运行就拉起；家长/管理员模式什么都不做。
+# 只在 studentMode=true、且没有「离线放行」标记时工作：发现 App 不在运行就拉起。
+# 家长/管理员模式什么都不做；首屏连不上、用户主动关掉 App 时也不拉起（2026-11-12）。
 #
 # 拉起方式：\`/usr/bin/open -a "$APP"\`（LaunchServices，与双击同一条路径）。
 # 2026-11-11 起产物用 Apple Development 签名，「经 LaunchServices 启动加载不出页面」那个前提已经消失
@@ -40,6 +44,9 @@ NAME="$(/usr/bin/basename "$APP" .app)"
 STATE="$HOME/Library/Application Support/k12-desktop/shell-state.json"
 PIDFILE="$HOME/Library/Application Support/k12-desktop/app.pid"
 LOGFILE="$HOME/Library/Application Support/k12-desktop/watchdog.log"
+# 首屏连不上时主进程会落这个标记（2026-11-12）：本次运行已放开锁定，用户关掉就让他关掉。
+# 不判它的话，App 退出 5 秒后又被拉起 —— 用户看到的是「关了又弹」，等于没放行。
+RELEASE="$HOME/Library/Application Support/k12-desktop/${OFFLINE_RELEASE_FILE_NAME}"
 
 # 判活优先级：心跳文件（App 启动时写 pid）→ 进程名兜底。
 # ⚠️ 不能用「包路径」判活：从 dist 启动、装到 /Applications 之后再从旧位置启动、
@@ -56,7 +63,7 @@ alive() {
 }
 
 while :; do
-  if [ -f "$STATE" ] && grep -q '"studentMode":true' "$STATE" 2>/dev/null; then
+  if [ -f "$STATE" ] && grep -q '"studentMode":true' "$STATE" 2>/dev/null && [ ! -f "$RELEASE" ]; then
     if ! alive; then
       # 只记一行，便于事后判断「到底有没有拉起过」；日志超过 64KB 就清空。
       [ -f "$LOGFILE" ] && [ "$(wc -c <"$LOGFILE" 2>/dev/null || echo 0)" -gt 65536 ] && : >"$LOGFILE"

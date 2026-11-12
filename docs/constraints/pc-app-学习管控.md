@@ -54,8 +54,25 @@ K12_WEB_URL 环境变量（dev/临时） > userData/config.json 的 serverUrl（
 - 为什么必须有：kiosk 由页面里的渲染层经 IPC 驱动，**离线时页面加载不出来 → 渲染层不执行
   → 窗口不是 kiosk →「关 Wi-Fi + 杀进程 + 重启」可逃逸**
 - 读损坏一律 `false`；写失败只 `warn` 绝不抛
-- **不会把人永久困住**：`LogoutButton` 判锁是纯本地的（`learningLock.ts:91` 只读 localStorage，
-  不发请求），学生恢复网络后锁若已到期即可登出
+- **学生模式只是「意图」，不等于「窗口锁着」**（2026-11-12 起）：拦 `close` / `before-quit` /
+  `minimize`、启动守护一律看 `windowLocked`，由 `driveWindowLockdown()` 维护。
+  ~~「不会把人永久困住」：`LogoutButton` 判锁是纯本地的（`learningLock.ts:91` 只读 localStorage、
+  不发请求），学生恢复网络后锁若已到期即可登出~~
+  —— **这句 2026-11-12 删除**：它只覆盖「恢复网络之后」，覆盖不了「永远连不上 → 永远解锁不了」。
+  现行口径见下一节。
+
+### 首屏连不上：本次运行放行锁定（2026-11-12）
+
+- 触发：主 frame `did-fail-load`，且**本窗口从未成功加载过真实页面**（`file:` 本地离线页不算，
+  靠 `pageLoadedOnce` 区分）。中途断网不放开，等重连。
+- 动作：`releaseLockdownForOffline()` → `driveWindowLockdown(false)`：退出 kiosk、
+  `setClosable(true)`，`close` / `before-quit` 不再拦。
+- **绝不能写 `shell-state.json`**：学生模式意图保留，下次连得上仍按学生模式启动。
+- **必须落 `userData/offline-release.json`**（`lib/offline-release.js`）让看护停手：
+  看护只看 `studentMode=true` 就会在 App 退出后 5 秒拉起，不处理就是「关了又弹」。
+  页面真正加载成功（`did-finish-load` 且非 `file:`）时清标记，看护恢复。
+- 已接受的代价：「断网 + 重启」可以换来一个可关闭的普通窗口。这是拿回可用性付的代价 ——
+  用户 2026-11-12 裁决：服务器不通时全屏且关不掉、只能断电，等于流氓软件。
 
 ### 系统打断后的全屏恢复（2026-11-04）
 

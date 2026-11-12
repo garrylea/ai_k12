@@ -8,6 +8,34 @@
 
 ---
 
+## 2026-11-12 PC App 首屏连不上时不再把人锁在 kiosk 里（只能断电的“流氓”状态）
+
+**用户实测反馈**：App 启动时加载不出登录页（只有「暂时连不上学习服务器，正在重试…」），
+窗口却是真 kiosk 全屏 —— 关不掉、最小化不了，`Cmd+Q` / `Cmd+Opt+Esc` / `Cmd+Tab` 全被挡，
+用户既用不了也退不出去，只能断电。
+
+**根因**：
+1. `studentMode` 持久化让窗口在 `ready-to-show` 就进 kiosk（`main.js` 的启动锁定）；
+2. 加载失败只换离线页、不解除锁定（`did-fail-load`）；
+3. 唯一的解锁出口在渲染层（`LearningSessionShell.tsx:142-145`），页面加载不出来就永远不执行；
+4. `close` / `before-quit` 只看 `studentMode`（意图），与窗口真实状态无关；
+5. 看护脚本只看 `studentMode=true`，关掉后 5 秒又拉起 —— 就算放行也「关了又弹」。
+
+**修复**（口径由用户 2026-11-12 裁决「首屏失败就不进 kiosk」）：
+- 新增 `apps/desktop/lib/offline-release.js`（标记 `userData/offline-release.json`，可单测）；
+- `main.js` 拆成 `studentMode`（意图，落 `shell-state.json`）与 `windowLocked`（窗口实际锁定）：
+  `close` / `before-quit` / `minimize`、守护开关一律看 `windowLocked`；
+- 主 frame `did-fail-load` 且本窗口从未成功加载过真实页面（`pageLoadedOnce`）→
+  `releaseLockdownForOffline()`：退出 kiosk、可关闭，落放行标记，**不写 `shell-state.json`**；
+  `ready-to-show` 的启动锁定在放行后跳过；
+- 页面真正加载成功（`did-finish-load` 且非 `file:`）→ 清标记 + 按学生模式补锁，看护恢复；
+- 看护脚本（`lib/watchdog.js`）见到放行标记就不拉起；
+- **代价（已接受）**：「断网 + 重启」可换到一个可关闭的普通窗口；学生模式意图保留，联网后照锁。
+- `scripts/verify-asar.js` 的 `REQUIRED` 补 `lib/offline-release.js`。
+
+**验证**：`apps/desktop` `npx vitest run` 141 passed / 3 skipped（新增 `offline-release` 5 条、
+看护脚本与接线护栏断言）。
+
 ## 2026-11-12 手写板加撤销/重做（写错一笔不用整板清空）
 
 **用户反馈**：古诗文手写作答时「某个字/某一笔写错了，现在的清空影响范围太大」。

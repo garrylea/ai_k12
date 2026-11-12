@@ -14,6 +14,7 @@ const {
   removeWatchdog,
 } = require('./watchdog.js');
 const { writeStudentMode, STATE_FILE_NAME } = require('./shell-state.js');
+const { OFFLINE_RELEASE_FILE_NAME } = require('./offline-release.js');
 
 let home;
 let calls;
@@ -52,6 +53,19 @@ describe('watchdog', () => {
     expect(script).toContain('sleep 5');
     // 靠网络心跳判断会被拔网线误伤，脚本里不该出现 curl / 后端地址
     expect(script).not.toContain('curl');
+  });
+
+  it('存在「离线放行」标记时不拉起（否则用户关了又弹，等于没放开）', () => {
+    const script = buildWatchdogScript();
+    // 标记名必须与主进程写的是同一个文件
+    expect(script).toContain(OFFLINE_RELEASE_FILE_NAME);
+    expect(script).toContain(
+      `RELEASE="$HOME/Library/Application Support/k12-desktop/${OFFLINE_RELEASE_FILE_NAME}"`,
+    );
+    // 判据与 studentMode 写在同一个 if 里：三者同时满足才拉起
+    expect(script).toMatch(
+      /if \[ -f "\$STATE" \] && grep -q '"studentMode":true' "\$STATE" 2>\/dev\/null && \[ ! -f "\$RELEASE" \]; then/,
+    );
   });
 
   it('判活不认包路径：心跳 pid 文件优先、进程名兜底（否则 dist/Applications 混用会反复拉起）', () => {

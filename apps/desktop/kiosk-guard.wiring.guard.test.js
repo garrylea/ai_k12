@@ -52,9 +52,38 @@ describe('kiosk 守护接线护栏', () => {
     expect(mainSrc).toMatch(/kioskGuard\.scheduleReassert\(/);
   });
 
-  it('学生模式开关启动/停止守护', () => {
-    expect(mainSrc).toMatch(/if \(studentMode\) kioskGuard\.start\(\);/);
+  it('窗口锁定开关启动/停止守护（判据是 windowLocked，不是学生模式意图）', () => {
+    expect(mainSrc).toMatch(/if \(windowLocked\) kioskGuard\.start\(\);/);
     expect(mainSrc).toMatch(/else kioskGuard\.stop\(\);/);
+  });
+
+  /**
+   * 2026-11-12 用户实测：服务器连不上时窗口仍是 kiosk，关不掉也退不出。
+   * 口径是「首屏失败就不进 kiosk」，但**不能改学生模式意图**（下次连得上仍要锁）。
+   */
+  it('首屏从未加载成功 → 放行窗口锁定 + 落看护标记（不能写回学生模式）', () => {
+    expect(mainSrc).toMatch(/if \(!pageLoadedOnce\) releaseLockdownForOffline\(/);
+    // 只看放行函数自己的函数体：不能顺手把 shell-state.json 写成 false
+    const releaseFn = mainSrc.match(
+      /function releaseLockdownForOffline\(reason\) \{[\s\S]*?\n\}/,
+    )?.[0];
+    expect(releaseFn).toBeTruthy();
+    expect(releaseFn).toMatch(/markOfflineRelease\(app\.getPath\('userData'\)\)/);
+    expect(releaseFn).toMatch(/driveWindowLockdown\(false\)/);
+    expect(releaseFn).not.toMatch(/writeStudentMode\(/);
+  });
+
+  it('关不掉 / 退出拦截只看窗口实际锁定状态（放行后必须能关）', () => {
+    // close 与 before-quit 各一处
+    expect(mainSrc.match(/if \(windowLocked\) event\.preventDefault\(\)/g)?.length).toBe(2);
+  });
+
+  it('页面真正加载成功后才补锁，并清掉离线放行标记', () => {
+    expect(mainSrc).toMatch(/pageLoadedOnce = true/);
+    expect(mainSrc).toMatch(/clearOfflineRelease\(app\.getPath\('userData'\)\)/);
+    expect(mainSrc).toMatch(/if \(studentMode && !windowLocked\) applyStudentMode\(true\)/);
+    // 离线页也是 did-finish-load，必须被 file: 判据挡掉，否则会误当「连上了」
+    expect(mainSrc).toMatch(/getURL\(\)\.startsWith\('file:'\)\) return;/);
   });
 
   it('重进 kiosk：setKiosk(false) → 等退出全屏 → setKiosk(true)，且禁止 back-to-back', () => {
