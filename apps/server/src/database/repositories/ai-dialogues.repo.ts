@@ -44,7 +44,8 @@ export class AiDialoguesRepository {
     track: AiDialogueRow['track'],
     limit: number,
     cursor?: number,
-    scene?: AiDialogueRow['scene'],
+    scene?: AiDialogueRow['scene'] | AiDialogueRow['scene'][],
+    hasChat = false,
   ): Promise<AiDialogueRow[]> {
     // 用池 query（客户端转义）而非 execute（服务端预处理）：MySQL 对预处理语句的
     // `LIMIT ?` 报 "Incorrect arguments to mysqld_stmt_execute"。值仍经 mysql2 转义，无注入风险。
@@ -54,9 +55,23 @@ export class AiDialoguesRepository {
       conditions.push('id < ?');
       params.push(cursor);
     }
-    if (scene) {
-      conditions.push('scene = ?');
-      params.push(scene);
+    const scenes = Array.isArray(scene) ? scene : scene ? [scene] : [];
+    if (scenes.length > 0) {
+      conditions.push(`scene IN (${scenes.map(() => '?').join(',')})`);
+      params.push(...scenes);
+    }
+    // 做题入口的会话按「是否真的聊过天」过滤：题干锚 / 判题提交 / 判题报告都不算聊天。
+    // 只约束 aux_freeform，避免把尚未发第一条消息的 aux_qna 会话也隐藏掉。
+    if (hasChat) {
+      conditions.push(`(
+        scene <> 'aux_freeform'
+        OR EXISTS (
+          SELECT 1 FROM ai_messages m
+          WHERE m.dialogue_id = ai_dialogues.id
+            AND m.deleted_at IS NULL
+            AND (m.type IS NULL OR m.type NOT IN ('transcription','freeform_submit','freeform_judge'))
+        )
+      )`);
     }
     params.push(limit);
     const [rows] = await this.pool.query<RowDataPacket[]>(

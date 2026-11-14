@@ -7,6 +7,7 @@ import { CurrentUser } from '../../common/decorators/current-user.js';
 import type { CreateConversationDto } from './dto/create-conversation.dto.js';
 import type { AppendMessageDto } from './dto/append-message.dto.js';
 import type { UpdateTitleDto } from './dto/update-title.dto.js';
+import type { AiDialogueScene } from '../../database/repositories/types.js';
 
 @Controller('api/conversations')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -24,13 +25,18 @@ export class ConversationsController {
     @Query('track') track: 'mainline' | 'auxiliary',
     @Query('cursor') cursor: string,
     @Query('scene') scene: string,
+    @Query('hasChat') hasChat: string,
     @CurrentUser() user: JwtUser,
   ) {
+    const scenes = scene
+      ? ([...new Set(scene.split(',').map((s) => s.trim()).filter(Boolean))] as AiDialogueScene[])
+      : undefined;
     return this.conversationsService.list(
       user.sub,
       track,
       cursor ? Number(cursor) : undefined,
-      scene as 'aux_qna' | 'aux_training' | 'aux_freeform' | 'mainline_question' | 'mainline_card' | undefined,
+      scenes,
+      hasChat,
     );
   }
 

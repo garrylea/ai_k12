@@ -112,13 +112,42 @@ export class ConversationsService {
     });
   }
 
+  private static readonly VALID_SCENES = new Set<AiDialogueScene>([
+    'aux_qna', 'aux_training', 'aux_freeform', 'mainline_question', 'mainline_card',
+  ]);
+
   async list(
     studentId: number,
     track: 'mainline' | 'auxiliary',
     cursor?: number,
-    scene?: AiDialogueScene,
+    scenes?: AiDialogueScene[] | AiDialogueScene,
+    hasChat?: boolean | string,
   ) {
-    return this.dialoguesRepo.findByStudentAndTrack(studentId, track, this.PAGE_SIZE, cursor, scene);
+    const sceneList = scenes == null ? undefined : Array.isArray(scenes) ? scenes : [scenes];
+    if (sceneList?.length) {
+      const invalid = sceneList.find((s) => !ConversationsService.VALID_SCENES.has(s));
+      if (invalid) {
+        throw new BadRequestException({ code: 1001, message: `scene 非法：${invalid}` });
+      }
+    }
+    if (
+      hasChat != null &&
+      hasChat !== '' &&
+      hasChat !== true &&
+      hasChat !== false &&
+      hasChat !== '0' &&
+      hasChat !== '1'
+    ) {
+      throw new BadRequestException({ code: 1001, message: 'hasChat 只能为 0 或 1' });
+    }
+    return this.dialoguesRepo.findByStudentAndTrack(
+      studentId,
+      track,
+      this.PAGE_SIZE,
+      cursor,
+      sceneList,
+      hasChat === true || hasChat === '1',
+    );
   }
 
   async get(dialogueId: number, studentId: number) {

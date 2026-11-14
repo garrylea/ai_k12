@@ -27,9 +27,23 @@ class FakeDialoguesRepo {
       .sort((a, b) => b.id - a.id);
     return hits[0] ?? null;
   }
-  async findByStudentAndTrack(studentId: number, track: string, limit: number, _cursor?: number, scene?: AiDialogueScene) {
+  lastFindArgs: { scenes?: string[]; hasChat?: boolean } = {};
+  async findByStudentAndTrack(
+    studentId: number,
+    track: string,
+    limit: number,
+    _cursor?: number,
+    scene?: AiDialogueScene | AiDialogueScene[],
+    hasChat = false,
+  ) {
+    this.lastFindArgs = {
+      scenes: scene == null ? undefined : Array.isArray(scene) ? scene : [scene],
+      hasChat,
+    };
+    const scenes = Array.isArray(scene) ? scene : scene ? [scene] : [];
     return this.rows
-      .filter((r) => r.student_id === studentId && r.track === track && !r.deleted_at && (!scene || r.scene === scene))
+      .filter((r) => r.student_id === studentId && r.track === track && !r.deleted_at)
+      .filter((r) => scenes.length === 0 || scenes.includes(r.scene))
       .sort((a, b) => b.id - a.id)
       .slice(0, limit);
   }
@@ -205,5 +219,27 @@ describe('ConversationsService (scene 分型 + 训练讲一讲按题锚定)', ()
     expect(byContent('敏感轮')).toBe(1);
     expect(byContent('显式放行')).toBe(0);
     expect(byContent('普通轮')).toBe(0);
+  });
+
+  it('list 支持多 scene', async () => {
+    await svc.create(1, { track: 'auxiliary' });
+    await svc.create(1, { track: 'auxiliary', scene: 'aux_freeform', subjectId: 1 });
+    const rows = await svc.list(1, 'auxiliary', undefined, ['aux_qna', 'aux_freeform']);
+    expect(rows.map((r) => r.scene).sort()).toEqual(['aux_freeform', 'aux_qna']);
+  });
+
+  it('list 透传 hasChat', async () => {
+    await svc.list(1, 'auxiliary', undefined, ['aux_qna', 'aux_freeform'], true);
+    expect(dialogues.lastFindArgs.hasChat).toBe(true);
+  });
+
+  it('非法 scene -> 400/1001', async () => {
+    await expect(svc.list(1, 'auxiliary', undefined, ['nope' as any]))
+      .rejects.toMatchObject({ response: { code: 1001 } });
+  });
+
+  it('hasChat 非 0/1 -> 400/1001', async () => {
+    await expect(svc.list(1, 'auxiliary', undefined, undefined, 'yes' as any))
+      .rejects.toMatchObject({ response: { code: 1001 } });
   });
 });
