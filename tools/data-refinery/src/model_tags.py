@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 CATEGORY_NAMES: dict[str, str] = {
     "new_definition": "新定义",
     "geometry_synthesis": "几何综合",
@@ -96,6 +94,7 @@ def normalize_category(raw: object) -> str | None:
 
 
 def normalize_model(category: str, raw: object) -> str | None:
+    """归一化模型 code：空模型返回 ""；非法/未知（含跨类）返回 None。"""
     if raw is None:
         return None
     if not isinstance(raw, str):
