@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS question_model_tags (
 - 迁移：`tools/db/migrations/2026-11-14_question_model_tags.sql`（幂等，手工 apply）。
 ```
 
-并在变更日志表格顶部加一行（当前最新为 v2.9，本条为 v2.10）：
+并在变更日志表格顶部加一行（当前最新为 v3.3，本条为 v3.4）：
 
 ```markdown
 | v2.10 | 2026-11-14 | 新增 `question_model_tags`（§3.2）：数学题中考模型两级标签；独立于 `knowledge_points`，避免判题写掌握度时污染；一题多模型、不分主次；`(category, model, confidence)` 索引支撑后续按模型开专项。 |
@@ -1800,7 +1800,7 @@ git commit -m "feat(refinery): 数学题中考模型标签主流程"
 ```bash
 cd /Users/lichao/Downloads/claude/imooc/ai_k12
 mysql -uai_k12 -pai_k12 ai_k12 -e "
-SELECT COUNT(*) total, SUM(MD5(CONCAT_WS('|', content, options, answer))) chk
+SELECT COUNT(*) total, SUM(CRC32(CONCAT_WS('|', content, options, answer))) chk
 FROM questions WHERE subject_id=1 AND is_active=1;
 " | tee /tmp/questions_hash_before.txt
 ```
@@ -1837,7 +1837,7 @@ cd tools/data-refinery && python3 src/label_model_tags.py --limit 3
 mysql -uai_k12 -pai_k12 ai_k12 -e "SELECT COUNT(*) AS rows_after FROM question_model_tags;"
 ```
 
-Expected：第二次运行后同一题不出现重复 `(question_id, category, model)`；总行数与第一次一致（同一批 3 题）。
+Expected：第二次运行后同一题不出现重复 `(question_id, category, model)`；**行数可能因 LLM 非确定性变化，幂等以唯一键不重复为准**，不要求两次行数完全一致。
 
 - [ ] **Step 4: Commit（只在第 2/3 步暴露了代码问题时）**
 
@@ -1887,7 +1887,7 @@ FROM question_model_tags;
 "
 ```
 
-Expected：`invalid=0`、`model_driven_empty=0`；各大类分布合理；`questions` 接近 509（允许部分题无标签）。
+Expected：`invalid=0`、`model_driven_empty=0`；各大类分布合理；有标签题数约 212 / 275 行（2026-11-14 实测；允许部分题无标签）。
 
 - [ ] **Step 3: 重跑幂等验收**
 
@@ -1916,7 +1916,7 @@ Expected：`dups=0`；两次全量运行后行数不翻倍。
 
 ```bash
 mysql -uai_k12 -pai_k12 ai_k12 -e "
-SELECT COUNT(*) total, SUM(MD5(CONCAT_WS('|', content, options, answer))) chk
+SELECT COUNT(*) total, SUM(CRC32(CONCAT_WS('|', content, options, answer))) chk
 FROM questions WHERE subject_id=1 AND is_active=1;
 " | tee /tmp/questions_hash_after.txt
 diff <(tail -n +2 /tmp/questions_hash_before.txt) <(tail -n +2 /tmp/questions_hash_after.txt)

@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-11-14 数学题中考模型标签
+
+**背景**：数学专项只能按教材知识点两级选题，没有「新定义/几何综合/圆综/倍长中线」等中考模型池。
+
+**改动**：
+- 新增 `question_model_tags`（8 大类 / 37 个模型；一题多模型、不分主次；大类≤2、模型≤3；模型驱动类不允许空模型）。独立于 `knowledge_points`，避免判题写掌握度时污染。
+- 新增 `tools/data-refinery/src/label_model_tags.py`：LLM 全量打标（有图送图）、枚举校验、写库、`review.csv` + 30 条 `review_sample.csv`、失败 `failures.jsonl`。
+- 标签枚举/校验/抽样集中在 `src/model_tags.py`；prompt 枚举由代码注入，防两处漂移。
+- `LLMClient` 新增 `complete_with_images()`。
+
+**验证**：509 道全量处理完；212 题有标签 / 275 行；非法枚举 0、模型驱动类空模型 0、重复键 0；`schema_reconcile.py` 80 表无差异。首轮 1 道（6676）JSON 多一个 `}` 解析失败，定向重跑后不再报错（该题最终无标签）。抽检 30 条发现 3 道圆/应用漏标（4769/4805/4832），定向重跑已补；4995 仍判 `midpoint_model` 而非 `median_doubling`（具体模型粒度差异，未硬改）。**DB 里 qwen/kimi/deepseek 的 Key 均 401，本次用本地 Qwen3.8-27B（`--model-key local`，支持图片）完成。**
+
+---
+
 ## 2026-11-14 做题答疑进历史 + 做题题进错题/专项
 
 **用户反馈**：做题页答疑后刷新就找不到聊天记录；做题错题被隔离在所有练习池外，
