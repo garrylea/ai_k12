@@ -13,7 +13,7 @@ export default function ConversationList() {
   const fetchConversations = () => {
     setLoading(true);
     setError(null);
-    listAllConversations('auxiliary', 'aux_qna')
+    listAllConversations('auxiliary', ['aux_qna', 'aux_freeform'], { hasChat: true })
       .then((items) => {
         setConversations(items);
         setLoading(false);

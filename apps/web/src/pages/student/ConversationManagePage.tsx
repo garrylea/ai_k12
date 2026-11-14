@@ -68,7 +68,7 @@ export default function ConversationManagePage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    listAllConversations('auxiliary', 'aux_qna')
+    listAllConversations('auxiliary', ['aux_qna', 'aux_freeform'], { hasChat: true })
       .then((items) => {
         if (!cancelled) {
           setConversations(items);

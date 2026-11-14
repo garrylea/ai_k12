@@ -472,11 +472,14 @@ export function createConversation(req: {
 
 export function listConversations(
   track: 'auxiliary',
-  scene: AiConversationScene,
+  scenes: AiConversationScene[],
   cursor?: number,
+  opts?: { hasChat?: boolean },
 ): Promise<ConversationItem[]> {
-  const qs = cursor ? `?track=${track}&scene=${scene}&cursor=${cursor}` : `?track=${track}&scene=${scene}`;
-  return fetchApi<ConversationItem[]>(`/conversations${qs}`);
+  const params = new URLSearchParams({ track, scene: scenes.join(',') });
+  if (cursor) params.set('cursor', String(cursor));
+  if (opts?.hasChat) params.set('hasChat', '1');
+  return fetchApi<ConversationItem[]>(`/conversations?${params.toString()}`);
 }
 
 // Fetch ALL conversations by walking the cursor-paginated list endpoint
@@ -484,12 +487,16 @@ export function listConversations(
 // Used by the sidebar so the "展开全部" button can reveal history beyond the
 // first page. Capped at 50 pages (500 items) as a safety valve against a
 // runaway loop; a K12 student won't approach that.
-export async function listAllConversations(track: 'auxiliary', scene: AiConversationScene): Promise<ConversationItem[]> {
+export async function listAllConversations(
+  track: 'auxiliary',
+  scenes: AiConversationScene[],
+  opts?: { hasChat?: boolean },
+): Promise<ConversationItem[]> {
   const PAGE = 10;
   const all: ConversationItem[] = [];
   let cursor: number | undefined;
   for (let i = 0; i < 50; i++) {
-    const page = await listConversations(track, scene, cursor);
+    const page = await listConversations(track, scenes, cursor, opts);
     all.push(...page);
     if (page.length < PAGE) break;
     cursor = page[page.length - 1].id;
