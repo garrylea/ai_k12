@@ -22,3 +22,12 @@ def test_parse_tags_response_empty_and_invalid():
 def test_parse_tags_response_strips_fence_and_think():
     raw = '<think>先想</think>\n```json\n{"tags":[{"category":"extremum"}]}\n```'
     assert parse_tags_response(raw) == [{"category": "extremum"}]
+
+
+def test_parse_tags_response_rejects_non_object_json():
+    # 合法 JSON 但不是对象：必须返回 None，不能抛 TypeError
+    assert parse_tags_response("5") is None
+    assert parse_tags_response('"tags"') is None
+    assert parse_tags_response("true") is None
+    assert parse_tags_response("[]") is None
+    assert parse_tags_response('{"tags":[]}') == []

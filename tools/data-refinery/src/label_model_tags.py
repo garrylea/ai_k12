@@ -68,7 +68,11 @@ def parse_tags_response(raw: str) -> list[dict] | None:
         data = _parse_json_object(raw)
     except (TypeError, ValueError):
         return None
-    if not data or "tags" not in data:
+    # 合法 JSON 未必是对象（"5" -> int、'"tags"' -> str、'[]' -> list），
+    # 非 dict 直接判失败，避免 `in` / 下标访问抛 TypeError。
+    if not isinstance(data, dict) or not data:
+        return None
+    if "tags" not in data:
         return None
     tags = data["tags"]
     if not isinstance(tags, list):
@@ -167,6 +171,7 @@ def label_one(question: dict, llm: Any, system_prompt: str,
               assets_root: Path, with_images: bool) -> Outcome:
     image_urls: list[str] = []
     image_missing = False
+    raw = ""
     try:
         if with_images:
             image_urls, image_missing = collect_image_data_urls(question, assets_root)
@@ -186,7 +191,8 @@ def label_one(question: dict, llm: Any, system_prompt: str,
             return Outcome(question, [], [], 0, image_missing,
                            error="parse_failed", raw=(raw or "")[:1000])
     except Exception as e:
-        return Outcome(question, [], [], 0, image_missing, error=str(e))
+        return Outcome(question, [], [], 0, image_missing, error=str(e),
+                       raw=raw[:1000])
 
     result = validate_tags(parsed)
     flags = compute_flags(
@@ -257,6 +263,16 @@ def main() -> int:
     )
     try:
         model_cfg = load_model_config(conn, args.model_key)
+        # 先查题再预检：空集合直接返回，不建客户端、不发任何网络请求。
+        questions = load_questions(conn, args.limit, args.question_id)
+        if not questions:
+            print("[done] 没有需要标注的题", flush=True)
+            if args.question_id:
+                requested = ",".join(str(qid) for qid in args.question_id)
+                print(f"[warn] --question-id {requested} 没有匹配到可标注的题"
+                      f"（不存在 / 非数学 / 已停用 / 非初中），请核对题号", flush=True)
+            return 0
+
         llm = create_llm_client(
             provider=model_cfg.provider, api_key=model_cfg.api_key,
             model=model_cfg.model, base_url=model_cfg.base_url,
@@ -266,11 +282,11 @@ def main() -> int:
         with_images = not args.no_images
         preflight(llm, with_images)
 
-        questions = load_questions(conn, args.limit, args.question_id)
-        if not questions:
-            print("[done] 没有需要标注的题", flush=True)
-            return 0
-        system_prompt = build_system_prompt(PROMPT_FILE.read_text(encoding="utf-8"))
+        try:
+            prompt_rules = PROMPT_FILE.read_text(encoding="utf-8")
+        except OSError as e:
+            raise SystemExit(f"[error] 找不到 prompt 文件 {PROMPT_FILE}：{e}") from e
+        system_prompt = build_system_prompt(prompt_rules)
         assets_root = cfg.output_dir / "assets"
         print(f"[start] 待标注 {len(questions)} 题，模型 {args.model_key}，"
               f"图片 {'on' if with_images else 'off'}，并发 {args.concurrency}",
@@ -297,45 +313,67 @@ def main() -> int:
                         write_tags(conn, outcome.question["id"], outcome.tags)
                     except Exception as e:
                         outcome.error = f"db_write_failed: {e}"
+                        # 事务已回滚，标签没进库；抽检 CSV 不能显示一份未落库的结果。
+                        outcome.tags = []
                         failed.append(outcome)
                 if i % 20 == 0 or i == len(futures):
                     print(f"[progress] {i}/{len(futures)} "
                           f"failed={len(failed)}", flush=True)
 
+        for outcome in outcomes:
+            if outcome.error and "failed" not in outcome.flags:
+                outcome.flags = sorted([*outcome.flags, "failed"])
+
         rows: list[dict] = []
         for outcome in outcomes:
             rows.extend(build_review_rows(
                 outcome.question, outcome.tags, outcome.flags))
-        rows.sort(key=lambda r: (r["question_id"], r["category"], r["model"]))
+        # 稳定排序：只按题号，保留 build_review_rows 的「置信度降序」标签顺序（spec §6.8）。
+        rows.sort(key=lambda r: r["question_id"])
         REVIEW_DIR.mkdir(parents=True, exist_ok=True)
         write_csv(REVIEW_DIR / "review.csv", rows, REVIEW_FIELDS)
         sample = pick_review_sample(rows)
         write_csv(REVIEW_DIR / "review_sample.csv", sample,
                   REVIEW_FIELDS + ["pick_reason"])
 
+        failures_path = REVIEW_DIR / "failures.jsonl"
         if failed:
-            with (REVIEW_DIR / "failures.jsonl").open("w", encoding="utf-8") as f:
+            with failures_path.open("w", encoding="utf-8") as f:
                 for outcome in failed:
                     f.write(json.dumps({
                         "question_id": outcome.question["id"],
                         "error": outcome.error,
                         "raw": outcome.raw,
                     }, ensure_ascii=False) + "\n")
+        elif failures_path.exists():
+            # 全绿重跑要清掉上一轮的失败清单，否则会被误读成本轮仍有失败。
+            failures_path.unlink()
 
         tagged = sum(1 for o in outcomes if o.tags)
         tag_rows = sum(len(o.tags) for o in outcomes)
         low_conf = sum(1 for o in outcomes
                        if any(t.confidence < LOW_CONFIDENCE for t in o.tags))
         dropped = sum(o.dropped for o in outcomes)
+        cat_counts: dict[str, int] = {}
+        for outcome in outcomes:
+            for tag in outcome.tags:
+                cat_counts[tag.category] = cat_counts.get(tag.category, 0) + 1
+        by_category = " ".join(
+            f"{cat}={cat_counts[cat]}" for cat in sorted(cat_counts)) or "-"
         print(f"[done] total={len(outcomes)} tagged_questions={tagged} "
               f"tag_rows={tag_rows} empty={len(outcomes) - tagged} "
               f"low_confidence={low_conf} dropped={dropped} "
               f"failed={len(failed)}", flush=True)
+        print(f"[by_category] {by_category}", flush=True)
         print(f"[csv] {REVIEW_DIR / 'review.csv'}", flush=True)
         print(f"[csv] {REVIEW_DIR / 'review_sample.csv'}", flush=True)
         if failed:
+            failed_ids = ",".join(
+                str(o.question["id"]) for o in sorted(
+                    failed, key=lambda o: o.question["id"]))
+            print(f"[failed_ids] {failed_ids}", flush=True)
             print(f"[fail] {len(failed)} 题失败，详情见 "
-                  f"{REVIEW_DIR / 'failures.jsonl'}；重跑同一命令即可补齐",
+                  f"{failures_path}；重跑同一命令即可补齐",
                   flush=True)
             return 1
         return 0
