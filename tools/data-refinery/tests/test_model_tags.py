@@ -109,3 +109,101 @@ def test_system_prompt_contains_rules_and_taxonomy():
     assert prompt.startswith("规则：只输出 JSON")
     assert "median_doubling" in prompt
     assert "倍长中线" in prompt
+
+
+from model_tags import LOW_CONFIDENCE, Tag, compute_flags, validate_tags
+
+
+def _raw(cat, model="", conf=0.9, reason="依据"):
+    return {"category": cat, "model": model, "confidence": conf, "reason": reason}
+
+
+def test_unknown_category_dropped():
+    result = validate_tags([_raw("不存在的类", "x")])
+    assert result.tags == []
+    assert result.dropped == 1
+
+
+def test_model_driven_unknown_model_drops_whole_tag():
+    result = validate_tags([_raw("geometry_synthesis", "不存在的模型")])
+    assert result.tags == []
+    assert result.dropped == 1
+
+
+def test_non_model_driven_unknown_model_keeps_empty_and_flags():
+    result = validate_tags([_raw("stats_probability", "不存在的模型")])
+    assert [(t.category, t.model) for t in result.tags] == [("stats_probability", "")]
+    assert "unknown_model" in result.flags
+
+
+def test_model_from_other_category_flags_mismatch():
+    result = validate_tags([_raw("stats_probability", "倍长中线")])
+    assert [(t.category, t.model) for t in result.tags] == [("stats_probability", "")]
+    assert "category_model_mismatch" in result.flags
+
+
+def test_model_driven_empty_model_drops_whole_tag():
+    result = validate_tags([_raw("circle_synthesis", "")])
+    assert result.tags == []
+    assert result.dropped == 1
+
+
+def test_empty_model_removed_when_specific_model_exists():
+    result = validate_tags([
+        _raw("stats_probability", "统计图表", 0.8),
+        _raw("stats_probability", "", 0.9),
+    ])
+    assert [(t.category, t.model) for t in result.tags] == [
+        ("stats_probability", "statistical_charts")
+    ]
+
+
+def test_dedupe_keeps_highest_confidence():
+    result = validate_tags([
+        _raw("geometry_synthesis", "倍长中线", 0.6),
+        _raw("geometry_synthesis", "median_doubling", 0.9),
+    ])
+    assert len(result.tags) == 1
+    assert result.tags[0].confidence == 0.9
+
+
+def test_caps_three_models_and_two_categories():
+    result = validate_tags([
+        _raw("geometry_synthesis", "倍长中线", 0.99),
+        _raw("geometry_synthesis", "截长补短", 0.98),
+        _raw("geometry_synthesis", "手拉手（旋转全等）", 0.97),
+        _raw("circle_synthesis", "切线判定与性质", 0.60),
+        _raw("stats_probability", "方差", 0.50),
+    ])
+    assert len(result.tags) <= 3
+    assert len({t.category for t in result.tags}) <= 2
+    assert result.tags[0].category == "geometry_synthesis"
+
+
+def test_confidence_clamped_and_missing_defaults():
+    result = validate_tags([
+        _raw("geometry_synthesis", "倍长中线", 1.7),
+        _raw("geometry_synthesis", "截长补短", "bad"),
+        _raw("geometry_synthesis", "中点模型", None),
+    ])
+    by_model = {t.model: t.confidence for t in result.tags}
+    assert by_model["median_doubling"] == 1.0
+    assert by_model["segment_cut_extend"] == 0.5
+    assert by_model["midpoint_model"] == 0.5
+
+
+def test_compute_flags():
+    tags = [Tag("geometry_synthesis", "median_doubling", 0.6, "x")]
+    flags = compute_flags(tags, difficulty=5, has_evidence=False,
+                          image_missing=True, extra_flags=["unknown_model"])
+    assert set(flags) == {"low_confidence", "no_evidence", "image_missing",
+                          "unknown_model"}
+
+
+def test_compute_flags_no_tag_hard_and_multi_category():
+    flags = compute_flags([], difficulty=5, has_evidence=True, image_missing=False)
+    assert "no_tag_hard" in flags
+    two = [Tag("geometry_synthesis", "median_doubling", 0.9, ""),
+           Tag("circle_synthesis", "tangent", 0.8, "")]
+    assert "multi_category" in compute_flags(
+        two, difficulty=3, has_evidence=True, image_missing=False)

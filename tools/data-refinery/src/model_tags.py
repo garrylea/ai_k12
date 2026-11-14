@@ -6,6 +6,10 @@
 
 from __future__ import annotations
 
+import random
+from dataclasses import dataclass
+from typing import Any, Iterable
+
 CATEGORY_NAMES: dict[str, str] = {
     "new_definition": "新定义",
     "geometry_synthesis": "几何综合",
@@ -128,3 +132,136 @@ def build_taxonomy_block() -> str:
 
 def build_system_prompt(rules: str) -> str:
     return f"{rules.strip()}\n\n{build_taxonomy_block()}"
+
+
+MAX_CATEGORIES = 2
+MAX_MODELS = 3
+LOW_CONFIDENCE = 0.70
+
+
+@dataclass(frozen=True)
+class Tag:
+    category: str
+    model: str
+    confidence: float
+    reason: str
+
+
+@dataclass
+class ValidationResult:
+    tags: list[Tag]
+    flags: list[str]
+    dropped: int
+
+
+def _to_confidence(raw: Any) -> float:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        return 0.50
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return 0.50
+    if val != val:  # NaN
+        return 0.50
+    return round(min(1.0, max(0.0, val)), 2)
+
+
+def _sort_key(tag: Tag) -> tuple:
+    models = list(MODEL_NAMES.get(tag.category, {}))
+    model_idx = models.index(tag.model) if tag.model in models else -1
+    return (-tag.confidence, CATEGORY_ORDER.index(tag.category), model_idx)
+
+
+def _known_model_anywhere(raw: object) -> bool:
+    """判断这个 model 值是否属于别的某个大类（用于区分 mismatch 与纯未知）。"""
+    if not isinstance(raw, str):
+        return False
+    key = raw.strip().strip("`").strip()
+    if not key:
+        return False
+    for models in MODEL_NAMES.values():
+        if key in models:
+            return True
+    for names in _MODEL_BY_NAME.values():
+        if key in names:
+            return True
+    return False
+
+
+def validate_tags(raw_tags: Any) -> ValidationResult:
+    """LLM 原始 tags -> 合法、去重、清理空模型、截上限后的 Tag 列表。"""
+    if not isinstance(raw_tags, list):
+        return ValidationResult([], [], 0)
+
+    flags: set[str] = set()
+    dropped = 0
+    merged: dict[tuple[str, str], Tag] = {}
+
+    for raw in raw_tags:
+        if not isinstance(raw, dict):
+            dropped += 1
+            continue
+        category = normalize_category(raw.get("category"))
+        if category is None:
+            dropped += 1
+            continue
+
+        raw_model = raw.get("model", "")
+        model = normalize_model(category, raw_model) if raw_model not in (None, "") else ""
+        if raw_model not in (None, "") and model is None:
+            if category in MODEL_DRIVEN:
+                dropped += 1
+                continue
+            model = ""
+            if _known_model_anywhere(raw_model):
+                flags.add("category_model_mismatch")
+            else:
+                flags.add("unknown_model")
+        if model is None:
+            model = ""
+        if category in MODEL_DRIVEN and not model:
+            dropped += 1
+            continue
+
+        tag = Tag(
+            category=category,
+            model=model,
+            confidence=_to_confidence(raw.get("confidence")),
+            reason=str(raw.get("reason") or "")[:255],
+        )
+        key = (category, model)
+        if key not in merged or tag.confidence > merged[key].confidence:
+            merged[key] = tag
+
+    cats_with_model = {t.category for t in merged.values() if t.model}
+    tags = [
+        t for t in merged.values()
+        if t.model or t.category not in cats_with_model
+    ]
+
+    tags.sort(key=_sort_key)
+    tags = tags[:MAX_MODELS]
+    cat_best: dict[str, float] = {}
+    for tag in tags:
+        cat_best[tag.category] = max(cat_best.get(tag.category, 0.0), tag.confidence)
+    kept = sorted(cat_best, key=lambda c: (-cat_best[c], CATEGORY_ORDER.index(c)))
+    kept_set = set(kept[:MAX_CATEGORIES])
+    tags = [t for t in tags if t.category in kept_set]
+
+    return ValidationResult(tags=tags, flags=sorted(flags), dropped=dropped)
+
+
+def compute_flags(tags: list[Tag], *, difficulty: int, has_evidence: bool,
+                  image_missing: bool, extra_flags: Iterable[str] = ()) -> list[str]:
+    flags = set(extra_flags)
+    if any(t.confidence < LOW_CONFIDENCE for t in tags):
+        flags.add("low_confidence")
+    if not has_evidence:
+        flags.add("no_evidence")
+    if image_missing:
+        flags.add("image_missing")
+    if difficulty >= 4 and not tags:
+        flags.add("no_tag_hard")
+    if len({t.category for t in tags}) == 2:
+        flags.add("multi_category")
+    return sorted(flags)
