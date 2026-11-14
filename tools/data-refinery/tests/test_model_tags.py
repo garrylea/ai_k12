@@ -271,3 +271,88 @@ def test_compute_flags_no_tag_hard_and_multi_category():
            Tag("circle_synthesis", "tangent", 0.8, "")]
     assert "multi_category" in compute_flags(
         two, difficulty=3, has_evidence=True, image_missing=False)
+
+
+import base64
+from pathlib import Path
+
+from model_tags import (
+    MAX_IMAGES,
+    build_user_prompt,
+    collect_image_data_urls,
+    encode_image_data_url,
+    extract_image_refs,
+    normalize_base_url,
+    resolve_image_path,
+)
+
+
+def test_normalize_base_url():
+    assert normalize_base_url("https://x/compatible-mode/") == "https://x/compatible-mode/v1"
+    assert normalize_base_url("https://x/v1") == "https://x/v1"
+    assert normalize_base_url("http://192.168.1.8:12345") == "http://192.168.1.8:12345/v1"
+
+
+def test_extract_image_refs_content_and_options():
+    content = "如图 ![](questions/math/a/1/stem_01.jpg) 和 <img src='questions/math/a/1/stem_02.png'>"
+    options = '[{"label":"A","text":"","image_url":"questions/math/a/1/opt_a.jpg"}]'
+    refs = extract_image_refs(content, options)
+    assert refs == [
+        "questions/math/a/1/stem_01.jpg",
+        "questions/math/a/1/stem_02.png",
+        "questions/math/a/1/opt_a.jpg",
+    ]
+
+
+def test_extract_image_refs_options_non_json_fallback():
+    options = 'A. ![](questions/math/a/1/opt_a.jpg) B. 文本'
+    assert extract_image_refs("", options) == ["questions/math/a/1/opt_a.jpg"]
+
+
+def test_resolve_image_path_rejects_traversal(tmp_path):
+    assets = tmp_path / "assets"
+    (assets / "questions").mkdir(parents=True)
+    (assets / "questions" / "ok.jpg").write_bytes(b"x")
+    assert resolve_image_path("questions/ok.jpg", assets) == (assets / "questions" / "ok.jpg")
+    assert resolve_image_path("../../etc/passwd", assets) is None
+    assert resolve_image_path("https://evil/x.jpg", assets) is None
+
+
+def test_encode_image_data_url(tmp_path):
+    p = tmp_path / "a.png"
+    p.write_bytes(b"\x89PNG\r\n\x1a\n")
+    url = encode_image_data_url(p)
+    assert url.startswith("data:image/png;base64,")
+    assert base64.b64decode(url.split(",", 1)[1]) == b"\x89PNG\r\n\x1a\n"
+
+
+def test_collect_images_caps_and_missing(tmp_path):
+    assets = tmp_path / "assets"
+    qdir = assets / "questions" / "q"
+    qdir.mkdir(parents=True)
+    refs = []
+    for i in range(5):
+        name = f"s{i}.png"
+        (qdir / name).write_bytes(b"x")
+        refs.append(f"questions/q/{name}")
+    question = {"content": " ".join(f"![]({r})" for r in refs) + " ![](questions/q/none.png)",
+                "options": None}
+    urls, missing = collect_image_data_urls(question, assets)
+    assert len(urls) == MAX_IMAGES
+    assert missing is True
+
+
+def test_build_user_prompt_truncates_and_includes_options():
+    q = {
+        "type": "short_answer", "difficulty": 4,
+        "content": "长" * 4000,
+        "options": '[{"label":"A","text":"1"},{"label":"B","text":"2"}]',
+        "explanation": "解析", "approach": "思路",
+    }
+    text = build_user_prompt(q)
+    assert "题型: short_answer" in text
+    assert "难度: 4" in text
+    assert "题干: " + "长" * 3000 in text
+    assert "A. 1" in text and "B. 2" in text
+    assert "解析: 解析" in text
+    assert "思路: 思路" in text

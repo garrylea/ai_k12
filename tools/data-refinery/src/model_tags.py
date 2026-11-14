@@ -6,7 +6,12 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import mimetypes
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 CATEGORY_NAMES: dict[str, str] = {
@@ -269,3 +274,137 @@ def compute_flags(tags: list[Tag], *, difficulty: int, has_evidence: bool,
     if len({t.category for t in tags}) == 2:
         flags.add("multi_category")
     return sorted(flags)
+
+
+MAX_IMAGES = 3
+MAX_IMAGE_BYTES = 6 * 1024 * 1024
+
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+_HTML_IMAGE_RE = re.compile(
+    r"""<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']""", re.IGNORECASE
+)
+_EXT_MIME = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+}
+
+
+def normalize_base_url(url: str) -> str:
+    base = (url or "").strip().rstrip("/")
+    if not base:
+        return base
+    return base if base.endswith("/v1") else base + "/v1"
+
+
+def _loads_json(raw: Any) -> Any:
+    if isinstance(raw, (list, dict)):
+        return raw
+    if not isinstance(raw, (str, bytes)):
+        return None
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _options_text(raw: Any) -> str:
+    data = _loads_json(raw)
+    if isinstance(data, list):
+        parts = []
+        for opt in data:
+            if not isinstance(opt, dict):
+                continue
+            label = str(opt.get("label") or "").strip()
+            text = str(opt.get("text") or "").strip()
+            if text:
+                parts.append(f"{label}. {text}" if label else text)
+        if parts:
+            return " ".join(parts)
+    return str(raw or "")
+
+
+def extract_image_refs(content: str | None, options_raw: Any) -> list[str]:
+    texts = [content or "", _options_text(options_raw)]
+    refs: list[str] = []
+    for text in texts:
+        refs.extend(_MD_IMAGE_RE.findall(text))
+        refs.extend(_HTML_IMAGE_RE.findall(text))
+    data = _loads_json(options_raw)
+    if isinstance(data, list):
+        for opt in data:
+            if isinstance(opt, dict) and opt.get("image_url"):
+                refs.append(str(opt["image_url"]))
+    seen: set[str] = set()
+    out: list[str] = []
+    for ref in refs:
+        ref = ref.strip()
+        if ref and ref not in seen:
+            seen.add(ref)
+            out.append(ref)
+    return out
+
+
+def resolve_image_path(ref: str, assets_root: Path) -> Path | None:
+    ref = (ref or "").strip()
+    if not ref or ref.startswith(("http://", "https://", "data:")):
+        return None
+    ref = ref.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+    root = assets_root.resolve()
+    path = (root / ref).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return None
+    return path if path.is_file() else None
+
+
+def encode_image_data_url(path: Path) -> str | None:
+    try:
+        if path.stat().st_size > MAX_IMAGE_BYTES:
+            return None
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    mime = (_EXT_MIME.get(path.suffix.lower())
+            or mimetypes.guess_type(path.name)[0]
+            or "application/octet-stream")
+    return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def collect_image_data_urls(question: dict, assets_root: Path) -> tuple[list[str], bool]:
+    refs = extract_image_refs(question.get("content"), question.get("options"))
+    urls: list[str] = []
+    missing = False
+    for ref in refs:
+        path = resolve_image_path(ref, assets_root)
+        if path is None:
+            missing = True
+            continue
+        if len(urls) >= MAX_IMAGES:
+            continue
+        url = encode_image_data_url(path)
+        if url is None:
+            missing = True
+            continue
+        urls.append(url)
+    return urls, missing
+
+
+def build_user_prompt(question: dict) -> str:
+    parts = [
+        "<question>",
+        f"题型: {question.get('type') or ''}",
+        f"难度: {question.get('difficulty')}",
+        f"题干: {(question.get('content') or '')[:3000]}",
+    ]
+    options = _options_text(question.get("options"))
+    if options.strip():
+        parts.append(f"选项: {options[:1000]}")
+    explanation = (question.get("explanation") or "").strip()
+    if explanation:
+        parts.append(f"解析: {explanation[:1500]}")
+    approach = (question.get("approach") or "").strip()
+    if approach:
+        parts.append(f"思路: {approach[:1500]}")
+    parts.append("</question>")
+    return "\n".join(parts)
