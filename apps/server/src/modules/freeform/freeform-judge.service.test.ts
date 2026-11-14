@@ -72,6 +72,7 @@ const mkDeps = (over: any = {}) => ({
     get: vi.fn(),
     create: vi.fn().mockResolvedValue({ id: 33, scene: 'aux_freeform' }),
   },
+  ingest: { tagExistingQuestion: vi.fn().mockResolvedValue(undefined) },
   ...over,
 });
 
@@ -84,6 +85,7 @@ const mkService = (deps: ReturnType<typeof mkDeps>) =>
     deps.messages as any,
     deps.files as any,
     deps.conversations as any,
+    deps.ingest as any,
   );
 
 const streamOnce = (report: string) =>
@@ -158,8 +160,8 @@ describe('FreeformJudgeService —— 落库口径', () => {
       errorBookId: 22,
     });
     expect(events.at(-1)).toEqual({ type: 'done' });
-    // 结构性证据：构造参数只有这 7 个，没有 points / mastery / practice。
-    expect(FreeformJudgeService.length).toBe(7);
+    // 结构性证据：构造参数只有这 8 个，没有 points / mastery / practice。
+    expect(FreeformJudgeService.length).toBe(8);
   });
 
   it('满分：清零未清错题，不建错题行', async () => {
@@ -249,7 +251,8 @@ describe('FreeformJudgeService —— 落库口径', () => {
     const events = await collect(svc.judgeStream(baseDto(), 9));
 
     expect(deps.questions.createFreeform).not.toHaveBeenCalled();
-    expect(deps.questions.updateFreeform).not.toHaveBeenCalled();
+    // 命中已有的 freeform 题：用判题结果覆盖（2026-11-14）
+    expect(deps.questions.updateFreeform).toHaveBeenCalledWith(88, expect.objectContaining({ answer: 'x=1' }));
     expect(deps.errorBooks.findUnclearedByStudentQuestionId).toHaveBeenCalledWith(9, 88);
     expect(events.find((e) => e.type === 'result')).toMatchObject({ questionId: 88 });
   });
@@ -278,6 +281,55 @@ describe('FreeformJudgeService —— 落库口径', () => {
     expect(events.some((e) => e.type === 'error' && e.code === 5000 && e.retryable)).toBe(true);
     expect(events.some((e) => e.type === 'result')).toBe(false);
     expect(deps.messages.create).not.toHaveBeenCalled();
+  });
+
+  it('判题落库后异步补知识点（不 await、失败不影响 result）', async () => {
+    const deps = mkDeps({ capability: { stream: streamOnce(REPORT_WITH_JSON(8, 10)), extractStructured: vi.fn() } });
+    const events = await collect(mkService(deps).judgeStream(baseDto(), 9));
+
+    expect(events.some((e) => e.type === 'result')).toBe(true);
+    expect(deps.ingest.tagExistingQuestion).toHaveBeenCalledWith(
+      11,
+      expect.stringContaining('已知 x+1=2'),
+      1,
+      9,
+    );
+  });
+
+  it('先答疑建过题、后提交判题：用判题结果覆盖该 freeform 题', async () => {
+    const deps = mkDeps({
+      capability: { stream: streamOnce(REPORT_WITH_JSON(8, 10)), extractStructured: vi.fn() },
+      questions: {
+        findById: vi.fn().mockResolvedValue({ id: 1, source: 'freeform' }),
+        findByContentHash: vi.fn().mockResolvedValue({ id: 11, source: 'freeform', content_hash: 'old' }),
+        findByContentPrefix: vi.fn().mockResolvedValue([]),
+        createFreeform: vi.fn(),
+        updateFreeform: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+    await collect(mkService(deps).judgeStream(baseDto(), 9));
+
+    expect(deps.questions.createFreeform).not.toHaveBeenCalled();
+    expect(deps.questions.updateFreeform).toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({ answer: 'x=1', full_score: 10 }),
+    );
+  });
+
+  it('选择题 options 落库前剥掉 isCorrect', async () => {
+    const report = REPORT_WITH_JSON(8, 10, {
+      type: 'choice',
+      options: [
+        { label: 'A', text: '1', isCorrect: true },
+        { label: 'B', text: '2', isCorrect: false },
+      ],
+    });
+    const deps = mkDeps({ capability: { stream: streamOnce(report), extractStructured: vi.fn() } });
+    await collect(mkService(deps).judgeStream(baseDto(), 9));
+
+    expect(deps.questions.createFreeform).toHaveBeenCalledWith(expect.objectContaining({
+      options: '[{"label":"A","text":"1"},{"label":"B","text":"2"}]',
+    }));
   });
 });
 

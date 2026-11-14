@@ -10,6 +10,7 @@ import { AiMessagesRepository } from '../../database/repositories/ai-messages.re
 import { UploadedFilesRepository } from '../../database/repositories/uploaded-files.repo.js';
 import type { QuestionRow, UploadedFileRow } from '../../database/repositories/types.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
+import { FreeformChatIngestService } from './freeform-chat-ingest.service.js';
 import { computeFreeformContentHash, stripMarkdownImages } from '../../common/utils/content-hash.util.js';
 import { subjectCodeOf } from '../../common/subject-config.js';
 import type { FreeformJudgeDto } from './dto/freeform.dto.js';
@@ -108,6 +109,7 @@ export class FreeformJudgeService {
     private readonly messages: AiMessagesRepository,
     private readonly files: UploadedFilesRepository,
     private readonly conversations: ConversationsService,
+    private readonly ingest: FreeformChatIngestService,
   ) {}
 
   async *judgeStream(dto: FreeformJudgeDto, studentId: number, signal?: AbortSignal): AsyncIterable<FreeformJudgeEvent> {
@@ -196,6 +198,8 @@ export class FreeformJudgeService {
       await this.persistMessages(dialogueId, questionContent, answer, cleaned, reasoning, images).catch((err) =>
         this.logger.warn(`freeform persistMessages failed: ${err instanceof Error ? err.message : err}`),
       );
+      // 判题落库后异步补知识点（失败只 warn，不影响判题结果）
+      void this.ingest.tagExistingQuestion(questionId, questionContent, subjectId, studentId);
       yield {
         type: 'result',
         questionId,
@@ -409,7 +413,7 @@ export class FreeformJudgeService {
       difficulty: parsed.question.difficulty,
       full_score: maxScore,
       content: questionContent,
-      options: parsed.question.options ? JSON.stringify(parsed.question.options) : null,
+      options: stripOptionAnswers(parsed.question.options),
       answer: parsed.question.answer,
       approach: parsed.question.approach,
       explanation: parsed.question.explanation,
@@ -426,10 +430,18 @@ export class FreeformJudgeService {
     } else {
       const textForMatch = stripMarkdownImages(questionContent) || questionContent;
       const existing =
-        (await this.questions.findByContentHash(hash)) ?? (await this.questions.findByContentPrefix(textForMatch))[0] ?? null;
-      questionId = existing
-        ? Number(existing.id)
-        : await this.questions.createFreeform({ subject_id: subjectId, source: 'freeform', ...row });
+        (await this.questions.findByContentHash(hash)) ??
+        (await this.questions.findByContentPrefix(textForMatch, { subjectId }))[0] ??
+        null;
+      if (!existing) {
+        questionId = await this.questions.createFreeform({ subject_id: subjectId, source: 'freeform', ...row });
+      } else {
+        questionId = Number(existing.id);
+        // 先答疑后提交：标注模型生成的答案要让位给判题结果
+        if (existing.source === 'freeform') {
+          await this.updateFreeform(questionId, row, existing.content_hash);
+        }
+      }
     }
 
     let errorBookId: number | undefined;
@@ -542,4 +554,12 @@ function stripJsonBlock(content: string): string {
   for (let m = re.exec(content); m; m = re.exec(content)) last = m;
   if (!last) return content.trim();
   return (content.slice(0, last.index) + content.slice(last.index + last[0].length)).trim();
+}
+
+/** options 只存 label/text，绝不把 isCorrect 存库（解禁后会随接口下发）。 */
+function stripOptionAnswers(
+  options: Array<{ label: string; text: string; isCorrect: boolean }> | null | undefined,
+): string | null {
+  if (!options?.length) return null;
+  return JSON.stringify(options.map(({ label, text }) => ({ label, text })));
 }
