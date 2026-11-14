@@ -13,6 +13,7 @@ from model_tags import (
     MODEL_DRIVEN,
     MODEL_NAMES,
     Tag,
+    build_review_rows,
     build_system_prompt,
     build_taxonomy_block,
     build_user_prompt,
@@ -23,6 +24,7 @@ from model_tags import (
     normalize_base_url,
     normalize_category,
     normalize_model,
+    pick_review_sample,
     resolve_image_path,
     validate_tags,
 )
@@ -449,3 +451,54 @@ def test_build_user_prompt_omits_missing_type_and_difficulty():
     assert "题干: 题干" in text
     # 0 是合法难度，必须照常输出
     assert "难度: 0" in build_user_prompt({"content": "x", "difficulty": 0})
+
+
+def _row(qid, cat="", model="", conf=0.9, flags=""):
+    return {"question_id": qid, "category": cat, "model": model,
+            "confidence": conf, "flags": flags}
+
+
+def test_build_review_rows_no_tag_outputs_one_row():
+    q = {"id": 7, "type": "short_answer", "difficulty": 5, "paper_refs": "卷 A"}
+    rows = build_review_rows(q, [], ["no_tag_hard"])
+    assert len(rows) == 1
+    assert rows[0]["question_id"] == 7
+    assert rows[0]["category"] == ""
+    assert rows[0]["flags"] == "no_tag_hard"
+
+
+def test_build_review_rows_multi_tags():
+    q = {"id": 7, "type": "proof", "difficulty": 4, "paper_refs": None}
+    tags = [Tag("geometry_synthesis", "median_doubling", 0.9, "延长"),
+            Tag("geometry_synthesis", "hand_in_hand", 0.8, "旋转")]
+    rows = build_review_rows(q, tags, ["multi_category"])
+    assert len(rows) == 2
+    assert rows[0]["category_name"] == "几何综合"
+    assert rows[1]["model_name"] == "手拉手（旋转全等）"
+
+
+def test_pick_review_sample_prefers_no_tag_hard_and_is_deterministic():
+    rows = []
+    for i in range(1, 41):
+        rows.append(_row(i, "geometry_synthesis", "median_doubling", 0.9))
+    rows.append(_row(100, "", "", 0, "no_tag_hard"))
+    rows.append(_row(101, "", "", 0, "no_tag_hard"))
+    a = pick_review_sample(rows, seed=42, total=30)
+    b = pick_review_sample(rows, seed=42, total=30)
+    assert [r["question_id"] for r in a] == [r["question_id"] for r in b]
+    picked = {r["question_id"] for r in a}
+    assert {100, 101} <= picked
+    assert len(picked) == 30
+
+
+def test_pick_review_sample_dedupes_questions():
+    rows = [_row(1, "geometry_synthesis", "median_doubling", 0.9),
+            _row(1, "geometry_synthesis", "hand_in_hand", 0.8)]
+    picked = pick_review_sample(rows, total=1)
+    assert len(picked) == 1
+
+
+def test_pick_review_sample_short_pool_returns_all():
+    rows = [_row(i, "stats_probability", "variance", 0.9) for i in range(1, 4)]
+    picked = pick_review_sample(rows, total=30)
+    assert len(picked) == 3

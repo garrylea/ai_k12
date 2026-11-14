@@ -10,6 +10,7 @@ import base64
 import json
 import mimetypes
 import os
+import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -420,3 +421,124 @@ def build_user_prompt(question: dict) -> str:
         parts.append(f"思路: {approach[:1500]}")
     parts.append("</question>")
     return "\n".join(parts)
+
+
+_ROW_FIELDS = [
+    "question_id", "paper_refs", "type", "difficulty",
+    "category", "category_name", "model", "model_name",
+    "confidence", "reason", "flags",
+]
+
+
+def build_review_rows(question: dict, tags: list[Tag], flags: list[str]) -> list[dict]:
+    base = {
+        "question_id": question["id"],
+        "paper_refs": question.get("paper_refs") or "",
+        "type": question.get("type") or "",
+        "difficulty": question.get("difficulty") or "",
+        "flags": ";".join(flags),
+    }
+    if not tags:
+        return [{**base, "category": "", "category_name": "", "model": "",
+                 "model_name": "", "confidence": "", "reason": ""}]
+    return [
+        {**base,
+         "category": t.category,
+         "category_name": CATEGORY_NAMES[t.category],
+         "model": t.model,
+         "model_name": MODEL_NAMES[t.category].get(t.model, ""),
+         "confidence": f"{t.confidence:.2f}",
+         "reason": t.reason}
+        for t in tags
+    ]
+
+
+def _representative_rows(rows: list[dict]) -> list[dict]:
+    best: dict[int, dict] = {}
+    for row in rows:
+        qid = row["question_id"]
+        prev = best.get(qid)
+        if prev is None:
+            best[qid] = row
+            continue
+        if float(row.get("confidence") or 0) > float(prev.get("confidence") or 0):
+            best[qid] = row
+    return list(best.values())
+
+
+def _flag_set(row: dict) -> set[str]:
+    return {f for f in str(row.get("flags") or "").split(";") if f}
+
+
+def _risk_priority(row: dict) -> int:
+    flags = _flag_set(row)
+    for idx, flag in enumerate(
+            ["low_confidence", "no_evidence", "multi_category", "image_missing"]):
+        if flag in flags:
+            return idx
+    return 99
+
+
+def pick_review_sample(rows: list[dict], seed: int = 42, total: int = 30) -> list[dict]:
+    """A 组风险抽样 + B 组固定种子随机；一题一行（取最高置信度标签）。"""
+    reps = _representative_rows(rows)
+    if len(reps) <= total:
+        return [{**r, "pick_reason": "all"} for r in sorted(
+            reps, key=lambda x: x["question_id"])]
+
+    picked: list[dict] = []
+    picked_ids: set[int] = set()
+
+    def take(row: dict, reason: str) -> None:
+        if row["question_id"] in picked_ids:
+            return
+        picked.append({**row, "pick_reason": reason})
+        picked_ids.add(row["question_id"])
+
+    # A 组：先 no_tag_hard（最多 3 条），再模型驱动类风险
+    hard = [r for r in sorted(reps, key=lambda x: x["question_id"])
+            if "no_tag_hard" in _flag_set(r)][:3]
+    for row in hard:
+        take(row, "no_tag_hard")
+    a_target = total // 2
+    model_rows = [r for r in reps
+                  if r.get("category") in MODEL_DRIVEN and r["question_id"] not in picked_ids]
+    model_rows.sort(key=lambda r: (_risk_priority(r),
+                                   float(r.get("confidence") or 0),
+                                   r["question_id"]))
+    for row in model_rows:
+        if len(picked) >= a_target:
+            break
+        take(row, f"flag:{_risk_priority(row)}" if _risk_priority(row) < 99
+             else "low_confidence_fill")
+
+    # A 组不够：用剩余题按置信度从低到高补
+    if len(picked) < a_target:
+        rest = sorted((r for r in reps if r["question_id"] not in picked_ids),
+                      key=lambda r: (float(r.get("confidence") or 0), r["question_id"]))
+        for row in rest:
+            if len(picked) >= a_target:
+                break
+            take(row, "low_confidence_fill")
+
+    # B 组：其他大类高置信度，固定种子随机
+    b_target = total - len(picked)
+    b_pool = [r for r in reps
+              if r["question_id"] not in picked_ids
+              and r.get("category") not in MODEL_DRIVEN
+              and float(r.get("confidence") or 0) >= LOW_CONFIDENCE]
+    b_pool.sort(key=lambda r: r["question_id"])
+    b_pick = random.Random(seed).sample(b_pool, min(b_target, len(b_pool)))
+    for row in b_pick:
+        take(row, "random_high_confidence")
+
+    # 仍不够：全库剩余按题号补
+    if len(picked) < total:
+        rest = sorted((r for r in reps if r["question_id"] not in picked_ids),
+                      key=lambda r: r["question_id"])
+        for row in rest:
+            if len(picked) >= total:
+                break
+            take(row, "fill")
+
+    return picked[:total]
