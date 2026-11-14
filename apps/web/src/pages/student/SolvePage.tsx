@@ -580,7 +580,13 @@ export default function SolvePage() {
 
             <div className={tab === 'ai' ? 'flex-1 min-h-0 overflow-hidden flex flex-col' : 'hidden'}>
               <AuxChatPanel
-                onRetry={errorStage === 'judge' ? () => void judge.retry() : undefined}
+                onRetry={
+                  errorStage === 'judge'
+                    ? () => void judge.retry()
+                    : errorStage === 'tutor'
+                      ? () => void tutor.retry()
+                      : undefined
+                }
               />
               <div className="shrink-0 p-3 bg-white border-t border-[#E5E5E5]">
                 <AuxInputBar

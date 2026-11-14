@@ -315,6 +315,25 @@ describe('SolvePage 状态机', () => {
     expect(screen.getByLabelText('满分')).toHaveValue(10);
   });
 
+  it('文字 + 配图：不调识题，图片物化成 Markdown 附在题干末尾', async () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('输入题目文字直接作答；只放图片则自动识别'), {
+      target: { value: '求下图的阴影面积' },
+    });
+    // 文字已有，再加图 —— 图只作配图，不能触发 MinerU
+    await addImageOnly();
+
+    fireEvent.click(screen.getByRole('button', { name: '开始作答' }));
+    await screen.findByLabelText('作答输入');
+
+    expect(recognizeMock).not.toHaveBeenCalled();
+    const figure = document.querySelector('img[alt="配图1"]') as HTMLImageElement | null;
+    expect(figure).toBeTruthy();
+    expect(figure?.getAttribute('src')).toContain('/uploads/draft.jpg');
+    // 题干文字仍在，图是追加而不是替换
+    expect(screen.getByText('求下图的阴影面积', { exact: false })).toBeInTheDocument();
+  });
+
   it('识别失败 → 手动输入走单候选选题（空题干就地写）', async () => {
     recognizeMock.mockRejectedValueOnce(new Error('识别失败'));
     renderPage();
@@ -642,6 +661,34 @@ describe('SolvePage 状态机', () => {
     const messages = useChatStore.getState().messages;
     expect(messages.filter((m) => m.role === 'user')).toHaveLength(1);
     expect(messages[messages.length - 1].content).toBe('重试后成功');
+    expect(messages[messages.length - 1].error).toBeUndefined();
+  });
+
+  it('答疑网络失败 → 错误气泡的「重试」重发答疑流，不重复用户气泡', async () => {
+    tutorStreamMock
+      .mockImplementationOnce(async function* () {
+        yield* [];
+        throw new Error('network down');
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: 'content', delta: '重试后的讲解' };
+      });
+
+    renderPage();
+    await goToAnswerStage();
+    fireEvent.click(screen.getByRole('button', { name: '答疑' }));
+
+    // 失败阶段是 tutor：气泡里必须有可点的「重试」（此前只有判题失败才有）
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }));
+
+    await waitFor(() => expect(tutorStreamMock).toHaveBeenCalledTimes(2));
+    // 同一场会话、同一条提问：不新建会话、不再追加用户气泡
+    expect(createConversationMock).toHaveBeenCalledTimes(1);
+    expect(tutorStreamMock.mock.calls[1][0]).toEqual(tutorStreamMock.mock.calls[0][0]);
+
+    const messages = useChatStore.getState().messages;
+    expect(messages.filter((m) => m.role === 'user')).toHaveLength(1);
+    expect(messages[messages.length - 1].content).toBe('重试后的讲解');
     expect(messages[messages.length - 1].error).toBeUndefined();
   });
 
