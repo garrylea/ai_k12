@@ -83,12 +83,20 @@ class LLMClient:
 
     # ---- 请求组装与容错 ----
 
-    def _build_kwargs(self, system_prompt: str, user_prompt: str) -> dict:
+    def _build_kwargs(self, system_prompt: str, user_prompt: str,
+                      image_data_urls: list[str] | None = None) -> dict:
+        user_content: Any = user_prompt
+        if image_data_urls:
+            user_content = [{"type": "text", "text": user_prompt}]
+            user_content.extend(
+                {"type": "image_url", "image_url": {"url": url}}
+                for url in image_data_urls
+            )
         kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": user_content},
             ],
         }
         extra: dict[str, Any] = {}
@@ -114,24 +122,33 @@ class LLMClient:
         stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
         return stripped.strip() or text
 
-    def complete(self, system_prompt: str, user_prompt: str) -> LLMResponse:
-        kwargs = self._build_kwargs(system_prompt, user_prompt)
+    def _request(self, kwargs: dict) -> Any:
         try:
-            response = self._client.chat.completions.create(**kwargs)
+            return self._client.chat.completions.create(**kwargs)
         except Exception as e:
             # 容错降级：端点不支持 thinking/cache 参数（400/422）时，去掉后重试一次
             if (self._thinking or self._enable_cache) and self._is_bad_param_error(e):
                 print(f"[llm] {self._provider}: 端点不支持 thinking/cache 参数（{e}），"
                       f"降级为无参数重试", flush=True)
                 kwargs.pop("extra_body", None)
-                response = self._client.chat.completions.create(**kwargs)
-            else:
-                raise
+                return self._client.chat.completions.create(**kwargs)
+            raise
+
+    def _to_response(self, response: Any) -> LLMResponse:
         return LLMResponse(
             content=self._clean_content(response.choices[0].message.content) or "{}",
             prompt_tokens=response.usage.prompt_tokens if response.usage else 0,
             completion_tokens=response.usage.completion_tokens if response.usage else 0,
         )
+
+    def complete(self, system_prompt: str, user_prompt: str) -> LLMResponse:
+        return self._to_response(
+            self._request(self._build_kwargs(system_prompt, user_prompt)))
+
+    def complete_with_images(self, system_prompt: str, user_prompt: str,
+                             image_data_urls: list[str]) -> LLMResponse:
+        kwargs = self._build_kwargs(system_prompt, user_prompt, image_data_urls)
+        return self._to_response(self._request(kwargs))
 
 
 class KimiClient(LLMClient):

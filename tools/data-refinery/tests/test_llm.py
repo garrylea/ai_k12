@@ -202,3 +202,24 @@ class TestAnthropicCompat:
 
         kwargs = mock_client.messages.create.call_args.kwargs
         assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 8192}
+
+
+from types import SimpleNamespace
+
+
+def test_complete_with_images_builds_multimodal_message():
+    c = LLMClient(api_key="fake", model="m")
+    fake = MagicMock()
+    fake.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content='{"tags":[]}'))],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    )
+    c._client = fake
+    out = c.complete_with_images(
+        "sys", "user text", ["data:image/png;base64,AAA"])
+    assert out.content == '{"tags":[]}'
+    messages = fake.chat.completions.create.call_args.kwargs["messages"]
+    assert messages[0] == {"role": "system", "content": "sys"}
+    assert messages[1]["content"][0] == {"type": "text", "text": "user text"}
+    assert messages[1]["content"][1] == {
+        "type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
