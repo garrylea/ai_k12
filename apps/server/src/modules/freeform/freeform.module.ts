@@ -5,6 +5,8 @@ import { FreeformJudgeService } from './freeform-judge.service.js';
 import { MineruModule } from './mineru.module.js';
 import { FreeformSplitCapability } from '../../ai-core/capabilities/freeform-split.capability.js';
 import { FreeformJudgeCapability } from '../../ai-core/capabilities/freeform-judge.capability.js';
+import { FreeformTagCapability } from '../../ai-core/capabilities/freeform-tag.capability.js';
+import { FreeformChatIngestService } from './freeform-chat-ingest.service.js';
 import {
   UploadedFilesRepository,
   QuestionsRepository,
@@ -12,6 +14,9 @@ import {
   AiDialoguesRepository,
   AiMessagesRepository,
 } from '../../database/repositories/index.js';
+import { KnowledgePointsRepository } from '../../database/repositories/knowledge-points.repo.js';
+import { SubjectsRepository } from '../../database/repositories/subjects.repo.js';
+import { StudentsRepository } from '../../database/repositories/students.repo.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
 
 /**
@@ -29,13 +34,19 @@ import { ConversationsModule } from '../conversations/conversations.module.js';
   providers: [
     FreeformSplitCapability,
     FreeformJudgeCapability,
+    FreeformTagCapability,
     FreeformRecognizeService,
     FreeformJudgeService,
+    FreeformChatIngestService,
     UploadedFilesRepository,
     QuestionsRepository,
     MainErrorBooksRepository,
     AiDialoguesRepository,
     AiMessagesRepository,
+    KnowledgePointsRepository,
+    SubjectsRepository,
+    StudentsRepository,
   ],
+  exports: [FreeformChatIngestService],
 })
 export class FreeformModule {}

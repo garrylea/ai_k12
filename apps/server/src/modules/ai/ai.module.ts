@@ -5,6 +5,7 @@ import { HandwritingService } from './handwriting.service.js';
 import { TutoringCapability } from '../../ai-core/capabilities/tutoring.capability.js';
 import { ConversationService } from '../../services/conversation/index.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
+import { FreeformModule } from '../freeform/freeform.module.js';
 import { SafetyAlertsModule } from '../safety/safety-alerts.module.js';
 import { SafetyAlertsService } from '../safety/safety-alerts.service.js';
 import { AiDialoguesRepository, AiMessagesRepository, ExtractTasksRepository, MainErrorBooksRepository, QuestionsRepository, UploadedFilesRepository, CardsRepository } from '../../database/repositories/index.js';
@@ -17,7 +18,7 @@ import { UnitsRepository } from '../../database/repositories/units.repo.js';
 import { StudentScopeService } from './student-scope.service.js';
 
 @Module({
-  imports: [ConversationsModule, SafetyAlertsModule],
+  imports: [ConversationsModule, SafetyAlertsModule, FreeformModule],
   controllers: [AIController],
   providers: [
     AIService,

@@ -21,15 +21,24 @@ export class QuestionsRepository {
    * LIKE 粗筛（needle 无标点，能穿过题库内容的标点），再在 JS 里精确比对
    * 前缀；返回按 id 倒序（最新优先）的候选。
    */
-  async findByContentPrefix(content: string, limit = 20): Promise<QuestionRow[]> {
+  async findByContentPrefix(
+    content: string,
+    opts?: { subjectId?: number; limit?: number },
+  ): Promise<QuestionRow[]> {
     const prefix = contentPrefix(content);
     if (prefix.length < 4) return [];
     const needle = prefix.slice(0, Math.min(6, prefix.length));
+    const conditions = ['is_active = 1', "content LIKE CONCAT('%', ?, '%')"];
+    const params: Array<number | string> = [needle];
+    if (opts?.subjectId != null) {
+      conditions.push('subject_id = ?');
+      params.push(opts.subjectId);
+    }
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT * FROM questions WHERE is_active = 1 AND content LIKE CONCAT('%', ?, '%') ORDER BY id DESC LIMIT 50`,
-      [needle],
+      `SELECT * FROM questions WHERE ${conditions.join(' AND ')} ORDER BY id DESC LIMIT 50`,
+      params,
     );
-    return (rows as QuestionRow[]).filter((r) => contentPrefix(r.content) === prefix).slice(0, limit);
+    return (rows as QuestionRow[]).filter((r) => contentPrefix(r.content) === prefix).slice(0, opts?.limit ?? 20);
   }
 
   /** 题中心定位：按主键取在用题目（训练模块用，训练题必来自题库）。 */

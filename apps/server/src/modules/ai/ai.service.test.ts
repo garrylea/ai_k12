@@ -50,6 +50,7 @@ function mkDeps(over: any = {}) {
         gradeLabel: '初二', textbookLabel: '人教版', learnedContent: '一次函数',
       }),
     },
+    freeformChatIngest: { maybeIngest: vi.fn().mockResolvedValue(undefined) },
   };
   return { ...base, ...over };
 }
@@ -58,7 +59,7 @@ function mkService(d: any) {
   return new AIService(
     d.tutoring, d.conversationsService, d.conversationService, d.dialoguesRepo,
     d.mainErrorRepo, d.filesRepo, d.subjectsRepo, d.questionsRepo, d.extractTasksRepo,
-    d.studentScope,
+    d.studentScope, d.freeformChatIngest,
   );
 }
 

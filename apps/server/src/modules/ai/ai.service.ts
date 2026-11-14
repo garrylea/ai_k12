@@ -10,6 +10,7 @@ import { mapLLMErrorToClient } from '../../ai-core/infra/model-client/errors.js'
 import { fallbackConfig } from '../../ai-core/config.js';
 import { normalizeFreeFormSubjectId } from '../../ai-core/freeform.js';
 import { StudentScopeService, type StudentLearningScope } from './student-scope.service.js';
+import { FreeformChatIngestService } from '../freeform/freeform-chat-ingest.service.js';
 import type { TutoringRequest, Attachment, StreamEvent, StructuredQuestionOutput } from '../../ai-core/types.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
 import { ConversationService } from '../../services/conversation/index.js';
@@ -38,6 +39,7 @@ export class AIService {
     private readonly questionsRepo: QuestionsRepository,
     private readonly extractTasksRepo: ExtractTasksRepository,
     private readonly studentScope: StudentScopeService,
+    private readonly freeformChatIngest: FreeformChatIngestService,
   ) {}
 
   async tutor(dto: TutorDto, userId: number) {
@@ -95,6 +97,8 @@ export class AIService {
       }
       // Fire-and-forget: name the conversation from the user's actual question.
       this.maybeUpdateTitle(dialogueId, userId, dto.message, response.message.content).catch(() => {});
+      // 做题答疑：只答疑、没提交的题也要进错题本（异步、永不阻断）
+      if (isFreeform) void this.freeformChatIngest.maybeIngest(dialogueId, userId);
       return {
         dialogueId,
         message: response.message,
@@ -179,6 +183,8 @@ export class AIService {
       yield event;
     }
     this.maybeUpdateTitle(dialogueId, userId, dto.message, assistantContent).catch(() => {});
+    // 做题答疑：聊过即入库（异步、永不阻断）
+    if (isFreeform) void this.freeformChatIngest.maybeIngest(dialogueId, userId);
   }
 
   // ---------- shared helpers ----------
