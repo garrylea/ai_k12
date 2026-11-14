@@ -329,7 +329,7 @@
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
-| GET | `/api/conversations` | 查询会话列表（按学生/时间/类型过滤） | MVP |
+| GET | `/api/conversations` | 查询会话列表（按学生/时间/类型过滤）。2026-11-14：`scene` 支持逗号分隔多值；`hasChat=1` 只返回「聊过天」的 `aux_freeform`（纯判题会话不显示），供答疑历史同时收做题答疑 | MVP |
 | POST | `/api/conversations` | 创建新会话 | MVP |
 | GET | `/api/conversations/{dialogueId}` | 会话元数据 | MVP |
 | PATCH | `/api/conversations/{dialogueId}` | 更新会话标题 | MVP |
@@ -338,7 +338,7 @@
 | POST | `/api/conversations/{dialogueId}/messages` | 发送用户消息（非流式兜底） | MVP |
 | GET | `/api/conversations/{dialogueId}/context` | 加载截断后的上下文（供 AI-Agent 内部使用） | P1 |
 
-> **场景分型扩展（2026-11-08）**：`scene` 枚举增加 `aux_freeform`（做题入口的判题 / 答疑会话，`track='auxiliary'`）；`POST /api/conversations` 增加可选 `title`（≤100 字，缺省按 track 兜底），两者细节见 §4.30。答疑历史列表仍按 `aux_qna` 过滤，`aux_freeform` 不会混入。
+> **场景分型扩展（2026-11-08 / 2026-11-14）**：`scene` 枚举增加 `aux_freeform`（做题入口的判题 / 答疑会话，`track='auxiliary'`）；`POST /api/conversations` 增加可选 `title`（≤100 字，缺省按 track 兜底），两者细节见 §4.30。**答疑历史列表自 2026-11-14 起同时查 `aux_qna` 与「有聊天消息的 `aux_freeform`」**：`GET /api/conversations` 支持 `scene` 逗号分隔多值 + `hasChat=1`；只提交判题、没聊过天的做题会话仍不显示。
 
 ### 4.12 Rewards — `/api/rewards`（**已废弃，2026-09-29 用户裁决**）
 
@@ -367,7 +367,7 @@
 | PUT | `/api/parent/students/{studentId}/subject-configs/{subjectId}` | 写入/切换该学科教材配置：`{ gradeCode, term, textbookVersionId? }`；versionId 缺省按默认规则选（同学段 edition 非空优先、id 大者优先）；已开始学习且版本/册别变化时**重置该学科学习状态**并返回 `reset: true`（错题/作业记录保留在库，不再展示/不阻塞门禁） | MVP |
 | GET | `/api/parent/dashboard` | 家长仪表盘：一次返回名下所有孩子的概览（`lastActiveAt` / `activeDays7` / `unreadAlerts`）+ 各自的按学科卡片（进度 / 正确率累计 / 自评 / 错题待清零 / 考试数）；实时聚合，不落库 | MVP |
 | GET | `/api/parent/students/{studentId}/reports` | **实时聚合学情报告（不落库、不调 LLM）**：`?period=weekly\|monthly`（默认 `weekly`，非法值归一化为 `weekly`）。返回 `stats` / `trend` / `subjects` / `weakPoints` / `weakPointsUncoveredCount` / `exams` | MVP |
-| GET | `/api/parent/students/{studentId}/errors` | 孩子错题本（只读；分页壳 `{items,page,pageSize,total}`，`pageSize` 服务端固定 20）。query：`subject` / `source`(practice\|discuss\|exam\|targeted\|error_practice\|auxiliary\|freeform) / `track`(main\|training) / `cleared`(uncleared\|cleared\|all) / `from` / `to` / `page`；`page` 非法 → 400/1001。**轨道分档**（`source` → 档位，唯一真源 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`）：`main` = `practice\|discuss\|exam`；`training` = `targeted\|error_practice\|auxiliary\|freeform`。孩子**在辅线答疑里问过**的题（`auxiliary`）归 `training`——它进训练轨「错题练习」池、可被做对清零；做题入口的错题（`freeform`）同样归 `training`，不可勾选（不进普通练习池），但学生可从错题本「重练」回做题页（2026-11-10） | MVP |
+| GET | `/api/parent/students/{studentId}/errors` | 孩子错题本（只读；分页壳 `{items,page,pageSize,total}`，`pageSize` 服务端固定 20）。query：`subject` / `source`(practice\|discuss\|exam\|targeted\|error_practice\|auxiliary\|freeform) / `track`(main\|training) / `cleared`(uncleared\|cleared\|all) / `from` / `to` / `page`；`page` 非法 → 400/1001。**轨道分档**（`source` → 档位，唯一真源 = `parent-insights.repo.ts` 的 `TRACK_SOURCES`）：`main` = `practice\|discuss\|exam`；`training` = `targeted\|error_practice\|auxiliary\|freeform`。孩子**在辅线答疑里问过**的题（`auxiliary`）归 `training`——它进训练轨「错题练习」池、可被做对清零；做题入口的错题（`freeform`）同样归 `training`，2026-11-14 起**有标准答案的题可勾选进错题练习/专项**（`answerable=false` 的纯图片/标注失败题仍不可练），学生也可从错题本「重练」回做题页（2026-11-10） | MVP |
 | GET | `/api/parent/students/{studentId}/chat-logs` | AI 对话回放列表（分页壳同 `errors`）。query：`track` / `scene` / `from` / `to` / `q`（**只搜会话标题**）/ `page`。**不提供学科筛选**（`ai_dialogues.subject_id` 约 76% 为 NULL）。**做题入口的 `aux_freeform` 会话一律排除**（SQL 无条件 `scene <> 'aux_freeform'`），`scene` 枚举也不含它 | MVP |
 | GET | `/api/parent/students/{studentId}/chat-logs/{dialogueId}` | 单条对话详情：逐句回放，含 `reasoning`（AI 思考链，默认折叠）、`safetyFlag`（闲聊/偏离学习标记）与 `images[]`（孩子随消息发的图片 URL，服务端从 `attachments` 解析、只留 `type=='image'`，无附件时空数组）；不回传 `token_*` / `response_time_ms`。`aux_freeform` 会话与不存在同码（404/1002），不能靠直查 id 绕过列表 | MVP |
 | GET | `/api/parent/students/{studentId}/study-time` | **学习时长（会话口径）**。query `from` / `to`（`YYYY-MM-DD`，缺省近 7 天；值非法**宽容回落**默认窗口、不 400；`from > to` 自动交换）。响应 `{totalSeconds, activeDays, byDay:[{date,seconds}], byModule:[{module,seconds}], bySubject:[{subjectId,seconds}], source:'sessions'}`。**口径标注**：这是**显式会话**口径，与 `dashboard.activeDays7` 的**四路时间戳代理并存、不替换**（spec §10，详见 §5.25）——UI 必须并列展示 + 区分文案（如「学习时长（会话）」vs「活跃天数」），**不得悄悄换掉** | MVP |
@@ -862,7 +862,7 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 ```
 
 - `subjectId` 必填，仅 `1`（数学）/ `4`（物理）/ `5`（化学）；`maxScore` 必填，1–100 整数；`questionContent` 必填、≤30000 字；`answer` ≤30000 字，`trim()` 为空且无 `draftFileId` → 400/1001「请先写答案或在草稿上作答」。
-- `questionId` 可选：再次提交时带上次 `result` 返回值。`source='freeform'` → 更新同一条；首次去重命中了真实题库题（source 非 freeform）→ 只复用、不改题；不存在 → 400/1001。
+- `questionId` 可选：再次提交时带上次 `result` 返回值。`source='freeform'` → 更新同一条；未带 `questionId` 但按 hash / 前 20 字命中**已有 freeform 题** → 也用判题结果覆盖（先答疑后提交时，标注模型的答案要让位），题库真题（source 非 freeform）只复用、不改题；不存在 → 新建。`questionId` 指向的题不存在 → 400/1001。
 - `dialogueId` 可选：必须是正整数（非数字 → 400/1001）；不存在 / 非本人 → 业务码 1002（HTTP 200；内部 404 在流内转成 `error` 事件）；`scene` 不是 `aux_freeform` → 400/1001。以上均在 SSE `error` 事件里下发（HTTP 仍 200）。
 - `questionImages` / `figureUrls` 各最多 6 张；`figureUrls` 必须以 `/uploads/freeform/` 开头、文件存在；`answer` 内嵌的 `/uploads/` 图片同样校验归属（最多 6 张）。无 `dialogueId` 时服务端创建 `aux_freeform` 会话（`track='auxiliary'`、`title='做题 · <题干前 20 字>'`、题干作 assistant 锚消息）。
 
@@ -879,7 +879,7 @@ SSE 事件（HTTP 恒为 **200**；`data: {json}\n\n`）：
 
 错误一律以 `error` 事件下发（HTTP 仍 200，前端只在流内区分成功失败）：入参 / 学科 / 满分 / 图片 → `code=1001`；`dialogueId` 不存在或非本人 → `code=1002`（`dialogueId` 非数字、场景不符仍为 `1001`）；模型失败或尾部 JSON 解析失败（含二次结构化提取）→ `code=5502`；题库 / 错题本写失败 → `code=5000`（报告已流出、保留在页面）。客户端断开（`res.close`）中止上游模型，**部分报告不写库**。
 
-流结束后：取累计正文中**最后一个** ```json 块 → zod 校验 → 清洗正文并 `content(replace)` → 落库 → `result` → `done`。落库顺序：① questions（插入 / 更新，`source='freeform'`、`answer_verified=0`、`grade_band=NULL`、无知识点行、`full_score=maxScore`、`content_hash` 为去图片后题干哈希）；② `main_error_books`（`totalScore < maxScore` 时 find-or-create，`source='freeform'`；满分 `clearUnclearedByStudentQuestionId`）；③ `ai_dialogues.question_id`（仅 NULL 时）；④ `ai_messages` 两条（user `freeform_submit` / assistant `freeform_judge`）；⑤ 新建错题行的 `main_error_books.dialogue_id`（best-effort）。①② 是关键写（失败发 5000、不发 result），③④⑤ 失败只 warn。**不发积分、不写 `practice_results`、不更新掌握度**。`totalScore` clamp 到 `[0, maxScore]`；`verdict` 按分数重算，不采信模型；`question.type` / `difficulty` 非法分别回落 `short_answer` / `2`。
+流结束后：取累计正文中**最后一个** ```json 块 → zod 校验 → 清洗正文并 `content(replace)` → 落库 → `result` → `done`。落库顺序：① questions（插入 / 更新，`source='freeform'`、`answer_verified=0`、`grade_band=NULL`、`full_score=maxScore`、`content_hash` 为去图片后题干哈希；**options 只存 label/text，剥掉 isCorrect**）；② `main_error_books`（`totalScore < maxScore` 时 find-or-create，`source='freeform'`；满分 `clearUnclearedByStudentQuestionId`）；③ `ai_dialogues.question_id`（仅 NULL 时）；④ `ai_messages` 两条（user `freeform_submit` / assistant `freeform_judge`）；⑤ 新建错题行的 `main_error_books.dialogue_id`（best-effort）；⑥ **异步补知识点**（判题结果落库后 fire-and-forget，已有 KP 跳过；失败只 warn）。①② 是关键写（失败发 5000、不发 result），③④⑤⑥ 失败只 warn。**判题本身不发积分、不写 `practice_results`、不更新掌握度**（这些题后续在错题练习/专项里作答时才发分、更新掌握度）。`totalScore` clamp 到 `[0, maxScore]`；`verdict` 按分数重算，不采信模型；`question.type` / `difficulty` 非法分别回落 `short_answer` / `2`。
 
 **3. `POST /api/files/upload?source=freeform`**
 
@@ -887,9 +887,16 @@ SSE 事件（HTTP 恒为 **200**；`data: {json}\n\n`）：
 
 **4. `POST /api/conversations`（扩展）**
 
-`scene` 增加 `aux_freeform`（仅 `track='auxiliary'` 合法，与 track 不匹配 400/1001）；新增可选 `title`（字符串，trim 后 ≤100 字，超长 400/1001；`scene='aux_freeform'` 且未传时按题干前 20 字生成 `做题 · …`、无题干为 `做题`，其余缺省 `辅线答疑`）。做题入口首次提交或首次【答疑】时创建（带 `subjectId`、`questionText` 题干锚、自定义标题）。`GET /api/conversations?track=auxiliary&scene=aux_qna` 仍按 scene 过滤，`aux_freeform` **不出现在答疑历史列表**，也不进入家长端对话回放。
+`scene` 增加 `aux_freeform`（仅 `track='auxiliary'` 合法，与 track 不匹配 400/1001）；新增可选 `title`（字符串，trim 后 ≤100 字，超长 400/1001；`scene='aux_freeform'` 且未传时按题干前 20 字生成 `做题 · …`、无题干为 `做题`，其余缺省 `辅线答疑`）。做题入口首次提交或首次【答疑】时创建（带 `subjectId`、`questionText` 题干锚、自定义标题）。**2026-11-14 起**：`GET /api/conversations?track=auxiliary&scene=aux_qna,aux_freeform&hasChat=1` 会返回「聊过天」的做题会话（见 §4.30 / §5.33）；家长端对话回放仍无条件排除 `aux_freeform`。
 
-**隔离与副作用**：freeform 题无知识点关联，且**页面不可勾选 + 训练判题入口拒绝**——错题练习页把 freeform 条目显示但置为不可勾选，`POST /api/training/judge`（`judgeQuestion`）对 `source='freeform'` 的题一律 400/1001「做题记录的题目暂不支持错题练习」，直连也绕不过；故不进专项 / 同类型 / 变式 / 考试 / 错题练习任何自动池。错题只在错题本列表回看。家长端错题列表按 `TRACK_SOURCES` 归 `training` 档（与 `auxiliary` 同档），freeform 不参与发分 / 掌握度 / 练习池（`auxiliary` 仍可进训练错题练习池）。
+**答疑即入库（2026-11-14）**：做题会话首次产生「真实回复」（assistant 消息不是题干锚 `transcription`、不是安全阻断 `block`）后，`FreeformChatIngestService.maybeIngest` 异步（fire-and-forget、永不 reject、失败只 warn）：
+- 已有 `question_id` 或已有 `freeform_judge` 消息 → 跳过（判题已建题 / 满分后答疑不重建）；
+- 取题干锚 + 会话 `subject_id`（为空则跳过，不猜数学）；
+- 按 hash → **带学科限定的**前 20 字去重；未命中则用 `FreeformTagCapability`（`prompts/freeform/tag.md`，模型只能从该学科知识点清单选 id）生成答案/解析/题型/难度/知识点，落 `questions(source='freeform')` 并绑 `question_knowledge_points`；
+- 该生已有该题错题行（含已清零）→ 不重复建；否则建 `main_error_books(source='freeform')` 并回填 `dialogue.question_id`。
+纯图片题（无可标注文本）建空答案题 + 错题本，`answerable=false`，不进练习池。
+
+**练习池（2026-11-14 解禁）**：`source='freeform'` 不再特殊隔离。错题列表返回 `answerable`（`q.answer <> ''`），前端据此决定是否可勾选；`POST /api/training/judge` 不再拒绝 freeform 题，空答案仍走 `unanswered` 守卫。挂上知识点后，按现有谓词进知识点专项；专项答错产生的 `targeted` 错题可进同类型；错题练习再次答错可触发变式（变式生成**仅数学**，非数学题直接跳过）。练习时按现有规则发分、更新知识点掌握度。家长端错题列表仍按 `TRACK_SOURCES` 归 `training` 档。
 
 ---
 
@@ -2304,10 +2311,10 @@ judge/stream（HTTP 200，text/event-stream）
 **口径钉子**：
 
 1. **原题照片不入题库**：`questions.content` 只含题干 Markdown 与 MinerU 提取、学生勾选的配图（`/uploads/freeform/...`），原图只在 `uploaded_files` / 磁盘。
-2. **freeform 题**：`source='freeform'`、`answer_verified=0`、`grade_band=NULL`、`full_score=maxScore`、**不写 `question_knowledge_points`**；判题成功且 `answer` 非空才入库；去重先 `content_hash`（去图片后题干）再前 20 字前缀，命中复用不覆盖。
-3. **错题本**：仅 `totalScore < maxScore` 写 / 复用未清行（`source='freeform'`）；满分清零；**不发积分、不写 `practice_results`、不调 MasteryService**；不写 `error_redo_logs`。
-4. **池隔离**：**页面不可勾选 + 训练判题入口拒绝**——错题练习页把 freeform 条目显示但不可勾选；`POST /api/training/judge`（`judgeQuestion`）对 `source='freeform'` 一律 400/1001，直连也绕不过。专项 / 同类型 / 变式按 KP、考试按 `paper_questions`，freeform 无 KP 自然不入选。家长端 `TRACK_SOURCES.training` 含 `freeform`（与 `auxiliary` 同档，家长可见）；freeform 不进练习池，`auxiliary` 仍可进训练错题练习池。
-5. **会话隔离**：`ai_dialogues.scene='aux_freeform'`，答疑历史列表按 `aux_qna` 过滤，不会混入；本入口不提供历史页，刷新回到录入。
+2. **freeform 题**：`source='freeform'`、`answer_verified=0`、`grade_band=NULL`、`full_score=maxScore`；判题成功且 `answer` 非空才入库；去重先 `content_hash`（去图片后题干）再**带学科限定的**前 20 字前缀，命中已有 freeform 题时用判题结果覆盖；判题后**异步补 `question_knowledge_points`**（`FreeformTagCapability`，失败只 warn）。**options 只存 label/text**，写库与读取（`parseOptions`）都剥 `isCorrect`。
+3. **错题本**：判题仅 `totalScore < maxScore` 写 / 复用未清行（`source='freeform'`）；满分清零；判题本身**不发积分、不写 `practice_results`、不调 MasteryService**。**2026-11-14 起只答疑、没提交的题**：首次真实答疑后异步结构化建题 + 进错题本；已有判题报告 / 已有错题行（含已清零）不重建。
+4. **练习池（2026-11-14 解禁）**：`source='freeform'` 不再特殊隔离；错题列表按 `answerable`（`answer <> ''`）决定是否可勾选，`POST /api/training/judge` 不再拒绝 freeform。挂 KP 后可进知识点专项；专项答错产生的 `targeted` 错题可进同类型；错题练习再次答错可触发变式（仅数学）。练习时按现有规则发分、更新掌握度。家长端 `TRACK_SOURCES.training` 含 `freeform`（与 `auxiliary` 同档）。
+5. **会话隔离**：`ai_dialogues.scene='aux_freeform'`；**2026-11-14 起**「有聊天消息」的做题会话出现在【辅助答疑】历史（`scene=aux_qna,aux_freeform&hasChat=1`），可回放、可续聊；纯判题会话不显示。做题页本身仍不提供历史页，刷新回录入。
 6. **交付**：环境检查 + 路由迁移 + schema 对账收敛为一条命令 `bash tools/freeform/setup.sh`；重启后端用 `node dist/main.js`。
 
 ---

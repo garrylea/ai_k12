@@ -8,6 +8,50 @@
 
 ---
 
+## 2026-11-14 做题答疑进历史 + 做题题进错题/专项
+
+**用户反馈**：做题页答疑后刷新就找不到聊天记录；做题错题被隔离在所有练习池外，
+而只答疑没提交的题完全不落库。
+
+**改动**：
+- `GET /api/conversations` 支持多 `scene` + `hasChat`；答疑列表只收「有聊天消息」的
+  `aux_freeform`（题干锚 / freeform_submit / freeform_judge 不算聊天）。
+- 回放把 `freeform_submit` 按 Markdown 渲染并去掉「题目/我的作答」信封；只提交草稿时给占位。
+- 新增 `FreeformChatIngestService`：答疑结束异步补题 + 标注知识点 + 进错题本；
+  判题落库后异步补知识点。已有判题报告 / 已有错题行（含已清零）不重建。
+- 命中已有 freeform 题时用判题结果覆盖标注答案；options 写库/读取都剥 `isCorrect`；
+  前缀去重带学科，避免跨学科误合并。
+- 解除 `source='freeform'` 的错题练习/专项隔离；`answerable=false` 仍不可练；
+  变式生成加学科守卫（目前只支持数学）。
+- 新增 `FreeformTagCapability`（`prompts/freeform/tag.md`）+ 存量补标脚本；
+  模型按 primary → fallback 依次尝试（实测 DeepSeek 402 余额耗尽时自动落到 qwen）。
+
+**验证**：server 2697 passed（202 files）、web 1742 passed（179 files）；两端 build 通过；
+存量补标 `scanned=3 tagged=3 failed=0`；`dist/ai-core/prompts/freeform/tag.md` 已随构建复制。
+
+---
+
+## 2026-11-14 自由作答页「答疑」网络失败只显示「生成失败」、没有重试入口
+
+**用户反馈**：[做题] → [答疑] 里出现「生成失败 / 网络连接失败，请重试」，但那一块没有可点的
+重试，只能自己重新打字发问。
+
+**根因**：`ErrorBubble` 只在 `error.retryable && onRetry` 时渲染按钮，而 `SolvePage` 只给
+判题失败接线（`errorStage === 'judge'`）。答疑失败由 `useFreeformTutor` 写入
+`stage: 'tutor'`，`onRetry` 为 `undefined` → 按钮永远不出现；辅线答疑 `useAuxChat` 早有
+`retry()`，自由作答页的 tutor 一直没实现。
+
+**修复**：
+- `useFreeformTutor` 抽出 `runStream(ctx)`，新增 `lastSendRef` 缓存上次
+  （会话 / 提问 / 附件 / 学科）；`retry()` 先 `resetLastAssistantToStreaming()` 再重发，
+  **不追加用户气泡、不新建会话**；
+- `SolvePage` 的 `onRetry` 按 `errorStage` 分派：`judge → judge.retry`、
+  `tutor → tutor.retry`、其它 `undefined`。
+
+**验证**：`SolvePage.test.tsx` 新增 1 条（模拟网络抛错 → 出现「重试」→ 点后流被调 2 次、
+请求体相同、用户气泡仍 1 条、错误清空）；web 全量 1735 passed。
+
+
 ## 2026-11-12 单点登录互踢卡在考试页（PC App 被别处登录后没被踢）
 
 **用户反馈**：学生在 PC App 上考试时，同账号在 Web 端再登录，App 端没有被踢下线，

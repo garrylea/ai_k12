@@ -1747,10 +1747,10 @@ paths:
         错误码（均在事件里）：入参/学科/满分/图片/dialogueId 非数字/场景不符 1001；
         dialogueId 不存在或非本人 1002；模型失败或尾部 JSON 解析失败（含二次结构化
         提取）5502；题库/错题本写失败 5000。落库：questions
-        （source='freeform'、answer_verified=0、grade_band=NULL、无知识点行）+
-        main_error_books（仅 totalScore < maxScore 写/复用，满分清零）；
-        **不发积分、不写 practice_results、不更新掌握度**。客户端断开即中止上游模型，
-        部分报告不写库。
+        （source='freeform'、answer_verified=0、grade_band=NULL；options 剥 isCorrect；
+        判题后异步补知识点）+ main_error_books（仅 totalScore < maxScore 写/复用，满分清零）；
+        **判题本身不发积分、不写 practice_results、不更新掌握度**（后续在错题练习/专项
+        作答时才发分、更新掌握度）。客户端断开即中止上游模型，部分报告不写库。
       operationId: streamFreeformJudge
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -2126,10 +2126,22 @@ paths:
             enum: [mainline, auxiliary]
         - name: scene
           in: query
-          description: 场景分型过滤（缺省返回该 track 全部；辅线答疑列表传 aux_qna）
+          description: |
+            场景分型过滤（缺省返回该 track 全部）。2026-11-14 起支持**逗号分隔多值**，
+            如 `aux_qna,aux_freeform`；逐项白名单校验，非法值 400/1001。
+            辅线答疑历史同时做题答疑：传 `aux_qna,aux_freeform` + `hasChat=1`。
           schema:
             type: string
-            enum: [aux_qna, aux_training, aux_freeform, mainline_question, mainline_card]
+            example: aux_qna,aux_freeform
+        - name: hasChat
+          in: query
+          description: |
+            `1` = 只返回「聊过天」的 aux_freeform 会话（存在非 transcription /
+            freeform_submit / freeform_judge 的消息）；`0` 或缺省关闭；空串视为缺省；
+            其它值 400/1001。只约束 aux_freeform，不影响 aux_qna。
+          schema:
+            type: string
+            enum: ['0', '1']
       responses:
         '200':
           description: 会话列表
@@ -2721,7 +2733,8 @@ paths:
         `main` = `practice | discuss | exam`；`training` = `targeted | error_practice | auxiliary | freeform`。
         孩子**在辅线答疑里问过**的题（`source = 'auxiliary'`）归 `training`——它进训练轨
         「错题练习」池、孩子能在那里做对清零；做题入口的错题（`source = 'freeform'`）同样归
-        `training`，但只在错题本列表展示、不可勾选（不进练习池）。
+        `training`；2026-11-14 起有标准答案的题也可勾选进错题练习/专项（`answerable=false`
+        的纯图片/标注失败题仍不可练）。
         `pageSize` 服务端固定 20，前端不传；`page` 非法（`abc` / `1.5` / `-1`）→ 400 / 1001，不静默回落。
         `page` 超出末页 → 200 + 空 `items` + 正确 `total`。
       operationId: listParentErrors
@@ -10931,23 +10944,28 @@ components:
         options:
           type: array
           nullable: true
-          description: 选择题选项（questions.options parse 后的数组；无 / 坏 JSON 为 null）
+          description: |
+            选择题选项（questions.options parse 后的数组；无 / 坏 JSON 为 null）。
+            2026-11-14 起**绝不含 isCorrect**（写库剥离 + 读取兜底），防答案泄漏。
           items:
             type: object
             properties:
               label: { type: string }
               text: { type: string }
-              isCorrect: { type: boolean }
         source:
           type: string
           nullable: true
           description: >-
             错题来源（main_error_books.source）：practice / discuss / exam /
             targeted / error_practice / auxiliary / freeform 等；null = 历史行未记。
-            source='freeform' 的错题只在错题本列表回看：页面显示但不可勾选，
-            训练判题入口（POST /training/judge）对 freeform 题一律 400/1001。
-            家长端错题列表归 training 档（TRACK_SOURCES.training 含 freeform）。
-      required: [errorBookId, questionId, questionText, type, level, createdAt, kpIds, options, source]
+            2026-11-14 起 source='freeform' 不再特殊禁选：按 `answerable` 决定能否进
+            错题练习/专项；家长端错题列表归 training 档（TRACK_SOURCES.training 含 freeform）。
+        answerable:
+          type: boolean
+          description: |
+            是否有标准答案（questions.answer 非空）。false = 纯图片题 / 标注失败，
+            前端置灰不可勾选；true 可进错题练习、知识点专项。2026-11-14 新增。
+      required: [errorBookId, questionId, questionText, type, level, createdAt, kpIds, options, source, answerable]
 
     TrainingJudgeRequest:
       type: object
