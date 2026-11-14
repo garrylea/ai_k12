@@ -4,6 +4,7 @@ import { ModelRouter } from '../infra/model-router.js';
 import { getModelConfigRegistry } from '../infra/model-config-registry.js';
 import { PromptBuilder } from '../infra/prompt-builder.js';
 import { ModelClient } from '../infra/model-client/index.js';
+import { ResponseParser } from '../infra/response-parser.js';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -58,6 +59,7 @@ export class FreeformTagCapability {
   private modelRouter = new ModelRouter(getModelConfigRegistry());
   private promptBuilder: PromptBuilder;
   private modelClient: ModelClient;
+  private parser = new ResponseParser();
 
   constructor(deps?: FreeformTagCapabilityDeps) {
     this.promptBuilder = new PromptBuilder(resolve(__dirname, '../prompts'));
@@ -84,23 +86,41 @@ export class FreeformTagCapability {
         },
       });
       const route = this.modelRouter.route({ scene: 'structuring', subject: 'math' });
-      const res = await this.modelClient.chat({
-        model: route.primary,
-        messages: prompt.messages,
-        responseFormat: 'json_object',
-        timeout: timeoutConfig.timeout.structuring ?? timeoutConfig.timeout.default,
-      });
-      const parsed = TagSchema.parse(JSON.parse(res.content));
-      return {
-        ...parsed,
-        approach: parsed.approach ?? null,
-        options: parsed.options ?? null,
-        // 只保留候选清单内的 id：去重 + 限 3 个
-        knowledgePointIds: [...new Set(parsed.knowledgePointIds)]
-          .filter((id) => allowed.has(id))
-          .slice(0, 3),
-      };
-    } catch {
+      const candidates = [route.primary, route.fallback].filter(Boolean) as typeof route.primary[];
+      let lastErr: unknown = null;
+      for (const model of candidates) {
+        try {
+          const res = await this.modelClient.chat({
+            model,
+            messages: prompt.messages,
+            responseFormat: 'json_object',
+            timeout: timeoutConfig.timeout.structuring ?? timeoutConfig.timeout.default,
+          });
+          // 模型常把 JSON 包进 ```json 围栏；用统一解析器（含围栏提取 + 常见修复）
+          const parsedResult = this.parser.parse<unknown>({
+            rawContent: res.content,
+            mode: 'json',
+            schema: TagSchema,
+            defaultResult: EMPTY,
+          });
+          if (!parsedResult.success || !parsedResult.data) throw new Error('tag JSON 解析失败');
+          const parsed = TagSchema.parse(parsedResult.data);
+          return {
+            ...parsed,
+            approach: parsed.approach ?? null,
+            options: parsed.options ?? null,
+            // 只保留候选清单内的 id：去重 + 限 3 个
+            knowledgePointIds: [...new Set(parsed.knowledgePointIds)]
+              .filter((id) => allowed.has(id))
+              .slice(0, 3),
+          };
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      throw lastErr ?? new Error('no model available');
+    } catch (err) {
+      console.warn(`[freeform-tag] failed: ${err instanceof Error ? err.message : String(err)}`);
       return { ...EMPTY };
     }
   }
