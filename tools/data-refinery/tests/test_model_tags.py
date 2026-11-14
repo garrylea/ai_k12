@@ -3,6 +3,7 @@
 
 import base64
 import json
+import random
 
 import model_tags
 from model_tags import (
@@ -477,6 +478,14 @@ def test_build_review_rows_multi_tags():
     assert rows[1]["model_name"] == "手拉手（旋转全等）"
 
 
+def test_build_review_rows_keeps_zero_difficulty():
+    q = {"id": 8, "type": "choice", "difficulty": 0}
+    rows = build_review_rows(q, [], [])
+    assert rows[0]["difficulty"] == 0
+    # 缺失难度仍落空串
+    assert build_review_rows({"id": 9}, [], [])[0]["difficulty"] == ""
+
+
 def test_pick_review_sample_prefers_no_tag_hard_and_is_deterministic():
     rows = []
     for i in range(1, 41):
@@ -485,10 +494,13 @@ def test_pick_review_sample_prefers_no_tag_hard_and_is_deterministic():
     rows.append(_row(101, "", "", 0, "no_tag_hard"))
     a = pick_review_sample(rows, seed=42, total=30)
     b = pick_review_sample(rows, seed=42, total=30)
-    assert [r["question_id"] for r in a] == [r["question_id"] for r in b]
-    picked = {r["question_id"] for r in a}
-    assert {100, 101} <= picked
-    assert len(picked) == 30
+    assert a == b
+    expected = (
+        [(100, "no_tag_hard"), (101, "no_tag_hard")]
+        + [(i, "model_driven_fill") for i in range(1, 14)]
+        + [(i, "fill") for i in range(14, 29)]
+    )
+    assert [(r["question_id"], r["pick_reason"]) for r in a] == expected
 
 
 def test_pick_review_sample_dedupes_questions():
@@ -496,6 +508,59 @@ def test_pick_review_sample_dedupes_questions():
             _row(1, "geometry_synthesis", "hand_in_hand", 0.8)]
     picked = pick_review_sample(rows, total=1)
     assert len(picked) == 1
+    # 同一题保留最高置信度的那条标签
+    assert picked[0]["model"] == "median_doubling"
+    assert float(picked[0]["confidence"]) == 0.9
+
+
+def test_pick_review_sample_mixed_group_a_and_b():
+    rows = [_row(i, "geometry_synthesis", "median_doubling", 0.9)
+            for i in range(1, 31)]
+    rows += [_row(i, "stats_probability", "variance", 0.85) for i in range(31, 51)]
+    picked = pick_review_sample(rows, seed=42, total=30)
+    assert len(picked) == 30
+    assert len({r["question_id"] for r in picked}) == 30
+
+    group_a = [(r["question_id"], r["pick_reason"]) for r in picked
+               if r["pick_reason"] != "random_high_confidence"]
+    assert group_a == [(i, "model_driven_fill") for i in range(1, 16)]
+
+    group_b = [r["question_id"] for r in picked
+               if r["pick_reason"] == "random_high_confidence"]
+    assert group_b == random.Random(42).sample(list(range(31, 51)), 15)
+
+
+def test_pick_review_sample_all_stats_splits_a_and_b():
+    rows = [_row(i, "stats_probability", "variance", 0.85) for i in range(1, 41)]
+    picked = pick_review_sample(rows, seed=42, total=30)
+    assert len(picked) == 30
+    assert len({r["question_id"] for r in picked}) == 30
+
+    a_ids = [r["question_id"] for r in picked
+             if r["pick_reason"] == "low_confidence_fill"]
+    assert a_ids == list(range(1, 16))
+
+    b_ids = [r["question_id"] for r in picked
+             if r["pick_reason"] == "random_high_confidence"]
+    assert b_ids == random.Random(42).sample(list(range(16, 41)), 15)
+
+
+def test_pick_review_sample_total_zero_returns_empty():
+    rows = [_row(i, "stats_probability", "variance", 0.85) for i in range(1, 41)]
+    assert pick_review_sample(rows, total=0) == []
+
+
+def test_pick_review_sample_tolerates_unparseable_confidence():
+    rows = [_row(1, "stats_probability", "variance", "0.9x"),
+            _row(2, "stats_probability", "variance", " "),
+            _row(3, "stats_probability", "variance", None),
+            _row(1, "stats_probability", "probability_calc", 0.95)]
+    picked = pick_review_sample(rows, total=2)
+    assert len({r["question_id"] for r in picked}) == 2
+    # 同题仍取可解析的高置信度标签
+    full = pick_review_sample(rows, total=30)
+    row1 = next(r for r in full if r["question_id"] == 1)
+    assert row1["model"] == "probability_calc"
 
 
 def test_pick_review_sample_short_pool_returns_all():

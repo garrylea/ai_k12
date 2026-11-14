@@ -423,19 +423,14 @@ def build_user_prompt(question: dict) -> str:
     return "\n".join(parts)
 
 
-_ROW_FIELDS = [
-    "question_id", "paper_refs", "type", "difficulty",
-    "category", "category_name", "model", "model_name",
-    "confidence", "reason", "flags",
-]
-
-
 def build_review_rows(question: dict, tags: list[Tag], flags: list[str]) -> list[dict]:
+    difficulty = question.get("difficulty")
     base = {
         "question_id": question["id"],
         "paper_refs": question.get("paper_refs") or "",
         "type": question.get("type") or "",
-        "difficulty": question.get("difficulty") or "",
+        # 0 是合法难度，只有 None/缺失才落空串
+        "difficulty": "" if difficulty is None else difficulty,
         "flags": ";".join(flags),
     }
     if not tags:
@@ -453,6 +448,17 @@ def build_review_rows(question: dict, tags: list[Tag], flags: list[str]) -> list
     ]
 
 
+def _safe_float(raw: Any) -> float:
+    """抽样排序用的容错置信度：非法/NaN 一律 0.0，绝不抛。"""
+    if isinstance(raw, bool):
+        return 0.0
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0 if val != val else val
+
+
 def _representative_rows(rows: list[dict]) -> list[dict]:
     best: dict[int, dict] = {}
     for row in rows:
@@ -461,7 +467,7 @@ def _representative_rows(rows: list[dict]) -> list[dict]:
         if prev is None:
             best[qid] = row
             continue
-        if float(row.get("confidence") or 0) > float(prev.get("confidence") or 0):
+        if _safe_float(row.get("confidence")) > _safe_float(prev.get("confidence")):
             best[qid] = row
     return list(best.values())
 
@@ -470,17 +476,27 @@ def _flag_set(row: dict) -> set[str]:
     return {f for f in str(row.get("flags") or "").split(";") if f}
 
 
-def _risk_priority(row: dict) -> int:
+_RISK_FLAGS = ["low_confidence", "no_evidence", "multi_category", "image_missing"]
+
+
+def _risk_flag(row: dict) -> str | None:
+    """按风险优先级返回第一个命中的 flag 名；无风险返回 None。"""
     flags = _flag_set(row)
-    for idx, flag in enumerate(
-            ["low_confidence", "no_evidence", "multi_category", "image_missing"]):
+    for flag in _RISK_FLAGS:
         if flag in flags:
-            return idx
-    return 99
+            return flag
+    return None
+
+
+def _risk_rank(row: dict) -> int:
+    flag = _risk_flag(row)
+    return _RISK_FLAGS.index(flag) if flag else len(_RISK_FLAGS)
 
 
 def pick_review_sample(rows: list[dict], seed: int = 42, total: int = 30) -> list[dict]:
     """A 组风险抽样 + B 组固定种子随机；一题一行（取最高置信度标签）。"""
+    if total <= 0:
+        return []
     reps = _representative_rows(rows)
     if len(reps) <= total:
         return [{**r, "pick_reason": "all"} for r in sorted(
@@ -503,19 +519,19 @@ def pick_review_sample(rows: list[dict], seed: int = 42, total: int = 30) -> lis
     a_target = total // 2
     model_rows = [r for r in reps
                   if r.get("category") in MODEL_DRIVEN and r["question_id"] not in picked_ids]
-    model_rows.sort(key=lambda r: (_risk_priority(r),
-                                   float(r.get("confidence") or 0),
+    model_rows.sort(key=lambda r: (_risk_rank(r),
+                                   _safe_float(r.get("confidence")),
                                    r["question_id"]))
     for row in model_rows:
         if len(picked) >= a_target:
             break
-        take(row, f"flag:{_risk_priority(row)}" if _risk_priority(row) < 99
-             else "low_confidence_fill")
+        flag = _risk_flag(row)
+        take(row, f"flag:{flag}" if flag else "model_driven_fill")
 
     # A 组不够：用剩余题按置信度从低到高补
     if len(picked) < a_target:
         rest = sorted((r for r in reps if r["question_id"] not in picked_ids),
-                      key=lambda r: (float(r.get("confidence") or 0), r["question_id"]))
+                      key=lambda r: (_safe_float(r.get("confidence")), r["question_id"]))
         for row in rest:
             if len(picked) >= a_target:
                 break
@@ -526,7 +542,7 @@ def pick_review_sample(rows: list[dict], seed: int = 42, total: int = 30) -> lis
     b_pool = [r for r in reps
               if r["question_id"] not in picked_ids
               and r.get("category") not in MODEL_DRIVEN
-              and float(r.get("confidence") or 0) >= LOW_CONFIDENCE]
+              and _safe_float(r.get("confidence")) >= LOW_CONFIDENCE]
     b_pool.sort(key=lambda r: r["question_id"])
     b_pick = random.Random(seed).sample(b_pool, min(b_target, len(b_pool)))
     for row in b_pick:
