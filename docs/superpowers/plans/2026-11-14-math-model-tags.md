@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS question_model_tags (
 并在变更日志表格顶部加一行（当前最新为 v3.3，本条为 v3.4）：
 
 ```markdown
-| v2.10 | 2026-11-14 | 新增 `question_model_tags`（§3.2）：数学题中考模型两级标签；独立于 `knowledge_points`，避免判题写掌握度时污染；一题多模型、不分主次；`(category, model, confidence)` 索引支撑后续按模型开专项。 |
+| v3.4 | 2026-11-14 | 新增 `question_model_tags`（§3.2）：数学题中考模型两级标签；独立于 `knowledge_points`，避免判题写掌握度时污染；一题多模型、不分主次；`(category, model, confidence)` 索引支撑后续按模型开专项。 |
 ```
 
 - [ ] **Step 4: 应用迁移并验证**

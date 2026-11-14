@@ -300,6 +300,12 @@ class AnthropicCompatClient(LLMClient):
             completion_tokens=response.usage.output_tokens if response.usage else 0,
         )
 
+    def complete_with_images(self, system_prompt: str, user_prompt: str,
+                             image_data_urls: list[str]) -> LLMResponse:
+        # 这条路径走 anthropic SDK（messages.create），没有 base 的 chat.completions，
+        # 基类实现会 AttributeError；显式拒绝，让调用方的 preflight 报出可读原因。
+        raise NotImplementedError("anthropic provider 不支持图片输入")
+
 
 # provider 字符串 -> 子类 注册表（create_llm_client 分发用）
 REGISTRY: dict[str, type[LLMClient]] = {

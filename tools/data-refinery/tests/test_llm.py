@@ -203,6 +203,13 @@ class TestAnthropicCompat:
         kwargs = mock_client.messages.create.call_args.kwargs
         assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 8192}
 
+    def test_complete_with_images_not_supported(self):
+        # 这条路径没有 chat.completions；必须显式 NotImplementedError 而不是 AttributeError
+        with patch("anthropic.Anthropic"):
+            llm = AnthropicCompatClient(api_key="fake", model="m")
+        with pytest.raises(NotImplementedError, match="不支持图片"):
+            llm.complete_with_images("sys", "user", ["data:image/png;base64,AAA"])
+
 
 from types import SimpleNamespace
 

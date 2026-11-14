@@ -15,7 +15,7 @@ import json
 import sys
 from base64 import b64encode
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +47,7 @@ class ModelConfig:
     provider: str
     model: str
     base_url: str
-    api_key: str
+    api_key: str = field(repr=False)
 
 
 @dataclass
@@ -77,7 +77,12 @@ def parse_tags_response(raw: str) -> list[dict] | None:
     tags = data["tags"]
     if not isinstance(tags, list):
         return None
-    return [t for t in tags if isinstance(t, dict)]
+    filtered = [t for t in tags if isinstance(t, dict)]
+    # 非空但全是非法条目（如 [1,2]）= 模型没按格式输出，不是「这题没有标签」。
+    # 若当 [] 返回，下游会删掉旧标签且不报错 —— 宁可判解析失败去重试。
+    if tags and not filtered:
+        return None
+    return filtered
 
 
 def load_model_config(conn, model_key: str) -> ModelConfig:
@@ -125,7 +130,10 @@ def load_questions(conn, limit: int | None, question_ids: list[int] | None) -> l
         cur.execute(sql, params)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-    assert all(r["grade_band"] in (None, "junior") for r in rows), "年级守卫失败"
+    bad = [r["id"] for r in rows if r["grade_band"] not in (None, "junior")]
+    if bad:
+        # 用 SystemExit 而非 assert：python -O 会摘掉 assert，年级守卫必须永远生效。
+        raise SystemExit(f"[error] 年级守卫失败: 非初中题被卷入 {bad[:10]}")
     if limit is not None:
         rows = rows[:limit]
     return rows
@@ -151,7 +159,8 @@ def preflight(llm: Any, with_images: bool) -> None:
         resp = llm.complete("你是助手。", "回复 ok")
     except Exception as e:
         raise SystemExit(f"[error] LLM 预检失败：{e}（检查网络 / VPN / Key）") from e
-    if "ok" not in (resp.content or "").lower():
+    # 只要求模型应答了「ok」；"OK" / "好的" 同样算通过。
+    if not any(k in (resp.content or "").lower() for k in ("ok", "okay", "好的", "好")):
         raise SystemExit(f"[error] LLM 预检返回异常：{resp.content!r}")
     if not with_images:
         return
@@ -195,6 +204,11 @@ def label_one(question: dict, llm: Any, system_prompt: str,
                        raw=raw[:1000])
 
     result = validate_tags(parsed)
+    if not result.tags and result.dropped > 0:
+        # 全部条目都没过校验（未知大类 / 模型驱动类缺模型）属于格式性失败，
+        # 不能当成「这题无标签」去删旧标签。
+        return Outcome(question, [], [], result.dropped, image_missing,
+                       error="validate_failed", raw=(raw or "")[:1000])
     flags = compute_flags(
         result.tags,
         difficulty=int(question.get("difficulty") or 0),
@@ -273,12 +287,16 @@ def main() -> int:
                       f"（不存在 / 非数学 / 已停用 / 非初中），请核对题号", flush=True)
             return 0
 
-        llm = create_llm_client(
-            provider=model_cfg.provider, api_key=model_cfg.api_key,
-            model=model_cfg.model, base_url=model_cfg.base_url,
-            timeout=120, max_tokens=512, max_retries=2,
-            thinking=False, enable_cache=False,
-        )
+        llm_kwargs: dict[str, Any] = {
+            "provider": model_cfg.provider, "api_key": model_cfg.api_key,
+            "model": model_cfg.model, "base_url": model_cfg.base_url,
+            "max_tokens": 512, "max_retries": 2,
+            "thinking": False, "enable_cache": False,
+        }
+        if model_cfg.provider != "local":
+            # 本地 27B 的 TTFT 高，LocalLlmClient 默认 300s；别用 120s 把它覆盖掉。
+            llm_kwargs["timeout"] = 120
+        llm = create_llm_client(**llm_kwargs)
         with_images = not args.no_images
         preflight(llm, with_images)
 

@@ -287,6 +287,7 @@ DELETE FROM question_model_tags WHERE question_id = ? AND source = 'llm';
 | `no_tag_hard` | `difficulty >= 4` 且无任何标签 |
 | `image_missing` | 引用的图片文件缺失/超限 |
 | `multi_category` | 该题命中 2 个大类 |
+| `failed` | 本次 LLM 调用/解析/校验失败，或写库失败；该题没有写入标签，详情见 `failures.jsonl` |
 
 **30 条抽法（脚本固定执行，不靠人挑）**：
 

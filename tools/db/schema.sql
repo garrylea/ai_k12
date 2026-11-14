@@ -267,7 +267,7 @@ CREATE TABLE IF NOT EXISTS question_knowledge_points (
 CREATE TABLE IF NOT EXISTS question_model_tags (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
   question_id   BIGINT       NOT NULL,
-  category      VARCHAR(32)  NOT NULL COMMENT '大类代码，见 spec §4.1',
+  category      VARCHAR(32)  NOT NULL COMMENT '大类代码，见 §4.1',
   category_name VARCHAR(32)  NOT NULL COMMENT '大类中文名（冗余，供读侧直接展示）',
   model         VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '模型代码；无二级时为空串',
   model_name    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '模型中文名',

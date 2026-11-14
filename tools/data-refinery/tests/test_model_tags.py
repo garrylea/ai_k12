@@ -190,7 +190,8 @@ def test_caps_three_models_and_two_categories():
         _raw("circle_synthesis", "切线判定与性质", 0.60),
         _raw("stats_probability", "方差", 0.50),
     ])
-    # 三条最高分同属几何综合 → 模型上限 3、大类上限 2 都命中；
+    # 三条最高分同属几何综合 → 本用例只触发模型上限 3（三条全留）。
+    # 大类上限不在此用例产生裁剪（同属一个大类），由 test_caps_empty_model_rows_occupy_slots 覆盖。
     # 精确断言防止「整类丢失」仍能通过宽松的 len 检查。
     assert [(t.category, t.model) for t in result.tags] == [
         ("geometry_synthesis", "median_doubling"),
