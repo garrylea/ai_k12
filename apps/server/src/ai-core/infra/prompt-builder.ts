@@ -110,6 +110,7 @@ export class PromptBuilder {
     }
     if (capability === 'freeform_split') return 'freeform/split.md';
     if (capability === 'freeform_judge') return 'freeform/judge.md';
+    if (capability === 'freeform_tag') return 'freeform/tag.md';
     if (capability === 'freeform_tutor') {
       // 做题页按学科选模块：只认物理/化学，其余（含 chinese/politics）回落数学。
       const module = subject === 'physics' || subject === 'chemistry' ? subject : 'math';

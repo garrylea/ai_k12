@@ -64,7 +64,7 @@ export interface RouteResult {
 
 // ========== Prompt Builder Types (§3.2.3) ==========
 
-export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge' | 'chinese_meaning_judge' | 'freeform_split' | 'freeform_judge' | 'freeform_tutor';
+export type CapabilityType = 'tutoring' | 'grading' | 'judgment' | 'explanation' | 'variation' | 'analysis' | 'fallback' | 'structuring' | 'hint' | 'dictation_feedback' | 'interpretation_judge' | 'english_word_judge' | 'chinese_meaning_judge' | 'freeform_split' | 'freeform_judge' | 'freeform_tutor' | 'freeform_tag';
 export type QuestionType = 'proof' | 'calculation' | 'reading' | 'essay' | 'translation';
 export type ExplanationMode = 'error_analysis' | 'knowledge_retry' | 'solution';
 
