@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { getAuthToken } from '@/services/authStorage';
 import { useChatStore } from '@/store/chatStore';
+import type { ChatMessage } from '@/store/chatStore';
 import { useAuxiliaryStore } from '@/store/auxiliaryStore';
 import {
   tutor,
@@ -33,6 +34,40 @@ interface SendContext {
   dlgId: number;
   message: string;
   attachments?: AttachmentRequest[];
+}
+
+/** 做题判题落库的 user 消息形如「题目：… 我的作答：…」；回放只显示作答，题干由锚消息展示。 */
+export function stripFreeformSubmitEnvelope(content: string): string {
+  const marker = '\n\n我的作答：\n';
+  const i = content.lastIndexOf(marker);
+  if (i < 0) return content;
+  const body = content.slice(i + marker.length);
+  // 只提交草稿时正文为空：给一句占位，避免空白气泡
+  return body.trim() ? body : '（本次仅提交了草稿）';
+}
+
+/** 历史消息 → 气泡模型（导出供单测；做题作答按 Markdown 渲染）。 */
+export function mapHistoryMessage(m: MessageItem): ChatMessage {
+  let images: string[] | undefined;
+  if (m.attachments) {
+    try {
+      const parsed = JSON.parse(m.attachments) as Array<{ type: string; url: string }>;
+      const urls = parsed.filter((a) => a.type === 'image' && !!a.url).map((a) => a.url);
+      if (urls.length) images = urls;
+    } catch {
+      // 坏 JSON 忽略
+    }
+  }
+  const isFreeformSubmit = m.type === 'freeform_submit';
+  return {
+    id: m.id,
+    role: m.role as 'user' | 'assistant',
+    content: isFreeformSubmit ? stripFreeformSubmitEnvelope(m.content) : m.content,
+    reasoning: m.reasoning ?? undefined,
+    type: m.type ?? undefined,
+    images,
+    ...(isFreeformSubmit ? { markdown: true } : {}),
+  };
 }
 
 export function useAuxChat(dialogueId: number) {
@@ -193,30 +228,7 @@ export function useAuxChat(dialogueId: number) {
           setMessages(
             items
               .filter((m) => m.role === 'user' || m.role === 'assistant')
-              .map((m) => {
-                // Parse persisted attachments (JSON string of {type,url}[]) back
-                // into display image URLs so history re-renders sent images.
-                let images: string[] | undefined;
-                if (m.attachments) {
-                  try {
-                    const parsed = JSON.parse(m.attachments) as Array<{ type: string; url: string }>;
-                    const urls = parsed
-                      .filter((a) => a.type === 'image' && !!a.url)
-                      .map((a) => a.url);
-                    if (urls.length) images = urls;
-                  } catch {
-                    // ignore malformed attachments JSON
-                  }
-                }
-                return {
-                  id: m.id,
-                  role: m.role as 'user' | 'assistant',
-                  content: m.content,
-                  reasoning: m.reasoning ?? undefined,
-                  type: m.type ?? undefined,
-                  images,
-                };
-              }),
+              .map(mapHistoryMessage),
           );
         })
         .catch(() => {
