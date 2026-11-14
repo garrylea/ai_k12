@@ -74,6 +74,12 @@ export class VariationGeneratorService {
     // 3. 原题：下线 / 空答案 / true_false（答案归一未实现，见 variation-question.util 注释）
     const q = await this.questionsRepo.findById(meb.question_id);
     if (!q) return;
+    // 变式生成目前只支持数学（写库 subject_id 固定 MATH_SUBJECT_ID）；
+    // 物理/化学做题错题不能被生成成数学题。
+    if (q.subject_id !== MATH_SUBJECT_ID) {
+      this.logger.warn(`variation generate skipped (errorItem=${errorItemId}): 暂只支持数学`);
+      return;
+    }
     if (!q.answer?.trim()) {
       this.logger.warn(`variation generate skipped (errorItem=${errorItemId}): 原题无标准答案`);
       return;

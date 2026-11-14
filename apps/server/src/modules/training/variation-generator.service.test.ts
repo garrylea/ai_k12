@@ -123,6 +123,7 @@ describe('VariationGeneratorService 跳过条件（不调 LLM、不留行）', (
     ['pending 变式已存在', { pending: true }],
     ['原题已下线', { question: null }],
     ['原题无标准答案', { question: makeQuestion({ answer: null }) }],
+    ['非数学题（物理）', { question: makeQuestion({ subject_id: 4 }) }],
     ['原题是 true_false', { question: makeQuestion({ type: 'true_false' }) }],
     ['无 primary 考点', { kpId: null }],
     ['考点不存在', { kp: null }],

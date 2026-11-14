@@ -83,7 +83,7 @@ describe('JudgeCoreService.judgeQuestion', () => {
       .rejects.toMatchObject({ status: 400 });
   });
 
-  it('freeform 题 -> 400/1001（做题入口的题不进错题练习）', async () => {
+  it('freeform 题照常判题（2026-11-14 隔离解除）', async () => {
     const deps = mk({
       questionsRepo: {
         findById: vi.fn().mockResolvedValue({ id: 30, source: 'freeform', type: 'choice', answer: 'A', options: null }),
@@ -92,16 +92,27 @@ describe('JudgeCoreService.judgeQuestion', () => {
         deleteById: vi.fn(),
       },
     });
-    const svc = mkSvc(deps);
-    const err = await svc
-      .judgeQuestion({ studentId: 1, subjectId: 1, questionId: 30, studentAnswer: 'B', source: 'error_practice' })
-      .catch((e) => e);
-    expect(err).toBeInstanceOf(HttpException);
-    expect(err.getStatus()).toBe(400);
-    expect(err.getResponse()).toMatchObject({ code: 1001, message: '做题记录的题目暂不支持错题练习' });
-    // 守卫必须在任何写库 / 调模型之前挡住
-    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
-    expect(deps.judgment.judge).not.toHaveBeenCalled();
+    const r = await mkSvc(deps).judgeQuestion({
+      studentId: 1, subjectId: 1, questionId: 30, studentAnswer: 'A', source: 'error_practice',
+    });
+    expect(r.isCorrect).toBe(true);
+  });
+
+  it('freeform 空答案题仍走 unanswered 守卫（不判错、不发分）', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findById: vi.fn().mockResolvedValue({ id: 32, source: 'freeform', type: 'short_answer', answer: '', options: null }),
+        findByContentHash: vi.fn(),
+        findOrCreate: vi.fn(),
+        deleteById: vi.fn(),
+      },
+    });
+    const r = await mkSvc(deps).judgeQuestion({
+      studentId: 1, subjectId: 1, questionId: 32, studentAnswer: 'x', source: 'error_practice',
+    });
+    expect(r.isCorrect).toBeNull();
+    expect(r.method).toBe('unanswered');
+    expect(r.pointsAwarded).toBe(0);
   });
 
   it('非 freeform 题照常判题（守卫只拦 freeform）', async () => {
