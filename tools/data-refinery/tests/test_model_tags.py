@@ -4,12 +4,16 @@
 from model_tags import (
     CATEGORY_NAMES,
     CATEGORY_ORDER,
+    LOW_CONFIDENCE,
     MODEL_DRIVEN,
     MODEL_NAMES,
+    Tag,
     build_system_prompt,
     build_taxonomy_block,
+    compute_flags,
     normalize_category,
     normalize_model,
+    validate_tags,
 )
 
 EXPECTED_CATEGORY_NAMES = {
@@ -111,9 +115,6 @@ def test_system_prompt_contains_rules_and_taxonomy():
     assert "倍长中线" in prompt
 
 
-from model_tags import LOW_CONFIDENCE, Tag, compute_flags, validate_tags
-
-
 def _raw(cat, model="", conf=0.9, reason="依据"):
     return {"category": cat, "model": model, "confidence": conf, "reason": reason}
 
@@ -175,9 +176,72 @@ def test_caps_three_models_and_two_categories():
         _raw("circle_synthesis", "切线判定与性质", 0.60),
         _raw("stats_probability", "方差", 0.50),
     ])
-    assert len(result.tags) <= 3
-    assert len({t.category for t in result.tags}) <= 2
-    assert result.tags[0].category == "geometry_synthesis"
+    # 三条最高分同属几何综合 → 模型上限 3、大类上限 2 都命中；
+    # 精确断言防止「整类丢失」仍能通过宽松的 len 检查。
+    assert [(t.category, t.model) for t in result.tags] == [
+        ("geometry_synthesis", "median_doubling"),
+        ("geometry_synthesis", "segment_cut_extend"),
+        ("geometry_synthesis", "hand_in_hand"),
+    ]
+    # dropped 只统计校验阶段丢弃（非法/未知/模型驱动缺模型），不含上限裁剪
+    assert result.dropped == 0
+
+
+def test_caps_empty_model_rows_occupy_slots():
+    result = validate_tags([
+        _raw("function_graph", "", 0.80),
+        _raw("application", "", 0.70),
+        _raw("stats_probability", "", 0.60),
+        _raw("new_definition", "algebra_new_definition", 0.50),
+    ])
+    # 前 3 名是三条空模型行；大类再截到 2 → 只留 function_graph / application。
+    # 空模型行占名额后，带具体模型的新定义行被上限挤掉。
+    assert [(t.category, t.model) for t in result.tags] == [
+        ("function_graph", ""),
+        ("application", ""),
+    ]
+    # 上限挤掉的行不计入 dropped（dropped 是 pre-cap 口径）
+    assert result.dropped == 0
+
+
+def test_non_list_raw_tags_counts_as_dropped():
+    for bad in (None, {"category": "geometry_synthesis"}, "not-a-list"):
+        result = validate_tags(bad)
+        assert result.tags == []
+        assert result.flags == []
+        assert result.dropped == 1
+
+
+def test_bool_confidence_falls_back_to_default():
+    result = validate_tags([_raw("geometry_synthesis", "倍长中线", True)])
+    assert result.tags[0].confidence == 0.50
+
+
+def test_nan_confidence_falls_back_to_default():
+    result = validate_tags([_raw("geometry_synthesis", "倍长中线", float("nan"))])
+    assert result.tags[0].confidence == 0.50
+
+
+def test_model_driven_none_model_drops_whole_tag():
+    result = validate_tags([_raw("geometry_synthesis", None)])
+    assert result.tags == []
+    assert result.dropped == 1
+
+
+def test_dedupe_tie_keeps_first_input_order():
+    result = validate_tags([
+        _raw("geometry_synthesis", "median_doubling", 0.9, "第一条"),
+        _raw("geometry_synthesis", "倍长中线", 0.9, "第二条"),
+    ])
+    assert len(result.tags) == 1
+    assert result.tags[0].reason == "第一条"
+
+
+def test_confidence_at_low_threshold_is_not_low_confidence():
+    tags = [Tag("geometry_synthesis", "median_doubling", LOW_CONFIDENCE, "")]
+    flags = compute_flags(tags, difficulty=2, has_evidence=True, image_missing=False)
+    assert "low_confidence" not in flags
+    assert flags == []
 
 
 def test_confidence_clamped_and_missing_defaults():

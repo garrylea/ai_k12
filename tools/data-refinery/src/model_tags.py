@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import random
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -151,6 +150,8 @@ class Tag:
 class ValidationResult:
     tags: list[Tag]
     flags: list[str]
+    # 只统计校验阶段丢弃的原始条目（非法结构 / 未知大类 / 未知或缺失的模型驱动模型 /
+    # 非列表入参），**不包含** MAX_MODELS / MAX_CATEGORIES 上限裁剪掉的行。
     dropped: int
 
 
@@ -189,9 +190,14 @@ def _known_model_anywhere(raw: object) -> bool:
 
 
 def validate_tags(raw_tags: Any) -> ValidationResult:
-    """LLM 原始 tags -> 合法、去重、清理空模型、截上限后的 Tag 列表。"""
+    """LLM 原始 tags -> 合法、去重、清理空模型、截上限后的 Tag 列表。
+
+    ``dropped`` 只统计校验阶段丢弃的条目（含非列表入参记为 1），
+    截断到 MAX_MODELS / MAX_CATEGORIES 时被上限挤掉的行**不计入**，
+    因此 ``len(raw_tags) - dropped`` 可能大于最终 ``len(tags)``。
+    """
     if not isinstance(raw_tags, list):
-        return ValidationResult([], [], 0)
+        return ValidationResult([], [], 1)
 
     flags: set[str] = set()
     dropped = 0
@@ -217,8 +223,6 @@ def validate_tags(raw_tags: Any) -> ValidationResult:
                 flags.add("category_model_mismatch")
             else:
                 flags.add("unknown_model")
-        if model is None:
-            model = ""
         if category in MODEL_DRIVEN and not model:
             dropped += 1
             continue
