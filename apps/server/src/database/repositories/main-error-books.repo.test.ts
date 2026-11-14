@@ -275,4 +275,15 @@ describe('MainErrorBooksRepository.countUncoveredUncleared', () => {
 
     expect(await repo.countUncoveredUncleared(9, 1)).toBe(0);
   });
+
+  it('findErrorBookEntries 返回 answerable（空答案/孤儿题 false）', async () => {
+    const pool = mockPool([
+      { id: 1, question_id: 10, questionText: '题', type: 'choice', full_score: 10, level: 1, created_at: new Date(), kp_id: null, options: null, source: 'freeform', answerable: 1 },
+    ]);
+    const repo = new MainErrorBooksRepository(pool as any);
+    const rows = await repo.findErrorBookEntries(1, 1, {});
+    expect(rows[0].answerable).toBe(1);
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).toContain("q.answer <> ''");
+  });
 });

@@ -1168,9 +1168,11 @@ export interface TrainingErrorBookEntry {
   options: unknown[] | null;
   /**
    * 题目来源（2026-11-08，Task 12 起后端返回）：`'freeform'` = 做题记录（自由提问）产生的题，
-   * 只能查看、不能进错题练习；其余/null 为普通错题。
+   * 前端据此显示「做题」标签；2026-11-14 起不再按来源禁选，改看 `answerable`。
    */
   source: string | null;
+  /** 是否有标准答案（false = 纯图片题/标注失败）：false 时不可进错题练习。2026-11-14 */
+  answerable: boolean;
 }
 
 export function getTrainingErrorBook(params: {

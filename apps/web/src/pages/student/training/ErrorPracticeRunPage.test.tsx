@@ -64,6 +64,7 @@ const ENTRY: TrainingErrorBookEntry = {
   kpIds: [],
   options: ['A. 1', 'B. 2'],
   source: null,
+  answerable: true,
 };
 
 /** 判题结果：本页只关心发分字段，其余给最小可用值。 */

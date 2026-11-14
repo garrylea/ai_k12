@@ -150,6 +150,15 @@ describe('TrainingService.getErrorBookEntries', () => {
     const r = await mkSvc(deps).getErrorBookEntries(1, 1, {});
     expect(r.map((e) => e.fullScore)).toEqual([10, null, null]);
   });
+
+  it('映射 answerable：1/0 -> boolean', async () => {
+    const deps = mk({ mainErrorRepo: { findErrorBookEntries: vi.fn().mockResolvedValue([
+      { id: 1, question_id: 10, questionText: '题', type: 'short_answer', full_score: 10, level: 1, created_at: new Date(), kp_id: null, options: null, source: 'freeform', answerable: 1 },
+      { id: 2, question_id: 11, questionText: '空答案', type: 'short_answer', full_score: 10, level: 1, created_at: new Date(), kp_id: null, options: null, source: 'freeform', answerable: 0 },
+    ]) } });
+    const r = await mkSvc(deps).getErrorBookEntries(1, 1, {});
+    expect(r.map((e) => e.answerable)).toEqual([true, false]);
+  });
 });
 
 describe('TrainingService.judgeTraining', () => {

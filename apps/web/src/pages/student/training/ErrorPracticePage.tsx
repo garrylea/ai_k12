@@ -74,9 +74,9 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** freeform（做题记录）条目只展示、不参与错题练习（2026-11-08）。 */
+/** 有标准答案才能进错题练习（2026-11-14：freeform 解禁，改按答案可用性判断）。 */
 function isSelectable(entry: TrainingErrorBookEntry): boolean {
-  return entry.source !== 'freeform';
+  return entry.answerable;
 }
 
 /** 做题错题走「重练」通道：写题单队列 → 做题页 ?redo=1（2026-11-10）。 */
@@ -212,7 +212,9 @@ export default function ErrorPracticePage() {
     () => entries.filter((e) => e.source === 'freeform').length,
     [entries],
   );
-  const allFreeform = entries.length > 0 && freeformCount === entries.length;
+  // 全部是做题错题、且一条都不能练：底部替换成说明句（孤儿题维持原计数句）
+  const allFreeformNotSelectable =
+    entries.length > 0 && freeformCount === entries.length && selectableCount === 0;
 
   const selectedCount = useMemo(
     () => entries.filter((e) => isSelectable(e) && selected.has(e.errorBookId)).length,
@@ -345,7 +347,8 @@ export default function ErrorPracticePage() {
               entries.map((entry) => {
                 const isSelected = selected.has(entry.errorBookId);
                 const isOrphan = entry.questionId == null;
-                const isFreeform = !isSelectable(entry);
+                const isFreeform = entry.source === 'freeform';
+                const notSelectable = !isSelectable(entry);
                 const varCount = pendingVarCount.get(entry.errorBookId) ?? 0;
                 return (
                   <Card
@@ -353,25 +356,25 @@ export default function ErrorPracticePage() {
                     className={
                       isOrphan
                         ? 'bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)] opacity-70'
-                        : isFreeform
-                          // freeform 行不降透明度：要能正常读题，靠禁用复选框 + 提示表达不可选
+                        : notSelectable
+                          // 不可选行不降透明度：要能正常读题，靠禁用复选框 + 提示表达原因
                           ? 'bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]'
                           : 'cursor-pointer hover:shadow-[var(--shadow-elevated)] bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]'
                     }
-                    onClick={isOrphan || isFreeform ? undefined : () => toggle(entry)}
+                    onClick={isOrphan || notSelectable ? undefined : () => toggle(entry)}
                   >
                     <div className="flex items-start gap-4">
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        disabled={isOrphan || isFreeform}
+                        disabled={isOrphan || notSelectable}
                         onChange={() => toggle(entry)}
                         onClick={(e) => e.stopPropagation()}
                         aria-label={
                           isOrphan
                             ? '该题未入库，不可选择'
-                            : isFreeform
-                              ? '做题记录的题目不可选择'
+                            : notSelectable
+                              ? '该题暂无标准答案，暂不支持练习'
                               : `选择错题 ${entry.errorBookId}`
                         }
                         className="mt-1 w-5 h-5 shrink-0 accent-[var(--brand-500)] cursor-pointer disabled:cursor-not-allowed"
@@ -415,14 +418,14 @@ export default function ErrorPracticePage() {
                             该题未入库，暂不支持线上重做
                           </p>
                         )}
-                        {isFreeform && (
+                        {((notSelectable && !isOrphan) || isFreeform) && (
                           <div className="flex items-center gap-3">
-                            {selectableCount > 0 && (
+                            {notSelectable && !isOrphan && (
                               <p className="text-xs text-[var(--learn-text-tertiary)]">
-                                做题记录的题目暂不支持错题练习
+                                该题暂无标准答案，暂不支持练习
                               </p>
                             )}
-                            {entry.questionId != null && (
+                            {isFreeform && entry.questionId != null && (
                               <button
                                 type="button"
                                 data-testid={`redo-freeform-${entry.errorBookId}`}
@@ -477,8 +480,8 @@ export default function ErrorPracticePage() {
           <div className="fixed bottom-0 left-0 right-0 border-t border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] shadow-[var(--shadow-card)]">
             <div className="mx-auto w-full max-w-[64rem] px-4 sm:px-8 py-4 flex items-center justify-between">
               <span className="text-sm text-[var(--learn-text-secondary)]">
-                {allFreeform
-                  ? '做题记录的题目暂不支持错题练习'
+                {allFreeformNotSelectable
+                  ? '当前筛选下没有可练习的错题'
                   : `已选 ${selectedCount} / ${selectableCount} 题`}
               </span>
               <Button

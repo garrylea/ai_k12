@@ -179,6 +179,7 @@ export class TrainingService {
         kpIds: row.kp_id != null ? [row.kp_id] : [],
         options: parseOptions(row.options),
         source: row.source ?? null,
+        answerable: Number(row.answerable) === 1,
       });
     }
     return [...byId.values()];

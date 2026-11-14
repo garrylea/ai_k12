@@ -282,7 +282,7 @@ export class MainErrorBooksRepository {
    */
   async findErrorBookEntries(studentId: number, subjectId: number, filters: {
     from?: string; to?: string; type?: string; kpId?: number;
-  }): Promise<Array<{ id: number; question_id: number | null; questionText: string | null; type: string | null; full_score: number | null; level: number; created_at: Date; kp_id: number | null; options: string | null; source: string | null }>> {
+  }): Promise<Array<{ id: number; question_id: number | null; questionText: string | null; type: string | null; full_score: number | null; level: number; created_at: Date; kp_id: number | null; options: string | null; source: string | null; answerable: number }>> {
     const conditions = ['meb.student_id = ?', 'meb.subject_id = ?', 'meb.is_cleared = 0'];
     const params: any[] = [studentId, subjectId];
     if (filters.from) { conditions.push('meb.created_at >= ?'); params.push(filters.from); }
@@ -292,7 +292,8 @@ export class MainErrorBooksRepository {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT meb.id, meb.question_id, COALESCE(q.content, meb.wrong_answer_text) AS questionText,
               q.type, q.full_score AS full_score, meb.level, meb.created_at,
-              q.options AS options, qkp.knowledge_point_id AS kp_id, meb.source
+              q.options AS options, qkp.knowledge_point_id AS kp_id, meb.source,
+              (q.id IS NOT NULL AND q.answer IS NOT NULL AND q.answer <> '') AS answerable
        FROM main_error_books meb
        LEFT JOIN questions q ON meb.question_id = q.id
        LEFT JOIN question_knowledge_points qkp ON qkp.question_id = meb.question_id
