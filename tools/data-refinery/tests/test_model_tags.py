@@ -1,18 +1,29 @@
 # -*- coding: utf-8 -*-
 """model_tags 纯函数测试（LLM/DB 不参与）。"""
 
+import base64
+import json
+
+import model_tags
 from model_tags import (
     CATEGORY_NAMES,
     CATEGORY_ORDER,
     LOW_CONFIDENCE,
+    MAX_IMAGES,
     MODEL_DRIVEN,
     MODEL_NAMES,
     Tag,
     build_system_prompt,
     build_taxonomy_block,
+    build_user_prompt,
+    collect_image_data_urls,
     compute_flags,
+    encode_image_data_url,
+    extract_image_refs,
+    normalize_base_url,
     normalize_category,
     normalize_model,
+    resolve_image_path,
     validate_tags,
 )
 
@@ -273,20 +284,6 @@ def test_compute_flags_no_tag_hard_and_multi_category():
         two, difficulty=3, has_evidence=True, image_missing=False)
 
 
-import base64
-from pathlib import Path
-
-from model_tags import (
-    MAX_IMAGES,
-    build_user_prompt,
-    collect_image_data_urls,
-    encode_image_data_url,
-    extract_image_refs,
-    normalize_base_url,
-    resolve_image_path,
-)
-
-
 def test_normalize_base_url():
     assert normalize_base_url("https://x/compatible-mode/") == "https://x/compatible-mode/v1"
     assert normalize_base_url("https://x/v1") == "https://x/v1"
@@ -318,12 +315,33 @@ def test_resolve_image_path_rejects_traversal(tmp_path):
     assert resolve_image_path("https://evil/x.jpg", assets) is None
 
 
+def test_resolve_image_path_query_leading_slash_and_schemes(tmp_path):
+    assets = tmp_path / "assets"
+    (assets / "questions").mkdir(parents=True)
+    ok = assets / "questions" / "ok.jpg"
+    ok.write_bytes(b"x")
+    (assets / "evil").mkdir()
+    (assets / "evil" / "x.jpg").write_bytes(b"x")
+    # 查询串 / 片段 / 前导斜杠都按相对 assets_root 解析
+    assert resolve_image_path("questions/ok.jpg?v=2", assets) == ok
+    assert resolve_image_path("questions/ok.jpg#frag", assets) == ok
+    assert resolve_image_path("/questions/ok.jpg", assets) == ok
+    # 协议大小写不敏感；data: 与协议相对 //host/... 一律拒绝
+    assert resolve_image_path("HTTPS://evil/x.jpg", assets) is None
+    assert resolve_image_path("Data:image/png;base64,AAA", assets) is None
+    assert resolve_image_path("//evil/x.jpg", assets) is None
+
+
 def test_encode_image_data_url(tmp_path):
     p = tmp_path / "a.png"
     p.write_bytes(b"\x89PNG\r\n\x1a\n")
     url = encode_image_data_url(p)
     assert url.startswith("data:image/png;base64,")
     assert base64.b64decode(url.split(",", 1)[1]) == b"\x89PNG\r\n\x1a\n"
+
+
+def _decoded(urls: list[str]) -> list[bytes]:
+    return [base64.b64decode(u.split(",", 1)[1]) for u in urls]
 
 
 def test_collect_images_caps_and_missing(tmp_path):
@@ -342,6 +360,52 @@ def test_collect_images_caps_and_missing(tmp_path):
     assert missing is True
 
 
+def test_collect_images_keeps_ref_order_within_cap(tmp_path):
+    assets = tmp_path / "assets"
+    qdir = assets / "questions" / "q"
+    qdir.mkdir(parents=True)
+    refs = []
+    for i in range(5):
+        name = f"s{i}.png"
+        (qdir / name).write_bytes(f"s{i}".encode())
+        refs.append(f"questions/q/{name}")
+    question = {"content": " ".join(f"![]({r})" for r in refs), "options": None}
+    urls, missing = collect_image_data_urls(question, assets)
+    assert missing is False
+    assert _decoded(urls) == [b"s0", b"s1", b"s2"]
+
+
+def test_collect_images_query_leading_slash_and_data_refs(tmp_path):
+    assets = tmp_path / "assets"
+    qdir = assets / "questions" / "q"
+    qdir.mkdir(parents=True)
+    (qdir / "a.png").write_bytes(b"a")
+    (qdir / "b.png").write_bytes(b"b")
+    question = {
+        "content": "![](questions/q/a.png?v=2) ![](/questions/q/b.png)"
+                   " ![](data:image/png;base64,AAA)",
+        "options": None,
+    }
+    urls, missing = collect_image_data_urls(question, assets)
+    assert _decoded(urls) == [b"a", b"b"]
+    assert missing is True
+
+
+def test_collect_images_oversized_beyond_cap_marks_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(model_tags, "MAX_IMAGE_BYTES", 4)
+    assets = tmp_path / "assets"
+    qdir = assets / "questions" / "q"
+    qdir.mkdir(parents=True)
+    for name in ("s0.png", "s1.png", "s2.png"):
+        (qdir / name).write_bytes(b"x")
+    (qdir / "big.png").write_bytes(b"xxxxx")  # 超出 MAX_IMAGE_BYTES(4)，且在第 4 张
+    refs = [f"questions/q/{n}" for n in ("s0.png", "s1.png", "s2.png", "big.png")]
+    question = {"content": " ".join(f"![]({r})" for r in refs), "options": None}
+    urls, missing = collect_image_data_urls(question, assets)
+    assert len(urls) == MAX_IMAGES
+    assert missing is True
+
+
 def test_build_user_prompt_truncates_and_includes_options():
     q = {
         "type": "short_answer", "difficulty": 4,
@@ -352,7 +416,36 @@ def test_build_user_prompt_truncates_and_includes_options():
     text = build_user_prompt(q)
     assert "题型: short_answer" in text
     assert "难度: 4" in text
-    assert "题干: " + "长" * 3000 in text
+    stem = next(line for line in text.splitlines() if line.startswith("题干: "))
+    assert len(stem) == len("题干: ") + 3000
+    assert "长" * 3001 not in text
     assert "A. 1" in text and "B. 2" in text
     assert "解析: 解析" in text
     assert "思路: 思路" in text
+
+
+def test_build_user_prompt_section_truncation_boundaries():
+    q = {
+        "content": "长" * 4000,
+        "options": json.dumps(
+            [{"label": "A", "text": "选" * 1200}], ensure_ascii=False),
+        "explanation": "解" * 1600,
+        "approach": "思" * 1600,
+    }
+    lines = {
+        line.split(": ", 1)[0]: line.split(": ", 1)[1]
+        for line in build_user_prompt(q).splitlines() if ": " in line
+    }
+    assert len(lines["题干"]) == 3000
+    assert len(lines["选项"]) == 1000
+    assert len(lines["解析"]) == 1500
+    assert len(lines["思路"]) == 1500
+
+
+def test_build_user_prompt_omits_missing_type_and_difficulty():
+    text = build_user_prompt({"content": "题干"})
+    assert "题型:" not in text
+    assert "难度:" not in text
+    assert "题干: 题干" in text
+    # 0 是合法难度，必须照常输出
+    assert "难度: 0" in build_user_prompt({"content": "x", "difficulty": 0})

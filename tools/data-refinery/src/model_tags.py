@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -303,7 +304,7 @@ def _loads_json(raw: Any) -> Any:
         return None
     try:
         return json.loads(raw)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return None
 
 
@@ -346,7 +347,7 @@ def extract_image_refs(content: str | None, options_raw: Any) -> list[str]:
 
 def resolve_image_path(ref: str, assets_root: Path) -> Path | None:
     ref = (ref or "").strip()
-    if not ref or ref.startswith(("http://", "https://", "data:")):
+    if not ref or ref.lower().startswith(("http://", "https://", "data:", "//")):
         return None
     ref = ref.split("?", 1)[0].split("#", 1)[0].lstrip("/")
     root = assets_root.resolve()
@@ -380,6 +381,15 @@ def collect_image_data_urls(question: dict, assets_root: Path) -> tuple[list[str
         if path is None:
             missing = True
             continue
+        # 容量上限只限制「产出」，不掩盖坏文件：超出前 3 张的不可读/超大文件同样算 missing。
+        try:
+            oversized = path.stat().st_size > MAX_IMAGE_BYTES
+        except OSError:
+            missing = True
+            continue
+        if oversized or not os.access(path, os.R_OK):
+            missing = True
+            continue
         if len(urls) >= MAX_IMAGES:
             continue
         url = encode_image_data_url(path)
@@ -391,12 +401,14 @@ def collect_image_data_urls(question: dict, assets_root: Path) -> tuple[list[str
 
 
 def build_user_prompt(question: dict) -> str:
-    parts = [
-        "<question>",
-        f"题型: {question.get('type') or ''}",
-        f"难度: {question.get('difficulty')}",
-        f"题干: {(question.get('content') or '')[:3000]}",
-    ]
+    parts = ["<question>"]
+    qtype = str(question.get("type") or "").strip()
+    if qtype:
+        parts.append(f"题型: {qtype}")
+    difficulty = question.get("difficulty")
+    if difficulty is not None:
+        parts.append(f"难度: {difficulty}")
+    parts.append(f"题干: {(question.get('content') or '')[:3000]}")
     options = _options_text(question.get("options"))
     if options.strip():
         parts.append(f"选项: {options[:1000]}")
