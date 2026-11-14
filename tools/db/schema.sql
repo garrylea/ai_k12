@@ -259,6 +259,29 @@ CREATE TABLE IF NOT EXISTS question_knowledge_points (
   CONSTRAINT fk_qkp_knowledge_point_id FOREIGN KEY (knowledge_point_id) REFERENCES knowledge_points (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ===== 数学题中考模型标签（2026-11-14）=====
+-- 设计：docs/superpowers/specs/2026-11-14-math-model-tags-design.md
+-- 迁移：tools/db/migrations/2026-11-14_question_model_tags.sql
+-- 独立于 knowledge_points：模型跨知识点，且不能污染掌握度。
+
+CREATE TABLE IF NOT EXISTS question_model_tags (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  question_id   BIGINT       NOT NULL,
+  category      VARCHAR(32)  NOT NULL COMMENT '大类代码，见 spec §4.1',
+  category_name VARCHAR(32)  NOT NULL COMMENT '大类中文名（冗余，供读侧直接展示）',
+  model         VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '模型代码；无二级时为空串',
+  model_name    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '模型中文名',
+  confidence    DECIMAL(3,2) NOT NULL DEFAULT 0.00 COMMENT '0-1，LLM 自评，仅用于排序抽检',
+  reason        VARCHAR(255) NOT NULL DEFAULT '' COMMENT '一句话依据，供抽检',
+  source        VARCHAR(16)  NOT NULL DEFAULT 'llm' COMMENT 'llm|manual',
+  created_at    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_qmt_question_cat_model (question_id, category, model),
+  KEY idx_qmt_category_model (category, model, confidence),
+  KEY idx_qmt_confidence (confidence),
+  CONSTRAINT fk_qmt_question FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ===== 训练模块（考试/专项/错题练习）基础表 =====
 -- 折回自 migrations/2026-09-02_add_training_tables.sql（install_mysql.sh 只执行 schema.sql，
 -- 迁移需同步折回；先例：textbook_versions 的 edition 4 元组）。
