@@ -16,7 +16,7 @@
 - **题池**：`category='geometry_synthesis' AND model='median_doubling' AND confidence>=0.70 AND is_active=1 AND answer<>''`，排除该生 `student_hidden_questions`。
 - **顺序**：`ORDER BY q.id ASC`；不吃 `RAND()`。
 - **题量**：模型模式只允许 `1` / `2`，且必须是该生 `math_targeted` 已开启档位、且不超过可练题数。
-- **记录标题**：handoff `title='倍长中线微专题'`；不加会话表列。
+- **记录标题**：handoff `title='倍长中线'`；不加会话表列。
 - **API 文档同步**：`docs/API接口与数据流设计文档.md` 与 `docs/api/openapi.yaml` 必须同时改。
 - **不新增依赖**。
 
@@ -753,8 +753,6 @@ describe('ModelSpecialPanel', () => {
     const p = props();
     render(<ModelSpecialPanel {...p} />);
     expect(screen.getByText('倍长中线')).toBeTruthy();
-    expect(screen.getByText('几何综合 · 微专题')).toBeTruthy();
-    expect(screen.getByText('可练 2 题')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /^2 题/ }));
     expect(p.onSelectTier).toHaveBeenCalledWith('2');
     fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
@@ -850,15 +848,6 @@ export function ModelSpecialPanel({
         <h2 className="text-xl font-bold text-[var(--learn-text-primary)]">
           {special.modelName}
         </h2>
-        <p className="mt-1 text-sm text-[var(--learn-text-secondary)]">
-          {special.categoryName} · 微专题
-        </p>
-        <p className="mt-2 text-sm text-[var(--learn-text-secondary)]">
-          先完整做一道两问的题，再单独巩固第二问。
-        </p>
-        <p className="mt-2 text-xs text-[var(--learn-text-tertiary)]">
-          可练 {special.questionCount} 题
-        </p>
       </section>
 
       {special.questionCount === 0 ? (
@@ -1124,7 +1113,6 @@ describe('中考模型模式', () => {
     fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
     await waitFor(() => expect(getModelSpecialsMock).toHaveBeenCalledWith(1));
     expect(await screen.findByText('倍长中线')).toBeTruthy();
-    expect(screen.getByText('可练 2 题')).toBeTruthy();
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
@@ -1138,7 +1126,7 @@ describe('中考模型模式', () => {
     });
     const stored: unknown = JSON.parse(sessionStorage.getItem('training:targeted') ?? 'null');
     expect(stored).toEqual({
-      sessionId: 77, questions: [STARTED_QUESTION], title: '倍长中线微专题',
+      sessionId: 77, questions: [STARTED_QUESTION], title: '倍长中线',
     });
   });
 
@@ -1237,7 +1225,7 @@ git commit -m "feat(web): 专项页支持倍长中线微专题"
 在 §5.16 的「选知识点 + 题型 + 题数」段后加：
 
 ```markdown
-**模型微专题（倍长中线，2026-11-15）**：专项页切到「中考模型」→ `GET /api/training/model-specials?subjectId=1` 取白名单与可练数 → 选 1/2 题档 → `POST /api/training/targeted/start` 传 `{category:'geometry_synthesis', model:'median_doubling', type:null, count}` → 服务端 JOIN `question_model_tags`（confidence>=0.70）+ 排除隐藏/空答案 + `ORDER BY q.id ASC` → 建 `training_sessions`（`task_code='math_targeted'`, `ref_type='model'`）→ 复用 `TargetedRunPage` 判题/发分。练习记录标题由 handoff `title` 落为「倍长中线微专题」。
+**模型微专题（倍长中线，2026-11-15）**：专项页切到「中考模型」→ `GET /api/training/model-specials?subjectId=1` 取白名单与可练数 → 选 1/2 题档 → `POST /api/training/targeted/start` 传 `{category:'geometry_synthesis', model:'median_doubling', type:null, count}` → 服务端 JOIN `question_model_tags`（confidence>=0.70）+ 排除隐藏/空答案 + `ORDER BY q.id ASC` → 建 `training_sessions`（`task_code='math_targeted'`, `ref_type='model'`）→ 复用 `TargetedRunPage` 判题/发分。练习记录标题由 handoff `title` 落为「倍长中线」。
 ```
 
 - [ ] **Step 3: openapi 路径**
@@ -1389,9 +1377,9 @@ Expected：通过。
 
 用学生账号在浏览器打开 `/student/training/targeted?subjectId=1`：
 
-1. 切「中考模型」，看到「倍长中线 · 几何综合 · 微专题 · 可练 2 题」。
+1. 切「中考模型」，看到「倍长中线」和 1/2 题档。
 2. 题量只出现 1/2 档，默认 2 题。
-3. 开始练习 → 先出完整两问题，再出第二问；交卷后练习记录标题为「倍长中线微专题」。
+3. 开始练习 → 先出完整两问题，再出第二问；交卷后练习记录标题为「倍长中线」。
 4. 家长把 1/2 档全停用后，模型页显示「家长未开启 1 或 2 题档位，暂不能开练。」且按钮禁用。
 
 - [ ] **Step 5: 写 changelog**
@@ -1407,7 +1395,7 @@ Expected：通过。
 - 新增 `GET /api/training/model-specials`：白名单模型 + 该生可练数（confidence>=0.70、active、有答案、排除隐藏）。
 - `POST /api/training/targeted/start` 支持 `{category, model}`（与 `kpId` 二选一）；模型模式 `type=null`、`count` 仅 1/2、且不超过可练数；题池按 `q.id ASC`，会话 `task_code='math_targeted'`、`ref_type='model'`。
 - 专项页新增「知识点 / 中考模型」切换；模型模式只展示倍长中线卡片，题量只显示家长已开启的 1/2 档；没有可用档位时禁用并提示。
-- handoff `title='倍长中线微专题'`，练习记录/结果页显示该标题；不新增表列、不新增 task code、不改积分规则。
+- handoff `title='倍长中线'`，练习记录/结果页显示该标题；不新增表列、不新增 task code、不改积分规则。
 
 **验证**：server / web 全量测试、两端 build、web lint；手动冒烟 1/2 题、记录标题、无档位禁用。
 ```

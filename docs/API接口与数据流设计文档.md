@@ -1542,7 +1542,7 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
   （专项练习无 bump-error-levels：新错题首轮作答，无「重做仍错」语义）
 ```
 
-**模型微专题（倍长中线，2026-11-15）**：专项页切到「中考模型」→ `GET /api/training/model-specials?subjectId=1` 取白名单与可练数 → 选 1/2 题档 → `POST /api/training/targeted/start` 传 `{category:'geometry_synthesis', model:'median_doubling', type:null, count}` → 服务端 JOIN `question_model_tags`（confidence>=0.70）+ 排除隐藏/空答案 + `ORDER BY q.id ASC` → 建 `training_sessions`（`task_code='math_targeted'`, `ref_type='model'`）→ 复用 `TargetedRunPage` 判题/发分。练习记录标题由 handoff `title` 落为「倍长中线微专题」。
+**模型微专题（倍长中线，2026-11-15）**：专项页切到「中考模型」→ `GET /api/training/model-specials?subjectId=1` 取白名单与可练数 → 选 1/2 题档 → `POST /api/training/targeted/start` 传 `{category:'geometry_synthesis', model:'median_doubling', type:null, count}` → 服务端 JOIN `question_model_tags`（confidence>=0.70）+ 排除隐藏/空答案 + `ORDER BY q.id ASC` → 建 `training_sessions`（`task_code='math_targeted'`, `ref_type='model'`）→ 复用 `TargetedRunPage` 判题/发分。练习记录标题由 handoff `title` 落为「倍长中线」。
 
 #### 5.16.1 专项训练选题排除已标记题
 

@@ -40,7 +40,7 @@
 
 - 不补题、不生成变式题、不扩到其他模型（旋转相似/中点模型/手拉手等）。
 - 不新增 `task_code`、不改积分规则、不改家长端积分配置页。
-- **不改练习记录表结构**；记录标题通过现有 handoff `title` 传递为「倍长中线微专题」（复用 `special_practice_sessions.title`，不加列）。
+- **不改练习记录表结构**；记录标题通过现有 handoff `title` 传递为「倍长中线」（复用 `special_practice_sessions.title`，不加列）。
 - 不做模型专项的独立首页第 5 张卡（保持训练首页四卡 2×2）。
 - 不做模型维度的推荐/薄弱点联动。
 
@@ -263,9 +263,6 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 
 ┌────────────────────────────────────┐
 │ 倍长中线                            │
-│ 几何综合 · 微专题                    │
-│ 先完整做一道两问的题，再单独巩固第二问。│
-│ 可练 2 题                            │
 │                                    │
 │ 题量                                │
 │ [1 题 +2 分] [2 题 +5 分]            │
@@ -274,8 +271,7 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 └────────────────────────────────────┘
 ```
 
-- 卡片标题 `倍长中线`；副标题 `几何综合 · 微专题`；说明一行 `先完整做一道两问的题，再单独巩固第二问。`
-- `可练 N 题` 来自 `questionCount`。
+- 卡片只显示模型名 `倍长中线`；**不显示分类、不显示「微专题」、不显示说明性文案、不显示「可练 N 题」**（2026-11-15 用户裁决：给用户带不来实际作用的文字不上页面）。
 - 题量 chips 复用现有 `TierChip`：显示档位名、分值、剩余次数；`remainingToday===0` 仍只置灰、不禁用（现有口径，不发分也让孩子练）。
 - 模型模式**隐藏题型选择器**（`type` 永远 null）。
 - 开始按钮 `开始练习`；loading 时 `开练中…` 并禁用（沿用现有 `starting`）。
@@ -291,7 +287,7 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 | `model-empty` | 该模型 `questionCount=0` | 卡片照常渲染，题量区 `暂无可练题目。`；开始按钮禁用 |
 | `model-ok` | 有模型且 count>0 | 卡片 + 题量 chips + 开始 |
 | `tiers-error` | `GET /points/me/rules` 失败 | 题量区显示 `档位加载失败，请重试` + `重试` 按钮；不整页报错，模型卡片仍可见 |
-| `no-tier` | 家长未开启可用档位 | 卡片照常显示，题量区按题池显示：可练 2 题 → `家长未开启 1 或 2 题档位，暂不能开练。`；可练 1 题 → `家长未开启 1 题档位，暂不能开练。`；开始禁用 |
+| `no-tier` | 家长未开启可用档位 | 卡片照常显示，题量区按题池显示：题池 2 题 → `家长未开启 1 或 2 题档位，暂不能开练。`；题池 1 题 → `家长未开启 1 题档位，暂不能开练。`；开始禁用 |
 | `starting` | 点开始 | 按钮 `开练中…`，禁用；失败在按钮上方显示 `startError`（沿用现有 ErrorBanner 风格） |
 | `empty-questions` | 接口返回空题单 | 留在配置页，提示 `这个模型暂时没有可练的题。`（防御，正常情况下 count 已校验） |
 
@@ -329,7 +325,7 @@ const res = await startTargetedPractice({
 const handoff: TargetedRunHandoff = {
   sessionId: res.sessionId,
   questions: res.questions,
-  title: '倍长中线微专题',   // 练习记录/结果页标题；复用现有 handoff title
+  title: '倍长中线',   // 练习记录/结果页标题；复用现有 handoff title
 };
 sessionStorage.setItem('training:targeted', JSON.stringify(handoff));
 navigate('/student/training/targeted/run');
@@ -356,7 +352,7 @@ navigate('/student/training/targeted/run');
 - **任务码复用**：`math_targeted`；模型模式不新增 `task_code`。
 - **档位/积分**：1 题档 2 分、2 题档 5 分（来自 `point_rules`，家长可改）；发分仍由 `POST /api/training/sessions/{id}/complete` 按会话 `tier_key` 取，不在开练时发。
 - **会话**：`training_sessions` 行 `task_code='math_targeted'`、`tier_key=count`、`expected_count=rows.length`、`ref_type='model'`、`ref_id=NULL`。`ref_type` 当前无消费方，只为后续统计留标记。
-- **练习记录标题**：模型模式 handoff 写 `title='倍长中线微专题'`；`TargetedRunPage` 判题时把它传给 `judgeTraining`，`special_practice_sessions.title` 落该值，练习记录列表/详情显示「倍长中线微专题」。**不需要给会话表加列**。
+- **练习记录标题**：模型模式 handoff 写 `title='倍长中线'`；`TargetedRunPage` 判题时把它传给 `judgeTraining`，`special_practice_sessions.title` 落该值，练习记录列表/详情显示「倍长中线」。**不需要给会话表加列**。
 - **模型维度统计**：标题已带模型名；若要按 `(category, model)` 聚合，按作答题目回查 `question_model_tags` 即可，不在会话表冗余模型。
 - **错题本**：判错走现有 `source='targeted'`，照常入本、参与清零门禁；模型模式不特殊。
 
