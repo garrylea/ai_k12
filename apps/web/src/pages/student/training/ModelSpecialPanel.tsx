@@ -44,8 +44,11 @@ export function ModelSpecialPanel({
   }
   if (!special) {
     return (
-      <Card className="mt-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
+      <Card className="mt-6 space-y-4 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
         <p className="text-sm text-[var(--learn-text-secondary)]">暂无可用模型。</p>
+        <Button variant="primary" size="lg" disabled>
+          开始练习
+        </Button>
       </Card>
     );
   }
@@ -112,6 +115,7 @@ export function ModelSpecialPanel({
       )}
 
       <section className="flex flex-col gap-3">
+        {startError && <p className="text-sm text-[var(--error)]">{startError}</p>}
         <Button
           variant="primary"
           size="lg"
@@ -119,14 +123,13 @@ export function ModelSpecialPanel({
           disabled={!canStart}
           onClick={onStart}
         >
-          开始练习
+          {starting ? '开练中…' : '开始练习'}
         </Button>
         {emptyHint && (
           <p className="text-sm text-[var(--learn-text-secondary)]">
             这个模型暂时没有可练的题。
           </p>
         )}
-        {startError && <p className="text-sm text-[var(--error)]">{startError}</p>}
       </section>
     </Card>
   );

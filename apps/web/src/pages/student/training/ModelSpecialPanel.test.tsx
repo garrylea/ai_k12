@@ -65,9 +65,20 @@ describe('ModelSpecialPanel', () => {
     expect(screen.getByText('暂无可练题目。')).toBeTruthy();
   });
 
-  it('白名单为空（special=null）：显示暂无可用模型，不与 0 题混淆', () => {
+  it('白名单为空（special=null）：显示暂无可用模型 + 禁用的开始按钮，不与 0 题混淆', () => {
     render(<ModelSpecialPanel {...props({ special: null, eligibleTiers: [], tierKey: null })} />);
     expect(screen.getByText('暂无可用模型。')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '开始练习' })).toBeDisabled();
     expect(screen.queryByText('暂无可练题目。')).toBeNull();
+  });
+
+  it('starting：按钮文案为开练中…并禁用', () => {
+    const p = props({ starting: true });
+    render(<ModelSpecialPanel {...p} />);
+    const btn = screen.getByRole('button', { name: '开练中…' });
+    expect(btn).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '开始练习' })).toBeNull();
+    fireEvent.click(btn);
+    expect(p.onStart).not.toHaveBeenCalled();
   });
 });

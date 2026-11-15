@@ -1524,7 +1524,7 @@ TargetedConfigPage 加载 -> GET /api/training/knowledge-points?subjectId={subje
   └─ KnowledgePointsRepository.findBySubject 平铺列表，前端按 parentKpId 组树
   ▼
 选知识点 + 题型（可选）+ 题数 -> POST /api/training/targeted/start
-  │  请求体 {subjectId, kpId|category+model, type, count}；count 1-20，type 白名单或 null
+  │  请求体 {subjectId, kpId|category+model, type, count}；count 1-20（KP 模式）/ 1-2（模型模式），type 白名单或 null
   ▼
 TrainingService.startTargetedPractice
   └─ QuestionsRepository.findRandomByKpAndType(subjectId, kpId, type?, count)

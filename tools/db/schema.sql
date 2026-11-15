@@ -1362,7 +1362,7 @@ CREATE TABLE IF NOT EXISTS training_sessions (
   expected_count SMALLINT NOT NULL DEFAULT 1,   -- 本次应完成的目标数（题数）
   judged_count   SMALLINT NOT NULL DEFAULT 0,   -- 审计留痕：实际判过几题
   status     VARCHAR(16) NOT NULL DEFAULT 'in_progress',  -- in_progress | completed | abandoned
-  -- 目标物类型：当前两个乙类任务（math_targeted / en_vocabulary）都写 'question'
+  -- 目标物类型：KP 模式写 'question'；模型微专题（倍长中线等）写 'model'
   -- （注意与 point_ledger.ref_type 是两套值，那边才有 'exam_session'/'passage' 等）
   ref_type   VARCHAR(24) DEFAULT NULL,
   ref_id     BIGINT DEFAULT NULL,

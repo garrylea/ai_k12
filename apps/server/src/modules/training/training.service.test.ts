@@ -389,6 +389,16 @@ describe('TrainingService.listModelSpecials', () => {
     expect(r).toEqual({ specials: [] });
     expect(deps.questionsRepo.countModelSpecialQuestions).not.toHaveBeenCalled();
   });
+
+  it.each([1, 0])('count 原样透传（%i 题），不夹取不改写', async (count) => {
+    const deps = mk({
+      questionsRepo: {
+        countModelSpecialQuestions: vi.fn().mockResolvedValue(count),
+      } as never,
+    });
+    const r = await mkSvc(deps).listModelSpecials(7, 1);
+    expect(r.specials[0].questionCount).toBe(count);
+  });
 });
 
 describe('TrainingService.startTargetedPractice', () => {
@@ -522,7 +532,7 @@ describe('TrainingService.startTargetedPractice', () => {
         model: 'median_doubling', modelName: '倍长中线',
       },
       type: null, count: 2,
-    })).rejects.toMatchObject({ status: 400 });
+    })).rejects.toThrow('题量超过可练题数（当前 1 题）');
     expect(deps.trainingSessionsRepo.create).not.toHaveBeenCalled();
   });
 });

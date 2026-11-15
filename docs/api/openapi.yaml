@@ -6332,7 +6332,7 @@ paths:
               $ref: '#/components/schemas/TargetedStartRequest'
       responses:
         '200':
-          description: 随机题单（可能为空数组）
+          description: KP 模式随机；模型模式按 `q.id ASC` 固定顺序（当前 1 题=7093、2 题=7093→7094 仅为现状快照）。
           content:
             application/json:
               schema:
@@ -11164,7 +11164,7 @@ components:
       properties:
         questions:
           type: array
-          description: 随机题单（白名单序列化，answer/explanation 剥离；抽不到题为空数组）
+          description: KP 模式随机；模型模式按 `q.id ASC` 固定顺序（当前 1 题=7093、2 题=7093→7094 仅为现状快照）。
           items:
             $ref: '#/components/schemas/TargetedPracticeQuestion'
         sessionId:
