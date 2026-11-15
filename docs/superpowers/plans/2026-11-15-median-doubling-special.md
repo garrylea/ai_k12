@@ -1,10 +1,12 @@
-# 倍长中线专项（2 题微专题）Implementation Plan
+# 数学中考模型专项（首批三模型）Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **2026-11-15 扩展**：白名单已从倍长中线 1 个扩到 3 个（+手拉手 5 题、几何新定义 11 题）；模型模式题量改为「家长已开档位且 ≤ 题池」，页面改为模型 chips 列表。本计划 Task 3 的单模型 UI 代码片段是首版实现记录，当前代码/测试以 `docs/superpowers/specs/2026-11-15-median-doubling-special-design.md` 与仓库实际为准。
 
-**Goal:** 在现有数学专项页新增「中考模型」模式，让倍长中线可用 1/2 题开练；复用 `math_targeted` 的判题、积分、练习记录，不改数据库。
+**Goal:** 在现有数学专项页新增「中考模型」模式，首批开放倍长中线 / 手拉手 / 几何新定义；复用 `math_targeted` 的判题、积分、练习记录，不改数据库。
 
-**Architecture:** 服务端新增一个白名单 + 两个只读查询（按模型数题/抽题），扩展现有 `POST /training/targeted/start` 的入参；前端在 `TargetedConfigPage` 内加模式切换，模型模式只展示白名单卡片与可用的 1/2 题档。题池只有 2 条同题干记录，按 `q.id ASC` 固定顺序，不随机。
+**Architecture:** 服务端白名单 + 两个只读查询（按模型数题/抽题），扩展现有 `POST /training/targeted/start` 的入参；前端在 `TargetedConfigPage` 内加模式切换，模型模式展示模型 chips 与家长已开启、且不超过题池的题量档。倍长中线固定 `q.id ASC`，其他模型 `RAND()`。
 
 **Tech Stack:** NestJS / mysql2 / Vitest（服务端）；React + Vite + Vitest（前端）；MySQL 8。设计真源：`docs/superpowers/specs/2026-11-15-median-doubling-special-design.md`。
 
@@ -13,10 +15,11 @@
 - **只做数学**：模型模式 `subjectId=1`；非数学直接 400（模型模式）。
 - **只读标签**：不改 `question_model_tags` / `questions` / 掌握度；**无数据库迁移**。
 - **复用**：`task_code='math_targeted'`、现有积分档位、`TargetedRunPage`、判题、完成发分；不新增 task code。
-- **题池**：`category='geometry_synthesis' AND model='median_doubling' AND confidence>=0.70 AND is_active=1 AND answer<>''`，排除该生 `student_hidden_questions`。
-- **顺序**：`ORDER BY q.id ASC`；不吃 `RAND()`。
-- **题量**：模型模式只允许 `1` / `2`，且必须是该生 `math_targeted` 已开启档位、且不超过可练题数。
-- **记录标题**：handoff `title='倍长中线'`；不加会话表列。
+- **白名单**：倍长中线 / 手拉手 / 几何新定义。
+- **题池**：`confidence>=0.70 AND is_active=1 AND answer<>''`，排除该生 `student_hidden_questions`。
+- **顺序**：倍长中线 `ORDER BY q.id ASC`；其他模型 `ORDER BY RAND()`。
+- **题量**：模型模式取该生 `math_targeted` 已开启档位且 ≤ 题池；倍长中线只 1/2。
+- **记录标题**：handoff `title=selectedModel.modelName`；不加会话表列。
 - **API 文档同步**：`docs/API接口与数据流设计文档.md` 与 `docs/api/openapi.yaml` 必须同时改。
 - **不新增依赖**。
 

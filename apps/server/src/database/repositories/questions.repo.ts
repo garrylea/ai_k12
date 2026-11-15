@@ -232,6 +232,11 @@ export class QuestionsRepository {
     model: string,
     count: number,
   ): Promise<QuestionRow[]> {
+    // 倍长中线是「完整题 → 第二问」的固定序列，必须 id 升序；
+    // 其他模型题池较大，随机抽，避免每次都出前几条。
+    const orderBy = model === 'median_doubling'
+      ? 'ORDER BY q.id ASC'
+      : 'ORDER BY RAND()';
     const sql = `SELECT q.* FROM questions q
       JOIN question_model_tags qmt ON qmt.question_id = q.id
       LEFT JOIN student_hidden_questions shq
@@ -239,7 +244,7 @@ export class QuestionsRepository {
       WHERE q.subject_id = ? AND qmt.category = ? AND qmt.model = ?
         AND qmt.confidence >= 0.70
         AND q.is_active = 1 AND q.answer <> '' AND shq.id IS NULL
-      ORDER BY q.id ASC LIMIT ?`;
+      ${orderBy} LIMIT ?`;
     // pool.query：LIMIT ? 不能走 execute 的 server-side prepare（仓库既有约定）。
     const [rows] = await this.pool.query<RowDataPacket[]>(
       sql, [studentId, subjectId, category, model, count],

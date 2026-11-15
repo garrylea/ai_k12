@@ -365,22 +365,45 @@ describe('TrainingService.getKnowledgePoints', () => {
 });
 
 describe('TrainingService.listModelSpecials', () => {
-  it('数学：返回白名单模型 + 该生可练题数', async () => {
+  it('数学：返回白名单 3 个模型 + 各自可练题数', async () => {
     const deps = mk({
       questionsRepo: {
-        countModelSpecialQuestions: vi.fn().mockResolvedValue(2),
+        countModelSpecialQuestions: vi.fn().mockImplementation(
+          (_studentId: number, _subjectId: number, _category: string, model: string) =>
+            Promise.resolve(model === 'median_doubling' ? 2 : model === 'hand_in_hand' ? 5 : 11),
+        ),
       } as never,
     });
     const r = await mkSvc(deps).listModelSpecials(7, 1);
-    expect(r.specials).toEqual([{
-      category: 'geometry_synthesis',
-      categoryName: '几何综合',
-      model: 'median_doubling',
-      modelName: '倍长中线',
-      questionCount: 2,
-    }]);
+    expect(r.specials).toEqual([
+      {
+        category: 'geometry_synthesis',
+        categoryName: '几何综合',
+        model: 'median_doubling',
+        modelName: '倍长中线',
+        questionCount: 2,
+      },
+      {
+        category: 'geometry_synthesis',
+        categoryName: '几何综合',
+        model: 'hand_in_hand',
+        modelName: '手拉手',
+        questionCount: 5,
+      },
+      {
+        category: 'new_definition',
+        categoryName: '新定义',
+        model: 'geometry_new_definition',
+        modelName: '几何新定义',
+        questionCount: 11,
+      },
+    ]);
     expect(deps.questionsRepo.countModelSpecialQuestions)
       .toHaveBeenCalledWith(7, 1, 'geometry_synthesis', 'median_doubling');
+    expect(deps.questionsRepo.countModelSpecialQuestions)
+      .toHaveBeenCalledWith(7, 1, 'geometry_synthesis', 'hand_in_hand');
+    expect(deps.questionsRepo.countModelSpecialQuestions)
+      .toHaveBeenCalledWith(7, 1, 'new_definition', 'geometry_new_definition');
   });
 
   it('非数学：返回空数组，不查库', async () => {
@@ -686,7 +709,7 @@ describe('TrainingController.startTargetedPractice — 档位白名单（定案 
     [{ subjectId: 4, category: 'geometry_synthesis', model: 'median_doubling', type: null, count: 2 }, '仅支持数学'],
     [{ subjectId: 1, category: 'x', model: 'y', type: null, count: 2 }, '不支持的模型专项'],
     [{ subjectId: 1, category: 'geometry_synthesis', model: 'median_doubling', type: 'proof', count: 2 }, '不支持题型筛选'],
-    [{ subjectId: 1, category: 'geometry_synthesis', model: 'median_doubling', type: null, count: 3 }, '仅支持 1 或 2 题'],
+    [{ subjectId: 1, category: 'geometry_synthesis', model: 'median_doubling', type: null, count: 4 }, '题量仅允许'],
   ])('模型模式非法入参 -> 400（%#）', async (dto, msg) => {
     const svc: any = { startTargetedPractice: vi.fn() };
     const rules: any = { listTierKeys: vi.fn().mockResolvedValue(['1', '2', '3']) };

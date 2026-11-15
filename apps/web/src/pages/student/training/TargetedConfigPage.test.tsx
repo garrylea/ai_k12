@@ -42,10 +42,14 @@ const getRulesMock = vi.mocked(getMyPointRules);
 const getModelSpecialsMock = vi.mocked(getModelSpecials);
 const startMock = vi.mocked(startTargetedPractice);
 
-/** 中考模型微专题（本期只有一个：倍长中线，2 道可练）。 */
+/** 中考模型：倍长中线（2 题）与手拉手（5 题）。 */
 const MODEL_SPECIAL: TrainingModelSpecial = {
   category: 'geometry_synthesis', categoryName: '几何综合',
   model: 'median_doubling', modelName: '倍长中线', questionCount: 2,
+};
+const HAND_SPECIAL: TrainingModelSpecial = {
+  category: 'geometry_synthesis', categoryName: '几何综合',
+  model: 'hand_in_hand', modelName: '手拉手', questionCount: 5,
 };
 
 // 模型专项只在切到「中考模型」时才拉，各用例默认给一份可练的
@@ -396,6 +400,30 @@ describe('中考模型模式', () => {
     const stored: unknown = JSON.parse(sessionStorage.getItem('training:targeted') ?? 'null');
     expect(stored).toEqual({
       sessionId: 77, questions: [STARTED_QUESTION], title: '倍长中线',
+    });
+  });
+
+  it('多模型：切到手拉手，按题池默认 3 题开练', async () => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
+    getModelSpecialsMock.mockResolvedValue({ specials: [MODEL_SPECIAL, HAND_SPECIAL] });
+    startMock.mockResolvedValue({ questions: [STARTED_QUESTION], sessionId: 99 });
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
+    expect(await screen.findByRole('button', { name: '手拉手' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '手拉手' }));
+
+    expect(await screen.findByRole('button', { name: /^3 题/ })).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+    });
+    expect(startMock).toHaveBeenCalledWith({
+      subjectId: 1,
+      category: 'geometry_synthesis',
+      model: 'hand_in_hand',
+      type: null,
+      count: 3,
     });
   });
 

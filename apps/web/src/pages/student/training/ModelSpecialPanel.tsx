@@ -4,7 +4,9 @@ import { tierStatus } from './point-tiers';
 import { TierChip } from './TierChip';
 
 export interface ModelSpecialPanelProps {
-  special: TrainingModelSpecial | null;
+  specials: TrainingModelSpecial[];
+  selectedModel: TrainingModelSpecial | null;
+  onSelectModel: (special: TrainingModelSpecial) => void;
   status: 'idle' | 'loading' | 'ok' | 'error';
   error: string | null;
   tiers: PointRuleTier[] | null;
@@ -20,9 +22,36 @@ export interface ModelSpecialPanelProps {
   onStart: () => void;
 }
 
+function ModelChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={
+        'h-10 px-4 rounded-full border text-sm font-medium transition-colors ' +
+        (active
+          ? 'border-[var(--brand-500)] bg-[var(--brand-500)] text-[var(--text-on-brand)]'
+          : 'border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] text-[var(--learn-text-secondary)] hover:border-[var(--brand-500)]')
+      }
+    >
+      {label}
+    </button>
+  );
+}
+
 export function ModelSpecialPanel({
-  special, status, error, tiers, tiersError, eligibleTiers, tierKey,
-  starting, startError, emptyHint, onRetry, onRetryTiers, onSelectTier, onStart,
+  specials, selectedModel, onSelectModel, status, error, tiers, tiersError,
+  eligibleTiers, tierKey, starting, startError, emptyHint,
+  onRetry, onRetryTiers, onSelectTier, onStart,
 }: ModelSpecialPanelProps) {
   if (status === 'idle' || status === 'loading') {
     return (
@@ -42,7 +71,7 @@ export function ModelSpecialPanel({
       </Card>
     );
   }
-  if (!special) {
+  if (!selectedModel) {
     return (
       <Card className="mt-6 space-y-4 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
         <p className="text-sm text-[var(--learn-text-secondary)]">暂无可用模型。</p>
@@ -53,9 +82,12 @@ export function ModelSpecialPanel({
     );
   }
 
-  const noTier = special.questionCount >= 2
-    ? '家长未开启 1 或 2 题档位，暂不能开练。'
-    : '家长未开启 1 题档位，暂不能开练。';
+  const special = selectedModel;
+  const noTier = special.questionCount >= 3
+    ? '家长未开启可用题量档位，暂不能开练。'
+    : special.questionCount === 2
+      ? '家长未开启 1 或 2 题档位，暂不能开练。'
+      : '家长未开启 1 题档位，暂不能开练。';
   const canStart = special.questionCount > 0
     && tierKey != null
     && eligibleTiers.some((t) => t.tierKey === tierKey)
@@ -63,10 +95,15 @@ export function ModelSpecialPanel({
 
   return (
     <Card className="mt-6 space-y-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
-      <section aria-label="模型专项">
-        <h2 className="text-xl font-bold text-[var(--learn-text-primary)]">
-          {special.modelName}
-        </h2>
+      <section aria-label="模型选择" className="flex flex-wrap gap-2">
+        {specials.map((s) => (
+          <ModelChip
+            key={`${s.category}:${s.model}`}
+            label={s.modelName}
+            active={s.category === special.category && s.model === special.model}
+            onClick={() => onSelectModel(s)}
+          />
+        ))}
       </section>
 
       {special.questionCount === 0 ? (

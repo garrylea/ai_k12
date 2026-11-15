@@ -221,9 +221,6 @@ export class TrainingController {
       if (dto.type !== null && dto.type !== undefined) {
         throw new BadRequestException('模型专项不支持题型筛选');
       }
-      if (!Number.isInteger(dto.count) || (dto.count !== 1 && dto.count !== 2)) {
-        throw new BadRequestException('模型专项仅支持 1 或 2 题');
-      }
     }
 
     const { count } = dto;

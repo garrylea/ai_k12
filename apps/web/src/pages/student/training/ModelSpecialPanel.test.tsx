@@ -13,6 +13,14 @@ const SPECIAL: TrainingModelSpecial = {
   questionCount: 2,
 };
 
+const HAND: TrainingModelSpecial = {
+  category: 'geometry_synthesis',
+  categoryName: '几何综合',
+  model: 'hand_in_hand',
+  modelName: '手拉手',
+  questionCount: 5,
+};
+
 function tier(key: string, label: string, points: number): PointRuleTier {
   return {
     tierKey: key, tierLabel: label, points,
@@ -22,7 +30,9 @@ function tier(key: string, label: string, points: number): PointRuleTier {
 
 function props(over: Partial<ModelSpecialPanelProps> = {}): ModelSpecialPanelProps {
   return {
-    special: SPECIAL,
+    specials: [SPECIAL],
+    selectedModel: SPECIAL,
+    onSelectModel: vi.fn(),
     status: 'ok',
     error: null,
     tiers: [tier('1', '1 题', 2), tier('2', '2 题', 5)],
@@ -59,12 +69,21 @@ describe('ModelSpecialPanel', () => {
   });
 
   it('可练 0 题：显示暂无可练题目', () => {
-    render(<ModelSpecialPanel {...props({ special: { ...SPECIAL, questionCount: 0 }, eligibleTiers: [], tierKey: null })} />);
+    const zero = { ...SPECIAL, questionCount: 0 };
+    render(<ModelSpecialPanel {...props({ specials: [zero], selectedModel: zero, eligibleTiers: [], tierKey: null })} />);
     expect(screen.getByText('暂无可练题目。')).toBeTruthy();
   });
 
-  it('白名单为空（special=null）：显示暂无可用模型 + 禁用的开始按钮，不与 0 题混淆', () => {
-    render(<ModelSpecialPanel {...props({ special: null, eligibleTiers: [], tierKey: null })} />);
+  it('多模型：点击手拉手切到该模型', () => {
+    const p = props({ specials: [SPECIAL, HAND], selectedModel: SPECIAL });
+    render(<ModelSpecialPanel {...p} />);
+    expect(screen.getByRole('button', { name: '倍长中线' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '手拉手' }));
+    expect(p.onSelectModel).toHaveBeenCalledWith(HAND);
+  });
+
+  it('白名单为空（specials=[]）：显示暂无可用模型 + 禁用的开始按钮，不与 0 题混淆', () => {
+    render(<ModelSpecialPanel {...props({ specials: [], selectedModel: null, eligibleTiers: [], tierKey: null })} />);
     expect(screen.getByText('暂无可用模型。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '开始练习' })).toBeDisabled();
     expect(screen.queryByText('暂无可练题目。')).toBeNull();

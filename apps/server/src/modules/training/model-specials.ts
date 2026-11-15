@@ -13,6 +13,18 @@ export const MODEL_SPECIALS: readonly ModelSpecial[] = [
     model: 'median_doubling',
     modelName: '倍长中线',
   },
+  {
+    category: 'geometry_synthesis',
+    categoryName: '几何综合',
+    model: 'hand_in_hand',
+    modelName: '手拉手',
+  },
+  {
+    category: 'new_definition',
+    categoryName: '新定义',
+    model: 'geometry_new_definition',
+    modelName: '几何新定义',
+  },
 ];
 
 export function findModelSpecial(

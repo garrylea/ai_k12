@@ -6277,7 +6277,7 @@ paths:
   /training/model-specials:
     get:
       tags: [Training]
-      summary: 模型微专题清单（倍长中线首批）
+      summary: 模型专项清单（倍长中线 / 手拉手 / 几何新定义）
       description: >-
         student JWT。subjectId 必填 integer；非数学返回 `{specials: []}`。
         questionCount 是该生可练数：question_model_tags.confidence>=0.70、
@@ -11157,7 +11157,7 @@ components:
           type: integer
           minimum: 1
           maximum: 20
-          description: 模型模式只能 1 或 2，且必须是家长已开启档位
+          description: 模型模式必须是家长已开启档位，且不超过该模型可练数
 
     TargetedStartResult:
       type: object

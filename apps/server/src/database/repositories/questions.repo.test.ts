@@ -225,7 +225,7 @@ describe('QuestionsRepository 模型专项抽题', () => {
     expect(params).toEqual([7, 1, 'geometry_synthesis', 'median_doubling']);
   });
 
-  it('find：ORDER BY q.id ASC + LIMIT ? 走 pool.query', async () => {
+  it('find：倍长中线固定 id 升序；其他模型随机', async () => {
     const pool = mockPool([{ id: 7093 }, { id: 7094 }]);
     const repo = new QuestionsRepository(pool as any);
     const rows = await repo.findModelSpecialQuestions(
@@ -235,6 +235,11 @@ describe('QuestionsRepository 模型专项抽题', () => {
     const [sql, params] = pool.query.mock.calls[0];
     expect(sql).toContain('ORDER BY q.id ASC LIMIT ?');
     expect(params).toEqual([7, 1, 'geometry_synthesis', 'median_doubling', 2]);
+
+    const pool2 = mockPool([{ id: 1 }]);
+    const repo2 = new QuestionsRepository(pool2 as any);
+    await repo2.findModelSpecialQuestions(7, 1, 'geometry_synthesis', 'hand_in_hand', 3);
+    expect(pool2.query.mock.calls[0][0]).toContain('ORDER BY RAND() LIMIT ?');
   });
 });
 

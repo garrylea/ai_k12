@@ -9,7 +9,7 @@ import {
   type TrainingKnowledgePoint,
   type TrainingModelSpecial,
 } from '@/services/api';
-import { MATH_TASK_CODE, tierStatus, usePointTiers } from './point-tiers';
+import { MATH_TASK_CODE, pickPracticeCount, tierStatus, usePointTiers } from './point-tiers';
 import { ModelSpecialPanel } from './ModelSpecialPanel';
 import { TierChip } from './TierChip';
 import type { TargetedRunHandoff } from './run-handoff';
@@ -132,6 +132,7 @@ export default function TargetedConfigPage() {
   const [mode, setMode] = useState<'kp' | 'model'>('kp');
   const [modelStatus, setModelStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
   const [modelError, setModelError] = useState<string | null>(null);
+  const [modelSpecials, setModelSpecials] = useState<TrainingModelSpecial[]>([]);
   const [selectedModel, setSelectedModel] = useState<TrainingModelSpecial | null>(null);
   const [modelTierKey, setModelTierKey] = useState<string | null>(null);
 
@@ -165,6 +166,7 @@ export default function TargetedConfigPage() {
       const data = await getModelSpecials(requested);
       // 请求期间切了学科：丢弃过期响应，否则会把上个学科的模型画到新学科下
       if (subjectIdRef.current !== requested) return;
+      setModelSpecials(data.specials);
       setSelectedModel(data.specials[0] ?? null);
       setModelStatus('ok');
     } catch {
@@ -172,6 +174,7 @@ export default function TargetedConfigPage() {
       setModelStatus('error');
       // 固定学生向文案：HTTP 错误串对小学生无意义，也不该暴露给前端页面
       setModelError('模型专项加载失败');
+      setModelSpecials([]);
       setSelectedModel(null);
     }
   }, [subjectId]);
@@ -181,6 +184,7 @@ export default function TargetedConfigPage() {
     setMode('kp');
     setModelStatus('idle');
     setModelError(null);
+    setModelSpecials([]);
     setSelectedModel(null);
     setModelTierKey(null);
   }, [subjectId]);
@@ -189,7 +193,7 @@ export default function TargetedConfigPage() {
     if (!selectedModel || tiers == null) return [];
     return tiers.filter((t) => {
       const n = Number(t.tierKey);
-      return Number.isInteger(n) && n >= 1 && n <= 2 && n <= selectedModel.questionCount;
+      return Number.isInteger(n) && n >= 1 && n <= selectedModel.questionCount;
     });
   }, [selectedModel, tiers]);
 
@@ -199,11 +203,18 @@ export default function TargetedConfigPage() {
       setModelTierKey(null);
       return;
     }
-    const keys = eligibleModelTiers.map((t) => t.tierKey);
-    if (modelTierKey == null || !keys.includes(modelTierKey)) {
-      setModelTierKey(String(Math.max(...keys.map(Number))));
+    if (modelTierKey == null || !eligibleModelTiers.some((t) => t.tierKey === modelTierKey)) {
+      const count = pickPracticeCount(eligibleModelTiers);
+      setModelTierKey(count == null ? null : String(count));
     }
   }, [mode, selectedModel, eligibleModelTiers, modelTierKey]);
+
+  const selectModel = (next: TrainingModelSpecial) => {
+    setSelectedModel(next);
+    setModelTierKey(null);
+    setStartError(null);
+    setEmptyHint(false);
+  };
 
   const selectMode = (next: 'kp' | 'model') => {
     setMode(next);
@@ -477,7 +488,9 @@ export default function TargetedConfigPage() {
           )}
           {mode === 'model' && (
             <ModelSpecialPanel
-              special={selectedModel}
+              specials={modelSpecials}
+              selectedModel={selectedModel}
+              onSelectModel={selectModel}
               status={modelStatus}
               error={modelError}
               tiers={tiers}
