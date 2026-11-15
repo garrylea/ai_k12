@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-11-15 倍长中线微专题（2 题）
+
+**背景**：数学专项只能按教材知识点选题；`question_model_tags` 已能标出倍长中线，但题池只有 2 条有效记录（7093 完整两问、7094 第二问；4524 无答案）。
+
+**改动**：
+- 新增 `GET /api/training/model-specials`：白名单模型 + 该生可练数（confidence>=0.70、active、有答案、排除隐藏）。
+- `POST /api/training/targeted/start` 支持 `{category, model}`（与 `kpId` 二选一）；模型模式 `type=null`、`count` 仅 1/2、且不超过可练数；题池按 `q.id ASC`，会话 `task_code='math_targeted'`、`ref_type='model'`。
+- 专项页新增「知识点 / 中考模型」切换；模型模式只展示倍长中线卡片，题量只显示家长已开启的 1/2 档；没有可用档位时禁用并提示。
+- handoff `title='倍长中线微专题'`，练习记录/结果页显示该标题；不新增表列、不新增 task code、不改积分规则。
+
+**验证**：server 全量测试 202 文件 / 2710 用例全绿（含 `training.service.test.ts` 95 例、`questions.repo.test.ts` 18 例）；web 全量测试 180 文件 / 1749 用例，两轮各有一例家长端用例在并行跑全量时超时（`ParentSubscriptionPage.test.tsx` / `ParentStudentsPage.test.tsx`），单文件复跑均通过，与被改动文件无关；两端 build 通过，web lint 仅存量 3 处错误（`analytics/tracker.test.ts`、`components/markdown.tsx`、`parent-mobile/MobilePointsPage.test.tsx`），改动文件 0 告警。手动冒烟（1/2 题档位、记录标题、无档位禁用）本机无学生 JWT，未跑，由页面单测覆盖。
+
+---
+
 ## 2026-11-14 数学题中考模型标签
 
 **背景**：数学专项只能按教材知识点两级选题，没有「新定义/几何综合/圆综/倍长中线」等中考模型池。
