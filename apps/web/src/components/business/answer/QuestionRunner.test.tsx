@@ -275,8 +275,10 @@ describe('主观题自评（self_assess 模式）', () => {
     );
     await user.type(screen.getByRole('textbox'), '解答');
     await user.click(screen.getByTitle('提交'));
-    // 进入自评视图；不做选择时 onFinish 不触发
-    expect(await screen.findByText('x=1')).toBeTruthy();
+    // 进入自评视图；参考答案是裸 LaTeX（x=1）→ 自动补 $ 后走 KaTeX；
+    // 不做选择时 onFinish 不触发
+    expect(await screen.findByRole('button', { name: '我做错了' })).toBeTruthy();
+    expect(document.querySelectorAll('.katex').length).toBeGreaterThan(0);
     expect(onFinish).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: '我做错了' }));
     await waitFor(() => {

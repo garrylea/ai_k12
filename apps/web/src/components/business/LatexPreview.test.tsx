@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ReactMarkdown from 'react-markdown';
-import { LatexPreview, autoWrapMath } from './LatexPreview';
+import { LatexPreview, autoWrapMath, autoWrapMathIfBare } from './LatexPreview';
 import type { PreviewScrollSync } from './preview-scroll-sync';
 import {
   ANSWER_IMG_CLASS,
@@ -72,6 +72,22 @@ describe('autoWrapMath 补 $ 判定', () => {
     expect(autoWrapMath('`a+b=1`')).toBe('`a+b=1`');
     expect(autoWrapMath('```\na+b=1\n```')).toBe('```\na+b=1\n```');
     expect(autoWrapMath('$$\\begin{cases}a & x>0\\end{cases}$$')).toBe('$$\\begin{cases}a & x>0\\end{cases}$$');
+  });
+
+  it('autoWrapMathIfBare：整段已有 $ 时一个字都不动；无 $ 的裸 LaTeX 才补', () => {
+    // 题库答案/解析专用：已含 $ 的文本存在不配对、跨图的情况，再补 $ 会打乱配对
+    expect(autoWrapMathIfBare('已含 $x=1$ 与裸 a+b=1')).toBe('已含 $x=1$ 与裸 a+b=1');
+    expect(autoWrapMathIfBare('$\\therefore EF//OD$ 且 \\sqrt{2}')).toBe('$\\therefore EF//OD$ 且 \\sqrt{2}');
+    expect(autoWrapMathIfBare('\\sqrt{2}')).toBe('$\\sqrt{2}$');
+    expect(autoWrapMathIfBare('OE=\\sqrt{41}')).toBe('$OE=\\sqrt{41}$');
+  });
+
+  it('标准 LaTeX 定界 \\[…\\] / \\(…\\) 原样保留（preprocessMarkdown 会统一转成 $ 系）', () => {
+    // 2026-11-15：题库的答案/解析常用 \[…\]，若被自动补 $ 包住会变成 `$\[$` 坏公式
+    expect(autoWrapMath('\\[\n2x^{2} - x - 3 = 0\n\\]')).toBe('\\[\n2x^{2} - x - 3 = 0\n\\]');
+    expect(autoWrapMath('向左平移 \\(2\\) 个单位')).toBe('向左平移 \\(2\\) 个单位');
+    // 定界符外的裸公式照常补 $
+    expect(autoWrapMath('\\[x=1\\] 且 a+b=1')).toBe('\\[x=1\\] 且 $a+b=1$');
   });
 
   // ── 本次修复的核心理由：判定逐段做，一处 $ 不再让全篇失效 ──

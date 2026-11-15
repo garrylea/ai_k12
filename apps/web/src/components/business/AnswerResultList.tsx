@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { autoWrapMath } from './LatexPreview';
+import { autoWrapMath, autoWrapMathIfBare } from './LatexPreview';
 import {
   markdownRemarkPlugins,
   markdownRemarkPluginsWithBreaks,
@@ -327,8 +327,9 @@ export function AnswerResultList({
                       <div className="p-3.5 bg-[var(--bg-base)] rounded-[10px]">
                         <div className="text-xs font-semibold text-[var(--text-tertiary)] mb-1.5">参考答案</div>
                         <div className="text-[13px] text-[var(--text-primary)] leading-[1.7]">
-                          <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
-                            {preprocessMarkdown(referenceAnswers[q.n]!)}
+                          {/* 与「你的答案」同口径：保留换行 + 裸 LaTeX 自动补 $（题库答案多为一行一步） */}
+                          <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                            {preprocessMarkdown(autoWrapMathIfBare(referenceAnswers[q.n]!))}
                           </ReactMarkdown>
                         </div>
                       </div>
@@ -342,8 +343,8 @@ export function AnswerResultList({
                           <div className="text-xs font-semibold text-[var(--warning)] mb-1.5">错因：{a.errorType}</div>
                         )}
                         <div className="text-[13px] text-[var(--text-primary)] leading-[1.7]">
-                          <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
-                            {preprocessMarkdown(explanation)}
+                          <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                            {preprocessMarkdown(autoWrapMathIfBare(explanation))}
                           </ReactMarkdown>
                         </div>
                       </div>

@@ -26,9 +26,12 @@ const MD_EMPHASIS = /^(?:\*[^*]+\*|_[^_]+_)$/;
 const MD_PREFIX = /^(?:\s*(?:[-+*]|\d+[.)]|#{1,6}|>)\s+)+/;
 /** HTML 标签（`<tr>` / `</td>` / `<br/>` / 打字中的 `<tr`）：交给 rehype-raw 渲染，不能包进 $…$ */
 const HTML_TAG_START = /^<\/?[a-zA-Z!]/;
-/** 已显式标注的区域，原样保留、不参与自动补 $：$$…$$（可跨行）、围栏代码块、行内代码、$…$
- *  （围栏必须排在行内代码之前，否则 ``` 会被当成一个空的 `…` 行内代码先吃掉） */
-const PROTECTED_RE = /(\$\$[\s\S]*?\$\$|```[\s\S]*?```|`[^`\n]*`|\$[^$\n]*\$)/g;
+/** 已显式标注的区域，原样保留、不参与自动补 $：$$…$$（可跨行）、围栏代码块、行内代码、
+ *  标准 LaTeX 定界 `\[…\]` / `\(…\)`、`$…$`
+ *  （围栏必须排在行内代码之前，否则 ``` 会被当成一个空的 `…` 行内代码先吃掉）
+ *  `\[…\]` / `\(…\)` 必须保护：它们是 preprocessMarkdown 会归一成 $ 系的显式定界符，
+ *  若先被自动补 $ 包住就会变成 `$\[$` 之类的坏公式（2026-11-15 全量验证发现）。 */
+const PROTECTED_RE = /(\$\$[\s\S]*?\$\$|```[\s\S]*?```|`[^`\n]*`|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]*\$)/g;
 
 /** 单个裸文本段是否需要包成 $...$（core 为去掉两侧空白后的内容）。 */
 function shouldWrap(core: string): boolean {
@@ -98,6 +101,19 @@ export function autoWrapMath(text: string): string {
   return segments.reduce((acc, seg) =>
     acc.endsWith('$') && seg.startsWith('$') ? `${acc} ${seg}` : acc + seg,
   );
+}
+
+/**
+ * 只给「整段完全没有 $」的文本自动补 $（题库答案/解析专用）。
+ *
+ * 为什么不像学生作答那样逐段补：题库里已有的 `$…$` 存在不配对、跨图、跨 CJK 的情况，
+ * 逐段补会在两段之间再插 `$`，把原本能渲染的公式打成 katex-error
+ * （2026-11-15 全量 569 条答案/解析实测：3 条出现新错误，均为已含 `$` 的文本）。
+ * 答案/解析只需要救「一条 $ 都没有」的裸 LaTeX（`\sqrt{2}` 这类）。
+ */
+export function autoWrapMathIfBare(text: string | null | undefined): string {
+  if (!text) return '';
+  return text.includes('$') ? text : autoWrapMath(text);
 }
 
 export function LatexPreview({

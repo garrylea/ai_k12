@@ -19,7 +19,7 @@ import {
   ANSWER_IMG_CLASS,
 } from '@/components/markdown';
 import { LatexEditor } from '../LatexEditor';
-import { autoWrapMath } from '../LatexPreview';
+import { autoWrapMath, autoWrapMathIfBare } from '../LatexPreview';
 import { PreviewDraftPanel } from '../PreviewDraftPanel';
 import type { PreviewScrollSync } from '../preview-scroll-sync';
 import { clearDraft } from '../draft-store';
@@ -481,16 +481,17 @@ export function QuestionRunner({
         </div>
         <div className="text-xs font-semibold text-[var(--text-tertiary)] mb-1.5">参考答案</div>
         <div className="text-sm text-[var(--text-primary)] leading-[1.7]">
-          <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>
-            {preprocessMarkdown(selfAssess.referenceAnswer || '（暂无参考答案）')}
+          {/* 与「你的作答」同口径：保留换行 + 裸 LaTeX 自动补 $ */}
+          <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>
+            {preprocessMarkdown(autoWrapMathIfBare(selfAssess.referenceAnswer || '（暂无参考答案）'))}
           </ReactMarkdown>
         </div>
         {selfAssess.explanation && (
           <>
             <div className="text-xs font-semibold text-[var(--text-tertiary)] mt-4 mb-1.5">解题思路与解析</div>
             <div className="text-sm text-[var(--text-primary)] leading-[1.7]">
-              <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>
-                {preprocessMarkdown(selfAssess.explanation)}
+              <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>
+                {preprocessMarkdown(autoWrapMathIfBare(selfAssess.explanation))}
               </ReactMarkdown>
             </div>
           </>
