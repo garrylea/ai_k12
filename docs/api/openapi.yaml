@@ -6279,7 +6279,7 @@ paths:
       tags: [Training]
       summary: 模型微专题清单（倍长中线首批）
       description: >-
-        student JWT。subjectId 必填 integer；非数学返回空数组。
+        student JWT。subjectId 必填 integer；非数学返回 `{specials: []}`。
         questionCount 是该生可练数：question_model_tags.confidence>=0.70、
         is_active=1、answer<>''，并排除该生 student_hidden_questions。
       operationId: listModelSpecials
@@ -6310,11 +6310,11 @@ paths:
   /training/targeted/start:
     post:
       tags: [Training]
-      summary: 专项练习开练（按学科 + 知识点随机抽题）
+      summary: 专项练习开练（按知识点或中考模型抽题）
       description: >-
-        专项练习配置完成后开练（student JWT）。count 限 1-20 整数（越界/非整数 400）；
-        type 白名单 choice|fill_blank|true_false|short_answer|proof 或 null（不限题型，
-        非法 400）。题单白名单序列化：只出 questionId/text/type/options，
+        专项练习配置完成后开练（student JWT）。KP 模式 count 限 1-20、type 白名单
+        choice|fill_blank|true_false|short_answer|proof|calculation 或 null（不限题型，
+        非法 400）；模型模式 count 只能 1/2。题单白名单序列化：只出 questionId/text/type/options，
         answer/explanation 等字段一律剥离（防答案泄露）；options 为 JSON 字符串
         parse 后的数组（无/坏 JSON 为 null）。抽不到题返回空数组（空集合非错误，
         前端判空显示提示）。选题时基于 JWT user.sub（studentId）排除该生已标记的
