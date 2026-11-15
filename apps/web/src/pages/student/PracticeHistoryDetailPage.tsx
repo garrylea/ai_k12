@@ -268,7 +268,9 @@ function QuestionCard({
       {q.questionAnswer ? (
         <div className="mb-2 text-sm">
           <span className="text-[var(--text-tertiary)]">正确答案：</span>
-          <MarkdownBlock text={q.questionAnswer} className="mt-1 text-[var(--success)]" />
+          {/* breaks：库里的证明/解答是「一行一步」的纯文本，不保留换行会挤成一整段，
+              看上去就像没渲染的原文（2026-11-15 用户反馈） */}
+          <MarkdownBlock text={q.questionAnswer} breaks className="mt-1 text-[var(--success)]" />
         </div>
       ) : null}
 
@@ -278,6 +280,7 @@ function QuestionCard({
           <p className="mb-1 text-xs text-[var(--text-tertiary)]">解析</p>
           <MarkdownBlock
             text={q.analysis ?? q.questionAnalysis ?? ''}
+            breaks
             className="text-sm text-[var(--text-secondary)]"
           />
         </div>

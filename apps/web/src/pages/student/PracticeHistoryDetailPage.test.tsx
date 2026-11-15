@@ -210,6 +210,26 @@ describe('PracticeHistoryDetailPage', () => {
     expect(container.textContent).not.toContain('\\frac{1}{5}');
   });
 
+  it('正确答案与解析保留单换行（多步证明不挤成一段）', async () => {
+    // 2026-11-15 用户反馈：答案/解析是「一行一步」的纯文本，不保留换行时挤成一整段，
+    // 看起来像没渲染的原文。我的答案早已 breaks，答案/解析漏了。
+    getDetailMock.mockResolvedValue({
+      session: EXAM_SESSION,
+      questions: [{
+        questionId: 100, questionOrder: 1, answerText: 'B', isCorrect: false, score: 0,
+        method: 'exact', analysis: '第一行解析\n第二行解析', judgedAt: null, materialText: null,
+        questionContent: '题面', questionAnswer: '∵AB∥CD，\n∴∠1=∠2。', questionAnalysis: null,
+        refType: 'question', refId: null, sentenceIndex: null,
+        passageTitle: null, passageSentence: null,
+        canRedo: false, canSimilar: false,
+      }],
+    });
+    const { container } = renderAt('exam', '1');
+    await waitFor(() => expect(screen.getByText('题面')).toBeInTheDocument());
+    // 正确答案 1 处 + 解析 1 处
+    expect(container.querySelectorAll('br').length).toBe(2);
+  });
+
   it('语文专项：questionId=null 时按 JSON 渲染作者/朝代/正文', async () => {
     getDetailMock.mockResolvedValue({
       session: SPECIAL_SESSION,
