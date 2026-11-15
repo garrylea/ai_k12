@@ -238,7 +238,7 @@ export default function TargetedConfigPage() {
       const handoff: TargetedRunHandoff = {
         sessionId: res.sessionId,
         questions: res.questions,
-        title: `${selectedModel.modelName}微专题`,
+        title: selectedModel.modelName,
       };
       sessionStorage.setItem('training:targeted', JSON.stringify(handoff));
       navigate(`/student/training/targeted/run${subjectQuery}`);

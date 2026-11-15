@@ -45,8 +45,6 @@ describe('ModelSpecialPanel', () => {
     const p = props();
     render(<ModelSpecialPanel {...p} />);
     expect(screen.getByText('倍长中线')).toBeTruthy();
-    expect(screen.getByText('几何综合 · 微专题')).toBeTruthy();
-    expect(screen.getByText('可练 2 题')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /^2 题/ }));
     expect(p.onSelectTier).toHaveBeenCalledWith('2');
     fireEvent.click(screen.getByRole('button', { name: '开始练习' }));

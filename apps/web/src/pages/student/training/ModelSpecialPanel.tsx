@@ -67,15 +67,6 @@ export function ModelSpecialPanel({
         <h2 className="text-xl font-bold text-[var(--learn-text-primary)]">
           {special.modelName}
         </h2>
-        <p className="mt-1 text-sm text-[var(--learn-text-secondary)]">
-          {special.categoryName} · 微专题
-        </p>
-        <p className="mt-2 text-sm text-[var(--learn-text-secondary)]">
-          先完整做一道两问的题，再单独巩固第二问。
-        </p>
-        <p className="mt-2 text-xs text-[var(--learn-text-tertiary)]">
-          可练 {special.questionCount} 题
-        </p>
       </section>
 
       {special.questionCount === 0 ? (

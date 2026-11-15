@@ -372,7 +372,7 @@ describe('按学科取题型与任务码', () => {
 });
 
 describe('中考模型模式', () => {
-  it('数学显示模式切换；切到模型后按 2 题开练并带微专题标题', async () => {
+  it('数学显示模式切换；切到模型后按 2 题开练并带正确标题', async () => {
     getKpsMock.mockResolvedValue(KPS);
     getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
     getModelSpecialsMock.mockResolvedValue({ specials: [MODEL_SPECIAL] });
@@ -382,7 +382,6 @@ describe('中考模型模式', () => {
     fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
     await waitFor(() => expect(getModelSpecialsMock).toHaveBeenCalledWith(1));
     expect(await screen.findByText('倍长中线')).toBeTruthy();
-    expect(screen.getByText('可练 2 题')).toBeTruthy();
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
@@ -396,7 +395,7 @@ describe('中考模型模式', () => {
     });
     const stored: unknown = JSON.parse(sessionStorage.getItem('training:targeted') ?? 'null');
     expect(stored).toEqual({
-      sessionId: 77, questions: [STARTED_QUESTION], title: '倍长中线微专题',
+      sessionId: 77, questions: [STARTED_QUESTION], title: '倍长中线',
     });
   });
 
@@ -471,8 +470,7 @@ describe('中考模型模式', () => {
     await renderPage();
     fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
 
-    expect(await screen.findByText('可练 1 题')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^1 题/ })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /^1 题/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^2 题/ })).toBeNull();
     expect(screen.getByRole('button', { name: '开始练习' })).not.toBeDisabled();
   });
@@ -501,7 +499,7 @@ describe('中考模型模式', () => {
     startMock.mockResolvedValue({ questions: [STARTED_QUESTION], sessionId: 88 });
     await renderPage();
     fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
-    expect(await screen.findByText('可练 2 题')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /^1 题/ })).toBeTruthy();
 
     // 默认档是 2 题（eligible 里最大档），改成 1 题后 count 必须跟着改
     fireEvent.click(screen.getByRole('button', { name: /^1 题/ }));
