@@ -4,10 +4,14 @@ import { Button, Card, PageHeader, Skeleton } from '@/components/base';
 import { StudentAccountActions } from '@/components/business';
 import {
   getKnowledgePoints,
+  getModelSpecials,
   startTargetedPractice,
   type TrainingKnowledgePoint,
+  type TrainingModelSpecial,
 } from '@/services/api';
 import { MATH_TASK_CODE, tierStatus, usePointTiers } from './point-tiers';
+import { ModelSpecialPanel } from './ModelSpecialPanel';
+import { TierChip } from './TierChip';
 import type { TargetedRunHandoff } from './run-handoff';
 import {
   getTrainingSubject,
@@ -46,52 +50,6 @@ function KpChip({
       }
     >
       {label}
-    </button>
-  );
-}
-
-/**
- * 题量档按钮（单选）：主行档位名，副行分值 + 剩余次数。
- * 档位与分值都来自 `GET /points/me/rules`（家长可改），前端不硬编码。
- */
-function TierChip({
-  label,
-  points,
-  status,
-  active,
-  capped,
-  onClick,
-}: {
-  label: string;
-  points: number;
-  status: string | null;
-  active: boolean;
-  capped: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={
-        'flex flex-col items-center justify-center min-h-11 px-4 py-1.5 rounded-full border ' +
-        'text-sm font-medium transition-colors ' +
-        (active
-          ? 'border-[var(--brand-500)] bg-[var(--brand-500)] text-[var(--text-on-brand)]'
-          : 'border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] text-[var(--learn-text-secondary)] hover:border-[var(--brand-500)]') +
-        (capped && !active ? ' opacity-60' : '')
-      }
-    >
-      <span>{label}</span>
-      <span
-        className={
-          'text-[0.625rem] font-normal ' +
-          (active ? 'opacity-90' : 'text-[var(--learn-text-tertiary)]')
-        }
-      >
-        +{points} 分{status ? ` · ${status}` : ''}
-      </span>
     </button>
   );
 }
@@ -170,6 +128,13 @@ export default function TargetedConfigPage() {
   const [startError, setStartError] = useState<string | null>(null);
   const [emptyHint, setEmptyHint] = useState(false);
 
+  // 专项模式：知识点（原行为）/ 中考模型
+  const [mode, setMode] = useState<'kp' | 'model'>('kp');
+  const [modelStatus, setModelStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<TrainingModelSpecial | null>(null);
+  const [modelTierKey, setModelTierKey] = useState<string | null>(null);
+
   const loadKps = useCallback(async () => {
     setLoadError(null);
     try {
@@ -184,6 +149,93 @@ export default function TargetedConfigPage() {
   useEffect(() => {
     void loadKps();
   }, [loadKps]);
+
+  const loadModelSpecials = useCallback(async () => {
+    setModelStatus('loading');
+    setModelError(null);
+    try {
+      const data = await getModelSpecials(subjectId);
+      setSelectedModel(data.specials[0] ?? null);
+      setModelStatus('ok');
+    } catch (err) {
+      setModelStatus('error');
+      setModelError(err instanceof Error ? err.message : '模型专项加载失败');
+      setSelectedModel(null);
+    }
+  }, [subjectId]);
+
+  useEffect(() => {
+    // 学科 query 变化时回到知识点模式并清空模型缓存
+    setMode('kp');
+    setModelStatus('idle');
+    setModelError(null);
+    setSelectedModel(null);
+    setModelTierKey(null);
+  }, [subjectId]);
+
+  const eligibleModelTiers = useMemo(() => {
+    if (!selectedModel || tiers == null) return [];
+    return tiers.filter((t) => {
+      const n = Number(t.tierKey);
+      return Number.isInteger(n) && n >= 1 && n <= 2 && n <= selectedModel.questionCount;
+    });
+  }, [selectedModel, tiers]);
+
+  useEffect(() => {
+    if (mode !== 'model') return;
+    if (!selectedModel || eligibleModelTiers.length === 0) {
+      setModelTierKey(null);
+      return;
+    }
+    const keys = eligibleModelTiers.map((t) => t.tierKey);
+    if (modelTierKey == null || !keys.includes(modelTierKey)) {
+      setModelTierKey(String(Math.max(...keys.map(Number))));
+    }
+  }, [mode, selectedModel, eligibleModelTiers, modelTierKey]);
+
+  const selectMode = (next: 'kp' | 'model') => {
+    setMode(next);
+    setStartError(null);
+    setEmptyHint(false);
+    if (next === 'model' && modelStatus === 'idle') void loadModelSpecials();
+  };
+
+  const canStartModel = selectedModel != null
+    && selectedModel.questionCount > 0
+    && modelTierKey != null
+    && eligibleModelTiers.some((t) => t.tierKey === modelTierKey)
+    && !starting;
+
+  const startModelPractice = async () => {
+    if (!canStartModel || selectedModel == null || modelTierKey == null) return;
+    setStarting(true);
+    setStartError(null);
+    setEmptyHint(false);
+    try {
+      const res = await startTargetedPractice({
+        subjectId,
+        category: selectedModel.category,
+        model: selectedModel.model,
+        type: null,
+        count: Number(modelTierKey),
+      });
+      if (res.questions.length === 0) {
+        setEmptyHint(true);
+        return;
+      }
+      const handoff: TargetedRunHandoff = {
+        sessionId: res.sessionId,
+        questions: res.questions,
+        title: `${selectedModel.modelName}微专题`,
+      };
+      sessionStorage.setItem('training:targeted', JSON.stringify(handoff));
+      navigate(`/student/training/targeted/run${subjectQuery}`);
+    } catch (err) {
+      setStartError(err instanceof Error ? err.message : '开练失败，请重试');
+    } finally {
+      setStarting(false);
+    }
+  };
 
   // 平铺列表 -> 一级 / 当前一级的二级
   const parentKps = useMemo(
@@ -258,149 +310,177 @@ export default function TargetedConfigPage() {
             </Button>
           </div>
 
-          {/* 配置区 */}
-          <Card className="mt-6 space-y-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
-            {/* 知识点两级选择 */}
-            <section aria-label="知识点选择">
-              <h2 className="text-sm font-semibold text-[var(--learn-text-secondary)] mb-3">知识点</h2>
-              {kps == null && !loadError ? (
-                <div className="space-y-3">
-                  <Skeleton width="40%" height={14} />
-                  <Skeleton height={40} />
-                </div>
-              ) : loadError ? (
-                <div className="flex items-center gap-4">
-                  <p className="text-sm text-[var(--learn-text-secondary)]">{loadError}</p>
-                  <Button variant="secondary" size="sm" onClick={() => void loadKps()}>
-                    重试
-                  </Button>
-                </div>
-              ) : parentKps.length === 0 ? (
-                <p className="text-sm text-[var(--learn-text-secondary)]">暂无可选知识点</p>
-              ) : (
-                <div className="space-y-4">
-                  {/* 一级 Chip 组（单选） */}
-                  <div className="flex flex-wrap gap-2">
-                    {parentKps.map((kp) => (
-                      <KpChip
-                        key={kp.id}
-                        label={kp.name}
-                        active={parentKpId === kp.id}
-                        onClick={() => selectParent(kp.id)}
-                      />
-                    ))}
-                  </div>
-                  {/* 二级列表（单选；未选一级时提示引导） */}
-                  {parentKpId != null &&
-                    (childKps.length === 0 ? (
-                      <p className="text-sm text-[var(--learn-text-tertiary)]">
-                        该专项下暂无细分知识点
-                      </p>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {childKps.map((kp) => (
-                          <KpListItem
-                            key={kp.id}
-                            name={kp.name}
-                            count={kp.questionCount}
-                            active={childKpId === kp.id}
-                            onClick={() => {
-                              setChildKpId(kp.id);
-                              setEmptyHint(false);
-                            }}
-                          />
-                        ))}
-                      </div>
-                    ))}
-                </div>
-              )}
-            </section>
+          {/* 专项类型：知识点 / 中考模型（仅数学） */}
+          {subjectId === SUBJECT_MATH && (
+            <div className="mt-6 flex flex-wrap gap-2" role="group" aria-label="专项类型">
+              <KpChip label="知识点" active={mode === 'kp'} onClick={() => selectMode('kp')} />
+              <KpChip label="中考模型" active={mode === 'model'} onClick={() => selectMode('model')} />
+            </div>
+          )}
 
-            {/* 题型 + 题量 */}
-            <section className="flex flex-wrap items-end gap-6" aria-label="题型与题量">
-              <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">题型</span>
-                <select
-                  value={type}
-                  onChange={(e) => {
-                    setType(e.target.value);
-                    setEmptyHint(false);
-                  }}
-                  className={selectClassName}
-                  aria-label="题型筛选"
-                >
-                  {typeOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </label>
-              <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-[var(--learn-text-secondary)]">题量</span>
-                {tiersError ? (
-                  <div className="flex items-center gap-3">
-                    <p className="text-sm text-[var(--learn-text-secondary)]">{tiersError}</p>
-                    <Button variant="secondary" size="sm" onClick={() => void loadTiers()}>
+          {/* 配置区 */}
+          {mode === 'kp' && (
+            <Card className="mt-6 space-y-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
+              {/* 知识点两级选择 */}
+              <section aria-label="知识点选择">
+                <h2 className="text-sm font-semibold text-[var(--learn-text-secondary)] mb-3">知识点</h2>
+                {kps == null && !loadError ? (
+                  <div className="space-y-3">
+                    <Skeleton width="40%" height={14} />
+                    <Skeleton height={40} />
+                  </div>
+                ) : loadError ? (
+                  <div className="flex items-center gap-4">
+                    <p className="text-sm text-[var(--learn-text-secondary)]">{loadError}</p>
+                    <Button variant="secondary" size="sm" onClick={() => void loadKps()}>
                       重试
                     </Button>
                   </div>
-                ) : tiers == null ? (
-                  <div className="flex flex-wrap gap-2" data-testid="tier-skeleton">
-                    <Skeleton width={72} height={44} rounded />
-                    <Skeleton width={72} height={44} rounded />
-                    <Skeleton width={72} height={44} rounded />
-                  </div>
-                ) : tiers.length === 0 ? (
-                  <p className="text-sm text-[var(--learn-text-secondary)]">家长已停用该任务</p>
+                ) : parentKps.length === 0 ? (
+                  <p className="text-sm text-[var(--learn-text-secondary)]">暂无可选知识点</p>
                 ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {tiers.map((tier) => {
-                      const { text, capped } = tierStatus(tier);
-                      return (
-                        <TierChip
-                          key={tier.tierKey}
-                          label={tier.tierLabel}
-                          points={tier.points}
-                          status={text}
-                          active={tierKey === tier.tierKey}
-                          capped={capped}
-                          onClick={() => {
-                            setTierKey(tier.tierKey);
-                            setEmptyHint(false);
-                          }}
+                  <div className="space-y-4">
+                    {/* 一级 Chip 组（单选） */}
+                    <div className="flex flex-wrap gap-2">
+                      {parentKps.map((kp) => (
+                        <KpChip
+                          key={kp.id}
+                          label={kp.name}
+                          active={parentKpId === kp.id}
+                          onClick={() => selectParent(kp.id)}
                         />
-                      );
-                    })}
+                      ))}
+                    </div>
+                    {/* 二级列表（单选；未选一级时提示引导） */}
+                    {parentKpId != null &&
+                      (childKps.length === 0 ? (
+                        <p className="text-sm text-[var(--learn-text-tertiary)]">
+                          该专项下暂无细分知识点
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {childKps.map((kp) => (
+                            <KpListItem
+                              key={kp.id}
+                              name={kp.name}
+                              count={kp.questionCount}
+                              active={childKpId === kp.id}
+                              onClick={() => {
+                                setChildKpId(kp.id);
+                                setEmptyHint(false);
+                              }}
+                            />
+                          ))}
+                        </div>
+                      ))}
                   </div>
                 )}
-              </div>
-            </section>
+              </section>
 
-            {/* 开练 + 反馈 */}
-            <section className="flex flex-col gap-3">
-              <div className="flex items-center gap-4">
-                <Button
-                  variant="primary"
-                  size="lg"
-                  loading={starting}
-                  disabled={!canStart}
-                  onClick={() => void startPractice()}
-                >
-                  开始练习
-                </Button>
-                {parentKpId != null && childKpId == null && !starting && (
-                  <span className="text-xs text-[var(--learn-text-tertiary)]">
-                    请先选择细分知识点
-                  </span>
+              {/* 题型 + 题量 */}
+              <section className="flex flex-wrap items-end gap-6" aria-label="题型与题量">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-medium text-[var(--learn-text-secondary)]">题型</span>
+                  <select
+                    value={type}
+                    onChange={(e) => {
+                      setType(e.target.value);
+                      setEmptyHint(false);
+                    }}
+                    className={selectClassName}
+                    aria-label="题型筛选"
+                  >
+                    {typeOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-xs font-medium text-[var(--learn-text-secondary)]">题量</span>
+                  {tiersError ? (
+                    <div className="flex items-center gap-3">
+                      <p className="text-sm text-[var(--learn-text-secondary)]">{tiersError}</p>
+                      <Button variant="secondary" size="sm" onClick={() => void loadTiers()}>
+                        重试
+                      </Button>
+                    </div>
+                  ) : tiers == null ? (
+                    <div className="flex flex-wrap gap-2" data-testid="tier-skeleton">
+                      <Skeleton width={72} height={44} rounded />
+                      <Skeleton width={72} height={44} rounded />
+                      <Skeleton width={72} height={44} rounded />
+                    </div>
+                  ) : tiers.length === 0 ? (
+                    <p className="text-sm text-[var(--learn-text-secondary)]">家长已停用该任务</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {tiers.map((tier) => {
+                        const { text, capped } = tierStatus(tier);
+                        return (
+                          <TierChip
+                            key={tier.tierKey}
+                            label={tier.tierLabel}
+                            points={tier.points}
+                            status={text}
+                            active={tierKey === tier.tierKey}
+                            capped={capped}
+                            onClick={() => {
+                              setTierKey(tier.tierKey);
+                              setEmptyHint(false);
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {/* 开练 + 反馈 */}
+              <section className="flex flex-col gap-3">
+                <div className="flex items-center gap-4">
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    loading={starting}
+                    disabled={!canStart}
+                    onClick={() => void startPractice()}
+                  >
+                    开始练习
+                  </Button>
+                  {parentKpId != null && childKpId == null && !starting && (
+                    <span className="text-xs text-[var(--learn-text-tertiary)]">
+                      请先选择细分知识点
+                    </span>
+                  )}
+                </div>
+                {emptyHint && (
+                  <p className="text-sm text-[var(--learn-text-secondary)]">该专项题目已练完或全部标记不再展示。可更换专项/题型，或在「我的不再展示清单」中重置。</p>
                 )}
-              </div>
-              {emptyHint && (
-                <p className="text-sm text-[var(--learn-text-secondary)]">该专项题目已练完或全部标记不再展示。可更换专项/题型，或在「我的不再展示清单」中重置。</p>
-              )}
-              {startError && (
-                <p className="text-sm text-[var(--error)]">{startError}</p>
-              )}
-            </section>
-          </Card>
+                {startError && (
+                  <p className="text-sm text-[var(--error)]">{startError}</p>
+                )}
+              </section>
+            </Card>
+          )}
+          {mode === 'model' && (
+            <ModelSpecialPanel
+              special={selectedModel}
+              status={modelStatus}
+              error={modelError}
+              tiers={tiers}
+              tiersError={tiersError}
+              eligibleTiers={eligibleModelTiers}
+              tierKey={modelTierKey}
+              starting={starting}
+              startError={startError}
+              emptyHint={emptyHint}
+              onRetry={() => void loadModelSpecials()}
+              onRetryTiers={() => void loadTiers()}
+              onSelectTier={setModelTierKey}
+              onStart={() => void startModelPractice()}
+            />
+          )}
         </div>
       </div>
     </div>

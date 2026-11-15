@@ -4,12 +4,14 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import TargetedConfigPage from './TargetedConfigPage';
 import {
   getKnowledgePoints,
+  getModelSpecials,
   getMyPointRules,
   startTargetedPractice,
   type MyPointRules,
   type PointRuleTier,
   type TargetedPracticeQuestion,
   type TrainingKnowledgePoint,
+  type TrainingModelSpecial,
 } from '@/services/api';
 
 /**
@@ -30,13 +32,27 @@ vi.mock('@/services/api', async (importOriginal) => {
     ...actual,
     getKnowledgePoints: vi.fn(),
     getMyPointRules: vi.fn(),
+    getModelSpecials: vi.fn(),
     startTargetedPractice: vi.fn(),
   };
 });
 
 const getKpsMock = vi.mocked(getKnowledgePoints);
 const getRulesMock = vi.mocked(getMyPointRules);
+const getModelSpecialsMock = vi.mocked(getModelSpecials);
 const startMock = vi.mocked(startTargetedPractice);
+
+/** 中考模型微专题（本期只有一个：倍长中线，2 道可练）。 */
+const MODEL_SPECIAL: TrainingModelSpecial = {
+  category: 'geometry_synthesis', categoryName: '几何综合',
+  model: 'median_doubling', modelName: '倍长中线', questionCount: 2,
+};
+
+// 模型专项只在切到「中考模型」时才拉，各用例默认给一份可练的
+beforeEach(() => {
+  getModelSpecialsMock.mockReset();
+  getModelSpecialsMock.mockResolvedValue({ specials: [MODEL_SPECIAL] });
+});
 
 const KPS: TrainingKnowledgePoint[] = [
   { id: 1, name: '数与代数', parentKpId: null, gradeBand: 'junior', questionCount: 10 },
@@ -280,6 +296,8 @@ describe('TargetedConfigPage 语文（subjectId=2）', () => {
     await renderPage(['/?subjectId=2']);
 
     expect(screen.getByText('语文 · 专项')).toBeTruthy();
+    // 模式切换只给数学（语文没有模型微专题）
+    expect(screen.queryByRole('button', { name: '中考模型' })).toBeNull();
     // 只有 cn_targeted 组（数学/英语组不显示）
     expect(screen.getByRole('button', { name: /^3 题/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^15 词/ })).toBeNull();
@@ -327,6 +345,7 @@ describe('按学科取题型与任务码', () => {
     await waitFor(() => expect(getRulesMock).toHaveBeenCalled());
     expect(screen.getByRole('option', { name: '计算' })).toBeTruthy();
     expect(await screen.findByText('物理 · 专项')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '中考模型' })).toBeNull();
   });
 
   it('化学：题型下拉不含「计算」，标题「化学 · 专项」', async () => {
@@ -337,6 +356,7 @@ describe('按学科取题型与任务码', () => {
 
     await waitFor(() => expect(getRulesMock).toHaveBeenCalled());
     expect(screen.queryByRole('option', { name: '计算' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '中考模型' })).toBeNull();
   });
 
   it('数学：标题与任务码保持不变（回归钉子）', async () => {
@@ -347,5 +367,61 @@ describe('按学科取题型与任务码', () => {
 
     await waitFor(() => expect(getRulesMock).toHaveBeenCalled());
     expect(await screen.findByText('专项练习')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '中考模型' })).toBeTruthy();
+  });
+});
+
+describe('中考模型模式', () => {
+  it('数学显示模式切换；切到模型后按 2 题开练并带微专题标题', async () => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
+    getModelSpecialsMock.mockResolvedValue({ specials: [MODEL_SPECIAL] });
+    startMock.mockResolvedValue({ questions: [STARTED_QUESTION], sessionId: 77 });
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
+    await waitFor(() => expect(getModelSpecialsMock).toHaveBeenCalledWith(1));
+    expect(await screen.findByText('倍长中线')).toBeTruthy();
+    expect(screen.getByText('可练 2 题')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+    });
+    expect(startMock).toHaveBeenCalledWith({
+      subjectId: 1,
+      category: 'geometry_synthesis',
+      model: 'median_doubling',
+      type: null,
+      count: 2,
+    });
+    const stored: unknown = JSON.parse(sessionStorage.getItem('training:targeted') ?? 'null');
+    expect(stored).toEqual({
+      sessionId: 77, questions: [STARTED_QUESTION], title: '倍长中线微专题',
+    });
+  });
+
+  it('没有 1/2 档：提示家长开启并禁用', async () => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf([
+      tier({ tierKey: '3', tierLabel: '3 题', points: 8 }),
+      tier({ tierKey: '5', tierLabel: '5 题', points: 12 }),
+    ]));
+    getModelSpecialsMock.mockResolvedValue({ specials: [MODEL_SPECIAL] });
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
+    expect(await screen.findByText('家长未开启 1 或 2 题档位，暂不能开练。')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '开始练习' })).toBeDisabled();
+  });
+
+  it('可练 0 题：显示暂无可练题目', async () => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
+    getModelSpecialsMock.mockResolvedValue({
+      specials: [{ ...MODEL_SPECIAL, questionCount: 0 }],
+    });
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
+    expect(await screen.findByText('暂无可练题目。')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '开始练习' })).toBeDisabled();
   });
 });

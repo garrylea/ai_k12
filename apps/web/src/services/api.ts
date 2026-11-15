@@ -1304,6 +1304,24 @@ export function getKnowledgePoints(subjectId: number): Promise<TrainingKnowledge
   return fetchApi<TrainingKnowledgePoint[]>(`/training/knowledge-points?${qs.toString()}`);
 }
 
+/** 模型微专题（白名单）；questionCount 是该生可练数。 */
+export interface TrainingModelSpecial {
+  category: string;
+  categoryName: string;
+  model: string;
+  modelName: string;
+  questionCount: number;
+}
+
+export function getModelSpecials(
+  subjectId: number,
+): Promise<{ specials: TrainingModelSpecial[] }> {
+  const qs = new URLSearchParams({ subjectId: String(subjectId) });
+  return fetchApi<{ specials: TrainingModelSpecial[] }>(
+    `/training/model-specials?${qs.toString()}`,
+  );
+}
+
 /** 专项练习题单条目：白名单序列化（无 answer/explanation），options 为 JSON 数组（字符串选项）。 */
 export interface TargetedPracticeQuestion {
   questionId: number;
@@ -1314,13 +1332,31 @@ export interface TargetedPracticeQuestion {
   materialText: string | null;
 }
 
+/**
+ * 专项练习开练入参（两种抽题口径，互斥）：
+ * - 知识点（含语文/英语等既有专项）：`kpId`；
+ * - 中考模型微专题：`category` + `model`，题型恒为不限（`type: null`）。
+ */
+export type StartTargetedPayload =
+  | {
+      subjectId: number;
+      kpId: number;
+      category?: never;
+      model?: never;
+      type: string | null;
+      count: number;
+    }
+  | {
+      subjectId: number;
+      kpId?: never;
+      category: string;
+      model: string;
+      type: null;
+      count: number;
+    };
+
 /** 专项练习开练：type 为 null 表示不限题型；抽不到题返回空数组（前端判空提示）。 */
-export function startTargetedPractice(payload: {
-  subjectId: number;
-  kpId: number;
-  type: string | null;
-  count: number;
-}): Promise<{
+export function startTargetedPractice(payload: StartTargetedPayload): Promise<{
   questions: TargetedPracticeQuestion[];
   /**
    * 训练会话 id，run 页收尾时拿它调 `completeTrainingSession` 发分（乙类唯一的发分入口）。
