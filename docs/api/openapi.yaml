@@ -8344,6 +8344,10 @@ components:
         questionAnalysis:
           type: string
           nullable: true
+        questionSource:
+          type: string
+          nullable: true
+          description: 题目来源（questions.source）；专项记录页逐题展示，便于溯源（2026-11-15）
         refType:
           type: string
           nullable: true
@@ -11194,7 +11198,11 @@ components:
           type: string
           nullable: true
           description: 同节共享材料（语文阅读/文段题，Markdown+图片）；数学题通常 null
-      required: [questionId, text, type, options, materialText]
+        source:
+          type: string
+          nullable: true
+          description: 题目来源（questions.source）；专项作答页展示，便于溯源（2026-11-15）
+      required: [questionId, text, type, options, materialText, source]
 
     RemediationGenerateRequest:
       type: object

@@ -40,6 +40,8 @@ export interface PracticeHistoryQuestion {
   materialText: string | null;
   questionAnswer: string | null;
   questionAnalysis: string | null;
+  /** 题目来源（questions.source，如「北京市西城区九年级模拟测试试卷」）；用于溯源。 */
+  questionSource: string | null;
   /** 语文专项：passage|word；考试为 question。 */
   refType: string | null;
   refId: number | null;

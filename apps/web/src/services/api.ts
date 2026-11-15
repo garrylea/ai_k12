@@ -1330,6 +1330,8 @@ export interface TargetedPracticeQuestion {
   options: unknown[] | null;
   /** 同节共享材料（语文阅读/文段题）；数学题通常 null */
   materialText: string | null;
+  /** 题目来源（questions.source）；旧交接体可能没有 → 可选 */
+  source?: string | null;
 }
 
 /**
@@ -3810,6 +3812,8 @@ export interface PracticeHistoryQuestion {
   materialText: string | null;
   questionAnswer: string | null;
   questionAnalysis: string | null;
+  /** 题目来源（questions.source）：专项记录页展示，便于溯源。 */
+  questionSource?: string | null;
   refType: string | null;
   refId: number | null;
   sentenceIndex: number | null;

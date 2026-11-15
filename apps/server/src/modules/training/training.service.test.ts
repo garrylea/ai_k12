@@ -440,15 +440,18 @@ describe('TrainingService.startTargetedPractice', () => {
     expect(deps.questionsRepo.findRandomByKpAndType).toHaveBeenCalledWith(7, 1, 3, 'proof', 10);
   });
 
-  it('白名单序列化：出 questionId/text/type/options/materialText，剥离 answer/explanation', async () => {
+  it('白名单序列化：出 questionId/text/type/options/materialText/source，剥离 answer/explanation', async () => {
     const deps = mk({
       questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([questionRow]) },
     });
     const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: 'choice', count: 5 });
     expect(r.questions).toHaveLength(1);
     const q = r.questions[0];
-    expect(q).toEqual({ questionId: 10, text: '题面文本', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null });
-    expect(Object.keys(q).sort()).toEqual(['materialText', 'options', 'questionId', 'text', 'type']);
+    expect(q).toEqual({
+      questionId: 10, text: '题面文本', type: 'choice',
+      options: ['A. 1', 'B. 2'], materialText: null, source: 'paper',
+    });
+    expect(Object.keys(q).sort()).toEqual(['materialText', 'options', 'questionId', 'source', 'text', 'type']);
     expect(JSON.stringify(r)).not.toContain('answer');
     expect(JSON.stringify(r)).not.toContain('explanation');
   });

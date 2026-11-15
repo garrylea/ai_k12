@@ -145,11 +145,14 @@ function StatusBadge({ isCorrect, answered }: { isCorrect: boolean | null; answe
 function QuestionCard({
   q,
   similarCounts,
+  showSource,
   onRedo,
   onSimilar,
 }: {
   q: PracticeHistoryQuestion;
   similarCounts: number[];
+  /** 专项记录才显示题目来源（考试整卷同一份，逐题重复无意义；2026-11-15 用户要求） */
+  showSource: boolean;
   onRedo: (q: PracticeHistoryQuestion) => Promise<void>;
   onSimilar: (q: PracticeHistoryQuestion, count: number) => Promise<void>;
 }) {
@@ -237,6 +240,16 @@ function QuestionCard({
           {q.passageSentence && <p className="mt-1 text-[var(--text-secondary)]">{q.passageSentence}</p>}
         </div>
       ) : null}
+
+      {showSource && q.questionSource && (
+        <p
+          data-testid="history-question-source"
+          title={q.questionSource}
+          className="mb-2 truncate text-xs text-[var(--text-tertiary)]"
+        >
+          来源：{q.questionSource}
+        </p>
+      )}
 
       {/* 我的答案 */}
       <div className="mb-2 text-sm">
@@ -488,6 +501,7 @@ export default function PracticeHistoryDetailPage() {
               key={`${q.questionOrder}-${q.refType ?? 'q'}-${q.refId ?? q.questionId}`}
               q={q}
               similarCounts={similarCounts}
+              showSource={session.source === 'special'}
               onRedo={handleRedo}
               onSimilar={handleSimilar}
             />

@@ -288,6 +288,7 @@ describe('PracticeHistoryService.getDetail', () => {
       sentence_index: null, question_order: 1, answer_text: 'A',
       is_correct: 0, score: '0.00', method: 'exact', analysis: null, judged_at: null,
       question_content: '题干', question_answer: 'B', question_analysis: null,
+      question_source: '2025 海淀 初三（上）期中',
       question_is_active: 1,
     }]);
     h.questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[200, 9]]));
@@ -295,6 +296,8 @@ describe('PracticeHistoryService.getDetail', () => {
     const r = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
     expect(r?.questions[0].canRedo).toBe(true);
     expect(r?.questions[0].canSimilar).toBe(true);
+    // 来源透传：专项记录页逐题展示，便于溯源
+    expect(r?.questions[0].questionSource).toBe('2025 海淀 初三（上）期中');
   });
 
   it('专项：标准答案为空但 has KP → canSimilar 仍为 true', async () => {

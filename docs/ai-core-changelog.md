@@ -8,6 +8,17 @@
 
 ---
 
+## 2026-11-15 专项题目来源展示（作答 + 练习记录）
+
+**背景**：专项题出现问题（内容错、答案错）时无法定位是哪份卷子/哪道题，用户要求每题都带来源用于溯源。
+
+**改动**：
+- `POST /api/training/targeted/start` 的题单增加 `source`（`questions.source`，如「北京市西城区九年级模拟测试试卷」）；作答页题面下方展示「来源：…」，自评页标题下同样展示（`QuestionRunner`，仅在传入 source 时渲染，主线/考试/错题页不受影响）。
+- 练习记录详情 `GET /api/student/practice-history/:source/:sessionId` 的每题增加 `questionSource`（两条路径：考试 `exam_answers` JOIN questions、专项 `special_answer_records` JOIN questions）；详情页只在专项记录逐题展示，考试记录不展示（整卷同一份，逐题重复无意义）。
+- API 设计文档 §4.18/§4.29 与 `openapi.yaml`（`PracticeHistoryQuestion`、`TargetedStartResult.questions`）同步。
+
+**验证**：会话 357（切线判定与性质）真实数据渲染，3 道题分别显示「2023年某地中考数学试卷」「西城35期中练习1」「北京市西城区九年级模拟测试试卷」；server `training.service` 97 例、`practice-history.service` 29 例、web 相关 66 例通过；`tsc` 两端通过。
+
 ## 2026-11-15 模型专项全量开放 + 新定义拆分
 
 **背景**：首版只有倍长中线一个模型；用户要求开放全部有题模型，并把「坐标系里的新定义」从「几何新定义」里拆出来。

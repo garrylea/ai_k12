@@ -458,6 +458,15 @@ export function QuestionRunner({
       <h1 className="font-bold shrink-0" style={{ fontSize: 'var(--fs-learn-h1)', lineHeight: '1.75rem', color: 'var(--learn-heading-1)' }}>
         对照参考答案，自评这道题
       </h1>
+      {selfAssess.question.source && (
+        <p
+          data-testid="question-source"
+          title={selfAssess.question.source}
+          className="shrink-0 -mt-2 truncate text-xs text-[var(--text-tertiary)]"
+        >
+          来源：{selfAssess.question.source}
+        </p>
+      )}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 rounded-xl border border-[var(--learn-card-border)] shadow-sm"
            style={{ backgroundColor: 'var(--learn-card-bg)' }}>
         {/* 自评必须能对照「自己写的」和「参考答案」：只给参考答案，学生记不住刚才写的步骤，
@@ -620,6 +629,16 @@ export function QuestionRunner({
               </div>
             )}
           </div>
+          {/* 题目来源：专项练习传 questions.source；出问题时可据此溯源（2026-11-15 用户要求） */}
+          {q.source && (
+            <p
+              data-testid="question-source"
+              title={q.source}
+              className="mt-3 truncate text-xs text-[var(--text-tertiary)]"
+            >
+              来源：{q.source}
+            </p>
+          )}
           {/* 提示抽屉 */}
           {hintState.show && (
             <div className="mt-3 p-3 rounded-lg bg-[var(--brand-100)] border-l-[3px] border-[var(--warning)]">

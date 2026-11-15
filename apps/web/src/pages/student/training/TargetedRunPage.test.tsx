@@ -113,6 +113,18 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+describe('专项作答页题目来源', () => {
+  it('题单带 source 时展示「来源：…」，便于溯源', async () => {
+    sessionStorage.setItem(KEY, JSON.stringify({
+      sessionId: 1,
+      questions: [{ ...QUESTION, source: '2025 海淀 初三（上）期中' }],
+    }));
+    renderPage();
+    const source = await screen.findByTestId('question-source');
+    expect(source).toHaveTextContent('来源：2025 海淀 初三（上）期中');
+  });
+});
+
 describe('TargetedRunPage 完成发分', () => {
   beforeEach(() => {
     judgeMock.mockReset();
