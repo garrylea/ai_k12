@@ -170,14 +170,26 @@ export function SolveSourceInput({ busy, error, onRetry, onManual, onRecognize }
   };
 
   const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(e.clipboardData.items)
+    // Word / Pages 复制时，剪贴板会同时放「文字」和「整段文字渲染成的图片」两版。
+    // 产品口径：两者并存时按图片处理（MinerU 能同时还原文字与插图），拦掉原生文字粘贴。
+    // 优先读 items；有些来源（Office、部分 Windows 剪贴板实现）只填 files，补一条兜底。
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const fromItems = items
       .filter((item) => item.kind === 'file')
       .map((item) => item.getAsFile())
       .filter((file): file is File => file !== null);
-    if (files.length > 0) {
-      e.preventDefault();
-      addFiles(files);
+    const candidates = fromItems.length > 0 ? fromItems : Array.from(e.clipboardData?.files ?? []);
+    const images = candidates.filter((file) => file.type.startsWith('image/'));
+    if (images.length === 0) return; // 纯文本 / 非图片：放行原生粘贴
+
+    e.preventDefault();
+    const supported = images.filter((file) => ALLOWED_IMAGE_TYPES.has(file.type));
+    if (supported.length === 0) {
+      // 以前这里静默 return：学生看到「粘了但没反应」。明确告知换截图/换格式，别再无声吞掉。
+      toast('error', '该图片格式暂不支持，请截图后再粘贴');
+      return;
     }
+    addFiles(supported);
   };
 
   return (

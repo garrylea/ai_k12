@@ -331,6 +331,116 @@ describe('SolveSourceInput', () => {
     });
   });
 
+  it('Word 复制（文字 + 图片并存）：按图片处理，不插入文字', async () => {
+    const onRecognize = vi.fn();
+    render(<SolveSourceInput busy={false} onRecognize={onRecognize} />);
+    const box = screen.getByRole('textbox');
+
+    const notCancelled = fireEvent.paste(box, {
+      clipboardData: {
+        items: [
+          { kind: 'string', type: 'text/plain', getAsFile: () => null },
+          {
+            kind: 'file',
+            type: 'image/png',
+            getAsFile: () => new File(['x'], 'word.png', { type: 'image/png' }),
+          },
+        ],
+      },
+    });
+
+    // 原生文字粘贴被拦下，只走图片；MinerU 负责同时还原文字与插图（产品口径）
+    expect(notCancelled).toBe(false);
+    expect((box as HTMLTextAreaElement).value).toBe('');
+    await waitFor(() => expect(screen.getAllByTestId('source-thumb')).toHaveLength(1));
+    // 有图 = 走识题，按钮不是「开始作答」
+    expect(screen.getByRole('button', { name: '开始识题' })).toBeInTheDocument();
+  });
+
+  it('剪贴板只有非图片文件：不拦原生粘贴，文字不被吞', () => {
+    render(<SolveSourceInput busy={false} onRecognize={vi.fn()} />);
+
+    const notCancelled = fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: {
+        items: [
+          { kind: 'string', type: 'text/plain', getAsFile: () => null },
+          {
+            kind: 'file',
+            type: 'application/pdf',
+            getAsFile: () => new File(['x'], 'q.pdf', { type: 'application/pdf' }),
+          },
+        ],
+      },
+    });
+
+    expect(notCancelled).toBe(true);
+    expect(screen.queryByTestId('source-thumb')).toBeNull();
+    expect(uploadFileMock).not.toHaveBeenCalled();
+  });
+
+  it('先输文字再粘图片：图片作为配图与文字一起提交', async () => {
+    const onRecognize = vi.fn();
+    render(<SolveSourceInput busy={false} onRecognize={onRecognize} />);
+    const box = screen.getByRole('textbox');
+
+    fireEvent.change(box, { target: { value: '求阴影面积' } });
+    fireEvent.paste(box, {
+      clipboardData: {
+        items: [
+          {
+            kind: 'file',
+            type: 'image/png',
+            getAsFile: () => new File(['x'], 'fig.png', { type: 'image/png' }),
+          },
+        ],
+      },
+    });
+
+    const submit = screen.getByRole('button', { name: '开始作答' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+
+    // 文字进题干、图片按下标附在后面（由 SolvePage 拼成 ![配图N](url)）
+    expect(onRecognize).toHaveBeenCalledWith({
+      text: '求阴影面积',
+      attachments: [{ type: 'image', fileId: '1' }],
+      imageUrls: ['/uploads/freeform/a.jpg'],
+    });
+  });
+
+  it('剪贴板是暂不支持的图片格式：给明确提示，不静默吞掉', () => {
+    render(<SolveSourceInput busy={false} onRecognize={vi.fn()} />);
+
+    const notCancelled = fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: {
+        items: [
+          {
+            kind: 'file',
+            type: 'image/tiff',
+            getAsFile: () => new File(['x'], 'scan.tiff', { type: 'image/tiff' }),
+          },
+        ],
+      },
+    });
+
+    expect(notCancelled).toBe(false); // 既然是图片，就别让原生粘贴兜底成空操作
+    expect(toastMock).toHaveBeenCalledWith('error', '该图片格式暂不支持，请截图后再粘贴');
+    expect(screen.queryByTestId('source-thumb')).toBeNull();
+  });
+
+  it('items 读不到文件时回退读 clipboardData.files', async () => {
+    render(<SolveSourceInput busy={false} onRecognize={vi.fn()} />);
+
+    fireEvent.paste(screen.getByRole('textbox'), {
+      clipboardData: {
+        items: [],
+        files: [new File(['x'], 'fallback.png', { type: 'image/png' })],
+      },
+    });
+
+    await waitFor(() => expect(screen.getAllByTestId('source-thumb')).toHaveLength(1));
+  });
+
   it('错误态：仅有回调时渲染「重试 / 手动输入题目」，busy 时禁用', () => {
     const { unmount } = render(<SolveSourceInput busy error="识别失败" onRecognize={vi.fn()} />);
     expect(screen.getByText('识别失败')).toBeInTheDocument();
