@@ -204,6 +204,49 @@ export class QuestionsRepository {
     return rows as QuestionRow[];
   }
 
+  /** 模型微专题：该生可练题数（与抽题谓词同源；confidence 阈值 0.70）。 */
+  async countModelSpecialQuestions(
+    studentId: number,
+    subjectId: number,
+    category: string,
+    model: string,
+  ): Promise<number> {
+    const sql = `SELECT COUNT(*) AS count FROM questions q
+      JOIN question_model_tags qmt ON qmt.question_id = q.id
+      LEFT JOIN student_hidden_questions shq
+        ON shq.question_id = q.id AND shq.student_id = ?
+      WHERE q.subject_id = ? AND qmt.category = ? AND qmt.model = ?
+        AND qmt.confidence >= 0.70
+        AND q.is_active = 1 AND q.answer <> '' AND shq.id IS NULL`;
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      sql, [studentId, subjectId, category, model],
+    );
+    return Number((rows[0] as { count: number } | undefined)?.count ?? 0);
+  }
+
+  /** 模型微专题抽题：固定 q.id 升序（本期 2 条为 7093→7094）。 */
+  async findModelSpecialQuestions(
+    studentId: number,
+    subjectId: number,
+    category: string,
+    model: string,
+    count: number,
+  ): Promise<QuestionRow[]> {
+    const sql = `SELECT q.* FROM questions q
+      JOIN question_model_tags qmt ON qmt.question_id = q.id
+      LEFT JOIN student_hidden_questions shq
+        ON shq.question_id = q.id AND shq.student_id = ?
+      WHERE q.subject_id = ? AND qmt.category = ? AND qmt.model = ?
+        AND qmt.confidence >= 0.70
+        AND q.is_active = 1 AND q.answer <> '' AND shq.id IS NULL
+      ORDER BY q.id ASC LIMIT ?`;
+    // pool.query：LIMIT ? 不能走 execute 的 server-side prepare（仓库既有约定）。
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      sql, [studentId, subjectId, category, model, count],
+    );
+    return rows as QuestionRow[];
+  }
+
   /** 补偿套题抽题（2026-09-21）：同考点 + 同题型 + 难度档（数组）随机取题。
    *  谓词与 findRandomByKpAndType 同源（「不再展示」排除、空答案排除、is_active）；
    *  难度由调用方按放宽阶梯（先同档，再 ±1 档）分次传入；

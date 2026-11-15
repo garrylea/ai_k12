@@ -23,7 +23,8 @@ import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictatio
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-practice.util.js';
-import { targetedTaskCode, subjectCodeOf, SUBJECT_CHINESE } from '../../common/subject-config.js';
+import { targetedTaskCode, subjectCodeOf, SUBJECT_CHINESE, SUBJECT_MATH } from '../../common/subject-config.js';
+import { MODEL_SPECIALS, type ModelSpecial } from './model-specials.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
 import type { SpecialPracticeVerdict } from '../../database/repositories/special-practice-logs.repo.js';
 import { SpecialPracticeSessionsRepository } from '../../database/repositories/special-practice-sessions.repo.js';
@@ -787,6 +788,23 @@ export class TrainingService {
     id: number; name: string; parentKpId: number | null; gradeBand: string; questionCount: number;
   }>> {
     return this.knowledgePointsRepo.findBySubject(subjectId);
+  }
+
+  /** 模型微专题清单：白名单 + 该生可练题数（非数学返回空）。 */
+  async listModelSpecials(
+    studentId: number,
+    subjectId: number,
+  ): Promise<{ specials: Array<ModelSpecial & { questionCount: number }> }> {
+    if (subjectId !== SUBJECT_MATH) return { specials: [] };
+    const specials = await Promise.all(
+      MODEL_SPECIALS.map(async (s) => ({
+        ...s,
+        questionCount: await this.questionsRepo.countModelSpecialQuestions(
+          studentId, subjectId, s.category, s.model,
+        ),
+      })),
+    );
+    return { specials };
   }
 
   /**

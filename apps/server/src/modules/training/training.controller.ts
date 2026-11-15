@@ -167,6 +167,15 @@ export class TrainingController {
     return this.trainingService.waitForExplanation(questionId);
   }
 
+  /** 模型微专题清单：白名单模型 + 该生可练题数（非数学返回空）。 */
+  @Get('model-specials')
+  async listModelSpecials(
+    @Query('subjectId', ParseIntPipe) subjectId: number,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.trainingService.listModelSpecials(user.sub, subjectId);
+  }
+
   /** 专项练习开练：count 必须是**家长已配的档位**（定案 7「档位即可选项」），再限 1-20 整数兜底；
    *  type 限白名单六值（含 null），越界/非法 400。返回体带 `sessionId`（乙类整批发分用）。
    *  studentId 从 JWT 取（用于排除该生已标记不再展示的题）。

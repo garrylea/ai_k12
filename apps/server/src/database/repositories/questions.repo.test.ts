@@ -208,6 +208,36 @@ describe('QuestionsRepository.updateFreeform', () => {
   });
 });
 
+describe('QuestionsRepository 模型专项抽题', () => {
+  it('count：JOIN 标签 / confidence>=0.70 / active / 有答案 / 隐藏排除', async () => {
+    const pool = mockPool([{ count: 2 }]);
+    const repo = new QuestionsRepository(pool as any);
+    const n = await repo.countModelSpecialQuestions(7, 1, 'geometry_synthesis', 'median_doubling');
+    expect(n).toBe(2);
+    expect(pool.execute).not.toHaveBeenCalled();
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('JOIN question_model_tags qmt');
+    expect(sql).toContain('qmt.confidence >= 0.70');
+    expect(sql).toContain('LEFT JOIN student_hidden_questions shq');
+    expect(sql).toContain('shq.id IS NULL');
+    expect(sql).toContain('q.is_active = 1');
+    expect(sql).toContain("q.answer <> ''");
+    expect(params).toEqual([7, 1, 'geometry_synthesis', 'median_doubling']);
+  });
+
+  it('find：ORDER BY q.id ASC + LIMIT ? 走 pool.query', async () => {
+    const pool = mockPool([{ id: 7093 }, { id: 7094 }]);
+    const repo = new QuestionsRepository(pool as any);
+    const rows = await repo.findModelSpecialQuestions(
+      7, 1, 'geometry_synthesis', 'median_doubling', 2,
+    );
+    expect(rows.map((r) => r.id)).toEqual([7093, 7094]);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('ORDER BY q.id ASC LIMIT ?');
+    expect(params).toEqual([7, 1, 'geometry_synthesis', 'median_doubling', 2]);
+  });
+});
+
 describe('QuestionsRepository.findKpRefsByQuestionIds', () => {
   it('按题聚合知识点并带顶层 code', async () => {
     const pool = mockPool([

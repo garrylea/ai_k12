@@ -14,6 +14,8 @@ const mk = (overrides: any = {}) => ({
     findById: vi.fn(),
     findRandomByKpAndType: vi.fn().mockResolvedValue([]),
     findByIds: vi.fn().mockResolvedValue([]),
+    findModelSpecialQuestions: vi.fn().mockResolvedValue([]),
+    countModelSpecialQuestions: vi.fn().mockResolvedValue(0),
   },
   questionHintsRepo: {
     findByQuestionId: vi.fn().mockResolvedValue(null),
@@ -359,6 +361,33 @@ describe('TrainingService.getKnowledgePoints', () => {
     const r = await mkSvc(deps).getKnowledgePoints(1);
     expect(deps.knowledgePointsRepo.findBySubject).toHaveBeenCalledWith(1);
     expect(r).toEqual(flat);
+  });
+});
+
+describe('TrainingService.listModelSpecials', () => {
+  it('数学：返回白名单模型 + 该生可练题数', async () => {
+    const deps = mk({
+      questionsRepo: {
+        countModelSpecialQuestions: vi.fn().mockResolvedValue(2),
+      } as never,
+    });
+    const r = await mkSvc(deps).listModelSpecials(7, 1);
+    expect(r.specials).toEqual([{
+      category: 'geometry_synthesis',
+      categoryName: '几何综合',
+      model: 'median_doubling',
+      modelName: '倍长中线',
+      questionCount: 2,
+    }]);
+    expect(deps.questionsRepo.countModelSpecialQuestions)
+      .toHaveBeenCalledWith(7, 1, 'geometry_synthesis', 'median_doubling');
+  });
+
+  it('非数学：返回空数组，不查库', async () => {
+    const deps = mk();
+    const r = await mkSvc(deps).listModelSpecials(7, 4);
+    expect(r).toEqual({ specials: [] });
+    expect(deps.questionsRepo.countModelSpecialQuestions).not.toHaveBeenCalled();
   });
 });
 
