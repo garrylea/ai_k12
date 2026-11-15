@@ -9,14 +9,17 @@ import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
   markdownRemarkPlugins,
+  markdownRemarkPluginsWithBreaks,
   markdownRehypePlugins,
   markdownComponents,
+  makeAnswerComponents,
   preprocessMarkdown,
   preprocessMaterialMarkdown,
   MarkdownImg,
   ANSWER_IMG_CLASS,
 } from '@/components/markdown';
 import { LatexEditor } from '../LatexEditor';
+import { autoWrapMath } from '../LatexPreview';
 import { PreviewDraftPanel } from '../PreviewDraftPanel';
 import type { PreviewScrollSync } from '../preview-scroll-sync';
 import { clearDraft } from '../draft-store';
@@ -27,6 +30,13 @@ import { isMathLikeSubject, selfAssessEligible } from '@/constants';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用内嵌草稿（PRD §7.12） */
 const MATH_SUBJECT_ID = 1;
+
+/**
+ * 学生作答专用 components（作答大图）：手绘/拍照的图按题面小图会被压成细线。
+ * 模块级常量：渲染里现造组件表会让 <img> 每次重挂、反复下载。
+ * 与结果页「你的答案」同口径（AnswerResultList.tsx）。
+ */
+const answerComponents = makeAnswerComponents();
 
 const SPINNER_SVG = (
   <svg className="animate-spin text-[var(--brand-500)]" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -450,6 +460,25 @@ export function QuestionRunner({
       </h1>
       <div className="flex-1 min-h-0 overflow-y-auto p-4 rounded-xl border border-[var(--learn-card-border)] shadow-sm"
            style={{ backgroundColor: 'var(--learn-card-bg)' }}>
+        {/* 自评必须能对照「自己写的」和「参考答案」：只给参考答案，学生记不住刚才写的步骤，
+            也就无从判断对错（2026-11-15 学生反馈）。渲染口径与结果页「你的答案」一致。 */}
+        <div className="text-xs font-semibold text-[var(--text-tertiary)] mb-1.5">你的作答</div>
+        <div
+          data-testid="self-assess-my-answer"
+          className="mb-4 rounded-lg bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] leading-[1.7]"
+        >
+          {selfAssess.submittedAnswer.trim() ? (
+            <ReactMarkdown
+              remarkPlugins={markdownRemarkPluginsWithBreaks}
+              rehypePlugins={markdownRehypePlugins}
+              components={answerComponents}
+            >
+              {preprocessMarkdown(autoWrapMath(selfAssess.submittedAnswer))}
+            </ReactMarkdown>
+          ) : (
+            <span className="text-[var(--text-tertiary)]">（未作答）</span>
+          )}
+        </div>
         <div className="text-xs font-semibold text-[var(--text-tertiary)] mb-1.5">参考答案</div>
         <div className="text-sm text-[var(--text-primary)] leading-[1.7]">
           <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={questionMarkdownComponents}>

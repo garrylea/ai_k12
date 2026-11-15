@@ -2,7 +2,7 @@
 // 复现测试：切题（上一题回退）后，之前已作答的答案应被回填，不丢失。
 // 场景对应 bug 报告：专项训练/考试/错题练习时回到上一题看到作答空白。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useMemo, useState } from 'react';
 
@@ -243,8 +243,10 @@ describe('主观题自评（self_assess 模式）', () => {
     );
     await user.type(screen.getByRole('textbox'), '我的证明');
     await user.click(screen.getByTitle('提交'));
-    // 自评视图出现：参考答案 + 自评按钮，未自评前不放行下一题
+    // 自评视图出现：先看到自己写的作答，再对照参考答案 + 自评按钮，未自评前不放行下一题
     expect(await screen.findByText('参考证明过程')).toBeTruthy();
+    expect(screen.getByText('你的作答')).toBeTruthy();
+    expect(within(screen.getByTestId('self-assess-my-answer')).getByText('我的证明')).toBeTruthy();
     expect(screen.queryByText('第二题题干')).toBeNull();
     await user.click(screen.getByRole('button', { name: '我做对了' }));
     expect(onSelfAssess).toHaveBeenCalledWith(
@@ -309,7 +311,10 @@ describe('内联自评闸门按学科开放（闸门③）', () => {
     );
     await user.type(screen.getByRole('textbox'), 'CO2');
     await user.click(screen.getByTitle('提交'));
-    expect(await screen.findByText('CO2')).toBeTruthy();
+    // 「我的作答」与「参考答案」各一处 CO2：按容器取，避免全页重复文本
+    const mine = await screen.findByTestId('self-assess-my-answer');
+    expect(within(mine).getByText('CO2')).toBeTruthy();
+    expect(screen.getByText('参考答案')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '我做对了' }));
     expect(onSelfAssess).toHaveBeenCalledTimes(1);
   });
