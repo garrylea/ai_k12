@@ -40,7 +40,7 @@
 
 - 不补题、不生成变式题、不扩到其他模型（旋转相似/中点模型/手拉手等）。
 - 不新增 `task_code`、不改积分规则、不改家长端积分配置页。
-- 不在练习历史标题里显示「倍长中线」（会话仍记 `math_targeted`）。
+- **不改练习记录表结构**；记录标题通过现有 handoff `title` 传递为「倍长中线微专题」（复用 `special_practice_sessions.title`，不加列）。
 - 不做模型专项的独立首页第 5 张卡（保持训练首页四卡 2×2）。
 - 不做模型维度的推荐/薄弱点联动。
 
@@ -102,8 +102,7 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 
 ### 4.3 顺序与题量
 
-- **固定 `q.id ASC`**：本期只有 2 条，`7093` 永远在 `7094` 前；1 题档只出 `7093`。
-- 2 题档出 `7093`、`7094`；不随机。PRD 的「随机抽题」在本微专题是**有意例外**：题池只有 2 条，随机只会让 1 题档随机到「第二问」而缺完整题。
+- **固定 `q.id ASC`**：本期只有 2 条，排序后第一条是 `7093`；1 题档出排序后的第一条（当前为 `7093`），2 题档出前两条（当前 `7093 → 7094`）。不随机。PRD 的「随机抽题」在本微专题是**有意例外**：题池只有 2 条，随机只会让 1 题档随机到「第二问」而缺完整题。
 - 未来题池 > 5 条时再改成随机（保留首题固定），只改 repo 排序，不改 API/UI。
 
 ### 4.4 已知限制（spec 明写，不在实现时再争）
@@ -181,13 +180,15 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 **校验顺序（模型模式）**
 
 1. `kpId` 与 `category+model` 必须**恰好一个**；两个都给或都不给 → 400 `kpId 与 category+model 必须二选一`。
-2. `subjectId !== 1` → 400 `模型专项仅支持数学`。
-3. 白名单没有该 `(category, model)` → 400 `不支持的模型专项`。
-4. `type !== null` → 400 `模型专项不支持题型筛选`。
-5. `count` 不在 1/2 → 400 `模型专项仅支持 1 或 2 题`。
-6. `count` 不在该生 `math_targeted` 已开启档位 → 400，沿用现有文案 `题量仅允许 1 | 2 | ...`。
-7. 查可练行；`rows.length < count` → 400 `题量超过可练题数（当前 N 题）`（N=0 时同一条）。
-8. 通过 → 返回题单 + 建会话。
+2. 只给了 `category` 或只给了 `model` → 400 `category 与 model 必须同时出现`。
+3. `subjectId !== 1` → 400 `模型专项仅支持数学`。
+4. 白名单没有该 `(category, model)` → 400 `不支持的模型专项`。
+5. `type !== null` → 400 `模型专项不支持题型筛选`。
+6. `count` 不在 1/2 → 400 `模型专项仅支持 1 或 2 题`。
+7. 该生 `math_targeted` 一个可用档位都没有 → 400 `家长未开启数学专项档位`。
+8. `count` 不在该生 `math_targeted` 已开启档位 → 400，沿用现有文案 `题量仅允许 1 | 2 | ...`。
+9. 查可练行；`rows.length < count` → 400 `题量超过可练题数（当前 N 题）`（N=0 时同一条）。
+10. 通过 → 返回题单 + 建会话。
 
 > KP 模式保持现有行为：`count` 是家长档位、`type` 白名单、抽不到题返回 `{questions: [], sessionId: null}`，不因本次改动改变。
 
@@ -221,7 +222,7 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 }
 ```
 
-- 模型模式题单顺序固定 `7093 → 7094`。
+- 模型模式题单顺序固定 `q.id ASC`：当前 1 题为 `7093`、2 题为 `7093 → 7094`（标签变化时以实际排序为准）。
 - 题单仍是白名单序列化：不含 `answer` / `explanation` / `approach`。
 - `sessionId` 可能为 null（会话 INSERT 失败），前端照常出题、不发分。
 
@@ -230,10 +231,12 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 | 场景 | HTTP | message |
 |---|---|---|
 | 模式互斥 | 400 | `kpId 与 category+model 必须二选一` |
+| category/model 只给一个 | 400 | `category 与 model 必须同时出现` |
 | 非数学模型 | 400 | `模型专项仅支持数学` |
 | 白名单外模型 | 400 | `不支持的模型专项` |
 | 模型模式带 type | 400 | `模型专项不支持题型筛选` |
 | count 不是 1/2 | 400 | `模型专项仅支持 1 或 2 题` |
+| 家长没有任何可用档位 | 400 | `家长未开启数学专项档位` |
 | count 不是家长档位 | 400 | `题量仅允许 1 | 2 | ...` |
 | count 超过可练数 | 400 | `题量超过可练题数（当前 N 题）` |
 | subjectId 非整数（GET） | 400 | Nest `ParseIntPipe` 默认 |
@@ -286,7 +289,7 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 | `model-error` | `GET model-specials` 失败 | 卡片内 `模型专项加载失败` + `重试` 按钮；不整页报错 |
 | `model-empty` | `specials=[]` 或 `questionCount=0` | `暂无可练题目。`；开始按钮禁用 |
 | `model-ok` | 有模型且 count>0 | 卡片 + 题量 chips + 开始 |
-| `no-tier` | 家长未开启 1/2 档 | 卡片照常显示，题量区显示 `家长未开启 1 或 2 题档位，暂不能开练。`；开始禁用 |
+| `no-tier` | 家长未开启可用档位 | 卡片照常显示，题量区按题池显示：可练 2 题 → `家长未开启 1 或 2 题档位，暂不能开练。`；可练 1 题 → `家长未开启 1 题档位，暂不能开练。`；开始禁用 |
 | `starting` | 点开始 | 按钮 `开练中…`，禁用；失败在按钮上方显示 `startError`（沿用现有 ErrorBanner 风格） |
 | `empty-questions` | 接口返回空题单 | 留在配置页，提示 `这个模型暂时没有可练的题。`（防御，正常情况下 count 已校验） |
 
@@ -308,7 +311,7 @@ const defaultKey = eligible.length > 0
 ```
 
 - 家长只开 1 题档 → 只显示 1 题；只开 2 题档 → 只显示 2 题；1/2 都开 → 显示两档，默认 2。
-- 只有 3/5/10 档 → `eligible=[]` → `no-tier` 状态。
+- 只有 3/5/10 档 → `eligible=[]` → `no-tier` 状态（题池 2 题时提示开启 1 或 2 题档；题池 1 题时提示开启 1 题档）。
 - 档位重新加载（`usePointTiers` 的 retry）后重算；当前选中档不在新 eligible 中则回默认。
 
 ### 6.5 开练与跳转
@@ -321,7 +324,11 @@ const res = await startTargetedPractice({
   type: null,
   count: Number(modelTierKey),
 });
-const handoff: TargetedRunHandoff = { sessionId: res.sessionId, questions: res.questions };
+const handoff: TargetedRunHandoff = {
+  sessionId: res.sessionId,
+  questions: res.questions,
+  title: '倍长中线微专题',   // 练习记录/结果页标题；复用现有 handoff title
+};
 sessionStorage.setItem('training:targeted', JSON.stringify(handoff));
 navigate('/student/training/targeted/run');
 ```
@@ -347,7 +354,8 @@ navigate('/student/training/targeted/run');
 - **任务码复用**：`math_targeted`；模型模式不新增 `task_code`。
 - **档位/积分**：1 题档 2 分、2 题档 5 分（来自 `point_rules`，家长可改）；发分仍由 `POST /api/training/sessions/{id}/complete` 按会话 `tier_key` 取，不在开练时发。
 - **会话**：`training_sessions` 行 `task_code='math_targeted'`、`tier_key=count`、`expected_count=rows.length`、`ref_type='model'`、`ref_id=NULL`。`ref_type` 当前无消费方，只为后续统计留标记。
-- **练习记录**：仍显示「数学专项」，不显示「倍长中线」；模型维度后续按作答题目回查 `question_model_tags` 即可，不在会话表冗余模型。
+- **练习记录标题**：模型模式 handoff 写 `title='倍长中线微专题'`；`TargetedRunPage` 判题时把它传给 `judgeTraining`，`special_practice_sessions.title` 落该值，练习记录列表/详情显示「倍长中线微专题」。**不需要给会话表加列**。
+- **模型维度统计**：标题已带模型名；若要按 `(category, model)` 聚合，按作答题目回查 `question_model_tags` 即可，不在会话表冗余模型。
 - **错题本**：判错走现有 `source='targeted'`，照常入本、参与清零门禁；模型模式不特殊。
 
 ---
@@ -422,7 +430,7 @@ navigate('/student/training/targeted/run');
 | 标签被重跑改掉/置信度下降 | count API 实时查标签；0 时显示「暂无可练题目」，不报错 |
 | 模型标签误标，池里混入非倍长题 | 当前两条有解析可核对（都用了倍长 BH 构造）；白名单先只放这一对，后续扩模型前先抽检 |
 | 直接调 API 绕过 UI 档位 | 服务端校验 count∈{1,2}、家长档位、可练数，三层都在服务端 |
-| 会话/积分与普通专项混淆 | 复用 `math_targeted` 是刻意选择；`ref_type='model'` 留标记，历史暂不区分 |
+| 会话/积分与普通专项混淆 | 复用 `math_targeted` 是刻意选择；`ref_type='model'` 留标记，记录标题用 handoff `title` 区分模型，不加表列 |
 
 ---
 
@@ -430,5 +438,5 @@ navigate('/student/training/targeted/run');
 
 - 题池扩到 ≥5 条后：抽题改随机（首题固定），2 题档不再固定 7093/7094。
 - 加其他模型（旋转相似 11、中点模型 7、手拉手 5）：只扩 `MODEL_SPECIALS` + 前端卡片，不改 API 形状。
-- 练习历史/家长报告显示模型维度：按作答题目 join `question_model_tags`，或在会话表加 `model_tag` 列（需迁移）。
+- 练习历史/家长报告按 `(category, model)` 聚合：按作答题目 join `question_model_tags`，或在会话表加 `model_tag` 列（需迁移）。
 - 模型微专题的方法讲解卡/例题：另立 spec，不与本期练习流程耦合。
