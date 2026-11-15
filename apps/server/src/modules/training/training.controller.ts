@@ -12,7 +12,8 @@ import { CurrentUser } from '../../common/decorators/current-user.js';
 import type { ErrorBookQueryDto } from './dto/error-book-query.dto.js';
 import type { JudgeTrainingDto } from './dto/judge-training.dto.js';
 import type { SelfAssessTrainingDto } from './dto/self-assess.dto.js';
-import { targetedTaskCode } from '../../common/subject-config.js';
+import { targetedTaskCode, SUBJECT_MATH } from '../../common/subject-config.js';
+import { findModelSpecial } from './model-specials.js';
 
 @Controller('api/training')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -181,33 +182,76 @@ export class TrainingController {
    *  studentId 从 JWT 取（用于排除该生已标记不再展示的题）。
    *
    *  白名单必须在服务层之前挡：范围校验放行 1-20 的任意整数，`count=13` 能绕过档位设计。
-   *  `listTierKeys` 内部先 `ensureRules`，从未发过分的全新学生拿到默认档位而不是空数组。 */
+   *  `listTierKeys` 内部先 `ensureRules`，从未发过分的全新学生拿到默认档位而不是空数组。
+   *
+   *  **模型微专题（2026-11-15）**：`{category, model}` 与 `kpId` 二选一。模型模式只支持数学、
+   *  不筛题型、限 1-2 题，同样受家长档位约束（档位未开则 400）。 */
   @Post('targeted/start')
   async startTargetedPractice(
-    @Body() dto: { subjectId: number; kpId: number; type: string | null; count: number },
+    @Body() dto: {
+      subjectId: number;
+      kpId?: number;
+      category?: string;
+      model?: string;
+      type: string | null;
+      count: number;
+    },
     @CurrentUser() user: JwtUser,
   ) {
+    const hasKp = Number.isInteger(dto.kpId) && (dto.kpId as number) > 0;
+    const hasCategory = typeof dto.category === 'string' && dto.category.trim() !== '';
+    const hasModel = typeof dto.model === 'string' && dto.model.trim() !== '';
+
+    if (hasKp && (hasCategory || hasModel)) {
+      throw new BadRequestException('kpId 与 category+model 必须二选一');
+    }
+    if (!hasKp && !hasCategory && !hasModel) {
+      throw new BadRequestException('kpId 与 category+model 必须二选一');
+    }
+    if (!hasKp && hasCategory !== hasModel) {
+      throw new BadRequestException('category 与 model 必须同时出现');
+    }
+
+    const special = hasKp ? null : findModelSpecial(dto.category, dto.model);
+    if (!hasKp) {
+      if (dto.subjectId !== SUBJECT_MATH) {
+        throw new BadRequestException('模型专项仅支持数学');
+      }
+      if (!special) throw new BadRequestException('不支持的模型专项');
+      if (dto.type !== null && dto.type !== undefined) {
+        throw new BadRequestException('模型专项不支持题型筛选');
+      }
+      if (!Number.isInteger(dto.count) || (dto.count !== 1 && dto.count !== 2)) {
+        throw new BadRequestException('模型专项仅支持 1 或 2 题');
+      }
+    }
+
     const { count } = dto;
-    // 学科 -> 任务码查表（spec 2026-10-31 §3.1）：数学/语文/物理/化学/道法各有独立档位
     const taskCode = targetedTaskCode(dto.subjectId);
     const allowed = await this.pointRulesService.listTierKeys(user.sub, taskCode);
+    if (!hasKp && allowed.length === 0) {
+      throw new BadRequestException('家长未开启数学专项档位');
+    }
     if (!allowed.includes(String(count))) {
       throw new BadRequestException(`题量仅允许 ${allowed.join(' | ')}`);
     }
     if (!Number.isInteger(count) || count < 1 || count > 20) {
       throw new BadRequestException('count 仅允许 1-20 的整数');
     }
+
     const type = dto.type ?? null;
     if (type !== null && !(TrainingController.TARGETED_TYPES as readonly string[]).includes(type)) {
       throw new BadRequestException(
         'type 仅允许 choice | fill_blank | true_false | short_answer | proof | calculation 或 null',
       );
     }
+
     return this.trainingService.startTargetedPractice({
       studentId: user.sub,
       subjectId: dto.subjectId,
-      kpId: dto.kpId,
-      type,
+      kpId: hasKp ? dto.kpId! : null,
+      modelSpecial: special,
+      type: special ? null : type,
       count,
     });
   }

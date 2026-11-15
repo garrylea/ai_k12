@@ -482,6 +482,49 @@ describe('TrainingService.startTargetedPractice', () => {
     expect(r).toEqual({ questions: [], sessionId: null });
     expect(deps.trainingSessionsRepo.create).not.toHaveBeenCalled();
   });
+
+  it('模型模式：按标签抽题、2 题按 id 顺序、会话 ref_type=model', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findModelSpecialQuestions: vi.fn().mockResolvedValue([
+          { ...questionRow, id: 7093 },
+          { ...questionRow, id: 7094, type: 'short_answer', content: '第二问' },
+        ]),
+      } as never,
+    });
+    const r = await mkSvc(deps).startTargetedPractice({
+      studentId: 7, subjectId: 1, kpId: null,
+      modelSpecial: {
+        category: 'geometry_synthesis', categoryName: '几何综合',
+        model: 'median_doubling', modelName: '倍长中线',
+      },
+      type: null, count: 2,
+    });
+    expect(deps.questionsRepo.findModelSpecialQuestions)
+      .toHaveBeenCalledWith(7, 1, 'geometry_synthesis', 'median_doubling', 2);
+    expect(r.questions.map((q) => q.questionId)).toEqual([7093, 7094]);
+    expect(deps.trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      task_code: 'math_targeted', tier_key: '2', expected_count: 2,
+      ref_type: 'model', ref_id: null,
+    }));
+  });
+
+  it('模型模式：可练题数不足 count -> 400，不建会话', async () => {
+    const deps = mk({
+      questionsRepo: {
+        findModelSpecialQuestions: vi.fn().mockResolvedValue([{ ...questionRow, id: 7093 }]),
+      } as never,
+    });
+    await expect(mkSvc(deps).startTargetedPractice({
+      studentId: 7, subjectId: 1, kpId: null,
+      modelSpecial: {
+        category: 'geometry_synthesis', categoryName: '几何综合',
+        model: 'median_doubling', modelName: '倍长中线',
+      },
+      type: null, count: 2,
+    })).rejects.toMatchObject({ status: 400 });
+    expect(deps.trainingSessionsRepo.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('TrainingService.startTargetedPractice — 建会话（乙类整批发分）', () => {
@@ -585,8 +628,8 @@ describe('TrainingController.startTargetedPractice — 档位白名单（定案 
     const r2 = await c.startTargetedPractice({ subjectId: 1, kpId: 3, type: 'proof', count: 10 }, user);
     expect(r1).toEqual({ questions: [], sessionId: 11 });
     expect(r2).toEqual({ questions: [], sessionId: 12 });
-    expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(1, { studentId: 7, subjectId: 1, kpId: 3, type: null, count: 1 });
-    expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(2, { studentId: 7, subjectId: 1, kpId: 3, type: 'proof', count: 10 });
+    expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(1, { studentId: 7, subjectId: 1, kpId: 3, modelSpecial: null, type: null, count: 1 });
+    expect(svc.startTargetedPractice).toHaveBeenNthCalledWith(2, { studentId: 7, subjectId: 1, kpId: 3, modelSpecial: null, type: 'proof', count: 10 });
   });
 
   it('从未发过分的全新学生：先 ensureRules 补默认档位再查，count=3 放行（返回空数组会 400 掉所有请求）', async () => {
@@ -606,6 +649,40 @@ describe('TrainingController.startTargetedPractice — 档位白名单（定案 
     await expect(
       c.startTargetedPractice({ subjectId: 1, kpId: 3, type: null, count: 5 }, user),
     ).rejects.toMatchObject({ status: 400 });
+    expect(svc.startTargetedPractice).not.toHaveBeenCalled();
+  });
+
+  it('模型模式：kpId=null + category/model + type=null + count=2 透传', async () => {
+    const svc: any = { startTargetedPractice: vi.fn().mockResolvedValue({ questions: [], sessionId: null }) };
+    const rules: any = { listTierKeys: vi.fn().mockResolvedValue(['1', '2']) };
+    const c = new TrainingController(svc, {} as never, {} as never, rules);
+    await c.startTargetedPractice({
+      subjectId: 1, category: 'geometry_synthesis', model: 'median_doubling',
+      type: null, count: 2,
+    }, { sub: 7 } as never);
+    expect(svc.startTargetedPractice).toHaveBeenCalledWith({
+      studentId: 7, subjectId: 1, kpId: null,
+      modelSpecial: {
+        category: 'geometry_synthesis', categoryName: '几何综合',
+        model: 'median_doubling', modelName: '倍长中线',
+      },
+      type: null, count: 2,
+    });
+  });
+
+  it.each([
+    [{ subjectId: 1, kpId: 3, category: 'geometry_synthesis', model: 'median_doubling', type: null, count: 2 }, '二选一'],
+    [{ subjectId: 1, category: 'geometry_synthesis', type: null, count: 2 }, '同时出现'],
+    [{ subjectId: 4, category: 'geometry_synthesis', model: 'median_doubling', type: null, count: 2 }, '仅支持数学'],
+    [{ subjectId: 1, category: 'x', model: 'y', type: null, count: 2 }, '不支持的模型专项'],
+    [{ subjectId: 1, category: 'geometry_synthesis', model: 'median_doubling', type: 'proof', count: 2 }, '不支持题型筛选'],
+    [{ subjectId: 1, category: 'geometry_synthesis', model: 'median_doubling', type: null, count: 3 }, '仅支持 1 或 2 题'],
+  ])('模型模式非法入参 -> 400（%#）', async (dto, msg) => {
+    const svc: any = { startTargetedPractice: vi.fn() };
+    const rules: any = { listTierKeys: vi.fn().mockResolvedValue(['1', '2', '3']) };
+    const c = new TrainingController(svc, {} as never, {} as never, rules);
+    await expect(c.startTargetedPractice(dto as never, { sub: 7 } as never))
+      .rejects.toThrow(msg);
     expect(svc.startTargetedPractice).not.toHaveBeenCalled();
   });
 });

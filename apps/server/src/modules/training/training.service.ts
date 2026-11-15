@@ -820,11 +820,16 @@ export class TrainingService {
    * **后端实际抽到的题数**——题池不够时两者可以不等；发分按档位走规则，题数只作审计留痕。
    *
    * **一题都没抽到就不建会话**：0 题的会话也能 complete 拿走整档分，是个白送分的口子。
+   *
+   * **模型微专题（2026-11-15）**：传 `modelSpecial` 时改按模型标签抽题，会话 `ref_type='model'`；
+   * 题数不足 `count` 直接 400（模型微专题是定量的「练这组题」，不像 KP 模式可少给几题）。
    */
   async startTargetedPractice(input: {
     studentId: number;
     subjectId: number;
-    kpId: number;
+    kpId?: number | null;
+    /** 模型微专题；与 kpId 二选一，控制器已校验。 */
+    modelSpecial?: ModelSpecial | null;
     type: string | null;
     count: number;
   }): Promise<{
@@ -835,13 +840,23 @@ export class TrainingService {
     /** 未抽到题时为 null（没有可完成的会话）。 */
     sessionId: number | null;
   }> {
-    const rows = await this.questionsRepo.findRandomByKpAndType(
-      input.studentId,
-      input.subjectId,
-      input.kpId,
-      input.type,
-      input.count,
-    );
+    const modelSpecial = input.modelSpecial ?? null;
+    const rows = modelSpecial
+      ? await this.questionsRepo.findModelSpecialQuestions(
+          input.studentId, input.subjectId, modelSpecial.category,
+          modelSpecial.model, input.count,
+        )
+      : await this.questionsRepo.findRandomByKpAndType(
+          input.studentId,
+          input.subjectId,
+          input.kpId as number,
+          input.type,
+          input.count,
+        );
+    // 模型专项是「这一组题练这个模型」，题数不足就 400，不按 KP 模式降级成少几题。
+    if (modelSpecial && rows.length < input.count) {
+      throw new BadRequestException(`题量超过可练题数（当前 ${rows.length} 题）`);
+    }
     const questions = rows.map((q) => ({
       questionId: q.id,
       text: q.content,
@@ -862,7 +877,7 @@ export class TrainingService {
           subject_id: input.subjectId,
           tier_key: String(input.count),
           expected_count: rows.length,
-          ref_type: 'question',
+          ref_type: modelSpecial ? 'model' : 'question',
           ref_id: null,
         });
       } catch (err) {
