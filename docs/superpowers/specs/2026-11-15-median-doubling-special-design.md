@@ -289,6 +289,7 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 | `model-error` | `GET model-specials` 失败 | 卡片内 `模型专项加载失败` + `重试` 按钮；不整页报错 |
 | `model-empty` | `specials=[]` 或 `questionCount=0` | `暂无可练题目。`；开始按钮禁用 |
 | `model-ok` | 有模型且 count>0 | 卡片 + 题量 chips + 开始 |
+| `tiers-error` | `GET /points/me/rules` 失败 | 题量区显示 `档位加载失败，请重试` + `重试` 按钮；不整页报错，模型卡片仍可见 |
 | `no-tier` | 家长未开启可用档位 | 卡片照常显示，题量区按题池显示：可练 2 题 → `家长未开启 1 或 2 题档位，暂不能开练。`；可练 1 题 → `家长未开启 1 题档位，暂不能开练。`；开始禁用 |
 | `starting` | 点开始 | 按钮 `开练中…`，禁用；失败在按钮上方显示 `startError`（沿用现有 ErrorBanner 风格） |
 | `empty-questions` | 接口返回空题单 | 留在配置页，提示 `这个模型暂时没有可练的题。`（防御，正常情况下 count 已校验） |
