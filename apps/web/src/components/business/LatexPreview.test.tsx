@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import ReactMarkdown from 'react-markdown';
-import { LatexPreview, autoWrapMath, autoWrapMathIfBare } from './LatexPreview';
+import { LatexPreview, autoWrapMath, normalizeAnswerMath } from './LatexPreview';
 import type { PreviewScrollSync } from './preview-scroll-sync';
 import {
   ANSWER_IMG_CLASS,
@@ -74,12 +74,16 @@ describe('autoWrapMath 补 $ 判定', () => {
     expect(autoWrapMath('$$\\begin{cases}a & x>0\\end{cases}$$')).toBe('$$\\begin{cases}a & x>0\\end{cases}$$');
   });
 
-  it('autoWrapMathIfBare：整段已有 $ 时一个字都不动；无 $ 的裸 LaTeX 才补', () => {
-    // 题库答案/解析专用：已含 $ 的文本存在不配对、跨图的情况，再补 $ 会打乱配对
-    expect(autoWrapMathIfBare('已含 $x=1$ 与裸 a+b=1')).toBe('已含 $x=1$ 与裸 a+b=1');
-    expect(autoWrapMathIfBare('$\\therefore EF//OD$ 且 \\sqrt{2}')).toBe('$\\therefore EF//OD$ 且 \\sqrt{2}');
-    expect(autoWrapMathIfBare('\\sqrt{2}')).toBe('$\\sqrt{2}$');
-    expect(autoWrapMathIfBare('OE=\\sqrt{41}')).toBe('$OE=\\sqrt{41}$');
+  it('normalizeAnswerMath：修 TAB 损坏的 \\text、修 $ 错位、补裸 LaTeX', () => {
+    // 1) 导入时 \text 被转义成 TAB+"ext"（4686/4688 库内实况）
+    expect(normalizeAnswerMath('$' + '\t' + 'ext { 当 } x > 0$')).toBe('$\\text { 当 } x > 0$');
+    // 2) 配对正常、汉字只在 \text{} 内：一个字都不动
+    const ok = '$1\\text{ 丝} \\approx 0.000\\,002\\,31\\text{ m}$';
+    expect(normalizeAnswerMath(ok)).toBe(ok);
+    // 3) $ 错位（公式段混进正文）：拆掉单 $ 后重新补，避免 \angle 变字面
+    expect(normalizeAnswerMath('证明 $AB=AC 因为 \\angle B$ 相等')).toBe('证明 $AB=AC$ 因为 $\\angle B$ 相等');
+    // 4) 一条 $ 都没有的裸 LaTeX
+    expect(normalizeAnswerMath('OE=\\sqrt{41}')).toBe('$OE=\\sqrt{41}$');
   });
 
   it('标准 LaTeX 定界 \\[…\\] / \\(…\\) 原样保留（preprocessMarkdown 会统一转成 $ 系）', () => {

@@ -12,7 +12,7 @@ import {
   preprocessMarkdown,
   preprocessMaterialMarkdown,
 } from '@/components/markdown';
-import { autoWrapMath, autoWrapMathIfBare } from '@/components/business/LatexPreview';
+import { autoWrapMath, normalizeAnswerMath } from '@/components/business/LatexPreview';
 import {
   getMyPointRules,
   getPracticeHistoryDetail,
@@ -270,8 +270,8 @@ function QuestionCard({
           <span className="text-[var(--text-tertiary)]">正确答案：</span>
           {/* breaks：库里的证明/解答是「一行一步」的纯文本，不保留换行会挤成一整段，
               看上去就像没渲染的原文（2026-11-15 用户反馈）。
-              裸 LaTeX 自动补 $：库里 13 条答案/2 条解析没有 $ 定界符（\sqrt{2} 等） */}
-          <MarkdownBlock text={autoWrapMathIfBare(q.questionAnswer)} breaks className="mt-1 text-[var(--success)]" />
+              normalizeAnswerMath：裸 LaTeX 补 $、修 $ 错位与 \text 损坏、夹在公式中间的插图单独切出 */}
+          <MarkdownBlock text={normalizeAnswerMath(q.questionAnswer)} breaks className="mt-1 text-[var(--success)]" />
         </div>
       ) : null}
 
@@ -280,7 +280,7 @@ function QuestionCard({
         <div className="mt-3 border-t border-[var(--bg-subtle)] pt-3">
           <p className="mb-1 text-xs text-[var(--text-tertiary)]">解析</p>
           <MarkdownBlock
-            text={autoWrapMathIfBare(q.analysis ?? q.questionAnalysis ?? '')}
+            text={normalizeAnswerMath(q.analysis ?? q.questionAnalysis ?? '')}
             breaks
             className="text-sm text-[var(--text-secondary)]"
           />

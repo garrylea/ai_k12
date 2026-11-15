@@ -26,12 +26,23 @@ const MD_EMPHASIS = /^(?:\*[^*]+\*|_[^_]+_)$/;
 const MD_PREFIX = /^(?:\s*(?:[-+*]|\d+[.)]|#{1,6}|>)\s+)+/;
 /** HTML 标签（`<tr>` / `</td>` / `<br/>` / 打字中的 `<tr`）：交给 rehype-raw 渲染，不能包进 $…$ */
 const HTML_TAG_START = /^<\/?[a-zA-Z!]/;
+/** `\text{中文}` / `\mathrm{…}` 这类「公式里的文字」：整块原子化，内部 CJK 不能当切割边界，
+ *  否则 `\text { ①当 }` 会被 CJK 拆成两半、各自补 $ 变成 unbalanced brace（4686 实测）。 */
+const TEXT_MACRO_RE = /\\(?:text|mathrm|textbf|textit|operatorname)\s*\{[^{}]*\}/g;
+/** CJK 汉字（不含全角标点）：用来判断「公式段里混入了正文」 */
+const CJK_HAN = /[\u4e00-\u9fff]/;
+/** 行内 LaTeX 命令（用于识别「正文段里漏了 $」） */
+const LATEX_CMD_RE = /\\[a-zA-Z]+/;
+/** 双 $ 显示公式块（`$$…$$`，可跨行） */
+const DISPLAY_MATH_RE = /\$\$[\s\S]*?\$\$/g;
 /** 已显式标注的区域，原样保留、不参与自动补 $：$$…$$（可跨行）、围栏代码块、行内代码、
- *  标准 LaTeX 定界 `\[…\]` / `\(…\)`、`$…$`
+ *  Markdown 图片（答案里常见「公式中间插图」）、标准 LaTeX 定界 `\[…\]` / `\(…\)`、`$…$`
  *  （围栏必须排在行内代码之前，否则 ``` 会被当成一个空的 `…` 行内代码先吃掉）
+ *  图片必须单独切出来：否则整段含 `](` 会被 shouldWrap 判成 Markdown 而整段不补 $，
+ *  图片前后的 `\because` 之类就变成字面文本（2026-11-15 真实答案 4686 实测）。
  *  `\[…\]` / `\(…\)` 必须保护：它们是 preprocessMarkdown 会归一成 $ 系的显式定界符，
  *  若先被自动补 $ 包住就会变成 `$\[$` 之类的坏公式（2026-11-15 全量验证发现）。 */
-const PROTECTED_RE = /(\$\$[\s\S]*?\$\$|```[\s\S]*?```|`[^`\n]*`|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]*\$)/g;
+const PROTECTED_RE = /(\$\$[\s\S]*?\$\$|```[\s\S]*?```|`[^`\n]*`|!\[[^\]\n]*\]\([^)\n]*\)|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]*\$)/g;
 
 /** 单个裸文本段是否需要包成 $...$（core 为去掉两侧空白后的内容）。 */
 function shouldWrap(core: string): boolean {
@@ -62,13 +73,22 @@ function wrapSegments(text: string): string {
 
 /** 处理单行裸文本：剥掉行首结构记号后判定正文，保留 Markdown 结构。 */
 function wrapBareLine(line: string): string {
+  // `\text{中文}` 先换成占位符：内部 CJK 不能让 wrapSegments 当成切段边界
+  const macros: string[] = [];
+  const masked = line.replace(TEXT_MACRO_RE, (m) => {
+    macros.push(m);
+    return `\uE000${macros.length - 1}\uE001`;
+  });
+  const restore = (s: string) =>
+    s.replace(/\uE000(\d+)\uE001/g, (_m, i: string) => macros[Number(i)]);
+
   // 表格行：按 | 拆成单元格分别判定，竖线原样保留
   //（整行一起判定会把 | 和单元格内容全包进一个公式，表格垮掉）
-  if (/^\s*\|/.test(line)) return line.split('|').map(wrapSegments).join('|');
+  if (/^\s*\|/.test(masked)) return restore(masked.split('|').map(wrapSegments).join('|'));
   // 列表 / 引用 / 标题行：只剥掉行首记号再判定正文
   //（不能整行跳过——`- x^2`、`## x^2` 里的公式也要能渲染；也不能整行包 $——会把列表符号当减号、标题失效）
-  const prefix = line.match(MD_PREFIX)?.[0] ?? '';
-  return prefix + wrapSegments(line.slice(prefix.length));
+  const prefix = masked.match(MD_PREFIX)?.[0] ?? '';
+  return restore(prefix + wrapSegments(masked.slice(prefix.length)));
 }
 
 /**
@@ -104,16 +124,48 @@ export function autoWrapMath(text: string): string {
 }
 
 /**
- * 只给「整段完全没有 $」的文本自动补 $（题库答案/解析专用）。
+ * 题库答案/解析的数学渲染入口（学生作答仍用 autoWrapMath）。
  *
- * 为什么不像学生作答那样逐段补：题库里已有的 `$…$` 存在不配对、跨图、跨 CJK 的情况，
- * 逐段补会在两段之间再插 `$`，把原本能渲染的公式打成 katex-error
- * （2026-11-15 全量 569 条答案/解析实测：3 条出现新错误，均为已含 `$` 的文本）。
- * 答案/解析只需要救「一条 $ 都没有」的裸 LaTeX（`\sqrt{2}` 这类）。
+ * 与 autoWrapMath 的差别：
+ * 1. 修导入损坏：`\text` 被转义成 TAB+"ext"（4686/4688 等）；
+ * 2. **定界符错位的文本先拆掉所有单 `$`**：入库时 `$` 位置错开一位，公式段里混着正文、
+ *    正文段里混着 `\because`，再怎么配对都渲染不出来（4686 实测 53 处 LaTeX 变字面）。
+ *    判定只看结构（正文段有 `\命令` / 公式段有汉字且不在 `\text{}` 内），
+ *    正常的 `$…$` 文本（4980/5021/4688）不会被误伤；
+ * 3. 之后统一交给 autoWrapMath 重新补 `$`（图片、`\[…\]`、`\text{}` 都已原子化保护）。
  */
-export function autoWrapMathIfBare(text: string | null | undefined): string {
+export function normalizeAnswerMath(text: string | null | undefined): string {
   if (!text) return '';
-  return text.includes('$') ? text : autoWrapMath(text);
+  const repaired = text.replace(/\text\b/g, '\\text');
+  // 结构正常（有 $ 且配对没错位）就一个字都不动：remark-math 自己能解析，
+  // 再补 $ 会在相邻公式之间插 $，把本来好的公式打成 katex-error（4416 实测）。
+  if (!repaired.includes('$')) return autoWrapMath(repaired);
+  return dollarsMisaligned(repaired)
+    ? autoWrapMath(stripSingleDollars(repaired))
+    : repaired;
+}
+
+/** 正文段混进 `\命令`，或公式段混进汉字（`\text{…}` 内除外）→ 认为 `$` 定界错位。 */
+function dollarsMisaligned(text: string): boolean {
+  const parts = text.replace(DISPLAY_MATH_RE, '@@@').split('$');
+  if (parts.length < 3) return false;
+  return parts.some((part, i) =>
+    i % 2 === 1
+      ? CJK_HAN.test(part.replace(TEXT_MACRO_RE, ''))
+      : LATEX_CMD_RE.test(part),
+  );
+}
+
+/** 去掉全部单 `$`（保留 `$$…$$` 块）：错位后无法再配对，靠 autoWrapMath 重新补。 */
+function stripSingleDollars(text: string): string {
+  const displays: string[] = [];
+  const masked = text.replace(DISPLAY_MATH_RE, (m) => {
+    displays.push(m);
+    return `\uE100${displays.length - 1}\uE101`;
+  });
+  return masked
+    .replace(/\$/g, '')
+    .replace(/\uE100(\d+)\uE101/g, (_m, i: string) => displays[Number(i)]);
 }
 
 export function LatexPreview({
