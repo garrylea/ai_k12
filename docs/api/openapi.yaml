@@ -6274,6 +6274,39 @@ paths:
                         items:
                           $ref: '#/components/schemas/TrainingKnowledgePoint'
 
+  /training/model-specials:
+    get:
+      tags: [Training]
+      summary: 模型微专题清单（倍长中线首批）
+      description: >-
+        student JWT。subjectId 必填 integer；非数学返回空数组。
+        questionCount 是该生可练数：question_model_tags.confidence>=0.70、
+        is_active=1、answer<>''，并排除该生 student_hidden_questions。
+      operationId: listModelSpecials
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: subjectId
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 模型清单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          specials:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/TrainingModelSpecial'
+
   /training/targeted/start:
     post:
       tags: [Training]
@@ -6287,6 +6320,8 @@ paths:
         前端判空显示提示）。选题时基于 JWT user.sub（studentId）排除该生已标记的
         「不再展示」题（LEFT JOIN student_hidden_questions ... IS NULL），
         请求体不变；题池排除后为空时返回 { questions: [] }。
+        模型微专题模式（传 category+model 代替 kpId）：仅 subjectId=1，type 必须 null，
+        count 只能 1/2，题单按 q.id ASC，会话 ref_type='model'。
       operationId: startTargetedPractice
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -11094,26 +11129,35 @@ components:
             不含该生「不再展示」这层个人维度）。0 = 前端置灰不可选。
       required: [id, name, parentKpId, gradeBand, questionCount]
 
+    TrainingModelSpecial:
+      type: object
+      required: [category, categoryName, model, modelName, questionCount]
+      properties:
+        category: { type: string, example: geometry_synthesis }
+        categoryName: { type: string, example: 几何综合 }
+        model: { type: string, example: median_doubling }
+        modelName: { type: string, example: 倍长中线 }
+        questionCount: { type: integer, example: 2 }
+
     TargetedStartRequest:
       type: object
-      required: [subjectId, kpId, type, count]
+      required: [subjectId, type, count]
+      description: kpId 与 category+model 二选一；模型模式 type 必须 null、count 只能 1/2。
       properties:
-        subjectId:
-          type: integer
-          description: 学科 ID
-        kpId:
-          type: integer
-          description: 知识点 id
+        subjectId: { type: integer }
+        kpId: { type: integer, description: 知识点 id；与 category+model 二选一 }
+        category: { type: string, description: 模型大类 code；必须与 model 同时出现 }
+        model: { type: string, description: 模型 code；必须与 category 同时出现 }
         type:
           type: string
           nullable: true
-          enum: [choice, multi_choice, fill_blank, true_false, short_answer, proof]
-          description: 题型过滤；null=不限题型（白名单外取值 400）
+          enum: [choice, fill_blank, true_false, short_answer, proof, calculation]
+          description: 题型过滤；模型模式必须 null
         count:
           type: integer
           minimum: 1
           maximum: 20
-          description: 抽题数量，限 1-20 整数（越界/非整数 400）
+          description: 模型模式只能 1 或 2，且必须是家长已开启档位
 
     TargetedStartResult:
       type: object
@@ -11123,6 +11167,10 @@ components:
           description: 随机题单（白名单序列化，answer/explanation 剥离；抽不到题为空数组）
           items:
             $ref: '#/components/schemas/TargetedPracticeQuestion'
+        sessionId:
+          type: integer
+          nullable: true
+          description: 训练会话 id；建会话失败为 null（不发分，学习照走）
       required: [questions]
 
     TargetedPracticeQuestion:
