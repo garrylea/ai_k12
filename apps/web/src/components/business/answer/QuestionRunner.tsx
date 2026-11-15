@@ -27,6 +27,7 @@ import { trackEvent } from '@/analytics/tracker';
 import { ChoiceOptionList } from './ChoiceOptionList';
 import type { RunnerAnswerRecord, RunnerJudgeOutcome, RunnerQuestion, RunnerSelfAssessContext } from './types';
 import { isMathLikeSubject, selfAssessEligible } from '@/constants';
+import { formatQuestionSource } from '@/utils/questionSource';
 
 /** 数学 subject_id（tools/db/schema.sql subjects seed 首行）——仅数学启用内嵌草稿（PRD §7.12） */
 const MATH_SUBJECT_ID = 1;
@@ -458,13 +459,13 @@ export function QuestionRunner({
       <h1 className="font-bold shrink-0" style={{ fontSize: 'var(--fs-learn-h1)', lineHeight: '1.75rem', color: 'var(--learn-heading-1)' }}>
         对照参考答案，自评这道题
       </h1>
-      {selfAssess.question.source && (
+      {formatQuestionSource(selfAssess.question.source) && (
         <p
           data-testid="question-source"
-          title={selfAssess.question.source}
+          title={selfAssess.question.source ?? ''}
           className="shrink-0 -mt-2 truncate text-xs text-[var(--text-tertiary)]"
         >
-          来源：{selfAssess.question.source}
+          来源：{formatQuestionSource(selfAssess.question.source)}
         </p>
       )}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 rounded-xl border border-[var(--learn-card-border)] shadow-sm"
@@ -630,13 +631,13 @@ export function QuestionRunner({
             )}
           </div>
           {/* 题目来源：专项练习传 questions.source；出问题时可据此溯源（2026-11-15 用户要求） */}
-          {q.source && (
+          {formatQuestionSource(q.source) && (
             <p
               data-testid="question-source"
-              title={q.source}
+              title={q.source ?? ''}
               className="mt-3 truncate text-xs text-[var(--text-tertiary)]"
             >
-              来源：{q.source}
+              来源：{formatQuestionSource(q.source)}
             </p>
           )}
           {/* 提示抽屉 */}

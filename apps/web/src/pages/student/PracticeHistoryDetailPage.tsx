@@ -13,6 +13,7 @@ import {
   preprocessMaterialMarkdown,
 } from '@/components/markdown';
 import { autoWrapMath, normalizeAnswerMath } from '@/components/business/LatexPreview';
+import { formatQuestionSource } from '@/utils/questionSource';
 import {
   getMyPointRules,
   getPracticeHistoryDetail,
@@ -241,13 +242,13 @@ function QuestionCard({
         </div>
       ) : null}
 
-      {showSource && q.questionSource && (
+      {showSource && formatQuestionSource(q.questionSource) && (
         <p
           data-testid="history-question-source"
-          title={q.questionSource}
+          title={q.questionSource ?? ''}
           className="mb-2 truncate text-xs text-[var(--text-tertiary)]"
         >
-          来源：{q.questionSource}
+          来源：{formatQuestionSource(q.questionSource)}
         </p>
       )}
 
