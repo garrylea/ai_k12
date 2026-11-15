@@ -22,32 +22,6 @@ export interface ModelSpecialPanelProps {
   onStart: () => void;
 }
 
-function ModelChip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={
-        'h-10 px-4 rounded-full border text-sm font-medium transition-colors ' +
-        (active
-          ? 'border-[var(--brand-500)] bg-[var(--brand-500)] text-[var(--text-on-brand)]'
-          : 'border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] text-[var(--learn-text-secondary)] hover:border-[var(--brand-500)]')
-      }
-    >
-      {label}
-    </button>
-  );
-}
-
 export function ModelSpecialPanel({
   specials, selectedModel, onSelectModel, status, error, tiers, tiersError,
   eligibleTiers, tierKey, starting, startError, emptyHint,
@@ -83,6 +57,13 @@ export function ModelSpecialPanel({
   }
 
   const special = selectedModel;
+  const groups = new Map<string, TrainingModelSpecial[]>();
+  for (const s of specials) {
+    const list = groups.get(s.categoryName) ?? [];
+    list.push(s);
+    groups.set(s.categoryName, list);
+  }
+  const currentKey = `${special.category}::${special.model}`;
   const noTier = special.questionCount >= 3
     ? '家长未开启可用题量档位，暂不能开练。'
     : special.questionCount === 2
@@ -95,16 +76,30 @@ export function ModelSpecialPanel({
 
   return (
     <Card className="mt-6 space-y-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
-      <section aria-label="模型选择" className="flex flex-wrap gap-2">
-        {specials.map((s) => (
-          <ModelChip
-            key={`${s.category}:${s.model}`}
-            label={s.modelName}
-            active={s.category === special.category && s.model === special.model}
-            onClick={() => onSelectModel(s)}
-          />
-        ))}
-      </section>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-xs font-medium text-[var(--learn-text-secondary)]">模型</span>
+        <select
+          aria-label="模型"
+          value={currentKey}
+          onChange={(e) => {
+            const next = specials.find(
+              (s) => `${s.category}::${s.model}` === e.target.value,
+            );
+            if (next) onSelectModel(next);
+          }}
+          className="h-10 px-3 rounded-[var(--radius-button)] border border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] text-[var(--learn-text-primary)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--brand-100)]"
+        >
+          {Array.from(groups.entries()).map(([categoryName, models]) => (
+            <optgroup key={categoryName} label={categoryName}>
+              {models.map((s) => (
+                <option key={`${s.category}::${s.model}`} value={`${s.category}::${s.model}`}>
+                  {s.modelName}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
 
       {special.questionCount === 0 ? (
         <p className="text-sm text-[var(--learn-text-secondary)]">暂无可练题目。</p>

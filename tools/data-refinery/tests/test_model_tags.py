@@ -42,7 +42,7 @@ EXPECTED_CATEGORY_NAMES = {
 }
 
 EXPECTED_MODEL_CODES = {
-    "new_definition": {"algebra_new_definition", "geometry_new_definition"},
+    "new_definition": {"algebra_new_definition", "coordinate_new_definition", "geometry_new_definition"},
     "geometry_synthesis": {
         "median_doubling", "segment_cut_extend", "hand_in_hand", "half_angle",
         "three_equal_angles", "rotation_similarity", "midpoint_model",
@@ -108,7 +108,7 @@ def test_normalize_model_edge_cases():
 
 
 def test_taxonomy_block_contains_every_code():
-    assert sum(len(v) for v in MODEL_NAMES.values()) == 37
+    assert sum(len(v) for v in MODEL_NAMES.values()) == 38
     for cat in CATEGORY_ORDER:
         assert set(MODEL_NAMES[cat]) == EXPECTED_MODEL_CODES[cat]
     block = build_taxonomy_block()

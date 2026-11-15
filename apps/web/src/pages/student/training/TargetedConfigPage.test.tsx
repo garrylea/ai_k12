@@ -411,8 +411,10 @@ describe('中考模型模式', () => {
     await renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
-    expect(await screen.findByRole('button', { name: '手拉手' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: '手拉手' }));
+    await waitFor(() => expect(screen.getByLabelText('模型')).toHaveValue('geometry_synthesis::median_doubling'));
+    fireEvent.change(screen.getByLabelText('模型'), {
+      target: { value: 'geometry_synthesis::hand_in_hand' },
+    });
 
     expect(await screen.findByRole('button', { name: /^3 题/ })).toBeTruthy();
     await act(async () => {

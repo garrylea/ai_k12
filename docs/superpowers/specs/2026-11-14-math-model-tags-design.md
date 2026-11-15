@@ -66,7 +66,7 @@
 
 | 大类（code / 名称） | 二级模型（code / 名称） | 判定要点 |
 |---|---|---|
-| `new_definition` / 新定义 | `algebra_new_definition` 代数新定义；`geometry_new_definition` 几何新定义 | 题干先给一个新概念/新运算/新变换，再按定义解题；北京卷常见第 28 题 |
+| `new_definition` / 新定义 | `algebra_new_definition` 代数新定义；`coordinate_new_definition` 坐标新定义；`geometry_new_definition` 几何新定义 | 题干先给一个新概念/新运算/新变换，再按定义解题；北京卷常见第 28 题。坐标系里的点/线/圆/变换定义归「坐标新定义」，纯图形定义归「几何新定义」 |
 | `geometry_synthesis` / 几何综合 | `median_doubling` 倍长中线；`segment_cut_extend` 截长补短；`hand_in_hand` 手拉手（旋转全等）；`half_angle` 半角模型；`three_equal_angles` 一线三等角；`rotation_similarity` 旋转相似；`midpoint_model` 中点模型；`angle_bisector` 角平分线模型；`isosceles_construction` 等腰/等边构造；`translation_construction` 平移构造；`axisymmetry_construction` 轴对称构造；`area_method` 面积法 | 三角形/四边形为载体，需要辅助线或图形变换；常见第 27 题 |
 | `circle_synthesis` / 圆综 | `tangent` 切线判定与性质；`perpendicular_chord` 垂径定理；`inscribed_angle` 圆周角与圆内接四边形；`similarity_trig` 相似与三角函数 | 圆的综合证明/计算（切线、相似、三角函数）；纯套定理的简单题不标 |
 | `extremum` / 最值问题 | `point_circle_extremum` 点圆最值；`general_drinking_horse` 将军饮马（轴对称最值）；`apollonius_circle` 阿氏圆；`hu_bu_gui` 胡不归；`guadou_principle` 瓜豆原理；`hidden_circle` 隐圆（定弦定角/四点共圆） | 题干求最大/最小/取值范围，且依赖几何变换或轨迹；只证四点共圆、不求最值的归圆综 |

@@ -6277,7 +6277,7 @@ paths:
   /training/model-specials:
     get:
       tags: [Training]
-      summary: 模型专项清单（倍长中线 / 手拉手 / 几何新定义）
+      summary: 模型专项清单（30 个有题模型，按大类分组）
       description: >-
         student JWT。subjectId 必填 integer；非数学返回 `{specials: []}`。
         questionCount 是该生可练数：question_model_tags.confidence>=0.70、

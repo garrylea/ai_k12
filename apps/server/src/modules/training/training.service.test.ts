@@ -365,7 +365,7 @@ describe('TrainingService.getKnowledgePoints', () => {
 });
 
 describe('TrainingService.listModelSpecials', () => {
-  it('数学：返回白名单 3 个模型 + 各自可练题数', async () => {
+  it('数学：返回白名单 30 个模型 + 各自可练题数', async () => {
     const deps = mk({
       questionsRepo: {
         countModelSpecialQuestions: vi.fn().mockImplementation(
@@ -375,35 +375,23 @@ describe('TrainingService.listModelSpecials', () => {
       } as never,
     });
     const r = await mkSvc(deps).listModelSpecials(7, 1);
-    expect(r.specials).toEqual([
-      {
-        category: 'geometry_synthesis',
-        categoryName: '几何综合',
-        model: 'median_doubling',
-        modelName: '倍长中线',
-        questionCount: 2,
-      },
-      {
-        category: 'geometry_synthesis',
-        categoryName: '几何综合',
-        model: 'hand_in_hand',
-        modelName: '手拉手',
-        questionCount: 5,
-      },
-      {
-        category: 'new_definition',
-        categoryName: '新定义',
-        model: 'geometry_new_definition',
-        modelName: '几何新定义',
-        questionCount: 11,
-      },
-    ]);
-    expect(deps.questionsRepo.countModelSpecialQuestions)
-      .toHaveBeenCalledWith(7, 1, 'geometry_synthesis', 'median_doubling');
-    expect(deps.questionsRepo.countModelSpecialQuestions)
-      .toHaveBeenCalledWith(7, 1, 'geometry_synthesis', 'hand_in_hand');
-    expect(deps.questionsRepo.countModelSpecialQuestions)
-      .toHaveBeenCalledWith(7, 1, 'new_definition', 'geometry_new_definition');
+    expect(r.specials).toHaveLength(30);
+    expect(r.specials[0]).toMatchObject({
+      category: 'geometry_synthesis',
+      categoryName: '几何综合',
+      model: 'median_doubling',
+      modelName: '倍长中线',
+      questionCount: 2,
+    });
+    expect(r.specials.find((s) => s.model === 'hand_in_hand')).toMatchObject({
+      modelName: '手拉手',
+      questionCount: 5,
+    });
+    expect(r.specials.find((s) => s.model === 'coordinate_new_definition')).toMatchObject({
+      modelName: '坐标新定义',
+      questionCount: 11,
+    });
+    expect(deps.questionsRepo.countModelSpecialQuestions).toHaveBeenCalledTimes(30);
   });
 
   it('非数学：返回空数组，不查库', async () => {

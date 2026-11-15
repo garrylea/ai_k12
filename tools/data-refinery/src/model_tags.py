@@ -32,6 +32,7 @@ CATEGORY_ORDER: list[str] = list(CATEGORY_NAMES)
 MODEL_NAMES: dict[str, dict[str, str]] = {
     "new_definition": {
         "algebra_new_definition": "代数新定义",
+        "coordinate_new_definition": "坐标新定义",
         "geometry_new_definition": "几何新定义",
     },
     "geometry_synthesis": {

@@ -54,7 +54,7 @@ describe('ModelSpecialPanel', () => {
   it('渲染倍长中线、题量与 1/2 档，点击开练', () => {
     const p = props();
     render(<ModelSpecialPanel {...p} />);
-    expect(screen.getByText('倍长中线')).toBeTruthy();
+    expect(screen.getByLabelText('模型')).toHaveValue('geometry_synthesis::median_doubling');
     fireEvent.click(screen.getByRole('button', { name: /^2 题/ }));
     expect(p.onSelectTier).toHaveBeenCalledWith('2');
     fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
@@ -74,11 +74,12 @@ describe('ModelSpecialPanel', () => {
     expect(screen.getByText('暂无可练题目。')).toBeTruthy();
   });
 
-  it('多模型：点击手拉手切到该模型', () => {
+  it('多模型：切换下拉到手拉手', () => {
     const p = props({ specials: [SPECIAL, HAND], selectedModel: SPECIAL });
     render(<ModelSpecialPanel {...p} />);
-    expect(screen.getByRole('button', { name: '倍长中线' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: '手拉手' }));
+    const select = screen.getByLabelText('模型');
+    expect(select).toHaveValue('geometry_synthesis::median_doubling');
+    fireEvent.change(select, { target: { value: 'geometry_synthesis::hand_in_hand' } });
     expect(p.onSelectModel).toHaveBeenCalledWith(HAND);
   });
 
