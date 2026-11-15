@@ -424,4 +424,96 @@ describe('中考模型模式', () => {
     expect(await screen.findByText('暂无可练题目。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '开始练习' })).toBeDisabled();
   });
+
+  it('模型清单拉取失败：显示固定文案，重试成功后渲染模型', async () => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
+    getModelSpecialsMock.mockRejectedValueOnce(new Error('boom'));
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
+    expect(await screen.findByText('模型专项加载失败')).toBeTruthy();
+    // 只给学生向固定文案，不回显网络/后端原文
+    expect(screen.queryByText('boom')).toBeNull();
+    expect(screen.queryByText(/boom/)).toBeNull();
+
+    getModelSpecialsMock.mockResolvedValue({ specials: [MODEL_SPECIAL] });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    });
+    expect(await screen.findByText('倍长中线')).toBeTruthy();
+  });
+
+  it('模型模式下档位拉取失败：面板内提示并可重试出档位', async () => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock
+      .mockRejectedValueOnce(new Error('tier down'))
+      .mockResolvedValue(rulesOf(MATH_TIERS));
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
+    expect(await screen.findByText('档位加载失败，请重试')).toBeTruthy();
+    // 模型本身已拉到：档位错误不遮住卡片
+    expect(await screen.findByText('倍长中线')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    });
+    expect(await screen.findByRole('button', { name: /^2 题/ })).toBeTruthy();
+  });
+
+  it('可练 1 题：只给 1 题档，不出现 2 题档，可直接开练', async () => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
+    getModelSpecialsMock.mockResolvedValue({
+      specials: [{ ...MODEL_SPECIAL, questionCount: 1 }],
+    });
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
+
+    expect(await screen.findByText('可练 1 题')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^1 题/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^2 题/ })).toBeNull();
+    expect(screen.getByRole('button', { name: '开始练习' })).not.toBeDisabled();
+  });
+
+  it('可练 1 题但家长没开 1 题档：按 1 题档提示并禁用', async () => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf([
+      tier({ tierKey: '2', tierLabel: '2 题', points: 5 }),
+      tier({ tierKey: '3', tierLabel: '3 题', points: 8 }),
+      tier({ tierKey: '5', tierLabel: '5 题', points: 12 }),
+    ]));
+    getModelSpecialsMock.mockResolvedValue({
+      specials: [{ ...MODEL_SPECIAL, questionCount: 1 }],
+    });
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
+
+    expect(await screen.findByText('家长未开启 1 题档位，暂不能开练。')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '开始练习' })).toBeDisabled();
+  });
+
+  it('手动点 1 题档开练：count 用 1，默认的 2 题档不泄漏', async () => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
+    getModelSpecialsMock.mockResolvedValue({ specials: [MODEL_SPECIAL] });
+    startMock.mockResolvedValue({ questions: [STARTED_QUESTION], sessionId: 88 });
+    await renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '中考模型' }));
+    expect(await screen.findByText('可练 2 题')).toBeTruthy();
+
+    // 默认档是 2 题（eligible 里最大档），改成 1 题后 count 必须跟着改
+    fireEvent.click(screen.getByRole('button', { name: /^1 题/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+    });
+    expect(startMock).toHaveBeenCalledWith({
+      subjectId: 1,
+      category: 'geometry_synthesis',
+      model: 'median_doubling',
+      type: null,
+      count: 1,
+    });
+  });
 });

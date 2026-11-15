@@ -64,4 +64,10 @@ describe('ModelSpecialPanel', () => {
     render(<ModelSpecialPanel {...props({ special: { ...SPECIAL, questionCount: 0 }, eligibleTiers: [], tierKey: null })} />);
     expect(screen.getByText('暂无可练题目。')).toBeTruthy();
   });
+
+  it('白名单为空（special=null）：显示暂无可用模型，不与 0 题混淆', () => {
+    render(<ModelSpecialPanel {...props({ special: null, eligibleTiers: [], tierKey: null })} />);
+    expect(screen.getByText('暂无可用模型。')).toBeTruthy();
+    expect(screen.queryByText('暂无可练题目。')).toBeNull();
+  });
 });

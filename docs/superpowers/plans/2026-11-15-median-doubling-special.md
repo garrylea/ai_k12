@@ -772,6 +772,12 @@ describe('ModelSpecialPanel', () => {
     render(<ModelSpecialPanel {...props({ special: { ...SPECIAL, questionCount: 0 }, eligibleTiers: [], tierKey: null })} />);
     expect(screen.getByText('暂无可练题目。')).toBeTruthy();
   });
+
+  it('白名单为空（special=null）：显示暂无可用模型，不与 0 题混淆', () => {
+    render(<ModelSpecialPanel {...props({ special: null, eligibleTiers: [], tierKey: null })} />);
+    expect(screen.getByText('暂无可用模型。')).toBeTruthy();
+    expect(screen.queryByText('暂无可练题目。')).toBeNull();
+  });
 });
 ```
 
@@ -825,7 +831,7 @@ export function ModelSpecialPanel({
   if (!special) {
     return (
       <Card className="mt-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
-        <p className="text-sm text-[var(--learn-text-secondary)]">暂无可练题目。</p>
+        <p className="text-sm text-[var(--learn-text-secondary)]">暂无可用模型。</p>
       </Card>
     );
   }
@@ -915,7 +921,7 @@ export function ModelSpecialPanel({
 
 - [ ] **Step 5: 页面加模式与模型状态**
 
-在 `TargetedConfigPage.tsx` 顶部 import 补：
+在 `TargetedConfigPage.tsx` 顶部 import 补（`useRef` 加进 react 的既有 import）：
 
 ```ts
 import { getModelSpecials, type TrainingModelSpecial } from '@/services/api';
@@ -932,21 +938,33 @@ import { TierChip } from './TierChip';
   const [modelError, setModelError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<TrainingModelSpecial | null>(null);
   const [modelTierKey, setModelTierKey] = useState<string | null>(null);
+
+  // 学科 query 的当前值：并发请求回来时用它判断响应是否已过期
+  const subjectIdRef = useRef(subjectId);
+
+  useEffect(() => {
+    subjectIdRef.current = subjectId;
+  }, [subjectId]);
 ```
 
 在 `loadKps` 之后加：
 
 ```ts
   const loadModelSpecials = useCallback(async () => {
+    const requested = subjectId;
     setModelStatus('loading');
     setModelError(null);
     try {
-      const data = await getModelSpecials(subjectId);
+      const data = await getModelSpecials(requested);
+      // 请求期间切了学科：丢弃过期响应，否则会把上个学科的模型画到新学科下
+      if (subjectIdRef.current !== requested) return;
       setSelectedModel(data.specials[0] ?? null);
       setModelStatus('ok');
-    } catch (err) {
+    } catch {
+      if (subjectIdRef.current !== requested) return;
       setModelStatus('error');
-      setModelError(err instanceof Error ? err.message : '模型专项加载失败');
+      // 固定学生向文案：HTTP 错误串对小学生无意义
+      setModelError('模型专项加载失败');
       setSelectedModel(null);
     }
   }, [subjectId]);
@@ -1156,6 +1174,12 @@ describe('中考模型模式', () => {
 ```ts
     expect(screen.queryByRole('button', { name: '中考模型' })).toBeNull();
 ```
+
+8. 复审补充的回归用例（Task 3 review，已实装）：
+   - 模型清单 `GET` 失败 → 固定文案 `模型专项加载失败`（不回显 `err.message`）→ 点 `重试` 成功渲染 `倍长中线`；
+   - 模型模式下档位拉取失败 → `档位加载失败，请重试` → 面板内 `重试` 后出现 `2 题` 档；
+   - `questionCount=1`：只渲染 `1 题` 档（无 `2 题`）、可直接开练；家长只开 2/3/5 档时提示 `家长未开启 1 题档位，暂不能开练。`；
+   - 手点 `1 题` 档开练 → `count: 1`（默认 2 题档不泄漏）。
 
 - [ ] **Step 8: 跑前端测试**
 

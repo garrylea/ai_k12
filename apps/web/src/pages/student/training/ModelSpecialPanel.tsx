@@ -45,7 +45,7 @@ export function ModelSpecialPanel({
   if (!special) {
     return (
       <Card className="mt-6 bg-[var(--learn-card-bg)] border border-[var(--learn-card-border)]">
-        <p className="text-sm text-[var(--learn-text-secondary)]">暂无可练题目。</p>
+        <p className="text-sm text-[var(--learn-text-secondary)]">暂无可用模型。</p>
       </Card>
     );
   }

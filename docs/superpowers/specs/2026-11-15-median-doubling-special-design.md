@@ -287,7 +287,8 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 | `kp` | 默认 / 点「知识点」 | 原知识点两级 + 题型 + 题量 + 开始，完全不变 |
 | `model-loading` | 首次点「中考模型」/ 重试 | 模型卡片骨架（`Skeleton`），不阻塞知识点模式 |
 | `model-error` | `GET model-specials` 失败 | 卡片内 `模型专项加载失败` + `重试` 按钮；不整页报错 |
-| `model-empty` | `specials=[]` 或 `questionCount=0` | `暂无可练题目。`；开始按钮禁用 |
+| `model-empty-list` | `specials=[]` | `暂无可用模型。`；开始按钮禁用 |
+| `model-empty` | 该模型 `questionCount=0` | 卡片照常渲染，题量区 `暂无可练题目。`；开始按钮禁用 |
 | `model-ok` | 有模型且 count>0 | 卡片 + 题量 chips + 开始 |
 | `tiers-error` | `GET /points/me/rules` 失败 | 题量区显示 `档位加载失败，请重试` + `重试` 按钮；不整页报错，模型卡片仍可见 |
 | `no-tier` | 家长未开启可用档位 | 卡片照常显示，题量区按题池显示：可练 2 题 → `家长未开启 1 或 2 题档位，暂不能开练。`；可练 1 题 → `家长未开启 1 题档位，暂不能开练。`；开始禁用 |
@@ -296,7 +297,7 @@ AND shq.id IS NULL          -- 该生「不再展示」排除
 
 > **判定顺序**：先判 `questionCount===0`（`model-empty`），再判 eligible 档位是否为空（`no-tier`）。
 >
-> `specials=[]`（白名单为空/非数学）显示整块空面板；`specials` 有元素但该模型 `questionCount=0` 时**仍渲染卡片**，只把题量和按钮置为不可用——避免家长/学生以为功能消失。
+> `specials=[]`（白名单为空/非数学）显示整块空面板，文案 `暂无可用模型。`（与「模型存在但没题」区分）；`specials` 有元素但该模型 `questionCount=0` 时**仍渲染卡片**，只把题量和按钮置为不可用——避免家长/学生以为功能消失。
 
 ### 6.4 题量档筛选算法
 

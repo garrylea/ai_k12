@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Card, PageHeader, Skeleton } from '@/components/base';
 import { StudentAccountActions } from '@/components/business';
@@ -135,6 +135,13 @@ export default function TargetedConfigPage() {
   const [selectedModel, setSelectedModel] = useState<TrainingModelSpecial | null>(null);
   const [modelTierKey, setModelTierKey] = useState<string | null>(null);
 
+  // 学科 query 的当前值：并发请求回来时用它判断响应是否已过期
+  const subjectIdRef = useRef(subjectId);
+
+  useEffect(() => {
+    subjectIdRef.current = subjectId;
+  }, [subjectId]);
+
   const loadKps = useCallback(async () => {
     setLoadError(null);
     try {
@@ -151,15 +158,20 @@ export default function TargetedConfigPage() {
   }, [loadKps]);
 
   const loadModelSpecials = useCallback(async () => {
+    const requested = subjectId;
     setModelStatus('loading');
     setModelError(null);
     try {
-      const data = await getModelSpecials(subjectId);
+      const data = await getModelSpecials(requested);
+      // 请求期间切了学科：丢弃过期响应，否则会把上个学科的模型画到新学科下
+      if (subjectIdRef.current !== requested) return;
       setSelectedModel(data.specials[0] ?? null);
       setModelStatus('ok');
-    } catch (err) {
+    } catch {
+      if (subjectIdRef.current !== requested) return;
       setModelStatus('error');
-      setModelError(err instanceof Error ? err.message : '模型专项加载失败');
+      // 固定学生向文案：HTTP 错误串对小学生无意义，也不该暴露给前端页面
+      setModelError('模型专项加载失败');
       setSelectedModel(null);
     }
   }, [subjectId]);
