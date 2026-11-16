@@ -1332,6 +1332,8 @@ export interface TargetedPracticeQuestion {
   materialText: string | null;
   /** 题目来源（questions.source）；旧交接体可能没有 → 可选 */
   source?: string | null;
+  /** 该题在原试卷中的题号（paper_questions.question_no）；旧交接体/无卷关联可能没有 → 可选 */
+  questionNo?: number | null;
 }
 
 /**
@@ -3814,6 +3816,8 @@ export interface PracticeHistoryQuestion {
   questionAnalysis: string | null;
   /** 题目来源（questions.source）：专项记录页展示，便于溯源。 */
   questionSource?: string | null;
+  /** 该题在原试卷中的题号（专项记录）；考试/无卷关联为 null。 */
+  questionNo?: number | null;
   refType: string | null;
   refId: number | null;
   sentenceIndex: number | null;

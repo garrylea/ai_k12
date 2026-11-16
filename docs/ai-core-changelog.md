@@ -8,6 +8,17 @@
 
 ---
 
+## 2026-11-16 专项题来源补充「试卷第 N 题」
+
+**需求**：在 2026-11-15 的「题目来源」基础上，同时显示该题在原试卷中的序号（用户要求；专项作答页 + 练习记录详情）。
+
+**数据来源**：`paper_questions.question_no`（卷内题号，入库时按卷面题号重排）。一道题可能被多份卷收录（现网 19 道），取值优先匹配 `questions.source` 对应的那份卷（入库时 `source` = 卷目录名 = `exam_papers.source_key` 尾段），对不上再退回最小题号；无卷关联为 null，回退只显示来源。同一段相关子查询在 `questions.repo.ts`（`PAPER_QUESTION_NO_SQL`）与 `special-answer-records.repo.ts`（练习记录）各一份。
+
+**改动**：
+- `POST /api/training/targeted/start` 题单增加 `questionNo`（`QuestionRow.question_no` 为派生命题列，仅两条专项抽题 SQL 带出）；`GET /api/student/practice-history/:source/:sessionId` 的专项题增加 `questionNo`（考试题恒 null，`questionOrder` 本身就是卷内题号）。
+- 作答页（含自评态）与专项练习记录把来源行改为「来源：… · 试卷第 N 题」（`formatPaperQuestionNo`）；没有题号时维持原样。作答页标题的「第 i/n 题」是本次练习位次，故题号前加「试卷」二字区分。
+- 练习记录「重做 / 同类型练习」不在本次范围（其运行态载荷本来就未带来源）。
+
 ## 2026-11-16 PC App 出包 20min → 2min（关掉逐文件安全时间戳）
 
 **背景**：用户反馈 `app-build.sh` 出包特别慢，对比另一个 Electron 工程 `/Users/lichao/Downloads/GeoDrawPro` 快得多。

@@ -3,6 +3,22 @@ import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import type { QuestionRow } from './types.js';
 import { contentPrefix } from '../../common/utils/content-hash.util.js';
 
+/**
+ * 抽题时带出「题目在试卷中的题号」（paper_questions.question_no）。
+ *
+ * 一道题可能被多份卷收录（去重后关联到多卷，题号各不相同），此时**优先取
+ * questions.source 对应的那份卷**：入库时 source 就是卷目录名（与
+ * exam_papers.source_key 尾段一致），能唯一对上；少数老数据 source 是卷内
+ * 文件名，对不上就退回最小题号（仅 19 道多卷题受影响）。
+ */
+const PAPER_QUESTION_NO_SQL = `(
+  SELECT pq.question_no FROM paper_questions pq
+  JOIN exam_papers ep ON ep.id = pq.paper_id
+  WHERE pq.question_id = q.id
+  ORDER BY (SUBSTRING_INDEX(ep.source_key, '/', -1) = q.source) DESC, pq.question_no
+  LIMIT 1
+)`;
+
 @Injectable()
 export class QuestionsRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
@@ -184,7 +200,7 @@ export class QuestionsRepository {
     count: number,
   ): Promise<QuestionRow[]> {
     const typeFilter = type != null ? ' AND q.type = ?' : '';
-    const sql = `SELECT q.* FROM questions q
+    const sql = `SELECT q.*, ${PAPER_QUESTION_NO_SQL} AS question_no FROM questions q
       JOIN question_knowledge_points qkp ON qkp.question_id = q.id
       LEFT JOIN student_hidden_questions shq
         ON shq.question_id = q.id AND shq.student_id = ?
@@ -237,7 +253,7 @@ export class QuestionsRepository {
     const orderBy = model === 'median_doubling'
       ? 'ORDER BY q.id ASC'
       : 'ORDER BY RAND()';
-    const sql = `SELECT q.* FROM questions q
+    const sql = `SELECT q.*, ${PAPER_QUESTION_NO_SQL} AS question_no FROM questions q
       JOIN question_model_tags qmt ON qmt.question_id = q.id
       LEFT JOIN student_hidden_questions shq
         ON shq.question_id = q.id AND shq.student_id = ?

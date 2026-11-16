@@ -136,6 +136,7 @@ export default function TargetedRunPage() {
         options: normalizeOptions(e.options),
         material: e.materialText,
         source: e.source ?? null,
+        questionNo: e.questionNo ?? null,
       })),
     [entries],
   );

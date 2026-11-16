@@ -149,6 +149,8 @@ export class PracticeHistoryService {
             questionAnswer: a.answer,
             questionAnalysis: a.explanation,
             questionSource: a.question_source ?? null,
+            // 考试题的 question_order 本身就是卷内题号（已在卡片头显示「第 N 题」），这里不重复透传
+            questionNo: null,
             refType: 'question',
             refId: null,
             sentenceIndex: null,
@@ -221,6 +223,7 @@ export class PracticeHistoryService {
         questionAnswer: a.question_answer,
         questionAnalysis: a.question_analysis,
         questionSource: a.question_source ?? null,
+        questionNo: a.question_paper_no ?? null,
         refType: a.ref_type,
         refId: a.ref_id,
         sentenceIndex: a.sentence_index,

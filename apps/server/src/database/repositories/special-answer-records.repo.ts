@@ -118,13 +118,22 @@ export class SpecialAnswerRecordsRepository {
   async listBySession(sessionId: number): Promise<Array<AnswerRow & {
     question_content: string | null; question_answer: string | null; question_analysis: string | null;
     question_source: string | null;
+    /** 该题在原试卷中的题号（paper_questions.question_no）；无卷关联时为 null。 */
+    question_paper_no: number | null;
     /** 题目在架标记（详情判断 canRedo / canSimilar）；题目无关联时为 null。 */
     question_is_active: number | null;
   }>> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
+      // 题号取值口径与专项抽题一致（questions.repo 的 PAPER_QUESTION_NO_SQL）：
+      // 多卷题优先取 questions.source 对应的那份卷。
       `SELECT sar.*, q.content AS question_content, q.answer AS question_answer,
               q.explanation AS question_analysis, q.is_active AS question_is_active,
-              q.source AS question_source
+              q.source AS question_source,
+              (SELECT pq.question_no FROM paper_questions pq
+                 JOIN exam_papers ep ON ep.id = pq.paper_id
+                WHERE pq.question_id = q.id
+                ORDER BY (SUBSTRING_INDEX(ep.source_key, '/', -1) = q.source) DESC, pq.question_no
+                LIMIT 1) AS question_paper_no
        FROM special_answer_records sar
        LEFT JOIN questions q ON sar.question_id = q.id
        WHERE sar.session_id = ?

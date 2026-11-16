@@ -13,7 +13,7 @@ import {
   preprocessMaterialMarkdown,
 } from '@/components/markdown';
 import { autoWrapMath, normalizeAnswerMath } from '@/components/business/LatexPreview';
-import { formatQuestionSource } from '@/utils/questionSource';
+import { formatPaperQuestionNo, formatQuestionSource } from '@/utils/questionSource';
 import {
   getMyPointRules,
   getPracticeHistoryDetail,
@@ -249,6 +249,7 @@ function QuestionCard({
           className="mb-2 truncate text-xs text-[var(--text-tertiary)]"
         >
           来源：{formatQuestionSource(q.questionSource)}
+          {formatPaperQuestionNo(q.questionNo) ? ` · ${formatPaperQuestionNo(q.questionNo)}` : ''}
         </p>
       )}
 

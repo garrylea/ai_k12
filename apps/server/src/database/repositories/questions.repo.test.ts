@@ -28,6 +28,9 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     expect(sql).toContain("q.answer <> ''");
     expect(sql).toContain('RAND()');
     expect(sql).toContain('LIMIT ?');
+    // 卷内题号：作答页展示「来源 + 试卷第 N 题」，多卷题优先取 source 对应的那份卷
+    expect(sql).toContain('paper_questions pq');
+    expect(sql).toContain('AS question_no');
     expect(params).toEqual([7, 1, 3, 'proof', 5]);
   });
 
@@ -234,6 +237,7 @@ describe('QuestionsRepository 模型专项抽题', () => {
     expect(rows.map((r) => r.id)).toEqual([7093, 7094]);
     const [sql, params] = pool.query.mock.calls[0];
     expect(sql).toContain('ORDER BY q.id ASC LIMIT ?');
+    expect(sql).toContain('AS question_no');
     expect(params).toEqual([7, 1, 'geometry_synthesis', 'median_doubling', 2]);
 
     const pool2 = mockPool([{ id: 1 }]);

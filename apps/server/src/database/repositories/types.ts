@@ -103,6 +103,8 @@ export interface QuestionRow extends RowDataPacket {
   content_hash: string | null;
   is_active: number;
   created_at: Date;
+  /** 派生命题：试卷内题号（paper_questions.question_no）。仅专项抽题查询带出，其余查询为 undefined。 */
+  question_no?: number | null;
 }
 
 export interface UploadedFileRow extends RowDataPacket {

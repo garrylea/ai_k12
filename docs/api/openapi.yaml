@@ -8348,6 +8348,12 @@ components:
           type: string
           nullable: true
           description: 题目来源（questions.source）；专项记录页逐题展示，便于溯源（2026-11-15）
+        questionNo:
+          type: integer
+          nullable: true
+          description: >-
+            该题在原试卷中的题号（paper_questions.question_no）；专项记录页与来源同行展示
+            「试卷第 N 题」。考试恒 null（questionOrder 已是卷内题号）；无卷关联也为 null（2026-11-16）
         refType:
           type: string
           nullable: true
@@ -11202,7 +11208,13 @@ components:
           type: string
           nullable: true
           description: 题目来源（questions.source）；专项作答页展示，便于溯源（2026-11-15）
-      required: [questionId, text, type, options, materialText, source]
+        questionNo:
+          type: integer
+          nullable: true
+          description: >-
+            该题在原试卷中的题号（paper_questions.question_no）；作答页与来源同行展示
+            「试卷第 N 题」。一道题属多份卷时优先取 source 对应的那份卷；无卷关联为 null（2026-11-16）
+      required: [questionId, text, type, options, materialText, source, questionNo]
 
     RemediationGenerateRequest:
       type: object

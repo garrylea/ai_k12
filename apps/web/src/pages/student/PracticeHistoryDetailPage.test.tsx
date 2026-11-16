@@ -230,15 +230,18 @@ describe('PracticeHistoryDetailPage', () => {
     expect(container.querySelectorAll('br').length).toBe(2);
   });
 
-  it('专项记录逐题显示题目来源；考试记录不显示（整卷同一份，重复无意义）', async () => {
-    const q = { ...UNANSWERED_QUESTION, questionId: 200, questionSource: '2025 海淀 初三（上）期中' };
+  it('专项记录逐题显示题目来源 + 卷内题号；考试记录不显示（整卷同一份，重复无意义）', async () => {
+    const q = {
+      ...UNANSWERED_QUESTION, questionId: 200, questionSource: '2025 海淀 初三（上）期中', questionNo: 12,
+    };
     getDetailMock.mockResolvedValue({
       session: { ...EXAM_SESSION, source: 'special', sessionId: 5, subjectId: 1, module: 'math_targeted' },
       questions: [q],
     });
     renderAt('special', '5');
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument());
-    expect(screen.getByTestId('history-question-source')).toHaveTextContent('2025 海淀 初三（上）期中');
+    expect(screen.getByTestId('history-question-source'))
+      .toHaveTextContent('2025 海淀 初三（上）期中 · 试卷第 12 题');
     cleanup();
 
     getDetailMock.mockResolvedValue({ session: EXAM_SESSION, questions: [q] });

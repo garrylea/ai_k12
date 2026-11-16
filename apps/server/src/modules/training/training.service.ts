@@ -838,6 +838,8 @@ export class TrainingService {
       options: unknown[] | null; materialText: string | null;
       /** 题目来源（questions.source）：专项作答页展示，便于溯源。 */
       source: string | null;
+      /** 该题在原试卷中的题号（paper_questions.question_no）；无卷关联时为 null。 */
+      questionNo: number | null;
     }>;
     /** 未抽到题时为 null（没有可完成的会话）。 */
     sessionId: number | null;
@@ -866,6 +868,7 @@ export class TrainingService {
       options: parseOptions(q.options),
       materialText: q.material_text ?? null,
       source: q.source ?? null,
+      questionNo: q.question_no ?? null,
     }));
 
     // 建会话失败**只丢这一轮的积分，不能 500 掉开练**：积分是激励层，绝不能挡住学习路径。

@@ -13,3 +13,13 @@ export function formatQuestionSource(source: string | null | undefined): string 
   if (!source) return null;
   return SOURCE_LABELS[source] ?? source;
 }
+
+/**
+ * 卷内题号展示串（paper_questions.question_no）。
+ * 专项练习的题从各份试卷里抽出来，作答页的「第 i/n 题」是本次练习的位次，
+ * 与卷内题号不是一回事，所以带「试卷」二字区分（2026-11-16 用户要求）。
+ */
+export function formatPaperQuestionNo(questionNo: number | null | undefined): string | null {
+  if (questionNo == null) return null;
+  return `试卷第 ${questionNo} 题`;
+}

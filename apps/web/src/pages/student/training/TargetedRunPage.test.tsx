@@ -114,14 +114,25 @@ function deferred<T>() {
 }
 
 describe('专项作答页题目来源', () => {
-  it('题单带 source 时展示「来源：…」，便于溯源', async () => {
+  it('题单带 source + questionNo 时展示「来源：… · 试卷第 N 题」，便于溯源', async () => {
     sessionStorage.setItem(KEY, JSON.stringify({
       sessionId: 1,
-      questions: [{ ...QUESTION, source: '2025 海淀 初三（上）期中' }],
+      questions: [{ ...QUESTION, source: '2025 海淀 初三（上）期中', questionNo: 12 }],
     }));
     renderPage();
     const source = await screen.findByTestId('question-source');
-    expect(source).toHaveTextContent('来源：2025 海淀 初三（上）期中');
+    expect(source).toHaveTextContent('来源：2025 海淀 初三（上）期中 · 试卷第 12 题');
+  });
+
+  it('题目无卷关联时只展示来源，不补位次', async () => {
+    sessionStorage.setItem(KEY, JSON.stringify({
+      sessionId: 1,
+      questions: [{ ...QUESTION, source: 'freeform', questionNo: null }],
+    }));
+    renderPage();
+    const source = await screen.findByTestId('question-source');
+    expect(source).toHaveTextContent('来源：答疑录入');
+    expect(source).not.toHaveTextContent('试卷第');
   });
 });
 
