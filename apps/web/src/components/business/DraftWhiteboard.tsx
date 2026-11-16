@@ -24,6 +24,23 @@ type Tool = 'pen' | 'dot' | 'eraser' | 'select' | 'compass' | 'line' | 'rect' | 
 type ShapeKind = 'line' | 'rect' | 'ellipse';
 const SHAPE_TOOLS: ReadonlySet<Tool> = new Set<Tool>(['line', 'rect', 'ellipse']);
 
+/** 手写笔光标：斜握钢笔图标（白底 + 深色描边，浅色/夜间浅灰画板上都看得清），
+ *  热点 (3,21) 对齐笔尖；浏览器不支持自定义光标时回退十字准星。 */
+const PEN_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
+  + '<path d="M3 21l1.6-4.4L15.9 5.3l2.8 2.8L7.4 19.4 3 21z" fill="#ffffff" stroke="#1f2937" stroke-width="1.4" stroke-linejoin="round"/>'
+  + '<path d="M4.6 16.6l2.8 2.8" stroke="#1f2937" stroke-width="1.4" stroke-linecap="round"/>'
+  + '</svg>',
+)}") 3 21, crosshair`;
+
+/** 各工具的画布光标（手写笔用笔形光标，其余绘制工具仍需十字准星对齐落点） */
+function cursorForTool(t: Tool): string {
+  if (t === 'select') return 'default';
+  if (t === 'eraser') return 'cell';
+  if (t === 'pen') return PEN_CURSOR;
+  return 'crosshair';
+}
+
 /** 笔迹线宽（CSS px）：恒定线宽细线（钢笔感），无 thinning 粗细起伏 */
 const INK_WIDTH = 2;
 
@@ -1759,7 +1776,7 @@ export function DraftWhiteboard({
       className="absolute inset-0 w-full h-full"
       // 所有工具 canvas 都接管指针（贴图本体穿透，选中/拖动/缩放控制点由各自层接事件）；
       // scroll-y 两指平移走 canvas 指针逻辑（touch-action:none 拦截原生手势）
-      style={{ touchAction: 'none', pointerEvents: 'auto', cursor: tool === 'select' ? 'default' : tool === 'eraser' ? 'cell' : 'crosshair' }}
+      style={{ touchAction: 'none', pointerEvents: 'auto', cursor: cursorForTool(tool) }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

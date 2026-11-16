@@ -657,3 +657,23 @@ describe('草稿白板：选中工具的点选命中', () => {
     expect(rects.some((r) => r.dashed)).toBe(false);
   });
 });
+
+describe('草稿白板：手写笔光标', () => {
+  it('手写笔用笔形光标（不再是十字准星），图形工具仍保留十字准星', () => {
+    const { container, canvas } = setup();
+    // 默认工具即手写笔
+    expect(canvas.style.cursor).toContain('data:image/svg+xml');
+    expect(canvas.style.cursor).not.toBe('crosshair');
+
+    pickTool(container, '直线');
+    expect(canvas.style.cursor).toBe('crosshair');
+  });
+
+  it('橡皮 / 选中仍用系统光标', () => {
+    const { container, canvas } = setup();
+    pickTool(container, '橡皮');
+    expect(canvas.style.cursor).toBe('cell');
+    pickTool(container, '选中');
+    expect(canvas.style.cursor).toBe('default');
+  });
+});
