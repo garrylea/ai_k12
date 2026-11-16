@@ -52,14 +52,25 @@ mac:
   # ⚠️ 出包后由 app-build.sh 的 verify_signature 逐个校验主程序与 Helper，没签上直接红。
   # ⚠️ CI（desktop-release.yml）仍是不签名，产物与本机包身份不同 —— 已知缺口。
   identity: null
+  # 关掉「安全时间戳」（2026-11-16 实测）：不写这条时 electron-builder 给**每个**被签文件拼
+  # 不带值的 `--timestamp`（@electron/osx-sign 的默认，见 MacTargetHelper.js 的 `timestamp ||
+  # undefined`），即逐个文件向 Apple TSA 取时间戳。Electron 包里 256 个文件有 223 个是
+  # `.pak` 语言包，也逐个签 —— 实测单文件 2.88s（联网）vs 0.102s（`--timestamp=none`），
+  # 双架构出包光这一步就是 20 分钟。写 `none` 后整包降到分钟级。
+  # 影响：签名不再带可信时间戳 → 证书过期后**旧包**的签名会失效（我们每次重打包重装，无感）；
+  # 局域网权限绑的是证书的 designated requirement（证书 + bundle id），与时间戳无关，不受影响。
+  # ⚠️ 将来若买 Developer ID 做**公证**（notarization），必须删掉这条 —— 公证要求安全时间戳。
+  timestamp: none
   # pkg 替代 dmg（2026-10-07 spec）：Installer.app 不向产物传播 quarantine（实测见 spec §2），
   # 「装完连不上服务器」的事故从机制上消失；dmg 拖拽 + 手跑 xattr 的家长路径废止。
-  # ⚠️ target 只出 .app（dir），pkg 封装收口到 tools/app-build.sh 的 pkgbuild 循环。
+  # （2026-11-16 口径：`tools/app-build.sh --local` 默认只出 dmg、加 `--pkg` 才连 pkg 一起出，
+  #   两者都用同一批 .app 封（dmg 走 hdiutil）；交付形态仍是 pkg，别把 dmg 放进下载页主区。）
+  # ⚠️ target 只出 .app（dir），pkg / dmg 封装收口到 tools/app-build.sh。
   #    为什么不用 electron-builder 的 pkg target：26.15.3 在「未签名 + 双架构单次构建」下，
   #    两个架构的并行任务共享同一中间产物（com.<bundleId>.pkg / distribution.xml，文件名不含架构）
   #    互踩竞态，**静默**产出装不上 Intel 机器的坏包（x64 包里是 arm64 主程序）——
   #    实测与根因见 docs/constraints/pc-app-学习管控.md（「打包与分发」节）。
-  #    禁止任何人直接 `electron-builder --mac` 打 pkg 走这条已损坏的路径。
+  #    禁止任何人直接 `electron-builder --mac` 打 pkg 走这条已损坏的路径（dmg target 同理，别切回去）。
   target: [{ target: dir, arch: [x64, arm64] }]
 
 linux:

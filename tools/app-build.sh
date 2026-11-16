@@ -8,8 +8,9 @@
 # 文档只需指过来，不必再抄一遍命令。**发布那一步不重写逻辑**：`--publish` 直接转发给
 # `tools/publish-installer.sh`（单一实现）。
 #
-# 本机限制（实测）：mac 包只能在本机出（封装用的 pkgbuild 是 macOS 自带）；**Windows/Linux
-# 出不了** —— NSIS 要 wine、AppImage 要 docker，本机都没装。三平台产物只能走 `--online`（CI）。
+# 本机限制（实测）：mac 包只能在本机出（封装用的 pkgbuild / hdiutil 都是 macOS 自带）；
+# **Windows/Linux 出不了** —— NSIS 要 wine、AppImage 要 docker，本机都没装。三平台产物只能走
+# `--online`（CI）。
 #
 # 设计见 docs/superpowers/specs/2026-09-27-pc-app-packaging-design.md
 set -euo pipefail
@@ -115,6 +116,40 @@ verify_signature() {
   log "签名校验通过（${apps} 个 .app）：主程序 + 4 个 Helper + Electron Framework 同一身份，--verify --deep --strict 绿"
 }
 
+# ── dmg 封装（--local 的默认产物，2026-11-16）────────────────────────────────
+# 口径（2026-11-16 用户裁决）：`--local` **默认只出 dmg**，加 `--pkg` 才连 pkg 一起出。
+# 但**交付形态仍是 .pkg**：dmg 拖拽安装会让 .app 带上 quarantine 隔离属性，Chromium 因此
+# 拿不到局域网沙箱许可 —— 表现为「App 能启动但永远连不上学习服务器，同机浏览器却正常」
+# （2026-10-07 事故，根因见 docs/constraints/pc-app-学习管控.md）。Installer.app 不向产物传播
+# quarantine，所以给家长分发的包必须加 --pkg 出。
+#
+# 为什么用 hdiutil 而不是 electron-builder 的 dmg target：与 pkg 同一套理由 —— yml 的
+# mac.target 是 dir（只出 .app），封装收口在本脚本；且双架构并行任务会共享同一批中间产物
+# （文件名不含架构，互踩竞态）。内容用 `ditto` 拷（保留扩展属性与代码签名），另放一个
+# /Applications 软链（拖拽安装用）。
+make_dmg() {
+  local app="$1" out="$2" stage status=0
+  [ -d "${app}" ] || die "缺 ${app} —— 无法封装 dmg"
+  stage="$(mktemp -d "${TMPDIR:-/tmp}/k12-dmg.XXXXXX")"
+  # mktemp 建的是 700 —— 卷根继承它，别的账号挂载后会打不开；显式放开。
+  chmod 755 "${stage}"
+  if ! ditto "${app}" "${stage}/${SIGN_APP}.app"; then
+    rm -rf "${stage}"
+    die "复制 .app 到 dmg 暂存目录失败：${app}"
+  fi
+  ln -s /Applications "${stage}/Applications"
+  log "封装 ${out} …"
+  # hdiutil 在 macOS 26 会提示「已废弃、改用 diskutil image create」—— 仍可用且跨版本更稳
+  # （diskutil 那条在旧系统上没有），别被这行 WARNING 吓到。
+  hdiutil create -volname "${SIGN_APP}" -srcfolder "${stage}" -ov -format UDZO "${out}" >/dev/null \
+    || status=$?
+  rm -rf "${stage}"
+  [ "${status}" -eq 0 ] || die "hdiutil 封装 dmg 失败（退出码 ${status}）：${out}"
+  # 只校验镜像本身（CRC）。签名不在这里验：镜像里就是源 .app 的字节级拷贝（ditto 不改内容），
+  # 由后面的 verify_signature 在源 .app 上逐个校验。
+  hdiutil verify "${out}" >/dev/null || die "dmg 镜像校验失败：${out}"
+}
+
 # 把 electron-builder 收在一处调用：失败时把它那句看不出所以然的报错翻译成可执行的提示。
 #
 # 为什么需要（2026-09-28 实测）：本机到 GitHub 不通时，electron-builder 会在
@@ -139,7 +174,7 @@ list_dist() {
   log "dist 产物："
   (
     cd "$DESKTOP_DIR/dist" 2>/dev/null || return 0
-    for f in *.pkg *.exe *.AppImage *.blockmap latest*.yml; do
+    for f in *.pkg *.dmg *.exe *.AppImage *.blockmap latest*.yml; do
       [ -f "$f" ] || continue
       printf '  %s (%s)\n' "$f" "$(du -h "$f" | cut -f1)"
     done
@@ -157,8 +192,11 @@ PC App 出包入口
                        不产出安装包、不清空 dist（只删旧的 dist/mac* 里的 .app）、不碰 web 层。
                        改完壳先跑这个。
   --local              本机出 mac 安装包：先清空 apps/desktop/dist，再出 x64 + arm64 两个 .app
-                       （electron-builder --dir）并用 pkgbuild 封装成两个 pkg（约 1min），
-                       最后跑 asar 自检与签名校验。
+                       （electron-builder --dir），各封一个 dmg，最后跑 asar 自检与签名校验
+                       （双架构实跑约 2min。2026-11-16 起关掉了逐文件的联网安全时间戳，
+                       之前每个 .pak 都去 Apple 取时间戳，要 20min，见 electron-builder.yml）。
+                       加 --pkg 则再各封一个 pkg —— **交付给家长要用 pkg**（dmg 拖拽会带
+                       quarantine，局域网访问可能被静默拒绝）。
   --online             GitHub Actions 出三平台包（mac pkg / win exe / linux AppImage）。
                        ⚠️ CI 出的 mac 包**不签名**（与本机 --local 的包身份不同，装同一台机
                        会重新要一次本地网络授权）。默认只做预检并打印要执行的命令；
@@ -168,20 +206,23 @@ PC App 出包入口
   --win | --linux      本机出不了（NSIS 要 wine、AppImage 要 docker），这里只说明原因与出路。
 
 选项：
-  --manifest           配合 --local：注入 publish 配置（注：mac 产物为 pkg 后通常不产出 latest-mac.yml）。
+  --manifest           配合 --local：注入 publish 配置（注：dmg/pkg 都由本脚本封，不产出 latest-mac.yml）。
                        不注入就没有更新清单。
+  --pkg                配合 --local：在默认的 dmg 之外再各出一个 .pkg（交付形态）。
+                       只出 dmg 是为了本机/内网试验；给家长分发请加这个开关。
   --yes                配合 --online：预检通过后真的打 tag 并推 origin。
   -h, --help           显示本页。
 
 示例（把 <版本> 换成 apps/desktop/package.json 里的 version）：
   bash tools/app-build.sh --check                             # 改完壳，快速确认没坏
-  bash tools/app-build.sh --local                             # 出两个 pkg
-  bash tools/app-build.sh --local --manifest                  # 注入 publish 配置（mac pkg 不产出 latest-mac.yml）
+  bash tools/app-build.sh --local                             # 只出两个 dmg（本机试验）
+  bash tools/app-build.sh --local --pkg                       # 两个 dmg + 两个 pkg（交付形态）
+  bash tools/app-build.sh --local --manifest                  # + 注入 publish 配置（mac 不产出 latest-mac.yml）
   bash tools/app-build.sh --online                            # 看要推什么（不推）
   bash tools/app-build.sh --online --yes                      # 预检通过后推 tag，触发 CI
-  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-<版本>-arm64.pkg
+  bash tools/app-build.sh --publish apps/desktop/dist/k12-desktop-<版本>-arm64.pkg   # 前提：跑过 --local --pkg；发 dmg 就换成 .dmg
 
-本机限制：mac 包只能在本机出（封装要 pkgbuild，macOS 自带）；Windows/Linux 产物只能靠 --online。
+本机限制：mac 包只能在本机出（封装要 pkgbuild / hdiutil，macOS 自带）；Windows/Linux 产物只能靠 --online。
 前提：--check / --local 都要求钥匙串里有 Apple Development 证书（Xcode → Settings → Accounts →
 Manage Certificates → +）；没有就直接报错，不会静默出未签名的包。
 打包需要能访问 GitHub（见 README 的说明）；发布到服务器会重建 web 并替换正在服务的 dist/。
@@ -213,12 +254,12 @@ mode_local() {
     local url
     url="$(server_url)"
     log "注入 publish 配置：$url/download"
-    warn "mac 产物为 pkg（dir target），本次不会产出 latest-mac.yml —— ④ 自动更新在 mac 本就不可用；该注入只对将来可能的 zip/electron-updater 路径有意义"
+    warn "mac 产物由本脚本封（dmg/pkg），本次不会产出 latest-mac.yml —— ④ 自动更新在 mac 本就不可用；该注入只对将来可能的 zip/electron-updater 路径有意义"
     args+=( --config.publish.provider=generic "--config.publish.url=$url/download" )
   fi
   log "清空 apps/desktop/dist …"
   rm -rf "$DESKTOP_DIR/dist"
-  log "出 mac .app（双架构 --dir，不打 pkg）…"
+  log "出 mac .app（双架构 --dir，安装包随后用 hdiutil / pkgbuild 封）…"
   # ⚠️ 这里**不要**再传 CLI `--dir`：它会整包覆盖 yml 的 mac.target，连 per-target 的
   #    arch 清单 [x64, arm64] 一起丢掉，只出本机架构（2026-10-08 实测只出了 mac-arm64）。
   #    dir 这个 target 已写在 electron-builder.yml 的 mac.target 里，交给它即可。
@@ -242,18 +283,26 @@ mode_local() {
       *"$want"*) ;;
       *) die "$arch_dir 主二进制架构不符：期望含 ${want}，实际「${actual}」（pkg target 竞态的失效模式，禁止出包）" ;;
     esac
-    out="$DESKTOP_DIR/dist/k12-desktop-$(pkg_version)-${arch}.pkg"
-    log "封装 $out …"
-    pkgbuild --identifier com.k12zhixue.desktop \
-             --root "$arch_dir" \
-             --scripts "$DESKTOP_DIR/scripts/pkg" \
-             --install-location /Applications \
-             "$out"
+    make_dmg "$arch_dir/${SIGN_APP}.app" "$DESKTOP_DIR/dist/k12-desktop-$(pkg_version)-${arch}.dmg"
+    if [ "$PKG" -eq 1 ]; then
+      out="$DESKTOP_DIR/dist/k12-desktop-$(pkg_version)-${arch}.pkg"
+      log "封装 $out …"
+      pkgbuild --identifier com.k12zhixue.desktop \
+               --root "$arch_dir" \
+               --scripts "$DESKTOP_DIR/scripts/pkg" \
+               --install-location /Applications \
+               "$out"
+    fi
   done
   verify_signature
   list_dist
+  if [ "$PKG" -eq 1 ]; then
+    warn "已同时出 pkg（交付形态）：dmg 仍仅供本机/内网试验 —— 拖拽安装会带 quarantine，局域网访问可能被静默拒绝"
+  else
+    warn "本次只出 dmg（本机/内网试验用）—— 给家长分发要再加 --pkg，拖拽安装的 quarantine 会静默断掉局域网访问"
+  fi
   if [ "$MANIFEST" -eq 0 ]; then
-    warn "本次没有更新清单 —— mac 产物为 pkg 本就不产出 latest-mac.yml（与是否加 --manifest 无关）"
+    warn "本次没有更新清单 —— dmg/pkg 都由本脚本封，本就不产出 latest-mac.yml（与是否加 --manifest 无关）"
   fi
 }
 
@@ -361,6 +410,7 @@ mode_unsupported() {
 
 MODE=""
 MANIFEST=0
+PKG=0
 CONFIRM=0
 PUBLISH_ARGS=()
 
@@ -393,6 +443,10 @@ while [ "$#" -gt 0 ]; do
       MANIFEST=1
       shift
       ;;
+    --pkg)
+      PKG=1
+      shift
+      ;;
     --yes)
       CONFIRM=1
       shift
@@ -409,6 +463,9 @@ done
 if [ "$MANIFEST" -eq 1 ] && [ "$MODE" != local ]; then
   warn "--manifest 只对 --local 有意义（当前模式：--${MODE}），本次已忽略"
 fi
+if [ "$PKG" -eq 1 ] && [ "$MODE" != local ]; then
+  warn "--pkg 只对 --local 有意义（当前模式：--${MODE}），本次已忽略"
+fi
 if [ "$CONFIRM" -eq 1 ] && [ "$MODE" != online ]; then
   warn "--yes 只对 --online 有意义（当前模式：--${MODE}），本次已忽略"
 fi
@@ -417,7 +474,7 @@ fi
 if [ "$MODE" = publish ]; then
   for _a in "${PUBLISH_ARGS[@]}"; do
     case "$_a" in
-      --yes|--manifest)
+      --yes|--manifest|--pkg)
         die "「${_a}」不能写在 --publish 之后：--publish 会收下它后面的所有参数当文件名（该选项对 --publish 也无意义）。把要传的选项放在模式参数之前。"
         ;;
     esac

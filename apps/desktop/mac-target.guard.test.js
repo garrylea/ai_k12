@@ -13,7 +13,9 @@ import { fileURLToPath } from 'node:url';
  *   互踩竞态，**静默**产出装不上 Intel 机器的坏包（x64 包里是 arm64 主程序）。已判死刑 ——
  *   pkg 封装收口到 tools/app-build.sh 与 CI 的 pkgbuild 循环（封装前有 file 架构校验）。
  * - **dmg**：Installer 才不向产物传播 quarantine，dmg 拖拽后的 app 带 quarantine 属性，
- *   家长首次打开被 Gatekeeper 拦、还得手跑 xattr —— 这条路径已废止。
+ *   家长首次打开被 Gatekeeper 拦、还得手跑 xattr —— 交付路径仍是 pkg。
+ *   （2026-11-16 起 `tools/app-build.sh --local` 默认用 hdiutil 在同一批 .app 上封 dmg
+ *   （`--pkg` 才连 pkg 一起出）；那条路径不进 yml，本护栏只管 `mac.target` 不许切回 dmg。）
  *
  * 为什么是护栏而不是靠记性：target 写一行 `dmg` 就能把已判死刑的路径悄悄接回来，
  * 而它坏得**静默**（竞态坏包 / quarantine），出包流程不会报错。谁改了这里，测试必须红。

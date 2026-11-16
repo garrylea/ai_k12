@@ -8,6 +8,30 @@
 
 ---
 
+## 2026-11-16 PC App 出包 20min → 2min（关掉逐文件安全时间戳）
+
+**背景**：用户反馈 `app-build.sh` 出包特别慢，对比另一个 Electron 工程 `/Users/lichao/Downloads/GeoDrawPro` 快得多。
+
+**根因**：不是脚本，是 `mac` 配置。我们的 `electron-builder.yml` 没写 `timestamp`，electron-builder 就按默认给**每个被签文件**拼不带值的 `--timestamp`（`app-builder-lib/out/mac/MacTargetHelper.js` 的 `timestamp || undefined` → `@electron/osx-sign` 的 `--timestamp`），即逐个文件向 Apple TSA 取时间戳；Electron 包里 256 个文件有 **223 个是 `.pak` 语言包**，也逐个签。实测单文件 `--timestamp` **2.88s** vs `--timestamp=none` **0.102s**（约 28 倍），双架构 ≈20min 全花在等网络上。GeoDrawPro 的 `package.json` 写了 `"timestamp": "none"`（`hardenedRuntime` 也关），只出 arm64，所以 1~2min。
+
+**改动**：`apps/desktop/electron-builder.yml` 的 `mac:` 增加 `timestamp: none`（带注释与「公证时必须删」的警告）；`tools/app-build.sh --help` 的 `--local` 耗时说明改成实情。
+
+**为什么能安全关掉**：我们不做公证（无 Developer ID），安全时间戳只对「证书过期后旧包签名仍有效」和 notarization 有意义。局域网权限绑的是 designated requirement（证书 + bundle id），**与时间戳无关** —— 出包后实测 `codesign -d -r-` 的 DR 与之前一致、`codesign -dv` 里已无 `Timestamp=` 行，`--verify --deep --strict` 仍全绿，hardened runtime 标志（`flags=0x10000(runtime)`）保留。
+
+**验证**：`bash tools/app-build.sh --local` 全流程 **1m58s**（改前同一台机 ≈20min），产出两个 dmg（136M / 143M），asar 自检、架构校验、签名校验全绿。落地约束见 `docs/constraints/pc-app-学习管控.md`「打包与分发」。
+
+## 2026-11-16 PC App 本机出包：默认出 dmg，--pkg 连 pkg 一起出
+
+**背景**：本机已能用 Xcode 的 Apple Development 证书签名，用户要 `.dmg` 产物。口径（用户当天裁决）：`--local` 默认**只出 dmg**（本机/内网试验），加 `--pkg` 才两种包都出；对外交付形态仍是 `.pkg`（dmg 拖拽会带 quarantine，见 2026-10-07 条目）。
+
+**改动**：
+- `tools/app-build.sh` 的 `mode_local`：`--dir` 出完双架构 `.app` 后，**每个架构必出一个** `k12-desktop-<版本>-<arch>.dmg`；新增 `--pkg` 开关，加了才跑原来的 `pkgbuild` 再出 `.pkg`。封装走 `hdiutil create -format UDZO`，内容用 `ditto` 拷（保留扩展属性与代码签名）+ `/Applications` 软链；暂存目录显式 `chmod 755`（mktemp 默认 700 会让卷根在别的账号下打不开），出完 `hdiutil verify` 校验 CRC。
+- 不用 electron-builder 的 dmg target：与 pkg target 同理（双架构并行任务共享不含架构名的中间产物，互踩竞态），`mac.target` 保持 `dir`。
+- `--help` / 示例 / `list_dist`（加 `*.dmg`）/ `--publish` 选项拦截同步；只出 dmg 时结尾会警告「给家长分发要加 --pkg」。
+- 文档口径：`docs/constraints/pc-app-学习管控.md` 改为「交付形态是 .pkg；`--local` 默认只出 dmg，`--pkg` 才连 pkg 一起出」；`electron-builder.yml` 与 `mac-target.guard.test.js` 注释同步（护栏本身不变：yml 的 `mac.target` 仍只能 `dir`）。
+
+**验证**：把 `run_builder` / 清 dist 步骤打桩后，用现有已签名 `.app` 实跑两条分支 —— `--local` 只产出两个 dmg（无 pkg），`--local --pkg` 产出 dmg + pkg；`hdiutil verify` checksum VALID；挂载 arm64 dmg 见 `K12 智学.app` + `Applications` 软链、卷根 755、`codesign --verify --strict` 通过；签名校验通过（2 个 .app：主程序 + 4 Helper + Electron Framework 同一身份）。产物：dmg 136M / 144M，pkg 121M / 128M。`apps/desktop` 144 例测试全绿（含 tools-shell 护栏）。另记：带签名实跑的整包耗时 **≈20min**（双架构逐文件 `codesign --timestamp` 要联网取时间戳，比未签名时代的 ~1min 慢一个量级），`--help` 已按实情改写。
+
 ## 2026-11-15 专项题目来源展示（作答 + 练习记录）
 
 **背景**：专项题出现问题（内容错、答案错）时无法定位是哪份卷子/哪道题，用户要求每题都带来源用于溯源。

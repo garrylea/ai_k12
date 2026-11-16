@@ -333,6 +333,16 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
     → CI 产物与本机包**签名身份不同**，同一台机换装会重新要一次授权。已知缺口，
     `--online` 会打警告；要补齐得把证书私钥导入 runner。
   - **不公证**（没有 Developer ID）这条不变：首次打开仍需「系统设置 → 隐私与安全性 → 仍要打开」。
+  - **关掉安全时间戳**（`mac.timestamp: none`，2026-11-16 实测 20min → **2min**）：不写这条时
+    `@electron/osx-sign` 给**每个**被签文件拼不带值的 `--timestamp`（逐个向 Apple TSA 取时间戳，
+    `app-builder-lib/out/mac/MacTargetHelper.js` 的 `timestamp || undefined`）。Electron 包 256 个
+    文件里 **223 个是 `.pak` 语言包**，也逐个签 —— 实测单文件 `--timestamp` **2.88s** vs
+    `--timestamp=none` **0.102s**，双架构光这一步就白等 20 分钟（同类工程 GeoDrawPro 用
+    `timestamp: none`，整包 1~2min，这是「为什么它快」的唯一原因）。
+    依据：我们不做公证，安全时间戳只对「证书过期后旧包签名仍有效」和 notarization 有意义；
+    局域网权限绑的是 designated requirement（证书 + bundle id），**与时间戳无关**（出包后
+    `codesign -d -r-` 实测 DR 不变，`codesign -dv` 里已无 `Timestamp=` 行）。
+    ⚠️ 将来买 Developer ID 做公证时必须删掉这条 —— 公证要求安全时间戳。
 - **`electron-builder.yml` 里故意不写 `publish`**：地址的唯一真源是 `apps/desktop/server-url.js`，
   CI 与 `tools/publish-installer.sh` 都从它推导。**别把 URL 抄进 yml**（那就是第二处、必然漂移）
 - **mac 包只能在 macOS runner 上构建**（`pkg` 走 `productbuild`，macOS 自带）；win/linux 只出 x64。
@@ -340,9 +350,12 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
 - ⚠️ **macOS runner 标签不要钉死版本号**：`macos-14` 于 2026-11-09 实测已被 GitHub 退役，
   job 会在 1 秒内**静默 cancelled**（注解 `The configuration 'macos-14-arm64-us-default' is not supported`，
   任何 step 都没跑，极易误判成"排队失败"）。现用 `macos-latest`。
-- **mac 产物是 `.pkg` 不是 dmg**（2026-10-07 spec）：Installer.app 不向产物传播 quarantine（实测见
-  spec §2），安装零终端；dmg 路线废止的原因是 quarantine 会**静默断掉 App 的局域网访问**
-  （App 能启动但永远「暂时连不上学习服务器」，浏览器却正常 —— 别再当网络/代码问题排查）
+- **mac 交付形态是 `.pkg`；`--local` 默认只出 dmg**（2026-10-07 spec，2026-11-16 口径）：
+  `bash tools/app-build.sh --local` 出两个 dmg（本机/内网试验），加 `--pkg` 才连 pkg 一起出。
+  **给家长的下载页只发 pkg**：Installer.app 不向产物传播 quarantine（实测见 spec §2），安装零终端；
+  dmg 的问题不是坏了，而是**拖拽安装会给 .app 带上 quarantine，静默断掉 App 的局域网访问**
+  （App 能启动但永远「暂时连不上学习服务器」，浏览器却正常 —— 别再当网络/代码问题排查）。
+  dmg 内容就是同一批已签名 .app 的 `ditto` 拷贝（`hdiutil` 封装，不用 electron-builder 的 dmg target）
 - **⚠️ `mac.extendInfo` 必须带 `NSLocalNetworkUsageDescription`**（2026-10-13 事故）：macOS 14.2+
   （Sequoia 起强制）对缺该声明的 App **静默拒绝局域网连接、授权弹窗都不出现** —— 症状是「Finder
   启动永远离线页，终端启动却正常」（终端启动的访问归属到终端的权限）、浏览器正常、拨本地网络
@@ -360,11 +373,11 @@ Electron 转成 `before-quit`，2026-11-10 实测）；**拦不住 SIGKILL（强
   实测同样两个包：GitHub 20 分钟未下完 → 华为云 16 秒）。已显式设置时脚本不覆盖。
   ⚠️ 这只覆盖 `tools/app-build.sh`；CI（runner 在海外）直连 GitHub，不需要镜像。
 - **不签名 → pkg 双击首次仍被 Gatekeeper 拦一次**：交付文档给「系统设置 → 隐私与安全性 → 仍要打开」
-  （GUI）；`xattr` 终端命令只作为旧 dmg 包的兜底说明保留
+  （GUI）；`xattr` 终端命令只作为 `.dmg` 包（`--local` 默认出的那种）的兜底说明保留
 
 ### 出包 / 发布的入口（2026-09-28 补）
 
-- **出包与发布统一走 `tools/app-build.sh`**（`--check` / `--local` / `--online` / `--publish`）。
+- **出包与发布统一走 `tools/app-build.sh`**（`--check` / `--local [--pkg|--manifest]` / `--online` / `--publish`）。
   **参数的唯一说明处是它的 `--help`** —— 文档里别抄命令，指过去即可（抄出来的就是会漂移的第二处）。
 - **`--online` 打 tag / 推 origin 必须有 `--yes`**：打 tag 是对外可见动作，脚本默认只预检并打印要执行的命令。
 - **`--publish` 只转发 `tools/publish-installer.sh`，不许复制发布逻辑**（发布要重建 web 并替换
