@@ -947,3 +947,36 @@ def test_current_question_reads_extracted_jsonl(tmp_path, monkeypatch):
     row = manual_fix._current_question(issue)
     assert row["content"].endswith("![](images/x.jpg)")
     assert manual_fix._current_question({**issue, "group_order": 9}) is None
+
+
+class _QuietConsole:
+    def info(self, *a, **k): pass
+    def prompt(self, *a, **k): pass
+    def block(self, *a, **k): pass
+    def legend(self, *a, **k): pass
+    def warn(self, *a, **k): pass
+
+
+def test_answer_only_record_keeps_stem(monkeypatch):
+    seq = iter(["42", "1"])
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
+    issue = {"source": "卷A", "rel_path": "数学/x/卷A", "group_order": 7,
+             "kind": "answer_missing", "reasons": ["answer_empty"]}
+    original = {"content": "题干", "options": [{"label": "A", "text": "甲"}],
+                "material_text": None}
+
+    records = manual_fix._ask_answer_only(issue, 7, original, _QuietConsole())
+
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["answer_only"] is True
+    assert rec["answer"] == "42"
+    assert rec["content"] == "题干"
+    assert rec["options"] == [{"label": "A", "text": "甲"}]
+
+
+def test_answer_only_skip_returns_empty(monkeypatch):
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: "s")
+    issue = {"source": "卷A", "rel_path": "数学/x/卷A", "group_order": 7,
+             "kind": "answer_missing"}
+    assert manual_fix._ask_answer_only(issue, 7, {"content": "题干"}, _QuietConsole()) == []

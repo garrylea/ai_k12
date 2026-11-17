@@ -796,6 +796,65 @@ def _targets(issue: dict) -> list[tuple[int, str]]:
     return seq
 
 
+def _ask_answer_only(issue: dict, target_no: int, original: dict,
+                     c) -> list[dict]:
+    """只补答案：题面/选项/图片一律不动，写库时也走 answer_only 分支。"""
+    c.info("只补答案：题面、选项、图片都不动")
+    answer = ""
+    while True:
+        c.prompt(f"第 {target_no} 题答案（e 重输 / s 跳过）› ")
+        raw = _read_line()
+        if raw is None:
+            return []
+        text = raw.strip()
+        if text.lower() in ("s", "skip"):
+            c.warn(f"第 {target_no} 题已跳过")
+            return []
+        if not text or text.lower() == "e":
+            continue
+        if any(m in text for m in _ECHO_MARKERS):
+            c.warn("答案里混进了界面文字，请重输")
+            continue
+        answer = text
+        break
+
+    c.block("答案", answer, max_lines=4)
+    while True:
+        c.legend([("1", "确认"), ("2", "重输"), ("s", "跳过")])
+        c.prompt("选择 › ")
+        raw = _read_line()
+        if raw is None:
+            return []
+        choice = raw.strip().lower()
+        if choice in ("", "1"):
+            break
+        if choice == "2":
+            return _ask_answer_only(issue, target_no, original, c)
+        if choice in ("s", "skip"):
+            return []
+        c.warn("请按 1 确认 / 2 重输 / s 跳过")
+
+    return [{
+        "source": issue["source"],
+        "rel_path": issue["rel_path"],
+        "group_order": target_no,
+        "content": original.get("content") or "",
+        "options": original.get("options"),
+        "material_text": original.get("material_text"),
+        "answer": answer,
+        "answer_only": True,
+        "issue_kind": issue["kind"],
+        "issue_reasons": issue.get("reasons") or [],
+        "expected_type": None,
+        "pdf": issue.get("pdf"),
+        "md": issue.get("md"),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "operator": getpass.getuser(),
+        "status": "ready",
+        "applied": False,
+    }]
+
+
 def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
              strategy, index: int = 1, total: int = 1) -> list[dict]:
     """引导录入一道题（允许粘贴里带多个题号，但提示按一题一录）。"""
@@ -804,6 +863,8 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
 
     # 已有题：先问图怎么处理（保留原图 / 换图 / 重新识别），再收文字
     original = _current_question(issue)
+    if issue.get("kind") == "answer_missing" and original is not None:
+        return _ask_answer_only(issue, target_no, original, c)
     orig_refs: list[str] = []
     if original is not None:
         opts_old = original.get("options") or []
@@ -973,7 +1034,7 @@ def _ask(issue: dict, paper_md_dir: Path,
     strategy = get_strategy(_subject_of(issue))
     _print_context(issue, index, total)
 
-    if issue.get("kind") in _CONTENT_KINDS:
+    if issue.get("kind") in _CONTENT_KINDS and issue.get("kind") != "answer_missing":
         verdict = _ask_verdict(issue)
         if verdict == "ok":
             mark_issue(issue["source"], issue["group_order"], "resolved",

@@ -113,6 +113,36 @@ def _patch_extracted(rec: dict, *, content: str, answer: str,
     print(f"[INFO] 已回写 extracted 并标记重发：{path}", flush=True)
 
 
+def _patch_extracted_answer(rec: dict, answer: str, output_dir: Path) -> None:
+    """只补答案：extracted 里只改 answer，题面/选项/图片原样保留。"""
+    rel, src = rec.get("rel_path"), rec.get("source")
+    if not rel or not src:
+        return
+    path = output_dir / "extracted" / rel / f"{src}.jsonl"
+    if not path.exists():
+        print(f"[WARN] 找不到 extracted 产物，跳过回写：{path}", flush=True)
+        return
+    rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    go = int(rec["group_order"])
+    changed = False
+    for row in rows:
+        if int(row.get("group_order") or -1) == go:
+            row["answer"] = answer
+            changed = True
+            break
+    if not changed:
+        print(f"[WARN] extracted 里没有第 {go} 题，答案未回写", flush=True)
+        return
+    path.write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+        encoding="utf-8",
+    )
+    checkpoint = RefineryCheckpoint(output_dir / ".publish_checkpoint.json")
+    checkpoint.load()
+    checkpoint.unmark_published(f"{rel}/{src}")
+    print(f"[INFO] 已回写 extracted 答案并标记重发：{path}", flush=True)
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -262,6 +292,21 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
     # 没有挂到卷上时，可能是「新增」，也可能是「复用」一条同内容的遗留行（重导摘了关联、
     # 没删题）。真正的选择要等内容物化后算哈希才知道，预览先把这个可能说清楚。
     action = "更新" if qid else "新增（同内容已存在则复用）"
+
+    if rec.get("answer_only"):
+        answer = (rec.get("answer") or "").strip()
+        if not apply:
+            return (f"只补答案：paper={paper_id} 第{go}题"
+                    f"（question_id={qid or '—'}）· 题面不动")
+        if qid is None:
+            return "跳过：题库里找不到这道题，无法只补答案"
+        if not answer:
+            return "跳过：答案为空"
+        cur.execute("UPDATE questions SET answer=%s WHERE id=%s", (answer, qid))
+        _patch_extracted_answer(
+            rec, answer, output_dir or RefineryConfig.from_env().output_dir,
+        )
+        return f"更新答案：paper={paper_id} 第{go}题 -> question_id={qid}"
 
     if not apply:
         # 预览要能判断"内容对不对"，只报更新/新增没用（用户 2026-10-31 指出）

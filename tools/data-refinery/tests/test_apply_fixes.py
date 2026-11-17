@@ -399,3 +399,28 @@ def test_reuses_orphan_row_for_same_paper_and_number():
     assert not any(sql.startswith("INSERT INTO questions") for sql, _ in cur.sql)
     assert any("UPDATE questions SET content" in sql for sql, _ in cur.sql)
     assert any("INSERT IGNORE INTO paper_questions" in sql for sql, _ in cur.sql)
+
+
+def test_answer_only_updates_answer_without_touching_content(tmp_path):
+    """只补答案：题面/选项/图片一律不动，只写 answer。"""
+    cur = FakeCursor(paper=(54, 4), existing=6058)
+    rec = {**REC, "answer_only": True, "answer": "42"}
+
+    msg = _impl.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+
+    updates = [(sql, args) for sql, args in cur.sql
+               if sql.startswith("UPDATE questions SET answer")]
+    assert len(updates) == 1
+    assert updates[0][1] == ("42", 6058)
+    assert not any("SET content=" in sql for sql, _ in cur.sql)
+    assert msg.startswith("更新答案")
+
+
+def test_answer_only_preview_does_not_write(tmp_path):
+    cur = FakeCursor(paper=(54, 4), existing=6058)
+    rec = {**REC, "answer_only": True, "answer": "42"}
+
+    msg = _impl.apply_record(cur, rec, apply=False, output_dir=tmp_path)
+
+    assert "只补答案" in msg and "题面不动" in msg
+    assert not any(sql.startswith("UPDATE") for sql, _ in cur.sql)

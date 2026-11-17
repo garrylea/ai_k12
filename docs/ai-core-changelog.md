@@ -56,6 +56,13 @@
 - 换图模式支持多路径（逗号分隔）/ 剪贴板；文件名用内容 hash，避免覆盖。
 - 单测覆盖 `_image_refs` / `_append_missing_images` / `_copy_new_images` / `_apply_image_placeholders` / `_current_question`。
 
+**补充 6（2026-11-17，只补答案）**：
+
+- `answer_missing` 不再先问「你看来有问题吗」、也不再要求重录题面：直接录答案并确认。
+- 补题记录带 `answer_only=true`；`apply_fixes` 只执行 `UPDATE questions SET answer=...`，不碰 content/options/material_text/type/is_active。
+- extracted 只回写 `answer` 并标记该卷重发布，published 重新物化时带上新答案。
+- 单测覆盖：只补答案写库不碰内容、预览不写库、跳过、题面保留。
+
 **文档**：`docs/superpowers/specs/2026-11-17-data-refinery-page-marker-cleanup-design.md`、`docs/superpowers/plans/2026-11-17-data-refinery-page-marker-cleanup.md`。
 
 ---

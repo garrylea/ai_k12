@@ -1092,6 +1092,15 @@ cd tools/data-refinery && python3 src/fix_page_markers_cli.py --apply --yes
 
 原题没有图时不会出现这一步。换图模式支持多个路径（逗号分隔），直接回车读剪贴板；`s` 取消本题。
 
+**只补答案（2026-11-17）**：`answer_missing` 的题不再要求重录题面。选中这类条目后直接提示：
+
+```
+只补答案：题面、选项、图片都不动
+第 7 题答案（e 重输 / s 跳过）›
+```
+
+确认后写库只 `UPDATE questions SET answer=...`，题面/选项/图片/题型都不动；同时只回写 extracted 的 `answer` 字段并标记该卷重发布。其他类型的题仍走完整补录流程。
+
 
 ## 5. 推荐工作流
 
