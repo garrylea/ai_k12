@@ -440,6 +440,61 @@ def _shift_images_to_options(stem: str, opts: list[dict]) -> tuple[str, list[dic
     return new_stem, new_opts
 
 
+_OPTION_IMG_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+
+
+def _image_only(seg: str) -> bool:
+    """段内除图片 markdown 外没有其他文字。"""
+    return bool(_OPTION_IMG_RE.search(seg)) and not _OPTION_IMG_RE.sub("", seg).strip()
+
+
+def _split_image_options_missing_d(content: str) -> tuple[str, list[dict] | None] | None:
+    """纯图选项 + D 标签被 MinerU 丢掉时的兜底拆分（35中 2026 期中题1 实测）。
+
+    形态：``A.\\n<img1>\\nB.\\n<img2>\\nC.\\n<img3>\\n<img4>`` —— 每段只有图，
+    C 段多出最后一张图；按「最后一张 = D」拆成 4 项。
+
+    只在极窄条件下生效，避免把文字选项题或题干配图误拆：
+    - 恰好找到 A、B、C 三个标记，且之后没有第 4 个标记；
+    - A/B 段各恰好 1 张图、C 段恰好 2 张图，且段内没有其他文字。
+
+    Returns:
+        (stem, opts) 或 None（不满足条件）。
+    """
+    for pattern in (_OPTION_MARK_RE, _BARE_INLINE_RE):
+        matches = list(pattern.finditer(content))
+        for i, m in enumerate(matches):
+            if m.group(1).upper() != "A" or i + 2 >= len(matches):
+                continue
+            seq = [matches[j].group(1).upper() for j in range(i, i + 3)]
+            if seq != ["A", "B", "C"]:
+                continue
+            if i + 3 < len(matches) and matches[i + 3].group(1).upper() == "D":
+                continue  # 完整的 A-D，交给主逻辑
+            marks = matches[i:i + 3]
+            segs = [
+                content[marks[0].end():marks[1].start()],
+                content[marks[1].end():marks[2].start()],
+                content[marks[2].end():],
+            ]
+            imgs = [_OPTION_IMG_RE.findall(seg) for seg in segs]
+            if [len(x) for x in imgs] != [1, 1, 2]:
+                continue
+            if not all(_image_only(seg) for seg in segs):
+                continue
+            stem = content[:marks[0].start()].strip()
+            if not stem:
+                continue
+            opts = [
+                {"label": "A", "text": imgs[0][0]},
+                {"label": "B", "text": imgs[1][0]},
+                {"label": "C", "text": imgs[2][0]},
+                {"label": "D", "text": imgs[2][1]},
+            ]
+            return stem, opts
+    return None
+
+
 def split_options(content: str) -> tuple[str, list[dict] | None]:
     """通用 A–D 拆分（所有走 generic 的学科共用；语文走 ChineseStrategy）。
 
@@ -467,6 +522,9 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
     """
     marks = _find_option_marks(content)
     if not marks:
+        image_split = _split_image_options_missing_d(content)
+        if image_split is not None:
+            return image_split
         return content, None
     # 小问内的选项不是整题选项：实验/多问题的大题里，`A./B./C./D.` 常属于某个
     # 小问（「(1)…(选填选项前的字母)A. … B. … C. … D. …」）。抽成顶层 options 会

@@ -35,6 +35,7 @@
 - 修答案区标题识别：`# 数学答案` 之前不被 `_ANSWER_KEYWORD_RE` 认，导致 35 中 2026 期中 28 题全 `答案✗`。规则收窄为「标题 + 学科前缀」，不认裸 `## 答案`（裸标题正文常用 `**1. 答案：**`，归入答案区反而比配对答案 md 更脏）。
 - 全卷没对齐答案时预览提示「可能靠第 6 步答案回填」。
 - `--preview` 在多命中且非交互时按 dry-run 处理（不再等输入），避免挂住。
+- 纯图选项：MinerU 丢掉 `D.` 标签时（A/B 段各 1 图、C 段 2 图），按「最后一张图 = D」补齐 4 项（35中 2026 期中题1 由「选0」变「选4」）。文字选项 + 题干配图不触发；3 张图时不猜。
 
 **文档**：`docs/superpowers/specs/2026-11-17-data-refinery-page-marker-cleanup-design.md`、`docs/superpowers/plans/2026-11-17-data-refinery-page-marker-cleanup.md`。
 

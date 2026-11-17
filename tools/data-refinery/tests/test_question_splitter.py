@@ -1626,3 +1626,34 @@ def test_answer_table_under_math_heading():
     result = {q.group_order: q for q in split_page(text, Path("t.md"))}
     assert result[1].answer.strip() == "D"
     assert result[2].answer.strip() == "A"
+
+
+# 纯图选项 + D 标签被 MinerU 丢掉（35中 2026 期中题1）
+
+
+def test_image_options_missing_d_label():
+    content = (
+        "下列剪纸图形中，既是轴对称图形又是中心对称图形的是()\n"
+        "A.\n![](images/a.jpg)\n"
+        "B.\n![](images/b.jpg)\n"
+        "C.\n![](images/c.jpg)\n![](images/d.jpg)"
+    )
+    stem, opts = split_options(content)
+    assert "下列剪纸图形" in stem
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+    assert opts[0]["text"] == "![](images/a.jpg)"
+    assert opts[3]["text"] == "![](images/d.jpg)"
+
+
+def test_image_options_three_images_no_d():
+    """C 段只有 1 张图（共 3 张）：不知道 D 在哪，不能猜。"""
+    content = (
+        "题干\nA.\n![](images/a.jpg)\nB.\n![](images/b.jpg)\nC.\n![](images/c.jpg)"
+    )
+    assert split_options(content)[1] is None
+
+
+def test_text_options_with_trailing_image_not_treated_as_image_options():
+    """文字选项 + 题干配图：不能把最后那张图当成 D（35中题8 就是这种缺 D）。"""
+    content = "题干\nA. 1    B. 2    C. 3\n![](images/fig.jpg)"
+    assert split_options(content)[1] is None
