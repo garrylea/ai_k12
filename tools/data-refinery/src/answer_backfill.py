@@ -98,7 +98,7 @@ def backfill(cfg, scope: Scope, *, dry_run: bool = False, overwrite: bool = Fals
             removed = [h for h in marker_hits if h.removed]
             manual = [h for h in marker_hits if not h.removed]
             if removed:
-                print(f"[page-marker] {rel}: 删除 {len(removed)} 处页码标记", flush=True)
+                print(f"[page-marker] {rel}: 删除 {len(removed)} 处页码/页眉标记", flush=True)
             if manual:
                 print(f"[WARN] [page-marker] {rel}: 未处理 {len(manual)} 处"
                       f"（表格/标签/围栏内）", flush=True)

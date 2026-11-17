@@ -572,7 +572,7 @@ def _load_prepared_text(md_path: Path) -> str:
     removed = [h for h in marker_hits if h.removed]
     manual = [h for h in marker_hits if not h.removed]
     if removed:
-        print(f"[page-marker] {md_path.stem}: 删除 {len(removed)} 处页码标记"
+        print(f"[page-marker] {md_path.stem}: 删除 {len(removed)} 处页码/页眉标记"
               f"（行 {', '.join(str(h.line_no) for h in removed[:10])}）", flush=True)
     if manual:
         print(f"[WARN] [page-marker] {md_path.stem}: 未处理 {len(manual)} 处"

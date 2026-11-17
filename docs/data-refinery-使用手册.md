@@ -1050,6 +1050,7 @@ python emphasis_cli.py --all-chinese
 **新导入自动清洗**（不需要额外命令）：
 
 - `src/page_markers.py`：强锚点 `第N页 + 共M页/斜杠`、弱锚点独行 `第N页`/`共N页`/`2页 共7页`（「第」被 OCR 丢掉）；整行/行内删除；行尾续行合并（含跨空行）；围栏/HTML 标签/表格内只记 `manual`。
+- 运行页眉（重复卷名）：MinerU 会在最后一题与答案区之间再印一遍卷首标题（35中题28 末尾多出「北京市第三十五中学」「2026—2027 学年度第一学期期中质量检测」）。只删「与顶部连续标题高度重合的 `#` 行」；答案区标题（含「答案/评分/解析/参考」）和章节标题不删。
 - 五个接入点：`question_extract`（主提取）、`publish_cli`（published 兜底：db_loader 只读 published，旧产物带页脚会在重跑入库时写回库）、`answer_extract_cli`（独立答案）、`answer_backfill`（答案回填）、`scanned_emphasis`（语文加点 md 侧切题）。
 - **切题预览（不调 LLM）**：`python3 src/import_cli.py --file <卷名> --preview` —— 必要时先 convert 出 md，再打印每题「题号 / 选项数 / 答案首 24 字 / 材料有无 / 题干首 40 字+尾 10 字」，图片显示成 `[图片]`（按 4 字计入长度）；已有 md 时用 `--preview --skip-convert`。范围超过 3 份只打题数。全卷都没对齐答案时会提示「可能靠第 6 步答案回填」。
 - **`--dry-run` 与 `--preview` 的区别**：`--dry-run` 不写盘，只有 PDF 时会报 `0 个文件`（不会生成 md）；要看切题结果用 `--preview`。

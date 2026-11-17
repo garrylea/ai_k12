@@ -323,3 +323,66 @@ def test_bare_page_total_in_body_sentence_kept():
 def test_bare_page_total_is_structure_line():
     assert is_page_marker_line("2页 共7页")
     assert is_page_marker_line("共7页")
+
+
+# 重复的卷名/考试名（运行页眉，MinerU 夹在最后一题与答案区之间）
+RUNNING_TITLE_DOC = """# 2026—2027 学年度第一学期北京市第三十五中学期中质量检测
+
+# 初三数学
+
+28. 最后一道题
+![](images/q28.jpg)
+
+# 北京市第三十五中学
+
+# 2026—2027 学年度第一学期期中质量检测
+
+# 数学答案
+
+1. D
+"""
+
+
+def test_running_title_removed():
+    out = clean(RUNNING_TITLE_DOC)
+    assert "# 北京市第三十五中学" not in out
+    assert "# 2026—2027 学年度第一学期期中质量检测" not in out
+    assert "![](images/q28.jpg)" in out
+    assert "# 数学答案" in out
+    # 卷首标题本身不能删
+    assert "# 2026—2027 学年度第一学期北京市第三十五中学期中质量检测" in out
+
+
+def test_non_heading_repeat_kept():
+    doc = "# 某某中学期中质量检测\n\n28. 题干\n\n期中质量检测\n"
+    assert "期中质量检测" in clean(doc).split("28.")[1]
+
+
+def test_unrelated_heading_kept():
+    doc = "# 某某中学期中质量检测\n\n## 三、解答题\n\n28. 题干\n"
+    assert "## 三、解答题" in clean(doc)
+
+
+def test_answer_heading_sharing_prefix_with_title_kept():
+    """卷首是「…试卷」、答案区是「…参考答案」：共享 8 字前缀也不能删。"""
+    doc = (
+        "# 初三年级数学学科试卷\n\n"
+        "1. 题干\n\n"
+        "# 初三年级数学学科参考答案\n\n"
+        "1. D\n"
+    )
+    out = clean(doc)
+    assert "# 初三年级数学学科参考答案" in out
+
+
+def test_section_header_repeated_is_not_running_title():
+    """「## 一、基础运用（共10分）」是章节标题，不是卷名。"""
+    doc = (
+        "## 一、基础运用（共10分）\n\n"
+        "1. 题干\n\n"
+        "## 参考答案\n\n"
+        "## 一、基础运用（共10分）\n\n"
+        "1. C\n"
+    )
+    out = clean(doc)
+    assert out.count("## 一、基础运用（共10分）") == 2

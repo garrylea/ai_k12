@@ -104,4 +104,4 @@ def test_main_strips_page_footer_from_cross_page_answer(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "[page-marker]" in out
-    assert "删除 1 处页码标记" in out
+    assert "删除 1 处页码/页眉标记" in out

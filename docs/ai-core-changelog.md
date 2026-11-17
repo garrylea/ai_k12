@@ -44,6 +44,12 @@
 - 两类都接进 `fix_question_cli` 文案；`options_incomplete` / `answer_missing` 在问题消失后自动收口（answer 只在本次真查过题库时收口）。
 - 同一题已有内容层问题时，「选项缺失」并入那条记录，不重复占一条。
 
+**补充 4（2026-11-17，运行页眉）**：
+
+- 35中 2026 期中题28 的 content 末尾混入卷首标题（「北京市第三十五中学」「2026—2027 学年度第一学期期中质量检测」）：MinerU 把卷首标题拆成多行，又在最后一题与答案区之间印了一遍。
+- `page_markers` 新增运行页眉识别：顶部连续 `#` 标题行为基准，后续同形标题行（子串 / ≥12 字公共前后缀）整行删除；含「答案/评分/解析/参考」或章节标题（`一、`/`第N部分`/`（一）`）一律不删（北京中学「…参考答案」曾被误删，已加护栏）。
+- 全量语料：14 处运行页眉被删，均为真实重复卷名；存量库 dry-run 0 行（未入库过）。
+
 **文档**：`docs/superpowers/specs/2026-11-17-data-refinery-page-marker-cleanup-design.md`、`docs/superpowers/plans/2026-11-17-data-refinery-page-marker-cleanup.md`。
 
 ---

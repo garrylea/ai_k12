@@ -103,7 +103,7 @@ def test_extract_questions_file_strips_page_markers(tmp_path, monkeypatch, capsy
 
     out = capsys.readouterr().out
     assert "[page-marker]" in out
-    assert "删除 2 处页码标记" in out
+    assert "删除 2 处页码/页眉标记" in out
 
 
 def test_preview_split_questions_strips_markers_without_llm(tmp_path):

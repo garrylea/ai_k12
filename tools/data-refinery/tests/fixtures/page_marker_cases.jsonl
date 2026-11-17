@@ -5,3 +5,4 @@
 {"name":"xicheng_q22","source":"数学/初中/second/2026/西城-模拟二 / Q22 / answer","input":"北京市西城区九年级模拟测试试卷 数学答案及评分参考 2026.5 第2页（共6页）","expect":""}
 {"name":"chaoyang_q26","source":"物理/初中/second/2026/朝阳-模拟二 / Q26 / answer","input":"九年级物理试卷答案及评分标准 第2页（共2页）","expect":""}
 {"name": "changping_chinese_2024_q10_di_lost", "input": "醉能同其乐，醒能述以文者，太守也。太守谓谁？庐陵欧阳修也。\n\n2页 共7页\n", "expect": "醉能同其乐，醒能述以文者，太守也。太守谓谁？庐陵欧阳修也。\n\n"}
+{"name": "bj35_q28_running_header", "input": "# 2026—2027 学年度第一学期北京市第三十五中学期中质量检测\n\n# 初三数学\n\n28. 最后一道题\n![](images/q28.jpg)\n\n# 北京市第三十五中学\n\n# 2026—2027 学年度第一学期期中质量检测\n\n# 数学答案\n\n1. D\n", "expect": "# 2026—2027 学年度第一学期北京市第三十五中学期中质量检测\n\n# 初三数学\n\n28. 最后一道题\n![](images/q28.jpg)\n\n\n\n# 数学答案\n\n1. D\n"}

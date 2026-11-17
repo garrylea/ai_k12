@@ -151,6 +151,28 @@ def strip_page_markers(text: str) -> tuple[str, list[PageMarkerHit]]:
     in_table = False
     i = 0
 
+    # 卷首标题：只取文件顶部**连续**的标题行（遇到第一行正文就停），
+    # 用于识别后面重复出现的运行页眉。不能扫前 N 行——尾部的重复页眉会混进来。
+    title_norms: list[str] = []
+    title_end = -1
+    for idx, ln in enumerate(lines[:15]):
+        text = ln.strip(_WS)
+        if not text:
+            continue
+        if not text.startswith("#"):
+            break
+        norm = _norm_running_title(text)
+        # 章节标题不是卷名（「## 一、基础运用（共10分）」在答案区会再出现一次）
+        if re.match(r"^(?:[一二三四五六七八九十]+、|第[一二三四五六七八九十\d]+部分|[（(][一二三四五六七八九十]+[）)])", norm):
+            title_end = idx
+            continue
+        if re.search(r"答案|评分|解析|参考", norm):
+            title_end = idx
+            continue
+        if len(norm) >= 6:
+            title_norms.append(norm)
+        title_end = idx
+
     while i < len(lines):
         line = lines[i]
         fence_line = line.lstrip().startswith(("```", "~~~"))
@@ -180,6 +202,14 @@ def strip_page_markers(text: str) -> tuple[str, list[PageMarkerHit]]:
                 out.append(line)
             else:
                 hits.append(PageMarkerHit(i + 1, line, True, removed=True))
+            in_table = _next_table_state(line, in_table)
+            i += 1
+            continue
+
+        # 重复的卷名/考试名（运行页眉）：MinerU 常把它夹在最后一题与答案区之间
+        if (i > title_end and title_norms and not _is_protected(line, 0, in_table)
+                and _is_running_title(line, title_norms)):
+            hits.append(PageMarkerHit(i + 1, line, True, removed=True))
             in_table = _next_table_state(line, in_table)
             i += 1
             continue
@@ -224,6 +254,61 @@ def strip_page_markers(text: str) -> tuple[str, list[PageMarkerHit]]:
         i += 1
 
     return "\n".join(out), hits
+
+
+_EMPHASIS_RE = re.compile(r"[#*_`>\s\u3000]+")
+
+
+def _norm_running_title(line: str) -> str:
+    """标题归一：去掉 markdown 前缀/强调符和空白，只留可比对的文字。"""
+    return _EMPHASIS_RE.sub("", line)
+
+
+def _common_prefix(a: str, b: str) -> int:
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
+def _common_suffix(a: str, b: str) -> int:
+    n = 0
+    for x, y in zip(reversed(a), reversed(b)):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
+def _is_running_title(line: str, titles: list[str]) -> bool:
+    """这一行是否是重复出现的卷名/考试名（运行页眉）。
+
+    MinerU 会把卷首标题拆成多行，并在题目末尾与答案区之间再印一遍
+    （35中 2026 期中：题28 末尾多出「北京市第三十五中学」「2026—2027 学年度
+    第一学期期中质量检测」）。判据只认「与卷首标题高度重合的整行」：
+
+    - 必须是标题行（以 # 开头）；
+    - 归一后 6–60 字、不含句读；
+    - 是某个卷首标题的子串，或与它有 ≥12 字的公共前缀/后缀；
+    - 不含「答案/评分/解析/参考」——那是答案区标题，删了整卷答案就对不上
+      （北京中学 2026 期中：「初三年级数学学科参考答案」与卷首「…试卷」
+      共享 8 字前缀，曾被误删）。
+    """
+    body = _norm_running_title(line)
+    if not line.lstrip().startswith("#") or not 6 <= len(body) <= 60:
+        return False
+    if re.search(r"[。！？；，,]", body):
+        return False
+    if re.search(r"答案|评分|解析|参考", body):
+        return False
+    for t in titles:
+        if body in t:
+            return True
+        if _common_prefix(body, t) >= 12 or _common_suffix(body, t) >= 12:
+            return True
+    return False
 
 
 def _residual(line: str) -> str:

@@ -54,7 +54,7 @@ def _strip_page_markers_from_question(item: ExamQuestion, rel: Path) -> None:
             print(f"[WARN] [page-marker] {rel}: {name} 未处理 {len(manual)} 处"
                   f"（表格/标签/围栏内）", flush=True)
     if removed_total:
-        print(f"[page-marker] {rel}: 删除 {removed_total} 处页码标记", flush=True)
+        print(f"[page-marker] {rel}: 删除 {removed_total} 处页码/页眉标记", flush=True)
 
 
 def parse_args(argv=None):

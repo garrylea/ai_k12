@@ -184,6 +184,7 @@ python src/extract_cli.py --file "2024 西城 模拟二"      # 顺序无所谓�
 MinerU 对一份 PDF 只输出**一个 md**，md 里没有页边界；页脚（`第5页（共8页）`、`共6页`）是普通文本行，不洗会被 `split_page` 当成上一题/上一题的续行，污染答案、题干和共享材料。
 
 - 模块：`src/page_markers.py`；强锚点 `第N页 + 共M页/斜杠`、弱锚点独行 `第N页`/`共N页`/`2页 共7页`（「第」被 OCR 丢掉）；整行/行内删除；行尾续行合并；围栏/HTML 标签/表格内只记 manual。
+- 同时删「重复的卷首标题（运行页眉）」：只认文件顶部连续标题行，后续以 `#` 出现、是标题子串或与它有 ≥12 字公共前后缀；含「答案/评分/解析/参考」和章节标题（`一、`/`第N部分`/`（一）`）一律不删。35中 2026 期中题28 末尾多出的「北京市第三十五中学」就是这类。
 - 接入点：`question_extract`（主提取）、`publish_cli`（published 兜底，保证 db_loader 的唯一输入是干净的）、`answer_extract_cli`（独立答案）、`answer_backfill`（答案回填）、`scanned_emphasis`（语文加点 md 侧切题）。
 - 切题预览：`python3 src/import_cli.py --file <卷名> --preview` —— 必要时先 convert 出 md，再打印每题「题号 / 选项数 / 答案首 24 字 / 材料有无 / 题干首 40 字+尾 10 字」，图片显示成 `[图片]`（按 4 字计入长度）。不调 LLM、不入库。已有 md 时可用 `--preview --skip-convert`。
 - `--dry-run` 不写盘，所以**只有 PDF、还没 md** 时它只报 `0 个文件`；这种情况要用 `--preview`。

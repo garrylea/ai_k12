@@ -56,7 +56,7 @@ def test_real_case_fixtures():
         for line in CASES.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert len(cases) == 7
+    assert len(cases) == 8
     for case in cases:
         got, _ = strip_page_markers(case["input"])
         assert got == case["expect"], case["name"]
