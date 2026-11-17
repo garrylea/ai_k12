@@ -486,3 +486,50 @@ def test_auto_close_stale_label_failed():
     assert closed == 1
     assert records[0]["status"] == "resolved"
     assert records[0]["auto_closed"] is True
+
+
+# ⑧/⑨ 选项缺失、答案缺失（2026-11-17）
+
+
+def test_choice_with_missing_options_is_recorded(tmp_path):
+    """选择题只有 3 个选项 = 题不完整（MinerU 丢选项，脚本找不回）。"""
+    md = _md(tmp_path, "1. 甲\n")
+    rows = [{"group_order": 1, "content": "甲", "type": "choice",
+             "options": [{"label": "A", "text": "1"},
+                         {"label": "B", "text": "2"},
+                         {"label": "C", "text": "3"}]}]
+    issues = R.scan_paper("卷A", Path("物理/x/卷A"), md, rows, None, [])
+    got = [i for i in issues if i["kind"] == "options_incomplete"]
+    assert len(got) == 1
+    assert got[0]["group_order"] == 1
+    assert got[0]["reasons"] == ["options_3of4"]
+
+
+def test_chinese_three_options_is_legal(tmp_path):
+    md = _md(tmp_path, "1. 甲\n")
+    rows = [{"group_order": 1, "content": "甲", "type": "choice",
+             "options": [{"label": "A", "text": "1"},
+                         {"label": "B", "text": "2"},
+                         {"label": "C", "text": "3"}]}]
+    issues = R.scan_paper("卷A", Path("语文/x/卷A"), md, rows, None, [])
+    assert not [i for i in issues if i["kind"] == "options_incomplete"]
+
+
+def test_answer_missing_uses_db_and_only_when_md_has_answers(tmp_path):
+    rows = [{"group_order": 1, "content": "甲", "type": "fill_blank", "options": None}]
+
+    md = _md(tmp_path, "1. 甲\n\n# 数学答案\n\n1. D\n")
+    issues = R.scan_paper("卷A", Path("数学/x/卷A"), md, rows, None, [],
+                          db_answers={1: ""})
+    assert [i["kind"] for i in issues if i["kind"] == "answer_missing"] == ["answer_missing"]
+
+    # 题库里有答案 → 不报
+    issues = R.scan_paper("卷A", Path("数学/x/卷A"), md, rows, None, [],
+                          db_answers={1: "D"})
+    assert not [i for i in issues if i["kind"] == "answer_missing"]
+
+    # md 里没有答案区（答案靠第 6 步回填）→ 即使空也不报
+    md2 = _md(tmp_path, "1. 甲\n")
+    issues = R.scan_paper("卷A", Path("数学/x/卷A"), md2, rows, None, [],
+                          db_answers={1: ""})
+    assert not [i for i in issues if i["kind"] == "answer_missing"]

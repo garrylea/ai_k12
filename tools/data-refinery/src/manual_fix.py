@@ -67,6 +67,7 @@ _REASON_TEXT = {
     "empty_stem": "题干是空的（正文里没有有效文字）",
     "llm_marked_incomplete": "标注时判定题干不完整",
     "flagged_needs_review": "入库时被标为待复核（内容不完整）",
+    "answer_empty": "题库里这道题的答案为空",
 }
 
 
@@ -76,6 +77,10 @@ def humanize_reasons(reasons: list[str]) -> list[str]:
     for reason in reasons or []:
         if reason in _REASON_TEXT:
             out.append(_REASON_TEXT[reason])
+            continue
+        m = re.match(r"options_(\d+)of(\d+)", reason)
+        if m:
+            out.append(f"选项只有 {m.group(1)} 个（应为 {m.group(2)} 个，可能 PDF 转换丢失）")
             continue
         m = re.match(r"prev_len_(\d+)_vs_median_(\d+)", reason)
         if m:
@@ -577,11 +582,14 @@ _KIND_TEXT = {
     "incomplete_content": "内容不完整",
     "merged_content": "前后题可能被合并",
     "type_mismatch": "题型与同大题不一致",
+    "options_incomplete": "题不完整（选项缺失）",
+    "answer_missing": "答案缺失",
     "manual_override": "主动重录",
 }
 
 # 内容层问题：先问「你看来有没有问题」，确认没问题就只落结论、不写库
-_CONTENT_KINDS = ("incomplete_content", "merged_content", "type_mismatch")
+_CONTENT_KINDS = ("incomplete_content", "merged_content", "type_mismatch",
+                  "options_incomplete", "answer_missing")
 
 
 def _print_context(issue: dict, index: int | None = None, total: int | None = None) -> None:
@@ -626,6 +634,11 @@ def _targets(issue: dict) -> list[tuple[int, str]]:
                     "题型会按选项自动判定")
         elif issue.get("kind") == "merged_content":
             note = "这一题混进了别的题的内容，请只录入本题自己的完整内容"
+        elif issue.get("kind") == "options_incomplete":
+            note = ("这一题选项不全（PDF 转换时丢了，脚本找不回），"
+                    "请录入完整题目（含 A–D 选项）；题型会按选项自动判定")
+        elif issue.get("kind") == "answer_missing":
+            note = "这一题答案缺失，请录入完整题目和答案（题干也一起贴，避免覆盖错）"
         else:
             note = "这一题内容不完整（缺小问），请录入完整题目"
         return [(issue["group_order"], note)]

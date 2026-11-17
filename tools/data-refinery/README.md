@@ -189,6 +189,7 @@ MinerU 对一份 PDF 只输出**一个 md**，md 里没有页边界；页脚（`
 - `--dry-run` 不写盘，所以**只有 PDF、还没 md** 时它只报 `0 个文件`；这种情况要用 `--preview`。
 - **禁止**用「删除纯数字行」清页码：一零一物理的 `1/2/3/4` 是图片标号；`本试卷共8页`、`请阅读第 2 页` 是正文。
 - 存量库清洗：`python3 src/fix_page_markers_cli.py --apply --yes`（默认预览；先备份、按 id 聚合 UPDATE、写后复查；`content` 变化重算 `content_hash`，冲突整行跳过）。
+- 识别问题扫描新增两类**只记录、不自动修**的条目：`options_incomplete`（选择题选项 < 4，语文 < 3；MinerU 丢选项找不回来）、`answer_missing`（md 自带答案区但题库答案为空）。都进 `output/recognition_issues.jsonl`，由 `fix_question_cli.py` 逐条让人补。
 
 ### 3. publish：物化图片 + 改写路径 -> published JSONL
 

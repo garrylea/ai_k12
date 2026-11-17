@@ -37,6 +37,13 @@
 - `--preview` 在多命中且非交互时按 dry-run 处理（不再等输入），避免挂住。
 - 纯图选项：MinerU 丢掉 `D.` 标签时（A/B 段各 1 图、C 段 2 图），按「最后一张图 = D」补齐 4 项（35中 2026 期中题1 由「选0」变「选4」）。文字选项 + 题干配图不触发；3 张图时不猜。
 
+**补充 3（2026-11-17，转换丢失的选项/答案改为只记录）**：
+
+- MinerU 丢选项（35中题8：md 里只有 A/B/C，D 整个丢失）脚本无法还原，不再猜：`recognition_scan` 新增 `options_incomplete`（选择题 options < 4；语文 < 3），进 `recognition_issues.jsonl`，由人工补题。
+- 新增 `answer_missing`：只在「md 自带答案区」时检查，且以**题库**为准（答案第 6 步才回填）；靠答案回填的卷不报，避免 752 条噪音。
+- 两类都接进 `fix_question_cli` 文案；`options_incomplete` / `answer_missing` 在问题消失后自动收口（answer 只在本次真查过题库时收口）。
+- 同一题已有内容层问题时，「选项缺失」并入那条记录，不重复占一条。
+
 **文档**：`docs/superpowers/specs/2026-11-17-data-refinery-page-marker-cleanup-design.md`、`docs/superpowers/plans/2026-11-17-data-refinery-page-marker-cleanup.md`。
 
 ---

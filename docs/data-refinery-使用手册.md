@@ -1074,6 +1074,13 @@ cd tools/data-refinery && python3 src/fix_page_markers_cli.py --apply --yes
 
 **已知缺口（P1 另案）**：英文 `Page N of M`（当前 0 样本）、无页码的重复运行页眉、中文数字页码、水印；真正的按页识别用 MinerU JSON 的 `page_idx`/`bbox`。
 
+**选项/答案缺失不自动修（2026-11-17）**：MinerU 丢掉的选项（选择题 < 4 项，语文 < 3 项）和「md 有答案区但题库答案为空」只写进识别问题清单，由人工补题：
+
+- `options_incomplete`：题不完整（选项缺失），原因是 PDF 转换丢失，脚本找不回；
+- `answer_missing`：答案缺失，只在 md 自带答案区时检查（靠第 6 步回填的卷不报，避免噪音）。
+
+两类都会自动收口：补题/重抽后重新扫描，不再检出即标 resolved。
+
 ## 5. 推荐工作流
 
 ### 5.0 单科/单卷一键导入（import_cli，2026-10-28 新增）

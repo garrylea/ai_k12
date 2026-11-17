@@ -33,6 +33,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+from question_splitter import is_answer_keyword  # noqa: E402
 from scope_filter import match_keyword  # noqa: E402
 from subject_codes import subject_code_for_path  # noqa: E402
 
@@ -70,6 +71,7 @@ _UNREPAIRED_OK_SUBJECTS = frozenset({"chinese", "politics", "history", "geograph
 # 不能因为 LLM 标记消失就自动收口。其余 reason 是 LLM 自由文本。
 _DETERMINISTIC_REASON_PREFIXES = (
     "empty_stem", "subq_starts_at_2", "body_contains_stem_", "body_belongs_to_stem_",
+    "options_",
 )
 
 
@@ -81,7 +83,8 @@ def _is_llm_only_reasons(reasons: list | None) -> bool:
     return has_llm and not has_det
 
 
-def _auto_close_stale(records: list[dict], current: set, scanned: set) -> int:
+def _auto_close_stale(records: list[dict], current: set, scanned: set,
+                      *, answers_checked: bool = False) -> int:
     """自动收口本次不再检出的旧记录，返回条数。
 
     - junk_question：噪声题已被切题过滤修掉（该行不再被当成题目）；
@@ -96,6 +99,8 @@ def _auto_close_stale(records: list[dict], current: set, scanned: set) -> int:
         key_junk = (rec["source"], rec.get("group_order"), "junk_question")
         key_inc = (rec["source"], rec.get("group_order"), "incomplete_content")
         key_lf = (rec["source"], rec.get("group_order"), "label_failed")
+        key_opts = (rec["source"], rec.get("group_order"), "options_incomplete")
+        key_ans = (rec["source"], rec.get("group_order"), "answer_missing")
         if rec.get("kind") == "junk_question" and key_junk not in current:
             rec["status"] = "resolved"
             rec["note"] = "已由切题过滤修复（该行不再被当成题目）"
@@ -106,6 +111,18 @@ def _auto_close_stale(records: list[dict], current: set, scanned: set) -> int:
                 and _is_llm_only_reasons(rec.get("reasons"))):
             rec["status"] = "resolved"
             rec["note"] = "重抽后该题不再被标 needs_review，自动收口"
+            rec["auto_closed"] = True
+            closed += 1
+        elif rec.get("kind") == "options_incomplete" and key_opts not in current:
+            rec["status"] = "resolved"
+            rec["note"] = "重抽/补题后选项已齐，自动收口"
+            rec["auto_closed"] = True
+            closed += 1
+        elif (answers_checked and rec.get("kind") == "answer_missing"
+                and key_ans not in current):
+            # 只有本次真查过题库答案才敢收口；DB 不可用时不能把旧记录全关掉
+            rec["status"] = "resolved"
+            rec["note"] = "重抽/答案回填后已有答案，自动收口"
             rec["auto_closed"] = True
             closed += 1
         elif rec.get("kind") == "label_failed" and key_lf not in current:
@@ -236,8 +253,13 @@ def fixed_numbers(source: str, fixes_dir: Path | None = None) -> dict[int, bool]
 
 def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
                pdf_path: Path | None, labeling_issues: list[dict],
-               fixes_dir: Path | None = None) -> list[dict]:
-    """单卷扫描，返回 issue 列表（一条=一处需要人工确认的问题）。"""
+               fixes_dir: Path | None = None,
+               db_answers: dict[int, str] | None = None) -> list[dict]:
+    """单卷扫描，返回 issue 列表（一条=一处需要人工确认的问题）。
+
+    ``db_answers``：题库里该卷每题答案（group_order → answer）。给了才做「答案缺失」
+    检查——extracted JSONL 的 answer 可能为空（答案在第 6 步才回填入库），只有 DB 是准的。
+    """
     if not rows:
         return []
 
@@ -456,6 +478,41 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
             list(rec.get("issues") or ["llm_label_failed_fallback"]),
             (by_no.get(no, {}).get("content") or ""))
 
+    # ⑧ 选择题选项不全（MinerU 丢选项，脚本找不回来；2026-11-17 35中题8 实测：
+    #    md 里只有 A/B/C，D 整个丢了）。记录下来让人工补，不阻断入库。
+    #    只查 JSONL 里带 options 字段的行（真实产物必有，单测的裸 rows 不触发）。
+    _subject = subject_code_for_path(rel_path, default="")
+    min_options = 3 if _subject == "chinese" else 4
+    for r in rows:
+        no = r.get("group_order")
+        if not isinstance(no, int) or "options" not in r:
+            continue
+        if str(r.get("type") or "") not in ("choice", "multi_choice"):
+            continue
+        opts = r.get("options") or []
+        if len(opts) >= min_options:
+            continue
+        reason = f"options_{len(opts)}of{min_options}"
+        # 同一题已经有内容层问题时，把「选项缺失」并进那条记录，不重复占一条
+        existing = next((i for i in issues if i.get("group_order") == no), None)
+        if existing is not None:
+            existing.setdefault("reasons", []).append(reason)
+            continue
+        add(no, "options_incomplete", [reason], r.get("content") or "")
+
+    # ⑨ 答案缺失：以题库为准（答案在第 6 步才回填，JSONL 里的不一定是最新）。
+    #    只在「md 自带答案区」时检查：答案靠第 6 步答案回填的卷，这里本来就会空，
+    #    报出来只是噪音（全库 752 题里绝大多数属于这种）。
+    md_has_answers = any(is_answer_keyword(ln) for ln in md_text.splitlines())
+    if db_answers is not None and md_has_answers:
+        for r in rows:
+            no = r.get("group_order")
+            if not isinstance(no, int) or no not in db_answers:
+                continue
+            if (db_answers.get(no) or "").strip():
+                continue
+            add(no, "answer_missing", ["answer_empty"], r.get("content") or "")
+
     return issues
 
 
@@ -546,6 +603,50 @@ def reopen_changed(records: list[dict], all_issues: list[dict]) -> int:
     return reopened
 
 
+def _load_db_answers(keys: list[str]) -> dict[str, dict[int, str]] | None:
+    """按 source_key 批量取题库答案（group_order → answer）。
+
+    DB 不可用返回 None，调用方跳过「答案缺失」检查（不能让扫描整体失败）。
+    """
+    if not keys:
+        return {}
+    try:
+        import pymysql
+
+        from config import RefineryConfig
+
+        cfg = RefineryConfig.from_env(input_dir=None, output_dir=None)
+        conn = pymysql.connect(
+            host=cfg.db_host, port=cfg.db_port, user=cfg.db_user,
+            password=cfg.db_pass, database=cfg.db_name, charset="utf8mb4",
+        )
+    except Exception as e:
+        print(f"[WARN] 答案缺失检查跳过（数据库不可用）：{e}", flush=True)
+        return None
+
+    out: dict[str, dict[int, str]] = {}
+    try:
+        with conn.cursor() as cur:
+            for i in range(0, len(keys), 200):
+                part = keys[i:i + 200]
+                ph = ",".join(["%s"] * len(part))
+                cur.execute(
+                    "SELECT p.source_key, q.group_order, q.answer "
+                    "FROM exam_papers p "
+                    "JOIN paper_questions pq ON pq.paper_id=p.id "
+                    "JOIN questions q ON q.id=pq.question_id "
+                    f"WHERE p.source_key IN ({ph})",
+                    part,
+                )
+                for key, no, ans in cur.fetchall():
+                    if no is None:
+                        continue
+                    out.setdefault(str(key), {})[int(no)] = ans or ""
+    finally:
+        conn.close()
+    return out
+
+
 def run(subject: str, file: str | None = None, *, write: bool = True,
         sources: set[str] | None = None) -> list[dict]:
     """扫描一个学科（可再按卷名子串 / 精确卷名集合收窄），返回本次检出的问题列表。
@@ -561,6 +662,9 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
 
     all_issues: list[dict] = []
     present_by_source: dict[str, set[int]] = {}
+
+    # 先收齐本次要扫的卷，再一次性取题库答案（答案缺失检查用；DB 不可用就跳过）
+    jobs: list[tuple[Path, Path, str]] = []
     for jsonl_path in sorted(extracted_root.rglob("*.jsonl")):
         rel_dir = jsonl_path.parent.relative_to(extracted_root)
         if str(rel_dir).split("/")[0] != subject:
@@ -570,14 +674,25 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
             continue
         if sources is not None and source not in sources:
             continue
+        jobs.append((jsonl_path, rel_dir, source))
+
+    keys = [(rel_dir / f"{source}.jsonl").as_posix()[: -len(".jsonl")]
+            for _jsonl, rel_dir, source in jobs]
+    answers_by_source = _load_db_answers(keys)
+
+    for jsonl_path, rel_dir, source in jobs:
         md_path = md_root / rel_dir / f"{source}.md"
         pdf_path = locate_pdf(pdf_root, rel_dir, source)
         rows = _read_jsonl(jsonl_path)
         present_by_source[source] = {
             r["group_order"] for r in rows if isinstance(r.get("group_order"), int)
         }
-        found = scan_paper(source, rel_dir, md_path, rows,
-                           pdf_path if pdf_path.exists() else None, labeling_issues)
+        key = (rel_dir / f"{source}.jsonl").as_posix()[: -len(".jsonl")]
+        found = scan_paper(
+            source, rel_dir, md_path, rows,
+            pdf_path if pdf_path.exists() else None, labeling_issues,
+            db_answers=None if answers_by_source is None else answers_by_source.get(key, {}),
+        )
         all_issues.extend(found)
         flag = f"，{len(found)} 处待确认" if found else ""
         print(f"[scan] {source}: {len(rows)} 题{flag}", flush=True)
@@ -589,7 +704,8 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
     records = _read_jsonl(ISSUES_FILE)
     current = {(i["source"], i["group_order"], i["kind"]) for i in all_issues}
     scanned = {i["source"] for i in all_issues}
-    closed = _auto_close_stale(records, current, scanned)
+    closed = _auto_close_stale(records, current, scanned,
+                               answers_checked=answers_by_source is not None)
     # 老记录里 pdf 为空（早期版本路径算错）时，用这次算出来的补上
     by_key = {(i["source"], i["group_order"], i["kind"]): i for i in all_issues}
     filled = 0
