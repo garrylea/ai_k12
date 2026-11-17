@@ -10,14 +10,19 @@ import { contentPrefix } from '../../common/utils/content-hash.util.js';
  * questions.source 对应的那份卷**：入库时 source 就是卷目录名（与
  * exam_papers.source_key 尾段一致），能唯一对上；少数老数据 source 是卷内
  * 文件名，对不上就退回最小题号（仅 19 道多卷题受影响）。
+ *
+ * 老批量导入的题（2026-09 之前）没有 paper_questions 关联，但 questions.group_order
+ * 就是入库时的卷面题号（db_loader 口径，2026-10-31），无关联时退回它 —— 否则这类题
+ * 在专项作答页 / 练习记录里只剩来源、没有题号（lc1 的 4686 即此例）。
+ * freeform / practice / remediation 等无卷来源的 group_order 为 NULL，仍返回 NULL。
  */
-const PAPER_QUESTION_NO_SQL = `(
+const PAPER_QUESTION_NO_SQL = `COALESCE((
   SELECT pq.question_no FROM paper_questions pq
   JOIN exam_papers ep ON ep.id = pq.paper_id
   WHERE pq.question_id = q.id
   ORDER BY (SUBSTRING_INDEX(ep.source_key, '/', -1) = q.source) DESC, pq.question_no
   LIMIT 1
-)`;
+), q.group_order)`;
 
 @Injectable()
 export class QuestionsRepository {

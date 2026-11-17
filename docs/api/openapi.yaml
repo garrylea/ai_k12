@@ -8353,7 +8353,8 @@ components:
           nullable: true
           description: >-
             该题在原试卷中的题号（paper_questions.question_no）；专项记录页与来源同行展示
-            「试卷第 N 题」。考试恒 null（questionOrder 已是卷内题号）；无卷关联也为 null（2026-11-16）
+            「试卷第 N 题」。考试恒 null（questionOrder 已是卷内题号）；无卷关联时退回
+            questions.group_order（卷面题号），仍无则为 null（2026-11-16 / 2026-11-17）
         refType:
           type: string
           nullable: true
@@ -11213,7 +11214,8 @@ components:
           nullable: true
           description: >-
             该题在原试卷中的题号（paper_questions.question_no）；作答页与来源同行展示
-            「试卷第 N 题」。一道题属多份卷时优先取 source 对应的那份卷；无卷关联为 null（2026-11-16）
+            「试卷第 N 题」。一道题属多份卷时优先取 source 对应的那份卷；无卷关联时退回
+            questions.group_order（卷面题号），仍无则为 null（2026-11-16 / 2026-11-17）
       required: [questionId, text, type, options, materialText, source, questionNo]
 
     RemediationGenerateRequest:

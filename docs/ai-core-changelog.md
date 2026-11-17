@@ -8,6 +8,18 @@
 
 ---
 
+## 2026-11-17 专项题号在无试卷关联的老题上缺失
+
+**用户反馈**：lc1 最近一次数学专项练习（session 357）第 3 题只显示来源、没有「试卷第 N 题」。
+
+**根因**：该题 `questions.id=4686` 是 2026-09-02 老批量导入行，`paper_questions` 里 0 条关联 → 抽题 SQL 返回 `questionNo=null`，前端按设计不渲染题号。同一道题后来从正式卷目录导入成 `4777`（挂在 2026 西城模拟二第 24 题），但 `4777.is_active=0`，抽题实际用的是老行。不是前端漏渲染。
+
+**修复**：`PAPER_QUESTION_NO_SQL` 与 `special-answer-records.repo.listBySession` 的题号子查询统一改为 `COALESCE(paper_questions.question_no, questions.group_order)`。老批量题没有卷关联时退回 `group_order`（db_loader 口径的卷面题号）；freeform/practice/remediation 等无卷来源的 `group_order` 为 NULL，仍返回 null。session 357 第 3 题现取到 24。API 文档与 openapi 同步补口径。
+
+**范围**：数学抽题池 400 题中 77 题无卷关联，其中 18 道西城老题、28 道「数学答案及评分参考」、21 道朝阳/海淀占位行（内容是 `1.`/`2.` 这类空壳）、10 道无卷来源（practice/freeform/remediation，`group_order` 为 NULL 不受影响）。语文/物理/化学抽题池无此问题。
+
+**测试**：server 相关 52 例通过，`tsc --noEmit` 通过。
+
 ## 2026-11-17 试卷/答案跨页页脚清洗（data-refinery）
 
 **问题**：MinerU 对一份 PDF 只输出一个 md，md 里没有页边界；页脚是普通文本行，`split_page` 把它当上一题/上一题的续行，污染答案、题干和共享材料。实测已入库 6 行：`questions.id=6959`（答案）、`6685`（题干）、`6713`（题干 `共6页` 碎片）、`5532/5533/5534`（共享材料，一处页脚污染 3 题）。

@@ -76,6 +76,10 @@ describe('SpecialAnswerRecordsRepository', () => {
     // 详情判断 canRedo / canSimilar 需要题目的在架标记
     expect(sql).toContain('q.is_active AS question_is_active');
     expect(sql).toContain('LEFT JOIN questions q');
+    // 老批量导入题没有 paper_questions 关联，题号退回 questions.group_order
+    expect(sql).toContain('COALESCE(');
+    expect(sql).toContain('q.group_order');
+    expect(sql).toContain('AS question_paper_no');
     expect(sql).toContain('sar.session_id = ?');
     expect(params).toEqual([7]);
   });

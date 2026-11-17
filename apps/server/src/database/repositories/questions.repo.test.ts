@@ -31,6 +31,9 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     // 卷内题号：作答页展示「来源 + 试卷第 N 题」，多卷题优先取 source 对应的那份卷
     expect(sql).toContain('paper_questions pq');
     expect(sql).toContain('AS question_no');
+    // 老批量导入题没有 paper_questions 关联，退回 questions.group_order（卷面题号）
+    expect(sql).toContain('COALESCE(');
+    expect(sql).toContain('q.group_order');
     expect(params).toEqual([7, 1, 3, 'proof', 5]);
   });
 

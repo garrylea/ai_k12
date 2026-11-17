@@ -838,7 +838,7 @@ export class TrainingService {
       options: unknown[] | null; materialText: string | null;
       /** 题目来源（questions.source）：专项作答页展示，便于溯源。 */
       source: string | null;
-      /** 该题在原试卷中的题号（paper_questions.question_no）；无卷关联时为 null。 */
+      /** 该题在原试卷中的题号（paper_questions.question_no；无卷关联时退回 questions.group_order）。 */
       questionNo: number | null;
     }>;
     /** 未抽到题时为 null（没有可完成的会话）。 */
