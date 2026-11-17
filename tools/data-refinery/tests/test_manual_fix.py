@@ -893,3 +893,57 @@ def test_ask_one_splits_material_then_options(tmp_path, monkeypatch):
     assert "(1) 太阳能电池" in recs[0]["content"]
     assert recs[0]["options"] is None          # 小问选项不抽成整题 options
     assert recs[0]["group_order"] == 19
+
+
+# 图片策略：保留原图 / 换图（不走 MinerU）
+
+
+def test_image_refs_dedupes_across_fields():
+    refs = manual_fix._image_refs(
+        "题干\n![](images/a.jpg)",
+        "材料 ![](images/b.jpg)",
+        "![](images/a.jpg)",
+    )
+    assert refs == ["images/a.jpg", "images/b.jpg"]
+
+
+def test_append_missing_images_keeps_existing_refs():
+    text = "题干\n![](images/a.jpg)"
+    out = manual_fix._append_missing_images(text, ["images/a.jpg", "images/b.jpg"])
+    assert out.count("images/a.jpg") == 1
+    assert out.rstrip().endswith("![](images/b.jpg)")
+
+
+def test_copy_new_images_copies_without_ocr(tmp_path):
+    src = tmp_path / "shot.png"
+    src.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    paper = tmp_path / "paper"
+
+    refs = manual_fix._copy_new_images([src, src], paper)
+    assert len(refs) == 2          # 两张相同图各算一次，路径相同
+    assert refs[0] == refs[1]
+    assert (paper / refs[0]).exists()
+    assert (paper / refs[0]).read_bytes() == src.read_bytes()
+
+
+def test_apply_image_placeholders_replaces_and_appends():
+    refs = ["images/m1.png", "images/m2.png"]
+    out = manual_fix._apply_image_placeholders("如图[图2]，求面积", refs)
+    assert "![](images/m2.png)" in out
+    assert out.rstrip().endswith("![](images/m1.png)")
+    assert "[图2]" not in out
+
+
+def test_current_question_reads_extracted_jsonl(tmp_path, monkeypatch):
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    rel = Path("数学/初中/first/2026/卷A")
+    d = tmp_path / "output" / "extracted" / rel
+    d.mkdir(parents=True)
+    _write(d / "卷A.jsonl", [
+        {"group_order": 1, "content": "甲", "options": None},
+        {"group_order": 2, "content": "乙 ![](images/x.jpg)", "options": None},
+    ])
+    issue = {"source": "卷A", "rel_path": str(rel), "group_order": 2}
+    row = manual_fix._current_question(issue)
+    assert row["content"].endswith("![](images/x.jpg)")
+    assert manual_fix._current_question({**issue, "group_order": 9}) is None

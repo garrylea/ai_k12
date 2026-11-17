@@ -50,6 +50,12 @@
 - `page_markers` 新增运行页眉识别：顶部连续 `#` 标题行为基准，后续同形标题行（子串 / ≥12 字公共前后缀）整行删除；含「答案/评分/解析/参考」或章节标题（`一、`/`第N部分`/`（一）`）一律不删（北京中学「…参考答案」曾被误删，已加护栏）。
 - 全量语料：14 处运行页眉被删，均为真实重复卷名；存量库 dry-run 0 行（未入库过）。
 
+**补充 5（2026-11-17，补题时的图片策略）**：
+
+- 修已有题时先问图怎么处理：`1` 保留原图（只改文字，正文没写图时把原图引用补到末尾）；`2` 换图（图片原样拷进 `images/`，**不走 MinerU**，正文可写 `[图1]` 占位）；`3` 重新截图识别（旧行为，可能再认错）。
+- 换图模式支持多路径（逗号分隔）/ 剪贴板；文件名用内容 hash，避免覆盖。
+- 单测覆盖 `_image_refs` / `_append_missing_images` / `_copy_new_images` / `_apply_image_placeholders` / `_current_question`。
+
 **文档**：`docs/superpowers/specs/2026-11-17-data-refinery-page-marker-cleanup-design.md`、`docs/superpowers/plans/2026-11-17-data-refinery-page-marker-cleanup.md`。
 
 ---

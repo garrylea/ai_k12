@@ -5,7 +5,10 @@
     也可以单独跑 src/fix_question_cli.py（同一套逻辑）。
 
 一次交互的输入约定（2026-10-31 改为显式菜单）：
-- 先选方式：`1` 粘贴文本 / `2` 图片路径（走 MinerU）/ `3` 本地文件 /
+- 修已有题时先问**图怎么处理**：`1` 保留原图（只改文字）、`2` 换图（给图片路径，
+  原样拷入 images/，不走 MinerU）、`3` 重新截图识别（MinerU，可能再认错）；
+  原题没有图时跳过这一步；
+- 再选文字录入方式：`1` 粘贴文本 / `2` 图片路径（走 MinerU）/ `3` 本地文件 /
   `4` 剪贴板图片；直接粘贴正文也行；
 - 截图后按 ⌘V/⌘C 出来的图贴不进来：终端只会往 stdin 送字符，图片在 PTY 里
   没有通道 —— 所以图片只能由进程自己去问系统剪贴板（2026-11-07 起支持）。
@@ -23,6 +26,7 @@
 """
 
 import getpass
+import hashlib
 import json
 import re
 import shutil
@@ -510,7 +514,143 @@ def _confirm_text(text: str) -> tuple[str, str]:
         c.warn("请按 1/2/3/4 选择（1 确认 / 2 编辑 / 3 重粘 / 4 放弃）")
 
 
-def _collect_content(paper_md_dir: Path) -> str | None:
+_IMG_REF_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+_IMG_PLACEHOLDER_RE = re.compile(r"\[图\s*([1-9]\d*)\]")
+
+
+def _image_refs(*texts: str) -> list[str]:
+    """按出现顺序收集图片引用（去重）。"""
+    out: list[str] = []
+    for text in texts:
+        for m in _IMG_REF_RE.finditer(text or ""):
+            ref = m.group(1)
+            if ref not in out:
+                out.append(ref)
+    return out
+
+
+def _append_missing_images(text: str, refs: list[str]) -> str:
+    """把没被新文本引用的原图补到末尾（只改文字、保留原图）。"""
+    missing = [r for r in refs if r not in text]
+    if not missing:
+        return text
+    return text.rstrip() + "\n\n" + "\n".join(f"![]({r})" for r in missing)
+
+
+def _copy_new_images(paths: list[Path], paper_md_dir: Path) -> list[str]:
+    """把用户给的图片**原样**拷进该卷 images/，返回 md 相对引用（不走 MinerU）。"""
+    dst = paper_md_dir / "images"
+    dst.mkdir(parents=True, exist_ok=True)
+    refs: list[str] = []
+    for path in paths:
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        name = f"manual_{hashlib.sha1(data).hexdigest()[:16]}{path.suffix.lower()}"
+        target = dst / name
+        if not target.exists():
+            target.write_bytes(data)
+        refs.append(f"images/{name}")
+    return refs
+
+
+def _apply_image_placeholders(text: str, refs: list[str]) -> str:
+    """把正文里的 `[图1]`/`[图2]` 换成图片引用；没用到的追加到末尾。"""
+    used = [False] * len(refs)
+
+    def repl(m: re.Match) -> str:
+        idx = int(m.group(1)) - 1
+        if 0 <= idx < len(refs):
+            used[idx] = True
+            return f"![]({refs[idx]})"
+        return m.group(0)
+
+    text = _IMG_PLACEHOLDER_RE.sub(repl, text)
+    rest = [r for i, r in enumerate(refs) if not used[i] and r not in text]
+    if rest:
+        text = text.rstrip() + "\n\n" + "\n".join(f"![]({r})" for r in rest)
+    return text
+
+
+def _current_question(issue: dict) -> dict | None:
+    """从 extracted JSONL 取这道题的当前版本（有图/选项才能做保留原图）。"""
+    rel = issue.get("rel_path")
+    source = issue.get("source")
+    if not rel or not source:
+        return None
+    path = ROOT / "output" / "extracted" / rel / f"{source}.jsonl"
+    if not path.exists():
+        return None
+    for row in _read_jsonl(path):
+        if row.get("group_order") == issue.get("group_order"):
+            return row
+    return None
+
+
+def _ask_image_mode(count: int) -> str:
+    """修复已有题时先问图片怎么处理，返回 keep / replace / ocr。"""
+    c = console()
+    c.write("")
+    c.write(f"这一题原有 {count} 张图，怎么处理？")
+    c.legend([("1", "保留原图（只改文字）"),
+              ("2", "换图（给图片路径，不识别文字）"),
+              ("3", "重新截图识别（MinerU，可能再认错）")])
+    while True:
+        c.prompt("选择 1/2/3（回车=1）› ")
+        raw = _read_line()
+        if raw is None:
+            return "keep"
+        raw = raw.strip()
+        if raw in ("", "1"):
+            return "keep"
+        if raw == "2":
+            return "replace"
+        if raw == "3":
+            return "ocr"
+        c.warn("请输入 1、2 或 3")
+
+
+def _ask_new_images(paper_md_dir: Path) -> list[str]:
+    """换图：一个或多个图片路径（逗号分隔）→ 原样拷进 images/；回车/剪贴板也可。"""
+    c = console()
+    while True:
+        c.prompt("图片路径（多个用逗号；直接回车读剪贴板；s 取消）› ")
+        raw = _read_line()
+        if raw is None:
+            return []
+        raw = raw.strip()
+        if raw.lower() == "s":
+            return []
+        paths: list[Path] = []
+        if not raw:
+            with tempfile.TemporaryDirectory(prefix="refinery-clip-") as tmp:
+                clip = _clipboard_to_path(Path(tmp))
+                if clip is not None and clip.suffix.lower() in IMAGE_SUFFIXES:
+                    paths = [clip]
+                elif clip is not None:
+                    c.warn("剪贴板里不是图片")
+                    continue
+        else:
+            for part in re.split(r"[,，]", raw):
+                p = Path(part.strip().strip("'\"")).expanduser()
+                if not p.is_absolute():
+                    p = Path.cwd() / p
+                if not p.exists():
+                    c.warn(f"找不到文件：{p}")
+                    continue
+                if p.suffix.lower() not in IMAGE_SUFFIXES:
+                    c.warn(f"不是图片：{p.name}")
+                    continue
+                paths.append(p)
+        refs = _copy_new_images(paths, paper_md_dir)
+        if refs:
+            c.ok(f"已拷入 {len(refs)} 张图：" + "、".join(r.split("/")[-1] for r in refs))
+            return refs
+        c.warn("没有收到图片，请重新给路径，或按 s 取消本题")
+
+
+def _collect_content(paper_md_dir: Path, *, allow_images: bool = True) -> str | None:
     """读人工输入；返回 Markdown 正文，跳过时返回 None。
 
     先问用哪种方式（1 粘贴 / 2 图片路径 / 3 文件 / 4 剪贴板），再预览确认。
@@ -520,7 +660,9 @@ def _collect_content(paper_md_dir: Path) -> str | None:
     """
     c = console()
     while True:
-        c.prompt("选择方式 1/2/3/4（或直接粘贴正文 / ⌘V 图片后回车）› ")
+        tip = ("选择方式 1/3（纯文字；或直接粘贴正文）› " if not allow_images
+               else "选择方式 1/2/3/4（或直接粘贴正文 / ⌘V 图片后回车）› ")
+        c.prompt(tip)
         first = _read_line()
         if first is None:
             return None
@@ -535,6 +677,9 @@ def _collect_content(paper_md_dir: Path) -> str | None:
             # 还没录内容就想改：说清楚该按什么，别把这个字母吃进正文
             c.warn("还没有可修改的内容；请按 1 粘贴正文 / 2 图片路径 / "
                    "3 文件路径 / 4 剪贴板图片")
+            continue
+        if low in ("2", "4") and not allow_images:
+            c.warn("当前是「纯文字」模式：图片请在上一步按 1/2 处理，这里只收文字")
             continue
         if low == "4":
             text = _from_clipboard(paper_md_dir)
@@ -656,16 +801,51 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
     """引导录入一道题（允许粘贴里带多个题号，但提示按一题一录）。"""
     c = console()
     c.step(index, total, f"录入第 {target_no} 题", note)
-    c.legend([("1", "粘贴文本"), ("2", "图片路径"), ("3", "文件路径"),
-              ("4", "剪贴板图片"), ("s", "跳过本题"), ("q", "退出")])
 
-    content = _collect_content(paper_md_dir)
+    # 已有题：先问图怎么处理（保留原图 / 换图 / 重新识别），再收文字
+    original = _current_question(issue)
+    orig_refs: list[str] = []
+    if original is not None:
+        opts_old = original.get("options") or []
+        orig_refs = _image_refs(
+            original.get("content") or "",
+            original.get("material_text") or "",
+            *(str((o or {}).get("text") or "") for o in opts_old),
+        )
+    mode = _ask_image_mode(len(orig_refs)) if orig_refs else "ocr"
+    new_refs: list[str] = []
+    if mode == "replace":
+        new_refs = _ask_new_images(paper_md_dir)
+        if not new_refs:
+            c.warn(f"第 {target_no} 题没有换图，已跳过")
+            return []
+
+    def prep(text: str) -> str:
+        """按图片策略加工文字：保留原图补引用 / 换图替换占位符。"""
+        if mode == "keep":
+            out = _append_missing_images(text, orig_refs)
+            if out != text:
+                c.info(f"已把原图 {len(orig_refs)} 张补到末尾（正文里没写图片引用）")
+            return out
+        if mode == "replace":
+            return _apply_image_placeholders(text, new_refs)
+        return text
+
+    if mode != "ocr":
+        c.legend([("1", "粘贴文本"), ("3", "文件路径"),
+                  ("s", "跳过本题"), ("q", "退出")])
+    else:
+        c.legend([("1", "粘贴文本"), ("2", "图片路径"), ("3", "文件路径"),
+                  ("4", "剪贴板图片"), ("s", "跳过本题"), ("q", "退出")])
+
+    content = _collect_content(paper_md_dir, allow_images=(mode == "ocr"))
     if content is None:
         c.warn(f"第 {target_no} 题未录入，已跳过")
         return []
     if not content.strip():
         c.warn("内容为空，未记录")
         return []
+    content = prep(content)
 
     parts = split_questions(content, strategy)
     if len(parts) > 1:
@@ -693,9 +873,9 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 c.err("题干被解析成了空串（选项字母写在内容下面的排版会造成这样），本条未记录")
                 c.info("请按「题干单独一行 → A. 内容 → B. 内容 …」重粘；"
                        "没有配图的选项只写文字即可，例如：A. 塑料笔杆")
-                fresh = _collect_content(paper_md_dir)
+                fresh = _collect_content(paper_md_dir, allow_images=(mode == "ocr"))
                 if fresh and fresh.strip():
-                    body = fresh
+                    body = prep(fresh)
                 continue
             mat_note = f" · 材料 {len(material)} 字" if material else ""
             if options:
@@ -718,9 +898,9 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                     body = edited
                 continue
             if answer in ("r", "redo"):
-                fresh = _collect_content(paper_md_dir)
+                fresh = _collect_content(paper_md_dir, allow_images=(mode == "ocr"))
                 if fresh and fresh.strip():
-                    body = fresh
+                    body = prep(fresh)
                 else:
                     c.warn("没有收到新内容，保留原题面")
                 continue
@@ -1095,8 +1275,8 @@ def review_by_numbers(subject: str | None, file: str | None,
     c.banner("主动重录",
              f"{paper['source']} · 输入题号（多个用逗号），回车结束 · q 退出")
     c.info("粘贴内容可以是「材料 + 题干 + 小问 + 选项 + 图片」一整段，"
-           "程序会分别拆到材料/题干/选项；图片写成 ![](images/xxx.jpg) 引用，"
-           "或直接给图片路径让 MinerU 识别")
+           "程序会分别拆到材料/题干/选项；已有题会先问图怎么处理："
+           "保留原图只改文字 / 换图（不识别）/ 重新截图识别")
 
     total = 0
     while True:
