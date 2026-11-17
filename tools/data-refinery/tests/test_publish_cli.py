@@ -210,3 +210,45 @@ class TestPublishCli:
         captured = capsys.readouterr()
         assert "语文/初中/second/2025/语文-海淀-模拟二-试卷" in captured.out
         assert "数学/初中/second/2025" not in captured.out
+
+
+class TestPublishPageMarkers:
+    def test_published_jsonl_has_no_page_footer(self, tmp_path, capsys):
+        """published 是 db_loader 的唯一输入：页脚必须在这一步就清掉。"""
+        out = _setup(tmp_path)
+        ext = out / "extracted" / "数学" / "试卷" / "试卷.jsonl"
+        item = json.loads(ext.read_text(encoding="utf-8").strip())
+        item["content"] = item["content"] + "\n\n第5页（共8页）"
+        item["answer"] = "1\n\n数学试卷答案及评分参考 第2页（共6页）"
+        ext.write_text(json.dumps(item, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"),
+                  "--output-dir", str(out / "published")])
+
+        printed = capsys.readouterr().out
+        assert "[page-marker]" in printed
+
+        pub = out / "published" / "数学" / "试卷" / "试卷.jsonl"
+        got = json.loads(pub.read_text(encoding="utf-8").strip())
+        assert "第5页" not in got["content"]
+        assert "第2页" not in got["answer"]
+        assert "评分参考" not in got["answer"]
+
+    def test_published_body_reference_kept(self, tmp_path):
+        """正文里的「第 N 页」引用不能当页脚删。"""
+        out = _setup(tmp_path)
+        ext = out / "extracted" / "数学" / "试卷" / "试卷.jsonl"
+        item = json.loads(ext.read_text(encoding="utf-8").strip())
+        item["content"] = item["content"] + " 请阅读第 2 页的问题 1"
+        ext.write_text(json.dumps(item, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main(["--input-dir", str(out / "extracted"),
+                  "--output-dir", str(out / "published")])
+
+        pub = out / "published" / "数学" / "试卷" / "试卷.jsonl"
+        got = json.loads(pub.read_text(encoding="utf-8").strip())
+        assert "请阅读第 2 页的问题 1" in got["content"]

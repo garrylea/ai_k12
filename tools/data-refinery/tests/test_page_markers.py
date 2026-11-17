@@ -297,3 +297,29 @@ def test_is_page_marker_line_false():
     assert not is_page_marker_line("本试卷共6页")
     assert not is_page_marker_line("（二）")
     assert not is_page_marker_line("<table><tr><td>第1页（共5页）</td></tr></table>")
+
+
+# 弱锚点：「第」字丢失，只剩「2页 共7页」（昌平一中语文 2024 实测）
+
+
+def test_bare_page_total_without_di():
+    assert clean("2页 共7页") == ""
+
+
+def test_bare_page_total_fullwidth_comma_and_digits():
+    assert clean("２页，共７页") == ""
+
+
+def test_bare_page_total_does_not_touch_exam_notice():
+    for line in ("本试卷共8页，共三道大题", "答题卡共2页", "第2页 共7页"):
+        assert strip_page_markers(line)[0] == ("" if line == "第2页 共7页" else line)
+
+
+def test_bare_page_total_in_body_sentence_kept():
+    text = "材料共 7 页，其中 2页 共7页 是答案"  # 非整行，不动
+    assert clean(text) == text
+
+
+def test_bare_page_total_is_structure_line():
+    assert is_page_marker_line("2页 共7页")
+    assert is_page_marker_line("共7页")

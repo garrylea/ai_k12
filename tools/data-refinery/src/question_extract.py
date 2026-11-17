@@ -549,6 +549,57 @@ def _judge_suspects(llm, suspects: list[dict], paper_stem: str) -> set[int]:
     return accepted
 
 
+def _load_prepared_text(md_path: Path) -> str:
+    """读 MD + 切题前的确定性清洗（不调 LLM、不写盘）。
+
+    正式提取与 ``--dry-run`` 预览共用同一段，避免两边口径漂移。
+    """
+    # 1. 全角括号归一
+    text = md_path.read_text(encoding="utf-8")
+    text = normalize_fullwidth_parens(text)
+
+    # 2. 答案合并检测（4 case）
+    text = maybe_merge_answer_md(md_path, text)
+
+    # 2.5 二维码过滤（切题前，页级）：试卷页脚的公众号二维码会被当作题干/选项配图，
+    # 在切题前删掉，避免被 split_options 的"上方最近图片"规则误挂到选项上。
+    # 放在答案合并之后，使题干/选项/解析（来自答案 md）三条链路一次性清掉。
+    text = strip_qr_images(text, md_path.parent)
+
+    # 2.6 页码标记清洗（2026-11-17）：MinerU 单 MD 没有页边界，页脚是普通文本行；
+    # 不洗会在 split_page 里被当成上一题的续行，污染题干/材料/答案。
+    text, marker_hits = strip_page_markers(text)
+    removed = [h for h in marker_hits if h.removed]
+    manual = [h for h in marker_hits if not h.removed]
+    if removed:
+        print(f"[page-marker] {md_path.stem}: 删除 {len(removed)} 处页码标记"
+              f"（行 {', '.join(str(h.line_no) for h in removed[:10])}）", flush=True)
+    if manual:
+        print(f"[WARN] [page-marker] {md_path.stem}: 未处理 {len(manual)} 处"
+              f"（表格/标签/围栏内，行 {', '.join(str(h.line_no) for h in manual[:10])}）",
+              flush=True)
+    return text
+
+
+def preview_split_questions(source) -> tuple[list, object]:
+    """预览：只跑「md → 题目」的确定性步骤，不调 LLM、不写盘。
+
+    供 ``extract_cli --dry-run`` 打印切题结果，让人先比对有没有切错，
+    再决定是否正式提取（正式提取会调 LLM 标注，代价高）。
+
+    Returns:
+        (questions, strategy) —— strategy 供调用方复用 ``split_options`` 等口径。
+    """
+    md_path = source.md_path
+    rel_parts = Path(str(source.rel_path)).parts
+    text = _load_prepared_text(md_path)
+    strategy = get_strategy(_subject_code_for(rel_parts))
+    questions = split_page(text, md_path, strategy=strategy)
+    kept = [q for q in questions if not is_junk_question(q)]
+    _split_inline_material(strategy, kept)
+    return kept, strategy
+
+
 def extract_questions_file(source, config, llm, fb_llm,
                             extracted_dir: Path, label_batch_size: int = 1) -> int:
     """处理单个试卷 MD：切题 + 标注 + 写 JSONL。返回切出的题数。
@@ -574,30 +625,8 @@ def extract_questions_file(source, config, llm, fb_llm,
     _purge_labeling_issues_for_source(
         extracted_dir.parent / "labeling_issues.jsonl", md_path.stem)
 
-    # 1. 读 MD + 全角括号归一
-    text = md_path.read_text(encoding="utf-8")
-    text = normalize_fullwidth_parens(text)
-
-    # 2. 答案合并检测（4 case）
-    text = maybe_merge_answer_md(md_path, text)
-
-    # 2.5 二维码过滤（切题前，页级）：试卷页脚的公众号二维码会被当作题干/选项配图，
-    # 在切题前删掉，避免被 split_options 的"上方最近图片"规则误挂到选项上。
-    # 放在答案合并之后，使题干/选项/解析（来自答案 md）三条链路一次性清掉。
-    text = strip_qr_images(text, md_path.parent)
-
-    # 2.6 页码标记清洗（2026-11-17）：MinerU 单 MD 没有页边界，页脚是普通文本行；
-    # 不洗会在 split_page 里被当成上一题的续行，污染题干/材料/答案。
-    text, marker_hits = strip_page_markers(text)
-    removed = [h for h in marker_hits if h.removed]
-    manual = [h for h in marker_hits if not h.removed]
-    if removed:
-        print(f"[page-marker] {md_path.stem}: 删除 {len(removed)} 处页码标记"
-              f"（行 {', '.join(str(h.line_no) for h in removed[:10])}）", flush=True)
-    if manual:
-        print(f"[WARN] [page-marker] {md_path.stem}: 未处理 {len(manual)} 处"
-              f"（表格/标签/围栏内，行 {', '.join(str(h.line_no) for h in manual[:10])}）",
-              flush=True)
+    # 1-2.6 读 MD → 归一 → 合并答案 → 去二维码 → 洗页码
+    text = _load_prepared_text(md_path)
 
     # 3. 元数据（学科决定切分策略，需在切分前）
     subject_code = _subject_code_for(rel_parts)

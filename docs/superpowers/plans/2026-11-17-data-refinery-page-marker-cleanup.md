@@ -38,7 +38,7 @@
 | `tools/data-refinery/src/fix_page_markers_cli.py` | 新建 | 存量库清洗：预览/备份/写入/复查 |
 | `tools/data-refinery/tests/test_fix_page_markers_cli.py` | 新建 | 纯函数 + 假连接 + 冲突/幂等/备份 |
 | `tools/data-refinery/tests/test_page_marker_corpus.py` | 新建 | 全量语料 auto/negative/manual 分类 |
-| `tools/data-refinery/tests/fixtures/page_marker_cases.jsonl` | 新建 | 6 个真实片段的最小回归样本 |
+| `tools/data-refinery/tests/fixtures/page_marker_cases.jsonl` | 新建 | 7 个真实片段的最小回归样本 |
 | `tools/data-refinery/tests/fixtures/page_marker_manual.txt` | 新建 | 表格/标签/围栏内手动清单快照 |
 | `tools/data-refinery/README.md` | 修改 | 试卷/答案章节加清洗说明 |
 | `docs/data-refinery-使用手册.md` | 修改 | 存量清洗一条命令 + 备份/回滚 |
@@ -539,14 +539,14 @@ git commit -m "feat(refinery): 存量库页码标记清洗 CLI"
 
 ## Task 9: 全量语料清单与回归
 
-**Status:** 2026-11-17 完成（6 个 fixture + 全量语料分类 2 passed；manual 0）；提交待用户确认。
+**Status:** 2026-11-17 完成（7 个 fixture + 全量语料分类 2 passed；manual 0）；提交待用户确认。
 
 **Files:**
 - Create: `tools/data-refinery/tests/test_page_marker_corpus.py`
 - Create: `tools/data-refinery/tests/fixtures/page_marker_cases.jsonl`
 - Create: `tools/data-refinery/tests/fixtures/page_marker_manual.txt`
 
-- [x] **Step 1: 落 6 个真实片段**
+- [x] **Step 1: 落 7 个真实片段**
 
 `page_marker_cases.jsonl` 每行：
 
@@ -710,3 +710,17 @@ Expected：全过；新增测试全绿。
 - 中文数字页码（`第一页`）；
 - 水印识别（当前试卷语料无样本）；
 - `questions.options` 内的页码标记（只记 manual）。
+
+---
+
+## 补充：2026-11-17 收尾（验收后追加）
+
+原计划 12 个任务全部完成后，复查「import_cli 是否真的接上」时发现三处缺口，已修完：
+
+| # | 缺口 | 处理 | 状态 |
+|---|---|---|---|
+| 1 | `publish` 阶段没洗，`output/published` 残留 5 行脏文本；`db_loader` 对同卷同题 `answer_verified=0` 且 hash 变化时会覆盖回库（`db_loader.py:1405-1417`） | `publish_cli` 加 `_strip_page_markers_from_question`；`--force` 重发布 4 卷；published 残留可清理行 0 | 完成 |
+| 2 | 漏了一种页脚：独行 `2页 共7页`（「第」被 OCR 丢掉），库里 `5369/5370/5371` 仍带 | 新增 `BARE_PAGE_TOTAL_RE`（只认整行）+ 单测 + 第 7 个 fixture；清 3 行 | 完成 |
+| 3 | `import_cli --dry-run` 只打印文件名，看不到切题结果 | 新增 `--preview`（必要时先 convert 再打印每题；`--dry-run` 不写盘，只有 PDF 时无法预览）；`preview_split_questions` 与正式提取共用 `_load_prepared_text`；0 文件时打印下一步命令 | 完成 |
+
+验证：`pytest -q --ignore=tests/test_import_cli.py` → **1873 passed / 10 skipped**；`fix_page_markers_cli --dry-run` → 0 行。

@@ -23,6 +23,7 @@
 | 数学答案页脚 | `数学-初三(下)-202607-西城-模拟二-试卷` 第 243 行 | Q22 答案尾部混入 `北京市西城区九年级模拟测试试卷 数学答案及评分参考 2026.5 第2页（共6页）` | md 已复现 |
 | 物理答案页脚 | `物理-初三(下)-202607-朝阳-模拟二-试卷` 第 435 行 | Q26 答案尾部混入 `九年级物理试卷答案及评分标准 第2页（共2页）` | md 已复现 |
 | 页码碎片 | `questions.id=6713`（paper 362，昌平一中 Q25） | 题干末尾混入独立行 `共6页`（`第N页` 丢失，只剩「共N页」） | `is_active=1`、`answer_verified=1` |
+| 页码碎片（「第」也丢了） | `questions.id=5369/5370/5371`（paper 26，昌平一中语文 Q10-12 共享材料） | 材料末尾混入独立行 `2页 共7页`（`第` 与 `2页` 被 MinerU 拆开/丢失） | 一处页脚污染 3 题 |
 | 题干/材料行内粘连 | `语文-初三(上)-202407-海淀·北京八一学校-（上）期中-试卷` 第 213 行 | 页脚不是独立行，而是插在句子中间：`...全留在一桥一水一` + `九年级（语文）第8页（共11页）` + `人家之间了` | md 已复现 |
 
 ### 1.2.1 2026-11-17 实际清理结果（已执行）
@@ -33,6 +34,8 @@
 - `6685` / `6713` 的 `content_hash` 与清洗后 `content` 重新匹配、无冲突；
 - `updated_at` 只变化这 6 行；
 - Q19-21 的 `material_text` 已删 `九年级(语文)第8页(共11页)`，`一桥一水一人家之间了` 已合并。
+- 同日补第二批：`2页 共7页` 弱锚点上线后，`5369/5370/5371` 三行 `material_text` 更新；备份 `output/page_marker_backup_20261117_111101.jsonl`（3 条旧值）；复查仍为 0。
+- publish 兜底上线后，对 4 卷 `--force` 重发布（北京中学、昌平一中数学、八一学校、昌平一中语文），`output/published` 可清理页码行 0。
 
 ### 1.3 为什么之前没发现
 
@@ -90,8 +93,9 @@
 ### 3.1 本期做（P0）
 
 1. 新增确定性页脚/页码清洗模块，支持**整行删除**与**行内粘连删除**。
-2. 在试卷/答案的 4 个入口统一调用清洗：
+2. 在试卷/答案的 5 个入口统一调用清洗：
    - `question_extract.extract_questions_file`
+   - `publish_cli.main`（published 兜底：db_loader 只读 published）
    - `answer_extract_cli.main`
    - `answer_backfill.backfill`
    - `scanned_emphasis._scan_pdf`
@@ -99,7 +103,8 @@
 4. 题目区增加「重复大题/部分标题」「题号跳跃」的**告警**，不改切分行为。
 5. 新增 `fix_page_markers_cli.py`，清洗库里已污染的记录（`content` / `material_text` / `answer` / `explanation` / `approach` 五个字段）；带备份、预览、验证。
 6. 回归测试：覆盖本文 §1.2 的全部真实案例、§8.3 的全量语料清单，以及「本试卷共 8 页」「第 2 页的问题」「图片标号 1/2/3/4」等负例。
-7. 文档同步：`README.md`、`docs/data-refinery-使用手册.md`、`docs/constraints/数据管线.md`、`docs/ai-core-changelog.md`。
+7. `import_cli --file <卷> --preview` 打印切题结果（题号/选项数/答案首 24 字/材料有无/题干首 40 字+尾 10 字，图片显示为 `[图片]` 并按 4 字计长），只跑确定性步骤、不调 LLM；必要时先 convert 出 md（`--dry-run` 不写盘，只有 PDF 时无法预览）。范围超过 3 份只打印题数。
+8. 文档同步：`README.md`、`docs/data-refinery-使用手册.md`、`docs/constraints/数据管线.md`、`docs/ai-core-changelog.md`。
 
 ### 3.2 本期不做（明确）
 
@@ -153,11 +158,15 @@ PAGE_MARKER_RE = re.compile(
 ```python
 BARE_PAGE_RE = re.compile(rf"^第\s*{_PAGE_NUM}\s*页\s*$")
 BARE_TOTAL_RE = re.compile(rf"^共\s*{_PAGE_NUM}\s*页\s*$")
+# 「第」被 OCR 丢掉，只剩「2页 共7页」（昌平一中语文 2024，一脏脏三题）
+BARE_PAGE_TOTAL_RE = re.compile(
+    rf"^{_PAGE_NUM}\s*页\s*[，,]?\s*共\s*{_PAGE_NUM}\s*页\s*$"
+)
 ```
 
 - 只匹配**整行**，不做行内删除；所以「请阅读第 2 页」「本试卷共 8 页」不会命中。
 - 命中即整行删除，不需要 residual 判定。
-- 当前语料只命中 1 处：`共6页`；`第N页` 独行暂无真实样本，但属于同类碎片，一并支持。
+- 当前语料命中：`共6页` 1 处、`2页 共7页` 1 处（3 行）；`第N页` 独行暂无真实样本，但属于同类碎片，一并支持。
 
 ### 4.2 什么不算（负例，绝不删）
 
@@ -773,6 +782,7 @@ python3 src/fix_page_markers_cli.py --dry-run
 |---|---|
 | `src/page_chrome.py` | 教材页眉/页脚频率统计（不要改成语义） |
 | `src/question_extract.py:576-586` | 试卷主提取顺序（接入点） |
+| `src/publish_cli.py`（`_strip_page_markers_from_question`） | published 兜底清洗（接入点） |
 | `src/answer_extract_cli.py:135-136` | 独立答案提取（接入点） |
 | `src/answer_backfill.py:94-95` | 答案回填（接入点） |
 | `src/scanned_emphasis.py:506-511` | 语文加点 md 侧切题（接入点） |

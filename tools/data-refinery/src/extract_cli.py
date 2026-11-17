@@ -163,6 +163,69 @@ def _match_pages(md_name: str, page_nums: set[int]) -> bool:
     return False
 
 
+_PREVIEW_IMG_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_PREVIEW_WS_RE = re.compile(r"\s+")
+
+
+def _preview_text(text: str, *, head: int, tail: int = 0) -> str:
+    """预览用短文本：图片换成 ``[图片]``，按替换后的长度截断（首 head + 尾 tail）。
+
+    ``[图片]`` 本身算 4 个字符，不按真实路径长度算。
+    """
+    s = _PREVIEW_IMG_RE.sub("[图片]", text or "")
+    s = _PREVIEW_WS_RE.sub(" ", s).strip()
+    if not s:
+        return ""
+    if tail > 0 and len(s) > head + tail + 1:
+        return s[:head] + "…" + s[-tail:]
+    if tail <= 0 and len(s) > head:
+        return s[:head] + "…"
+    return s
+
+
+def _print_split_preview(source: MarkdownSource, *, detailed: bool) -> None:
+    """--dry-run：打印 md 切出的题目，供人工比对是否切错（不调 LLM）。
+
+    每题打印「题号 / 选项数 / 答案首 24 字 / 材料有无 / 题干首 40 字+尾 10 字」；
+    图片统一显示为 ``[图片]``。完整内容看 md 本身。
+    """
+    from question_extract import preview_split_questions
+
+    try:
+        questions, strategy = preview_split_questions(source)
+    except Exception as e:  # 预览失败不能影响 dry-run 的其余输出
+        print(f"  [WARN] 切题预览失败：{type(e).__name__}: {e}", flush=True)
+        return
+
+    if not questions:
+        print("  [split] 0 题（切题为空）", flush=True)
+        return
+
+    nums = [q.group_order for q in questions if q.group_order is not None]
+    span = f"，题号 {min(nums)}-{max(nums)}" if nums else ""
+    print(f"  [split] 共 {len(questions)} 题{span}", flush=True)
+    if not detailed:
+        print("  （逐题明细需 --file 指定单卷；整批 dry-run 只打印题数）", flush=True)
+        return
+
+    if not any((q.answer or "").strip() for q in questions):
+        print("  [提示] 切题阶段没有对齐到答案：该卷可能靠第 6 步答案回填"
+              "（配对答案 md / --answers）补，预览里统一显示「答：—」", flush=True)
+
+    for q in questions:
+        try:
+            _, opts = strategy.split_options(q.content)
+        except Exception:
+            opts = []
+        opts = opts or []
+        answer = _preview_text(q.answer or "", head=24)
+        material_mark = "材料✓" if (q.material_text or "").strip() else "材料✗"
+        body = _preview_text(q.content or "", head=40, tail=10)
+        no = f"{q.group_order:>3}" if q.group_order is not None else "  ?"
+        print(f"    {no}  选{len(opts)}  答：{answer or '—'}  {material_mark}  │ {body}",
+              flush=True)
+
+
 def _last_lesson_id(jsonl_path: Path) -> str | None:
     """读 jsonl 中最后一条非空 lesson_id，用于断点续传时回填 per-book 状态。
 
@@ -456,7 +519,19 @@ def main(argv=None):
         sources = [s for s in sources if _match_pages(s.md_path.name, page_nums)]
     if args.book:
         sources = [s for s in sources if match_keyword(s.rel_path, args.book)]
+    if not sources:
+        print("[提示] 没有匹配到 md：若素材只有 PDF，需先转换出 md —— "
+              "`python3 src/import_cli.py --file <卷名> --preview` "
+              "会一步完成转换并打印切题结果（不调 LLM、不入库）", flush=True)
+        return
     if args.dry_run:
+        detailed = len(sources) == 1  # 只对单卷打印逐题明细，避免整学科刷屏
+        # 切题预览要跑一次 split（不调 LLM，但整学科上百卷会明显变慢），
+        # 只在小范围时开；范围大就只报文件清单。
+        preview_enabled = len(sources) <= 3
+        if not preview_enabled and sources:
+            print(f"[split] 范围较大（{len(sources)} 份），跳过切题预览；"
+                  f"用 --file 指定单卷可看逐题明细", flush=True)
         for s in sources:
             key = str(s.rel_path / s.md_path.name)
             try:
@@ -464,8 +539,11 @@ def main(argv=None):
                                     allow_ask=False)
                 label = KIND_LABELS[kind]
             except MaterialKindUnknown:
+                kind = None
                 label = "类型未知（正式执行时会问你）"
-            print(f"[dry-run] {s.rel_path / s.md_path.name} ({label})")
+            print(f"[dry-run] {s.rel_path / s.md_path.name} ({label})", flush=True)
+            if kind == KIND_PAPER and preview_enabled:
+                _print_split_preview(s, detailed=detailed)
         return
 
     # --reconvert：清理匹配页的 checkpoint + 删除已有 JSONL

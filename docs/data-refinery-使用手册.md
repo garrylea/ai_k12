@@ -1049,8 +1049,10 @@ python emphasis_cli.py --all-chinese
 
 **新导入自动清洗**（不需要额外命令）：
 
-- `src/page_markers.py`：强锚点 `第N页 + 共M页/斜杠`、弱锚点独行 `第N页`/`共N页`；整行/行内删除；行尾续行合并（含跨空行）；围栏/HTML 标签/表格内只记 `manual`。
-- 四个接入点：`question_extract`（主提取）、`answer_extract_cli`（独立答案）、`answer_backfill`（答案回填）、`scanned_emphasis`（语文加点 md 侧切题）。
+- `src/page_markers.py`：强锚点 `第N页 + 共M页/斜杠`、弱锚点独行 `第N页`/`共N页`/`2页 共7页`（「第」被 OCR 丢掉）；整行/行内删除；行尾续行合并（含跨空行）；围栏/HTML 标签/表格内只记 `manual`。
+- 五个接入点：`question_extract`（主提取）、`publish_cli`（published 兜底：db_loader 只读 published，旧产物带页脚会在重跑入库时写回库）、`answer_extract_cli`（独立答案）、`answer_backfill`（答案回填）、`scanned_emphasis`（语文加点 md 侧切题）。
+- **切题预览（不调 LLM）**：`python3 src/import_cli.py --file <卷名> --preview` —— 必要时先 convert 出 md，再打印每题「题号 / 选项数 / 答案首 24 字 / 材料有无 / 题干首 40 字+尾 10 字」，图片显示成 `[图片]`（按 4 字计入长度）；已有 md 时用 `--preview --skip-convert`。范围超过 3 份只打题数。全卷都没对齐答案时会提示「可能靠第 6 步答案回填」。
+- **`--dry-run` 与 `--preview` 的区别**：`--dry-run` 不写盘，只有 PDF 时会报 `0 个文件`（不会生成 md）；要看切题结果用 `--preview`。
 - **不删裸数字行**：一零一物理的 `1/2/3/4` 是图片标号；`本试卷共8页`、`请阅读第 2 页` 是正文。
 
 **存量库清洗（用户只需记这一条）**：
@@ -1066,7 +1068,7 @@ cd tools/data-refinery && python3 src/fix_page_markers_cli.py --apply --yes
 - 表格/标签/围栏内命中只打 `[manual]`，不计入硬 0。
 - `answer_verified=1` 不重置，只打 `[note]` 提示抽查。
 - 只想看：`python3 src/fix_page_markers_cli.py --dry-run`（默认也是预览）。
-- 2026-11-17 实跑：6 行 / 6 字段更新，备份 6 条，复查 `[verify] 可自动清理的标记：0`。
+- 2026-11-17 实跑：第一批 6 行 / 6 字段（备份 6 条）+ 第二批 3 行 / 3 字段（`2页 共7页`，备份 3 条），复查 `[verify] 可自动清理的标记：0`。
 
 **回滚**：备份 JSONL 含 `question_id / field / old / new`；按 id+字段手工 UPDATE 旧值即可。
 

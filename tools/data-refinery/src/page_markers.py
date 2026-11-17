@@ -26,6 +26,11 @@ PAGE_MARKER_RE = re.compile(
 # 弱锚点：整行只剩页码碎片（昌平一中「共6页」实测）
 BARE_PAGE_RE = re.compile(rf"^第\s*{_PAGE_NUM}\s*页\s*$")
 BARE_TOTAL_RE = re.compile(rf"^共\s*{_PAGE_NUM}\s*页\s*$")
+# 弱锚点：「第」字被 MinerU 丢掉，只剩「2页 共7页」（昌平一中语文 2024 实测）。
+# 只认整行，避免误删正文里的「共 N 页」。
+BARE_PAGE_TOTAL_RE = re.compile(
+    rf"^{_PAGE_NUM}\s*页\s*[，,]?\s*共\s*{_PAGE_NUM}\s*页\s*$"
+)
 
 _HEADING_PREFIX_RE = re.compile(r"^#{1,6}\s*")
 _SENTENCE_END_RE = re.compile(r"[。！？；]")
@@ -124,6 +129,7 @@ def is_page_marker_line(line: str) -> bool:
     return bool(
         BARE_PAGE_RE.match(s)
         or BARE_TOTAL_RE.match(s)
+        or BARE_PAGE_TOTAL_RE.match(s)
         or PAGE_MARKER_RE.search(s)
     )
 
@@ -167,7 +173,8 @@ def strip_page_markers(text: str) -> tuple[str, list[PageMarkerHit]]:
         stripped = line.strip(_WS)
 
         # 弱锚点：整行页码碎片
-        if BARE_PAGE_RE.match(stripped) or BARE_TOTAL_RE.match(stripped):
+        if (BARE_PAGE_RE.match(stripped) or BARE_TOTAL_RE.match(stripped)
+                or BARE_PAGE_TOTAL_RE.match(stripped)):
             if _is_protected(line, 0, in_table):
                 hits.append(PageMarkerHit(i + 1, line, False, removed=False))
                 out.append(line)
@@ -332,7 +339,8 @@ def _can_join(next_line: str) -> bool:
     s = next_line.strip(_WS)
     if not s:
         return False
-    if BARE_PAGE_RE.match(s) or BARE_TOTAL_RE.match(s) or PAGE_MARKER_RE.search(s):
+    if (BARE_PAGE_RE.match(s) or BARE_TOTAL_RE.match(s)
+            or BARE_PAGE_TOTAL_RE.match(s) or PAGE_MARKER_RE.search(s)):
         return False
     if _STRUCTURAL_NEXT_RE.match(s):
         return False

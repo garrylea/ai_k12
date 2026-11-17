@@ -23,6 +23,19 @@
 
 **已知缺口**（另案 P1）：英文 `Page N of M`（当前 0 样本）、无页码的重复运行页眉、中文数字页码、水印；真正的按页识别要用 MinerU JSON 的 `page_idx`/`bbox`。
 
+**补充（同日收尾，发现两处缺口）**：
+
+- **弱锚点漏了「第」被 OCR 丢掉**的独行 `2页 共7页`（昌平一中语文 2024，原 md 第 123 行）。已加 `BARE_PAGE_TOTAL_RE`（只认整行），清掉 `questions.id=5369/5370/5371` 三行 `material_text`，备份 `output/page_marker_backup_20261117_111101.jsonl`。
+- **publish 阶段没洗**：`db_loader` 只读 published，旧 published 带页脚时，重跑 load 会按「同卷同 group_order + hash 不同 + answer_verified=0」覆盖回库（`db_loader.py:1405-1417`）。已在 `publish_cli` 加兜底清洗，并对 4 卷 `--force` 重发布（北京中学、昌平一中数学、八一学校、昌平一中语文），published 残留可清理页码行 0。
+- **`--dry-run` 现在会打印切题结果**：`import_cli --file <卷> --preview` → 每题「题号/选项数/答案有无/材料有无/题干首 40 字」，只跑确定性步骤、不调 LLM；只有 PDF 时 `--preview` 会先 convert 出 md（`--dry-run` 不写盘，无法预览），范围超过 3 份只打印题数。
+
+**补充 2（2026-11-17，preview 列与答案标题）**：
+
+- 预览加「答案首 24 字」列；题干改为「首 40 + 尾 10」，图片统一显示 `[图片]` 并按 4 字计长。
+- 修答案区标题识别：`# 数学答案` 之前不被 `_ANSWER_KEYWORD_RE` 认，导致 35 中 2026 期中 28 题全 `答案✗`。规则收窄为「标题 + 学科前缀」，不认裸 `## 答案`（裸标题正文常用 `**1. 答案：**`，归入答案区反而比配对答案 md 更脏）。
+- 全卷没对齐答案时预览提示「可能靠第 6 步答案回填」。
+- `--preview` 在多命中且非交互时按 dry-run 处理（不再等输入），避免挂住。
+
 **文档**：`docs/superpowers/specs/2026-11-17-data-refinery-page-marker-cleanup-design.md`、`docs/superpowers/plans/2026-11-17-data-refinery-page-marker-cleanup.md`。
 
 ---

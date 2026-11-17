@@ -75,6 +75,9 @@ def parse_args(argv=None):
                         help="逗号分隔的多个卷名关键字：等价于对每个关键字各跑一遍 --file，"
                              "一次导入多份卷（与 --file 互斥）")
     parser.add_argument("--dry-run", action="store_true", help="每步只打印，不写盘/不入库")
+    parser.add_argument("--preview", action="store_true",
+                        help="只看切题结果：必要时先转换出 md，再打印每题"
+                             "（不调 LLM、不入库；等价于 convert + extract --dry-run）")
     parser.add_argument("--skip-convert", action="store_true", help="跳过 convert（复用已有 md）")
     parser.add_argument("--skip-extract", action="store_true", help="跳过 extract")
     parser.add_argument("--skip-publish", action="store_true", help="跳过 publish")
@@ -122,8 +125,7 @@ def parse_args(argv=None):
             parser.error("--paper-id 必须是正整数")
     if args.fix_only:
         # 这些开关和「只补题」语义相反：同给会让用户以为会重建/导入，实际都被跳过
-        for given, flag in (
-            (args.answers, "--answers"),
+        for given, flag in (            (args.answers, "--answers"),
             (args.cards_only, "--cards-only"),
             (args.reconvert, "--reconvert"),
             (args.re_extract, "--re-extract"),
@@ -132,6 +134,9 @@ def parse_args(argv=None):
         ):
             if given:
                 parser.error(f"--fix-only 只补题，不能与 {flag} 同用")
+    if args.preview and (args.dry_run or args.fix_only):
+        parser.error("--preview 不能与 --dry-run / --fix-only 同用"
+                     "（--preview 自己就是「只预览切题」）")
     return args
 
 
@@ -161,7 +166,7 @@ def extract_argv(args) -> list[str]:
     argv = _common(args)
     if _stage_file(args):
         argv += ["--file", _stage_file(args)]
-    if args.dry_run:
+    if args.dry_run or args.preview:
         argv.append("--dry-run")
     if args.re_extract or args.redo:
         argv.append("--reconvert")
@@ -359,7 +364,7 @@ def _resolve_file(args, cfg) -> int | None:
             print(f"[命中 {len(hits)} 份] 关键词 {raw} 需要收窄，先选一份：", flush=True)
             for idx, rel in enumerate(hits, 1):
                 print(f"  {idx}. {rel.as_posix()}", flush=True)
-            if args.dry_run:
+            if args.dry_run or args.preview:
                 print("         [dry-run] 正式执行时会让你选一份；本次按全部候选预演", flush=True)
                 return None
             if not sys.stdin.isatty():
@@ -507,6 +512,13 @@ def _answers_only(args) -> bool:
 def _execute(args) -> int:
     """按 args 里的范围跑完整管线（单卷/单批）。"""
     answers_only = _answers_only(args)
+    if args.preview:
+        # --preview：只跑 convert（必要时生成 md）+ extract --dry-run（打印切题），
+        # 其余阶段全关；不调 LLM、不写库。
+        args.skip_publish = args.skip_meta = args.skip_load = args.skip_answers = True
+        args.skip_review = True
+        args._preview = True
+        print("=== 预览切题（convert → extract --dry-run；不入库、不调 LLM）===", flush=True)
     if args.fix_only:
         # 只补题：把前 6 步全关掉（含 MinerU 转换、切题、入库），
         # 只留第 7/8/9 步 —— 与手写那串 --skip-* 完全等价，没有额外分支逻辑。
@@ -555,7 +567,7 @@ def _execute(args) -> int:
     # 识别问题扫描：缺号 / 被吞 / 内容不完整 / 前后题合并 / 卷首页脚被当题，
     # 落 output/recognition_issues.jsonl，供 src/fix_question_cli.py 逐条人工确认
     # （不阻塞入库，可随时补跑）
-    if not args.cards_only and not answers_only:
+    if not args.cards_only and not answers_only and not getattr(args, "_preview", False):
         stages.append(("7/9 识别问题扫描（缺号/被吞/内容不完整/前后题合并/噪声题）",
                        _scan_entry(args), []))
         # 扫完直接引导人工补题：交互终端下会逐条问，非交互（CI/管道）只打印命令，

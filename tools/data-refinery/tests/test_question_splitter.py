@@ -1602,3 +1602,27 @@ def test_ocr_tens_correction_does_not_emit_jump_warning(capsys):
     out = capsys.readouterr().out
     assert "题号疑似 OCR 错认" in out
     assert "题号跳跃" not in out
+
+
+def test_answer_keyword_accepts_heading_forms():
+    """「# 数学答案」「## 答案」是答案区；作文题「寻找坚守的答案」不是。"""
+    assert is_answer_keyword("# 数学答案")
+    assert not is_answer_keyword("## 答案")  # 裸标题不认：正文多为加粗答案，解析更脏
+    assert is_answer_keyword("# 数学试题答案")
+    assert is_answer_keyword("## 语文答案")
+    assert not is_answer_keyword("## 寻找坚守的答案")
+    assert not is_answer_keyword("3. 试题答案一律填涂或书写在答题卡上")
+
+
+def test_answer_table_under_math_heading():
+    """35中 2026 期中实测：答案区标题是「# 数学答案」，答案在 table 里。"""
+    text = (
+        "1. 题干一\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "2. 题干二\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "# 数学答案\n"
+        "<table><tr><td>题号</td><td>1</td><td>2</td></tr>"
+        "<tr><td>答案</td><td>D</td><td>A</td></tr></table>\n"
+    )
+    result = {q.group_order: q for q in split_page(text, Path("t.md"))}
+    assert result[1].answer.strip() == "D"
+    assert result[2].answer.strip() == "A"

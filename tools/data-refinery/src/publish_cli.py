@@ -20,6 +20,7 @@ from config import RefineryConfig
 from image_rewrite import rewrite_item
 from material_kind import SCOPE_KIND, kind_of_jsonl
 from models import ExamQuestion, TextbookCard
+from page_markers import strip_page_markers
 from scope_filter import build_scope, describe, match_keyword, match_scope
 from subject_codes import subject_code_for_path as _subject_code_for
 
@@ -27,6 +28,33 @@ from subject_codes import subject_code_for_path as _subject_code_for
 # 不需要用户记住 `--force`（2026-10-31 用户指出：能记一个命令就不该让人记两个）。
 # 2 = 起于 2026-10-31：answer 字段里的图片也一并物化改写。
 PUBLISH_VERSION = 2
+
+# 试卷题干/材料/答案/解析里可能残留的页码标记（extract 已洗，这里兜底）
+_QUESTION_TEXT_FIELDS = ("content", "material_text", "answer", "explanation")
+
+
+def _strip_page_markers_from_question(item: ExamQuestion, rel: Path) -> None:
+    """清洗单题文本字段里的页码标记。
+
+    extract 阶段已经洗过；这里再洗一遍是为了让 **published JSONL 本身干净** ——
+    db_loader 以 published 为准，旧产物若带页脚，重跑入库会把页脚写回库。
+    """
+    removed_total = 0
+    for name in _QUESTION_TEXT_FIELDS:
+        value = getattr(item, name, None)
+        if not value:
+            continue
+        cleaned, hits = strip_page_markers(value)
+        removed = [h for h in hits if h.removed]
+        manual = [h for h in hits if not h.removed]
+        if removed and cleaned != value:
+            setattr(item, name, cleaned)
+            removed_total += len(removed)
+        if manual:
+            print(f"[WARN] [page-marker] {rel}: {name} 未处理 {len(manual)} 处"
+                  f"（表格/标签/围栏内）", flush=True)
+    if removed_total:
+        print(f"[page-marker] {rel}: 删除 {removed_total} 处页码标记", flush=True)
 
 
 def parse_args(argv=None):
@@ -193,6 +221,7 @@ def main(argv=None):
                 if kind == "questions":
                     item = ExamQuestion(**raw)
                     asset_prefix = f"questions/{subject_code}/{source_key}/{idx}"
+                    _strip_page_markers_from_question(item, rel)
                 else:
                     item = TextbookCard(**raw)
                     asset_prefix = f"textbooks/{subject_code}/{source_key}/{item.sort_order}"
