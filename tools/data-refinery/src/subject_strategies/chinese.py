@@ -19,6 +19,7 @@ question_splitter.py 里；搬到这里之后内核不再出现任何学科判�
 import re
 from pathlib import Path
 
+from page_markers import is_page_marker_line
 from question_splitter import (
     is_answer_keyword,
     is_group_header,
@@ -333,7 +334,8 @@ def _align_by_number(lines: list[str]) -> list[tuple[int, list[str]]]:
         if not line.strip():
             continue
         norm = line.translate(_FULLWIDTH_TO_HALF)
-        if _SECTION_HEADER_RE.match(norm) or is_group_header(norm)[0]:
+        if (_SECTION_HEADER_RE.match(norm) or is_group_header(norm)[0]
+                or is_page_marker_line(norm)):
             continue
 
         # 剥掉 markdown 标题前缀再判题号（'## 27．评分参考'）；norm 与原文等长，偏移可直接回切

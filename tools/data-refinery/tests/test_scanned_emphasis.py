@@ -6,6 +6,7 @@ from scanned_emphasis import (
     CharBox,
     Hit,
     _attribute,
+    _questions_from_md,
     _group_hits,
     _norm,
     _page_selected,
@@ -104,3 +105,39 @@ def test_underline_for_detects_horizontal_line():
     blank = np.full((120, 160), 255, dtype=np.uint8)
     blank[20:60, 20:60] = 0
     assert _underline_for(_box(), blank) is False
+
+
+CHINESE_MATERIAL_MD = """# 现代文阅读
+
+（一）（共 8 分）
+
+阅读下面的作品，完成19-21题。
+
+⑪千年的长河在同里歇了歇脚，继续前行，把个江南古镇的韵味，全留在一桥一水一九年级（语文）第8页（共11页）
+人家之间了……
+
+19. 根据全文内容补全下列信息。（4分）
+(1) 昨夜，投宿在古镇明清老街的世德堂。
+(2) 昨夜，____；
+
+20. 文中多处描绘了同里人的“吃”，请从【A】【B】两句，选择一句来赏析。（3分）
+
+21. 作者在文末写道：“那桨声，从容地响起，千年不变。”请结合全文，说说作者为什么说桨声千年不变。(4分)
+"""
+
+
+def test_questions_from_md_strips_footer_and_joins_shared_material(tmp_path):
+    """语文加点定位用的 md 侧切题也要先洗页脚，否则 Q19-21 材料都带页脚。"""
+    md = tmp_path / "语文-初三(上)-202607-海淀-（上）期中-试卷.md"
+    md.write_text(CHINESE_MATERIAL_MD, encoding="utf-8")
+
+    by_no = dict(_questions_from_md(md))
+    assert 19 in by_no and 20 in by_no and 21 in by_no
+    for no in (19, 20, 21):
+        assert "第8页" not in by_no[no]
+        assert "一桥一水一人家之间了" in by_no[no]
+
+
+def test_questions_from_md_missing_returns_empty(tmp_path):
+    assert _questions_from_md(None) == []
+    assert _questions_from_md(tmp_path / "nope.md") == []

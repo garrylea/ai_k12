@@ -119,3 +119,38 @@ def test_unknown_subject_dir_is_skipped_not_guessed_as_math(tmp_path, monkeypatc
     assert stats["filled"] == 0
     assert calls == []
     assert "音乐" in capsys.readouterr().out
+
+
+def test_strips_page_markers_before_extract(tmp_path, monkeypatch, capsys):
+    """答案回填前必须清洗页脚；跨页页脚不能进 extract_answers 的输入。"""
+    _, md = _make_paper(tmp_path)
+    md.write_text(
+        "# 试卷\n\n参考答案\n\n"
+        "10.答案：先天下之忧而忧\n\n"
+        "（2分）语文试卷答案及评分参考 第 1页（共 5页）\n",
+        encoding="utf-8",
+    )
+
+    seen = {}
+
+    def extract_answers(text, md_path):
+        seen["text"] = text
+        return [ExtractedAnswer(no=10, answer="先天下之忧而忧")]
+
+    monkeypatch.setattr(
+        answer_backfill, "get_strategy",
+        lambda code: SimpleNamespace(extract_answers=extract_answers),
+    )
+    monkeypatch.setattr(answer_backfill, "subject_code_for_path",
+                        lambda rel, default=None: "chinese")
+    monkeypatch.setattr(answer_backfill, "_connect",
+                        lambda cfg: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(answer_backfill, "_lookup_paper_id", lambda conn, key: 42)
+    monkeypatch.setattr(answer_backfill, "importer_main", lambda argv: 0)
+
+    stats = answer_backfill.backfill(_cfg(tmp_path), build_scope(subject="语文"))
+    assert stats["filled"] == 1
+    assert "语文试卷答案及评分参考" not in seen["text"]
+    assert "第1页" not in seen["text"]
+    assert "（2分）" in seen["text"]
+    assert "[page-marker]" in capsys.readouterr().out

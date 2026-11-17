@@ -24,6 +24,7 @@ from question_labeler import (
     apply_true_false_exemption,
 )
 from section_analyzer import analyze_sections
+from page_markers import strip_page_markers
 from qr_detect import strip_qr_images
 from subject_codes import subject_code_for_parts
 from subject_strategies import get_strategy
@@ -584,6 +585,19 @@ def extract_questions_file(source, config, llm, fb_llm,
     # 在切题前删掉，避免被 split_options 的"上方最近图片"规则误挂到选项上。
     # 放在答案合并之后，使题干/选项/解析（来自答案 md）三条链路一次性清掉。
     text = strip_qr_images(text, md_path.parent)
+
+    # 2.6 页码标记清洗（2026-11-17）：MinerU 单 MD 没有页边界，页脚是普通文本行；
+    # 不洗会在 split_page 里被当成上一题的续行，污染题干/材料/答案。
+    text, marker_hits = strip_page_markers(text)
+    removed = [h for h in marker_hits if h.removed]
+    manual = [h for h in marker_hits if not h.removed]
+    if removed:
+        print(f"[page-marker] {md_path.stem}: 删除 {len(removed)} 处页码标记"
+              f"（行 {', '.join(str(h.line_no) for h in removed[:10])}）", flush=True)
+    if manual:
+        print(f"[WARN] [page-marker] {md_path.stem}: 未处理 {len(manual)} 处"
+              f"（表格/标签/围栏内，行 {', '.join(str(h.line_no) for h in manual[:10])}）",
+              flush=True)
 
     # 3. 元数据（学科决定切分策略，需在切分前）
     subject_code = _subject_code_for(rel_parts)

@@ -496,22 +496,32 @@ def _attribute(hit: Hit, questions: list[tuple[int, str]]) -> None:
     hit.ambiguous = len(best) > 1 and best[0][0] == best[1][0]
 
 
+def _questions_from_md(md_path: Path | None) -> list[tuple[int, str]]:
+    """从切题结果取「题号 → 材料+题干」；页脚先清洗（答案/材料跨页）。"""
+    if not md_path or not md_path.exists():
+        return []
+    try:
+        from question_extract import normalize_fullwidth_parens
+        from question_splitter import split_page
+        from subject_strategies import get_strategy
+        from page_markers import strip_page_markers
+
+        text = normalize_fullwidth_parens(md_path.read_text(encoding="utf-8"))
+        text, _ = strip_page_markers(text)
+        return [
+            (q.group_order, f"{q.material_text or ''}\n{q.content}")
+            for q in split_page(text, md_path, strategy=get_strategy("chinese"))
+        ]
+    except Exception as e:
+        print(f"  [warn] 切题失败，题号留空：{type(e).__name__}: {e}", flush=True)
+        return []
+
+
 def _scan_pdf(pdf: Path, md_path: Path | None, args, ocr) -> list[Hit]:
     import fitz
 
     doc = fitz.open(pdf)
-    questions: list[tuple[int, str]] = []
-    if md_path and md_path.exists():
-        try:
-            from question_extract import normalize_fullwidth_parens
-            from question_splitter import split_page
-            from subject_strategies import get_strategy
-
-            text = normalize_fullwidth_parens(md_path.read_text(encoding="utf-8"))
-            for q in split_page(text, md_path, strategy=get_strategy("chinese")):
-                questions.append((q.group_order, f"{q.material_text or ''}\n{q.content}"))
-        except Exception as e:
-            print(f"  [warn] 切题失败，题号留空：{type(e).__name__}: {e}", flush=True)
+    questions = _questions_from_md(md_path)
 
     hits: list[Hit] = []
     try:

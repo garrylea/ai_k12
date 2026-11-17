@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from question_splitter import (
-    is_date_trap, is_group_header, is_main_stem,
+    is_answer_structure_line, is_date_trap, is_group_header, is_main_stem,
     is_sub_stem, is_answer_keyword, split_inline_stems,
 )
 from question_splitter import split_page, RawQuestion
@@ -1492,3 +1492,113 @@ def test_huiwen_q19_material_then_options_pipeline():
     stem, opts = split_options(rest)
     assert opts is None
     assert "A. 滑动变阻器的最大阻值太大了" in stem
+
+
+def test_answer_section_skips_section_header():
+    text = (
+        "一、选择题\n"
+        "1. 题干一\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "2. 题干二\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "参考答案\n"
+        "1. C\n"
+        "（二）（共 5 分）\n"
+        "2. B\n"
+    )
+    result = {q.group_order: q for q in split_page(text, Path("test.md"))}
+    assert result[1].answer == "C"
+    assert result[2].answer == "B"
+    assert "（二）" not in result[1].answer
+
+
+def test_answer_section_skips_page_marker():
+    text = (
+        "一、选择题\n"
+        "1. 题干一\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "2. 题干二\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "参考答案\n"
+        "1. C\n"
+        "第5页（共8页）\n"
+        "2. B\n"
+    )
+    result = {q.group_order: q for q in split_page(text, Path("test.md"))}
+    assert result[1].answer == "C"
+    assert result[2].answer == "B"
+    assert "第5页" not in result[1].answer
+
+
+def test_is_answer_structure_line_guards_table_rows():
+    assert is_answer_structure_line("（二）（共 5 分）")
+    assert is_answer_structure_line("第5页（共8页）")
+    assert is_answer_structure_line("共6页")
+    assert not is_answer_structure_line("<table><tr><td>第5页（共8页）</td></tr></table>")
+    assert not is_answer_structure_line("答案正文")
+
+
+def test_chinese_answer_alignment_skips_page_marker_and_section_header():
+    text = (
+        "# 参考答案\n"
+        "10.答案：A\n"
+        "（二）（共 5 分）\n"
+        "第5页（共8页）\n"
+        "11.答案：B\n"
+    )
+    answers = get_strategy("chinese").extract_answers(text, Path("test.md"))
+    by_no = {a.no: a for a in answers}
+    assert by_no[10].answer == "A"
+    assert by_no[11].answer == "B"
+    assert "第5页" not in by_no[10].answer
+    assert "（二）" not in by_no[10].answer
+
+
+def test_repeated_group_header_warns(capsys):
+    text = (
+        "一、选择题\n"
+        "1. 题干一\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "一、选择题\n"
+        "2. 题干二\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+    )
+    result = split_page(text, Path("test.md"))
+    assert [q.group_order for q in result] == [1, 2]
+    out = capsys.readouterr().out
+    assert "重复大题标题" in out
+    assert "当前题 1 可能被截断" in out
+
+
+def test_repeated_part_header_warns(capsys):
+    text = (
+        "第一部分 选择题\n"
+        "1. 题干一\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "第一部分 选择题\n"
+        "2. 题干二\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+    )
+    result = split_page(text, Path("test.md"))
+    assert [q.group_order for q in result] == [1, 2]
+    out = capsys.readouterr().out
+    assert "重复部分标题" in out
+    assert "当前题 1 可能被截断" in out
+
+
+def test_forward_stem_jump_warns(capsys):
+    text = (
+        "1. 题干一\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "3. 题干三\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+    )
+    result = split_page(text, Path("test.md"))
+    assert [q.group_order for q in result] == [1, 3]
+    out = capsys.readouterr().out
+    assert "题号跳跃 1 处" in out
+    assert "1→3" in out
+    assert "可能是跨页假题号/OCR 缺题" in out
+
+
+def test_ocr_tens_correction_does_not_emit_jump_warning(capsys):
+    text = (
+        "22. 题干二十二\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "33. 题干二十三\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+        "24. 题干二十四\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+    )
+    result = split_page(text, Path("test.md"))
+    assert [q.group_order for q in result] == [22, 23, 24]
+    out = capsys.readouterr().out
+    assert "题号疑似 OCR 错认" in out
+    assert "题号跳跃" not in out

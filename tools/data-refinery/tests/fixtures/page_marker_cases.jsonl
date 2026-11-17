@@ -1,0 +1,6 @@
+{"name":"haidian_answer_q10","source":"paper 447 / Q10 / answer","input":"（2分，每空 1 分。有错该空不得分）语文试卷答案及评分参考 第 1页（共 5页）","expect":"（2分，每空 1 分。有错该空不得分）"}
+{"name":"beijing_zhongxue_q24","source":"paper 361 / Q24 / content","input":"第5页（共8页）","expect":""}
+{"name":"bayi_q19_material","source":"paper 33 / Q19-21 / material_text","input":"…全留在一桥一水一九年级（语文）第8页（共11页）\n人家之间了……","expect":"…全留在一桥一水一人家之间了……"}
+{"name":"changping_q25","source":"paper 362 / Q25 / content","input":"共6页","expect":""}
+{"name":"xicheng_q22","source":"数学/初中/second/2026/西城-模拟二 / Q22 / answer","input":"北京市西城区九年级模拟测试试卷 数学答案及评分参考 2026.5 第2页（共6页）","expect":""}
+{"name":"chaoyang_q26","source":"物理/初中/second/2026/朝阳-模拟二 / Q26 / answer","input":"九年级物理试卷答案及评分标准 第2页（共2页）","expect":""}

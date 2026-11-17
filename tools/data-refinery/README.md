@@ -14,7 +14,8 @@ tools/data-refinery/
 │   ├── convert_cli.py        # convert 子命令
 │   ├── markdown_scanner.py   # Markdown 扫描器（含 kind 判定：试卷/答案 -> questions）
 │   ├── image_scan.py         # 页面图片扫描（尺寸 + 折算字数，小图标舍弃）
-│   ├── page_chrome.py        # 运行页眉/页脚/水印剥离（书级频率统计）
+│   ├── page_chrome.py        # 教材运行页眉/页脚/水印剥离（书级频率统计）
+│   ├── page_markers.py       # 试卷/答案页码标记清洗（强/弱锚点 + 行内粘连）
 │   ├── qr_detect.py          # 二维码图剔除（切题前，避免误挂到选项上）
 │   ├── card_splitter.py      # 卡片拆分（内容不动，按标题/长度/图片切块）
 │   ├── card_labeler.py       # LLM 卡片标注（page_type/card_type/lesson_id/title）
@@ -36,6 +37,7 @@ tools/data-refinery/
 │   ├── db_loader_cli.py      # db_loader 子命令
 │   ├── answer_importer.py    # 题目内容回写核心（answer/approach/explanation/type）
 │   ├── answer_importer_cli.py # answer_importer 子命令（--export / --records / --doc）
+│   ├── fix_page_markers_cli.py # 存量题库页码清洗（预览/备份/UPDATE/复查）
 │   ├── answer_doc.py         # Markdown 按卷答案文档解析（纯函数层）
 │   ├── answer_records.py     # JSONL 记录的解析/校验与 export 序列化（纯函数层）
 │   ├── refinery_cli.py       # 串联 publish + db_loader（旧入口，保留）
@@ -176,6 +178,15 @@ python src/extract_cli.py --file "2024 西城 模拟二"      # 顺序无所谓�
 输出到 `tools/data-refinery/output/extracted/`，每份 Markdown 镜像一个 `<stem>.jsonl`（如 `page_001.jsonl`、`<试卷名>.jsonl`），多页教材各自独立、互不覆盖。
 
 **lesson_id（教材卡片）**：LLM 每张卡片输出小节/章标题原文作为标识，续页/续卡片填 null，由 CLI 按书跨页继承（per-book running 状态），保证一节的内容落在同一 lesson_id。章前综述归该章"第 0 节"。封面/目录/版权/前言等前置内容不抽取（输出空 items）。断点续传时从已抽页 jsonl 回填状态。`--file` 只抽单页时不携带跨页状态，续页 card 的 lesson_id 可能为 null。
+
+### 2.5 页码清洗（试卷/答案）
+
+MinerU 对一份 PDF 只输出**一个 md**，md 里没有页边界；页脚（`第5页（共8页）`、`共6页`）是普通文本行，不洗会被 `split_page` 当成上一题/上一题的续行，污染答案、题干和共享材料。
+
+- 模块：`src/page_markers.py`；强锚点 `第N页 + 共M页/斜杠`、弱锚点独行 `第N页`/`共N页`；整行/行内删除；行尾续行合并；围栏/HTML 标签/表格内只记 manual。
+- 接入点：`question_extract`（主提取）、`answer_extract_cli`（独立答案）、`answer_backfill`（答案回填）、`scanned_emphasis`（语文加点 md 侧切题）。
+- **禁止**用「删除纯数字行」清页码：一零一物理的 `1/2/3/4` 是图片标号；`本试卷共8页`、`请阅读第 2 页` 是正文。
+- 存量库清洗：`python3 src/fix_page_markers_cli.py --apply --yes`（默认预览；先备份、按 id 聚合 UPDATE、写后复查；`content` 变化重算 `content_hash`，冲突整行跳过）。
 
 ### 3. publish：物化图片 + 改写路径 -> published JSONL
 

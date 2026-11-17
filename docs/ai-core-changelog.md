@@ -8,6 +8,25 @@
 
 ---
 
+## 2026-11-17 试卷/答案跨页页脚清洗（data-refinery）
+
+**问题**：MinerU 对一份 PDF 只输出一个 md，md 里没有页边界；页脚是普通文本行，`split_page` 把它当上一题/上一题的续行，污染答案、题干和共享材料。实测已入库 6 行：`questions.id=6959`（答案）、`6685`（题干）、`6713`（题干 `共6页` 碎片）、`5532/5533/5534`（共享材料，一处页脚污染 3 题）。
+
+**修复**：
+- 新增 `tools/data-refinery/src/page_markers.py`：确定性清洗强锚点（`第N页+共M页/斜杠`）与弱锚点（独行 `第N页`/`共N页`），支持整行删除、行内粘连删除、跨空行续行合并；围栏/HTML 标签/表格内只记 manual；不删裸数字（图片标号）和正文「第 N 页」引用。
+- 四个入口接入：`question_extract`、`answer_extract_cli`、`answer_backfill`、`scanned_emphasis`。
+- 答案区跳过节标题/页码标记（`question_splitter` + `chinese._align_by_number`）。
+- 题目区增加重复大题/部分标题告警、题号跳跃每文件一行汇总（只提示，不改切分）。
+- 新增 `src/fix_page_markers_cli.py`：存量库清洗，`--apply --yes` 一条命令完成预览、备份、按 id 聚合 UPDATE、复查。
+
+**实测结果**：6 行 / 6 字段更新；备份 `output/page_marker_backup_20261117_085933.jsonl`；`[verify] 可自动清理的标记：0`、`[manual] 0`；`6685/6713` 的 `content_hash` 与清洗后 content 匹配且无冲突；`updated_at` 只变化这 6 行。Q19-21 材料已删页脚并合并为「一桥一水一人家之间了」。
+
+**已知缺口**（另案 P1）：英文 `Page N of M`（当前 0 样本）、无页码的重复运行页眉、中文数字页码、水印；真正的按页识别要用 MinerU JSON 的 `page_idx`/`bbox`。
+
+**文档**：`docs/superpowers/specs/2026-11-17-data-refinery-page-marker-cleanup-design.md`、`docs/superpowers/plans/2026-11-17-data-refinery-page-marker-cleanup.md`。
+
+---
+
 ## 2026-11-16 专项题来源补充「试卷第 N 题」
 
 **需求**：在 2026-11-15 的「题目来源」基础上，同时显示该题在原试卷中的序号（用户要求；专项作答页 + 练习记录详情）。

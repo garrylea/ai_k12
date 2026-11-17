@@ -1043,6 +1043,35 @@ python emphasis_cli.py --all-chinese
 - 电子版 PDF 效果最好；**纯扫描件**（无文字层）需要 OCR 字符框，本期不做。
 - 若后续重新跑 extract/publish，新数据不会自带标记——需在入库后再跑一次本命令（或等它接进 `import_cli`）。
 
+### 4.13 page_markers / fix_page_markers_cli — 试卷/答案页码清洗（2026-11-17）
+
+**问题**：MinerU 对一份 PDF 只输出一个 md，md 里没有页边界；`第5页（共8页）`、`共6页` 这类页脚是普通文本行，不洗会被 `split_page` 当成上一题的续行，污染答案/题干/共享材料。实测已入库 6 行（`6959 / 6685 / 6713 / 5532-5534`）。
+
+**新导入自动清洗**（不需要额外命令）：
+
+- `src/page_markers.py`：强锚点 `第N页 + 共M页/斜杠`、弱锚点独行 `第N页`/`共N页`；整行/行内删除；行尾续行合并（含跨空行）；围栏/HTML 标签/表格内只记 `manual`。
+- 四个接入点：`question_extract`（主提取）、`answer_extract_cli`（独立答案）、`answer_backfill`（答案回填）、`scanned_emphasis`（语文加点 md 侧切题）。
+- **不删裸数字行**：一零一物理的 `1/2/3/4` 是图片标号；`本试卷共8页`、`请阅读第 2 页` 是正文。
+
+**存量库清洗（用户只需记这一条）**：
+
+```bash
+cd tools/data-refinery && python3 src/fix_page_markers_cli.py --apply --yes
+```
+
+内部自动完成：预览 → 备份 `output/page_marker_backup_<时间戳>.jsonl` → 按 `question_id` 聚合 UPDATE → 写后复查。
+
+- 清洗 `content / material_text / answer / explanation / approach`；`options` 不动。
+- `content` 变化时重算 `content_hash`；与其它题冲突则整行跳过并打 `[conflict]`。
+- 表格/标签/围栏内命中只打 `[manual]`，不计入硬 0。
+- `answer_verified=1` 不重置，只打 `[note]` 提示抽查。
+- 只想看：`python3 src/fix_page_markers_cli.py --dry-run`（默认也是预览）。
+- 2026-11-17 实跑：6 行 / 6 字段更新，备份 6 条，复查 `[verify] 可自动清理的标记：0`。
+
+**回滚**：备份 JSONL 含 `question_id / field / old / new`；按 id+字段手工 UPDATE 旧值即可。
+
+**已知缺口（P1 另案）**：英文 `Page N of M`（当前 0 样本）、无页码的重复运行页眉、中文数字页码、水印；真正的按页识别用 MinerU JSON 的 `page_idx`/`bbox`。
+
 ## 5. 推荐工作流
 
 ### 5.0 单科/单卷一键导入（import_cli，2026-10-28 新增）

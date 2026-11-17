@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from page_markers import is_page_marker_line
+
 # 主题号（行首）：1-2 位数字 + . + 非数字字符（不要求空格，兼容 9.xxx / 9. xxx / 9.$...$），
 # 或 + 4 位年份+中文（'6.2025年...'，. 后是年份数字仍算题号），或 + :（'21: 在...' 冒号格式）。
 # 仍排除小数（9.5）与 4 位日期（2026.5）。
@@ -77,6 +79,19 @@ _MATERIAL_HEAD_RE = re.compile(r'^#{0,6}\s*材料\s*[一二三四五六七八九
 def is_date_trap(line: str) -> bool:
     """行首是否为日期/页码格式（如 2026.5），不当题号。"""
     return bool(_DATE_TRAP_RE.match(line))
+
+
+def is_answer_structure_line(line: str) -> bool:
+    """答案区里不属于答案正文的结构行：页码标记 / 小节标题。
+
+    用 ``is_page_marker_line``（已含表格行护栏），避免把整行 ``<table>`` 跳过。
+    """
+    return is_page_marker_line(line) or bool(_SECTION_HEADER_RE.match(line))
+
+
+def _header_key(line: str) -> str:
+    """大题/部分标题的归一化键（去 Markdown 标题前缀与首尾空白）。"""
+    return re.sub(r"^#{1,6}\s*", "", line.strip()).strip()
 
 
 def is_group_header(line: str) -> tuple[bool, str | None]:
@@ -801,6 +816,10 @@ def split_page(text: str, md_path: Path,
     last_stem_no = 0   # 题干区已建的最大题号（纠正 OCR 十位错认，如 23→33）
     seen_stems: set[int] = set()  # 已建题号（防答案区/考试说明重复建题）
     warned_dup = False            # 重复题号只告警一次，避免刷屏
+    # 跨页重复的大题/部分标题：只用于告警，不改变切分行为
+    seen_group_headers: set[str] = set()
+    seen_part_headers: set[str] = set()
+    jump_warnings: list[tuple[int, int, int]] = []  # (from, to, line_no)
     # 材料分段（policy.attach）：scope = 一个大题/子小节/材料块
     scope_id = 0
     scope_pending: list[str] = []
@@ -864,6 +883,12 @@ def split_page(text: str, md_path: Path,
         if part_ok:
             # 卷内部分标题（'## 第二部分 非选择题'）：关闭当前题、丢弃该行，
             # 不改 group_id/分数状态（大题分组由后续 '一、选择题' 决定）
+            if not in_answer_section:
+                key = _header_key(line)
+                if current is not None and key in seen_part_headers:
+                    print(f"[WARN] {md_path.stem}: 重复部分标题「{key}」出现在第 {i + 1} 行，"
+                          f"当前题 {current.group_order} 可能被截断，请核对 PDF", flush=True)
+                seen_part_headers.add(key)
             if in_answer_section:
                 _flush_answer()
             elif current is not None:
@@ -913,6 +938,12 @@ def split_page(text: str, md_path: Path,
                 continue
 
         if ok:
+            if not in_answer_section:
+                key = _header_key(line)
+                if current is not None and key in seen_group_headers:
+                    print(f"[WARN] {md_path.stem}: 重复大题标题「{key}」出现在第 {i + 1} 行，"
+                          f"当前题 {current.group_order} 可能被截断，请核对 PDF", flush=True)
+                seen_group_headers.add(key)
             if in_answer_section:
                 _flush_answer()
             else:
@@ -982,6 +1013,10 @@ def split_page(text: str, md_path: Path,
                     })
 
         if in_answer_section:
+            # 页码标记 / 小节标题（（二）（共 5 分））不属于答案正文；
+            # 不跳过会拼进上一题答案（海淀 2026 题10 实测）。
+            if is_answer_structure_line(line):
+                continue
             # 表格格式选择题答案（<table>...<tr><td>题号</td>...<td>答案</td>...</table>）
             if '<table>' in line or '<table ' in line:
                 table_answers = parse_answer_table(line)
@@ -1109,11 +1144,13 @@ def split_page(text: str, md_path: Path,
             # OCR 十位错认：22 之后写成 33、再往后又是 24 → 33 实际是 23
             # （清华附中 2024 题23 实测）。只在前跳一位且个位吻合时纠正，
             # 真跳号（试卷本身缺题）不动，留给缺号告警。
-            if (last_stem_no and n > last_stem_no + 1
-                    and n % 10 == (last_stem_no + 1) % 10):
-                print(f"[WARN] 题号疑似 OCR 错认：{last_stem_no} 之后出现 {n}，"
-                      f"按 {last_stem_no + 1} 处理", flush=True)
-                n = last_stem_no + 1
+            if last_stem_no and n > last_stem_no + 1:
+                if n % 10 == (last_stem_no + 1) % 10:
+                    print(f"[WARN] 题号疑似 OCR 错认：{last_stem_no} 之后出现 {n}，"
+                          f"按 {last_stem_no + 1} 处理", flush=True)
+                    n = last_stem_no + 1
+                else:
+                    jump_warnings.append((last_stem_no, n, i + 1))
             last_stem_no = max(last_stem_no, n)
             if current is not None:
                 questions.append(current)
@@ -1195,5 +1232,11 @@ def split_page(text: str, md_path: Path,
     attach_pre = getattr(strategy, "attach_pre_material", None)
     if callable(attach_pre):
         attach_pre(questions, lines)
+
+    if jump_warnings:
+        detail = "、".join(f"{a}→{b}@{line}" for a, b, line in jump_warnings[:8])
+        more = "…" if len(jump_warnings) > 8 else ""
+        print(f"[WARN] {md_path.stem}: 题号跳跃 {len(jump_warnings)} 处"
+              f"（{detail}{more}），可能是跨页假题号/OCR 缺题，请核对 PDF", flush=True)
 
     return questions

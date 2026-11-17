@@ -17,6 +17,7 @@ import pymysql
 from answer_extract_cli import paper_title, render_answer_doc
 from answer_importer_cli import main as importer_main
 from db_loader_cli import _kind
+from page_markers import strip_page_markers
 from scope_filter import Scope, match_scope
 from subject_codes import subject_code_for_path
 from subject_strategies import UnknownStrategyError, get_strategy
@@ -92,6 +93,15 @@ def backfill(cfg, scope: Scope, *, dry_run: bool = False, overwrite: bool = Fals
                 continue
 
             text = md_path.read_text(encoding="utf-8")
+            # 答案跨页时 MinerU 会把页脚当普通文本行；不洗会并进上一题答案。
+            text, marker_hits = strip_page_markers(text)
+            removed = [h for h in marker_hits if h.removed]
+            manual = [h for h in marker_hits if not h.removed]
+            if removed:
+                print(f"[page-marker] {rel}: 删除 {len(removed)} 处页码标记", flush=True)
+            if manual:
+                print(f"[WARN] [page-marker] {rel}: 未处理 {len(manual)} 处"
+                      f"（表格/标签/围栏内）", flush=True)
             answers = strategy.extract_answers(text, md_path)
             if not any((a.answer or "").strip() for a in answers):
                 print(f"[answers] 跳过（没有参考答案段）：{rel}")
