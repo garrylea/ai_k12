@@ -84,11 +84,15 @@ export function PaperPositionPanel(props: PaperPositionPanelProps) {
     );
   }
 
-  const grades = Array.from(new Set(options.map((o) => o.grade)));
-  const semesters = options.filter((o) => o.grade === grade);
+  const gradeOptions = Array.from(new Set(options.map((o) => o.grade)));
+  const displayGrade = grade ?? gradeOptions[0] ?? '';
+  const semesterOptions = options.filter((o) => o.grade === displayGrade);
+  const displaySemester = semester ?? semesterOptions[0]?.semester ?? '';
   const allZero = positions.length === 0
     || positions.every((p) => p.wrongCount + p.untriedCount === 0);
-  const canStart = selectedQuestionNo != null
+  const selectedPosition = positions.find((p) => p.questionNo === selectedQuestionNo);
+  const canStart = selectedPosition != null
+    && selectedPosition.wrongCount + selectedPosition.untriedCount > 0
     && tierKey != null
     && eligibleTiers.some((t) => t.tierKey === tierKey)
     && !starting;
@@ -100,22 +104,22 @@ export function PaperPositionPanel(props: PaperPositionPanelProps) {
           <span className="text-xs font-medium text-[var(--learn-text-secondary)]">年级</span>
           <select
             aria-label="年级"
-            value={grade ?? ''}
+            value={displayGrade}
             onChange={(e) => onSelectGrade(e.target.value)}
             className={selectClassName}
           >
-            {grades.map((g) => <option key={g} value={g}>{g}</option>)}
+            {gradeOptions.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </label>
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-[var(--learn-text-secondary)]">学期</span>
           <select
             aria-label="学期"
-            value={semester ?? ''}
+            value={displaySemester}
             onChange={(e) => onSelectSemester(e.target.value as TrainingSemester)}
             className={selectClassName}
           >
-            {semesters.map((o) => (
+            {semesterOptions.map((o) => (
               <option key={o.semester} value={o.semester}>{SEMESTER_LABELS[o.semester]}</option>
             ))}
           </select>

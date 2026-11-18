@@ -97,4 +97,19 @@ describe('PaperPositionPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(p.onRetryOptions).toHaveBeenCalled();
   });
+
+  it('年级/学期为 null 时回落到首个选项，不显示无题空态', () => {
+    const p = props({ grade: null, semester: null });
+    render(<PaperPositionPanel {...p} />);
+    expect(screen.getByLabelText('年级')).toHaveValue('初三');
+    expect(screen.getByLabelText('学期')).toHaveValue('first');
+    expect(screen.queryByText('该年级学期暂无可练题目。')).toBeNull();
+    expect(p.onSelectGrade).not.toHaveBeenCalled();
+    expect(p.onSelectSemester).not.toHaveBeenCalled();
+  });
+
+  it('选中的题号无可练题时开始禁用', () => {
+    render(<PaperPositionPanel {...props({ selectedQuestionNo: 25, tierKey: '3' })} />);
+    expect(screen.getByRole('button', { name: '开始练习' })).toBeDisabled();
+  });
 });
