@@ -276,6 +276,13 @@ export default function ErrorPracticeRunPage() {
                   headerActions={(q) => (
                     <DiscussIconButton onClick={() => setDiscussQ(q)} />
                   )}
+                  headerExtra={
+                    // 导出常驻；草稿按钮随面板开合。放标题行右侧，草稿面板展开时不会被它压住
+                    <div className="flex items-center gap-2">
+                      <PrintIconButton onClick={() => setPrintOpen(true)} />
+                      {!draftOpen && <DraftIconButton onClick={() => setDraftOpen(true)} />}
+                    </div>
+                  }
                   onSubmit={handleSubmit}
                   onSelfAssess={async (q, assessment) => {
                     const entry = entryByN.get(q.n);
@@ -293,6 +300,7 @@ export default function ErrorPracticeRunPage() {
                   onClose={(answered) => setExitConfirm({ open: true, answered })}
                 />
               </div>
+              {/* DOM 顺序：DraftPanel 必须排在 DiscussDrawer 之前（面板内 canvas 是 absolute，抽屉要盖住它） */}
               {draftOpen && currentQ && (
                 <DraftPanel
                   questionId={currentQ.n}
@@ -300,14 +308,6 @@ export default function ErrorPracticeRunPage() {
                   onClose={() => setDraftOpen(false)}
                 />
               )}
-            </div>
-            {/* 草稿入口：页面背景层右上角 absolute 定位，仅面板收起时显示（展开时面板头部自带收起按钮）。
-                DOM 顺序：草稿这行必须排在 DiscussDrawer 之前——DraftPanel 内里的 canvas 是 absolute，
-                同层 z-index:auto 的定位元素按 DOM 序绘制，排在后面的一方才压在上面（讨论抽屉要盖住面板）；
-                图标则在 DiscussDrawer 之前，抽屉才能盖住它、关闭钮才可点。 */}
-            <div className="absolute top-4 right-4 flex items-center gap-2">
-              <PrintIconButton onClick={() => setPrintOpen(true)} />
-              {!draftOpen && <DraftIconButton onClick={() => setDraftOpen(true)} />}
             </div>
             {discussQ && phase === 'answering' && (
               <DiscussDrawer

@@ -199,6 +199,13 @@ export default function VariationRunPage() {
               hints={hints}
               onRequestHint={handleRequestHint}
               headerActions={(q) => <DiscussIconButton onClick={() => setDiscussQ(q)} />}
+              headerExtra={
+                // 导出常驻；草稿按钮随面板开合。放标题行右侧，草稿面板展开时不会被它压住
+                <div className="flex items-center gap-2">
+                  <PrintIconButton onClick={() => setPrintOpen(true)} />
+                  {!draftOpen && <DraftIconButton onClick={() => setDraftOpen(true)} />}
+                </div>
+              }
               onSubmit={handleSubmit}
               onSelfAssess={handleSelfAssess}
               onFinish={handleFinish}
@@ -206,6 +213,7 @@ export default function VariationRunPage() {
               onClose={(answered) => setExitConfirm({ open: true, answered })}
             />
           </div>
+          {/* DOM 顺序：DraftPanel 必须排在 DiscussDrawer 之前（面板内 canvas 是 absolute，抽屉要盖住它） */}
           {draftOpen && currentQ && (
             <DraftPanel
               questionId={currentQ.n}
@@ -215,11 +223,6 @@ export default function VariationRunPage() {
           )}
         </div>
 
-        {/* 导出与草稿入口：背景层右上角 absolute（DOM 顺序说明同 RemediationRunPage） */}
-        <div className="absolute top-4 right-4 flex items-center gap-2">
-          <PrintIconButton onClick={() => setPrintOpen(true)} />
-          {!draftOpen && <DraftIconButton onClick={() => setDraftOpen(true)} />}
-        </div>
         {discussQ && (
           <DiscussDrawer
             mode="training"
