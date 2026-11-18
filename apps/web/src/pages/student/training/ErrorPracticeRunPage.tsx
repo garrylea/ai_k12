@@ -23,7 +23,9 @@ import {
 } from '@/services/api';
 import { normalizeOptions } from './normalizeOptions';
 import { usePointsFeedback } from './points-feedback';
-import { parseSubjectId } from '@/constants';
+import { parseSubjectId, subjectName } from '@/constants';
+import { PrintIconButton } from '@/components/business/print/PrintIconButton';
+import { PrintPreview } from '@/components/business/print/PrintPreview';
 
 /** 列表页写入的题单键（读后即删，防止刷新后重复进入旧题单）。 */
 const SESSION_KEY = 'training:errors';
@@ -43,6 +45,7 @@ export default function ErrorPracticeRunPage() {
   const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
   // 页面级草稿抽屉：始终可见图标，切题即清空（草稿不保存）
   const [draftOpen, setDraftOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
   const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
   // 退出确认（X 按钮）：answered 由 QuestionRunner 传出
   const [exitConfirm, setExitConfirm] = useState<{ open: boolean; answered: number }>({ open: false, answered: 0 });
@@ -252,6 +255,7 @@ export default function ErrorPracticeRunPage() {
                   return res.explanation;
                 }}
                 onClose={() => navigate(`/student/training/errors${subjectQuery}`)}
+                onExport={() => setPrintOpen(true)}
               />
             </div>
           </div>
@@ -259,7 +263,7 @@ export default function ErrorPracticeRunPage() {
           <>
             {/* 答题区与草稿面板并排：草稿占真实空间（不再是浮层遮挡），答题列随之被挤窄 */}
             <div className="flex-1 min-h-0 flex">
-              <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+              <div className="relative flex-1 min-w-0 min-h-0 flex flex-col">
                 <QuestionRunner
                   questions={questions}
                   subjectId={subjectId}
@@ -288,7 +292,13 @@ export default function ErrorPracticeRunPage() {
                   onQuestionChange={setCurrentQ}
                   onClose={(answered) => setExitConfirm({ open: true, answered })}
                 />
+                {/* 导出常驻；草稿按钮随面板开合。锚在答题列右上角 → 草稿面板展开时随列左移，不会压住面板收起钮 */}
+                <div className="absolute top-0 right-0 flex items-center gap-2">
+                  <PrintIconButton onClick={() => setPrintOpen(true)} />
+                  {!draftOpen && <DraftIconButton onClick={() => setDraftOpen(true)} />}
+                </div>
               </div>
+              {/* DOM 顺序：DraftPanel 必须排在 DiscussDrawer 之前（面板内 canvas 是 absolute，抽屉要盖住它） */}
               {draftOpen && currentQ && (
                 <DraftPanel
                   questionId={currentQ.n}
@@ -297,15 +307,6 @@ export default function ErrorPracticeRunPage() {
                 />
               )}
             </div>
-            {/* 草稿入口：页面背景层右上角 absolute 定位，仅面板收起时显示（展开时面板头部自带收起按钮）。
-                DOM 顺序：草稿这行必须排在 DiscussDrawer 之前——DraftPanel 内里的 canvas 是 absolute，
-                同层 z-index:auto 的定位元素按 DOM 序绘制，排在后面的一方才压在上面（讨论抽屉要盖住面板）；
-                图标则在 DiscussDrawer 之前，抽屉才能盖住它、关闭钮才可点。 */}
-            {!draftOpen && (
-              <div className="absolute top-4 right-4">
-                <DraftIconButton onClick={() => setDraftOpen(true)} />
-              </div>
-            )}
             {discussQ && phase === 'answering' && (
               <DiscussDrawer
                 mode="training"
@@ -343,6 +344,12 @@ export default function ErrorPracticeRunPage() {
             </div>
           </Modal>
         )}
+        <PrintPreview
+          open={printOpen}
+          questions={questions}
+          meta={{ subject: subjectName(subjectId) }}
+          onClose={() => setPrintOpen(false)}
+        />
         {/* 浏览器返回/路由跳转拦截（X 确认已同步置 guardRef.current=false 故不二次弹） */}
         <RunExitGuard
           guardRef={guardRef}

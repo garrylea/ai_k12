@@ -4,6 +4,8 @@ import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import type { RunnerQuestion } from '@/components/business/answer/types';
 import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
+import { PrintIconButton } from '@/components/business/print/PrintIconButton';
+import { PrintPreview } from '@/components/business/print/PrintPreview';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import { Modal, PageHeader } from '@/components/base';
 import { toast } from '@/components/base/Toast';
@@ -37,6 +39,7 @@ export default function RemediationRunPage() {
   // 页面级草稿抽屉：始终可见图标，切题即清空；currentQ 由 QuestionRunner.onQuestionChange 喂
   const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
   const [draftOpen, setDraftOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
   const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
   // 退出确认（X 按钮）：answered 由 QuestionRunner 传出
   const [exitConfirm, setExitConfirm] = useState<{ open: boolean; answered: number }>({
@@ -193,7 +196,7 @@ export default function RemediationRunPage() {
 
         {/* 答题区与草稿面板并排：草稿占真实空间，答题列随之被挤窄 */}
         <div className="flex-1 min-h-0 flex">
-          <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+          <div className="relative flex-1 min-w-0 min-h-0 flex flex-col">
             <QuestionRunner
               key={round}
               questions={questions}
@@ -211,7 +214,13 @@ export default function RemediationRunPage() {
               onQuestionChange={setCurrentQ}
               onClose={(answered) => setExitConfirm({ open: true, answered })}
             />
+            {/* 导出常驻；草稿按钮随面板开合。锚在答题列右上角 → 草稿面板展开时随列左移，不会压住面板收起钮 */}
+            <div className="absolute top-0 right-0 flex items-center gap-2">
+              <PrintIconButton onClick={() => setPrintOpen(true)} />
+              {!draftOpen && <DraftIconButton onClick={() => setDraftOpen(true)} />}
+            </div>
           </div>
+          {/* DOM 顺序：DraftPanel 必须排在 DiscussDrawer 之前（面板内 canvas 是 absolute，抽屉要盖住它） */}
           {draftOpen && currentQ && (
             <DraftPanel
               questionId={currentQ.n}
@@ -221,14 +230,6 @@ export default function RemediationRunPage() {
           )}
         </div>
 
-        {/* 草稿入口：背景层右上角 absolute，仅面板收起时显示。
-            DOM 顺序：草稿这行必须排在 DiscussDrawer 之前——讨论抽屉要盖住它、关闭钮才可点
-            （同 TargetedRunPage 的层级说明）。 */}
-        {!draftOpen && (
-          <div className="absolute top-4 right-4">
-            <DraftIconButton onClick={() => setDraftOpen(true)} />
-          </div>
-        )}
         {discussQ && (
           <DiscussDrawer
             mode="training"
@@ -263,6 +264,13 @@ export default function RemediationRunPage() {
             </div>
           </Modal>
         )}
+
+        <PrintPreview
+          open={printOpen}
+          questions={questions}
+          meta={{ subject: '数学' }}
+          onClose={() => setPrintOpen(false)}
+        />
 
         {/* 浏览器返回/路由跳转拦截（X 确认已同步置 guardRef.current=false 故不二次弹） */}
         <RunExitGuard

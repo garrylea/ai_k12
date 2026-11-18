@@ -1,0 +1,142 @@
+/* 专项练习导出 PDF：屏幕预览 + A4 打印。
+   纸面 portal 到 body（#root 之外），拿不到主题 token，必须自带一套颜色变量。 */
+
+.print-portal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow: auto;
+  background: rgba(15, 23, 42, 0.45);
+  padding-bottom: 12mm;
+}
+
+.print-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 16px;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.print-toolbar-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.print-toolbar-actions { display: flex; gap: 8px; }
+
+.print-btn {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.print-btn:hover { background: #f9fafb; }
+.print-btn--primary { border-color: #111827; background: #111827; color: #fff; }
+.print-btn--primary:hover { background: #1f2937; }
+
+.print-scroll { display: block; padding: 8mm 4mm; }
+
+.print-sheet {
+  --text-primary: #111;
+  --text-secondary: #444;
+  --bg-subtle: #d4d4d4;
+  --bg-base: #fff;
+  --bg-page: #fff;
+  --brand-500: #111;
+  --learn-card-bg: #fff;
+  --learn-card-border: #ddd;
+  --text-tertiary: #666;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  box-sizing: border-box;
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 14mm 12mm;
+  background: #fff;
+  color: var(--text-primary);
+  font-size: 10.5pt;
+  line-height: 1.75;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+
+.print-sheet .md-prose { color: var(--text-primary); }
+.print-sheet .md-prose img { max-width: 100%; height: auto; break-inside: avoid; }
+
+.print-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8mm;
+  padding-bottom: 2mm;
+  margin-bottom: 5mm;
+  border-bottom: 0.5pt solid #999;
+  font-size: 9pt;
+  color: #333;
+}
+
+.print-q { margin: 0 0 6mm; break-inside: avoid; }
+.print-q-body { display: flex; gap: 2mm; }
+.print-q-no { flex: 0 0 7mm; text-align: right; font-weight: 600; }
+.print-q-main { flex: 1 1 auto; min-width: 0; }
+
+.print-material {
+  margin: 0 0 2.5mm;
+  padding-left: 3mm;
+  border-left: 2px solid #bbb;
+  color: #333;
+}
+
+.print-sheet .print-options { list-style: none; margin: 1.5mm 0 0; padding: 0 0 0 9mm; }
+.print-sheet .print-option { display: flex; gap: 2mm; margin-bottom: 1mm; break-inside: avoid; }
+.print-opt-label { flex: 0 0 5mm; font-weight: 600; }
+.print-opt-text { flex: 1 1 auto; min-width: 0; }
+
+.print-answer-blank { margin-left: 9mm; }
+.print-answer-blank--short { height: 24mm; }
+.print-answer-blank--medium { height: 40mm; }
+.print-answer-blank--long { height: 52mm; }
+
+.print-sheet table { width: 100%; border-collapse: collapse; }
+.print-sheet th,
+.print-sheet td { border: 0.5pt solid #999; padding: 1mm 2mm; }
+
+/* 预览层打开时锁 body 滚动；打印时必须放开，否则多页会被裁成一页 */
+body.print-open { overflow: hidden; }
+
+@media print {
+  /* 不只隐藏 #root：图片放大浮层等也 portal 到 body，漏掉会印到纸上。
+     仅在预览层打开时生效，否则应用内任意 Cmd/Ctrl+P 会印出空白页。 */
+  body.print-open > *:not(.print-portal) { display: none !important; }
+  body { overflow: visible !important; }
+  .print-portal {
+    position: static;
+    padding: 0;
+    background: #fff;
+    overflow: visible;
+  }
+  .print-toolbar { display: none !important; }
+  .print-scroll { display: block; padding: 0; }
+  .print-sheet {
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  @page { size: A4; margin: 14mm 12mm; }
+}

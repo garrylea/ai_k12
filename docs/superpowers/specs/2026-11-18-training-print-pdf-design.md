@@ -165,7 +165,7 @@ interface PrintMeta {
 | 四个答题页（`TargetedRunPage` / `ErrorPracticeRunPage` / `VariationRunPage` / `RemediationRunPage`） | 右上角 `absolute top-4 right-4` 动作组。该容器现在包在 `{!draftOpen && ...}` 里、只放草稿图标，需拆成**常驻容器**：`导出` 始终渲染，`草稿` 仍随面板开合 | 打开预览层 |
 | `AnswerResultList`（**仅专项 / 错题两页**的结果态；变式与补偿答完直接离开、没有结果弹窗） | 底部按钮区，新增次级按钮「导出 PDF」（`确认` 左侧，`gap-3` 居中） | 打开预览层 |
 
-- 按钮为线性 SVG + 文本「导出」，aria-label「导出 PDF」；题单为空时不渲染（现有页面已在空题单时提前 return，正常不会出现）。
+- 按钮为线性 SVG 图标（与草稿图标同尺寸），`title` / `aria-label` 为「导出 PDF」；题单为空时不渲染（现有页面已在空题单时提前 return，正常不会出现）。入口锚在答题列右上角，草稿面板展开时随列左移，不遮挡面板收起钮。
 - **答题态与结果态都传同一个 `questions`（`RunnerQuestion[]`）**，不要传 `resultQuestions`（缺选项，见 §4.1）。
 - 结果弹窗新增可选 prop `onExport?: () => void`；不传时底部布局与现在完全一致（只有「确认」，`ExamResultPage` 不受影响）。
 - 四个页面各自新增一个 `printOpen` 状态；预览层关闭时回到原页面状态（不改动答题进度、不触发导航守卫）。

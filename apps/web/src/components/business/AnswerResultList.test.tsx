@@ -1,8 +1,9 @@
 // 学生答案里的手绘图在结果页必须能看清（默认题面小图样式会压成 50px 细条）。
 // 注意：本组件还会渲染题面/解析等多处 Markdown —— 用例里只放一张图（在学生答案里），
 // 也不展开「查看解析」，否则 getByRole('img') 会命中多个。
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { AnswerResultList } from './AnswerResultList';
 
 afterEach(() => cleanup());
@@ -92,5 +93,32 @@ describe('AnswerResultList 题号', () => {
     expect(screen.getByTestId('result-qno-2')).toHaveTextContent('2');
     expect(screen.getByTestId('result-qno-3')).toHaveTextContent('3');
     expect(screen.getByTestId('result-qno-5')).toHaveTextContent('5');
+  });
+});
+
+describe('AnswerResultList 导出入口', () => {
+  it('传 onExport 时出现「导出 PDF」并可点击', async () => {
+    const onExport = vi.fn();
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '题面' }]}
+        answers={{ '1': { isCorrect: true, method: 'exact', studentAnswer: 'A' } }}
+        onClose={() => {}}
+        onExport={onExport}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: '导出 PDF' }));
+    expect(onExport).toHaveBeenCalledTimes(1);
+  });
+
+  it('不传 onExport 时不渲染「导出 PDF」', () => {
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '题面' }]}
+        answers={{ '1': { isCorrect: true, method: 'exact', studentAnswer: 'A' } }}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '导出 PDF' })).toBeNull();
   });
 });
