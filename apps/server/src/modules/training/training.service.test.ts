@@ -599,6 +599,68 @@ describe('TrainingService.startTargetedPractice', () => {
     })).rejects.toThrow('题量超过可练题数（当前 1 题）');
     expect(deps.trainingSessionsRepo.create).not.toHaveBeenCalled();
   });
+
+  it('paper 模式：错题在前、未做补足，不足 count 直接 400 且不建会话', async () => {
+    const wrong = { ...questionRow, id: 21, question_no: 24 };
+    const untried = { ...questionRow, id: 22, question_no: 24 };
+    const deps = mk({
+      questionsRepo: {
+        listPaperPositionOptions: vi.fn().mockResolvedValue([
+          { grade: '初三', semester: 'first', question_count: 28, papers: 6 },
+        ]),
+        countPaperPositionQuestions: vi.fn().mockResolvedValue([]),
+        findPaperPositionWrongQuestions: vi.fn().mockResolvedValue([wrong]),
+        findPaperPositionUntriedQuestions: vi.fn().mockResolvedValue([untried]),
+      } as never,
+    });
+    const r = await mkSvc(deps).startTargetedPractice({
+      studentId: 7, subjectId: 1, paperPosition: { grade: '初三', semester: 'first', questionNo: 24 },
+      type: null, count: 2,
+    });
+
+    expect(deps.questionsRepo.findPaperPositionWrongQuestions)
+      .toHaveBeenCalledWith(7, 1, '初三', 'first', 24, 2);
+    expect(deps.questionsRepo.findPaperPositionUntriedQuestions)
+      .toHaveBeenCalledWith(7, 1, '初三', 'first', 24, 1);
+    expect(r.questions.map((q) => q.questionId)).toEqual([21, 22]);
+    expect(deps.trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      task_code: 'math_targeted', tier_key: '2', expected_count: 2,
+      ref_type: 'paper_position', ref_id: 24,
+    }));
+  });
+
+  it('paper 模式：可练数不足 400，不建会话', async () => {
+    const deps = mk({
+      questionsRepo: {
+        listPaperPositionOptions: vi.fn().mockResolvedValue([
+          { grade: '初三', semester: 'first', question_count: 28, papers: 6 },
+        ]),
+        countPaperPositionQuestions: vi.fn().mockResolvedValue([]),
+        findPaperPositionWrongQuestions: vi.fn().mockResolvedValue([]),
+        findPaperPositionUntriedQuestions: vi.fn().mockResolvedValue([{ ...questionRow, id: 21 }]),
+      } as never,
+    });
+    await expect(mkSvc(deps).startTargetedPractice({
+      studentId: 7, subjectId: 1, paperPosition: { grade: '初三', semester: 'first', questionNo: 24 },
+      type: null, count: 3,
+    })).rejects.toThrow('该题号可练题数不足（当前 1 题）');
+    expect(deps.trainingSessionsRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('paper 模式：题号超出常见卷长 400', async () => {
+    const deps = mk({
+      questionsRepo: {
+        listPaperPositionOptions: vi.fn().mockResolvedValue([
+          { grade: '初三', semester: 'first', question_count: 28, papers: 6 },
+        ]),
+        countPaperPositionQuestions: vi.fn().mockResolvedValue([]),
+      } as never,
+    });
+    await expect(mkSvc(deps).startTargetedPractice({
+      studentId: 7, subjectId: 1, paperPosition: { grade: '初三', semester: 'first', questionNo: 29 },
+      type: null, count: 1,
+    })).rejects.toThrow('题号超出卷面范围（1-28）');
+  });
 });
 
 describe('TrainingService.startTargetedPractice — 建会话（乙类整批发分）', () => {

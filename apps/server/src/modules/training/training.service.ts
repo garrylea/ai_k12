@@ -38,6 +38,7 @@ import {
   type DictationDiffOp,
 } from '../../common/utils/normalize-chinese.util.js';
 import type { ErrorBookEntryDto, ErrorBookQueryDto } from './dto/error-book-query.dto.js';
+import type { QuestionRow } from '../../database/repositories/types.js';
 import type {
   DictationPassageListItem,
   DictationQuestionItem,
@@ -924,13 +925,19 @@ export class TrainingService {
    *
    * **模型微专题（2026-11-15）**：传 `modelSpecial` 时改按模型标签抽题，会话 `ref_type='model'`；
    * 题数不足 `count` 直接 400（模型微专题是定量的「练这组题」，不像 KP 模式可少给几题）。
+   *
+   * **试卷题号（2026-11-18）**：传 `paperPosition` 时按「年级 + 学期 + 题号」抽题，
+   * 该生**错题在前、未做补足**，会话 `ref_type='paper_position'`、`ref_id=题号`；
+   * 可练题数不足 `count` 同样 400（学生指定了题号，少给题等于练了别的卷面）。
    */
   async startTargetedPractice(input: {
     studentId: number;
     subjectId: number;
     kpId?: number | null;
-    /** 模型微专题；与 kpId 二选一，控制器已校验。 */
+    /** 模型微专题；与 kpId / paperPosition 三选一，控制器已校验。 */
     modelSpecial?: ModelSpecial | null;
+    /** 试卷题号；与 kpId / modelSpecial 三选一，控制器已校验。 */
+    paperPosition?: { grade: string; semester: 'first' | 'second'; questionNo: number } | null;
     type: string | null;
     count: number;
   }): Promise<{
@@ -945,22 +952,55 @@ export class TrainingService {
     /** 未抽到题时为 null（没有可完成的会话）。 */
     sessionId: number | null;
   }> {
+    const paperPosition = input.paperPosition ?? null;
+    if (paperPosition) {
+      const meta = await this.listPaperPositions(
+        input.studentId, input.subjectId, paperPosition.grade, paperPosition.semester,
+      );
+      if (meta.typicalQuestionCount == null) {
+        throw new BadRequestException('该年级学期暂无试卷');
+      }
+      if (paperPosition.questionNo < 1 || paperPosition.questionNo > meta.typicalQuestionCount) {
+        throw new BadRequestException(`题号超出卷面范围（1-${meta.typicalQuestionCount}）`);
+      }
+    }
     const modelSpecial = input.modelSpecial ?? null;
-    const rows = modelSpecial
-      ? await this.questionsRepo.findModelSpecialQuestions(
-          input.studentId, input.subjectId, modelSpecial.category,
-          modelSpecial.model, input.count,
-        )
-      : await this.questionsRepo.findRandomByKpAndType(
-          input.studentId,
-          input.subjectId,
-          input.kpId as number,
-          input.type,
-          input.count,
-        );
-    // 模型专项是「这一组题练这个模型」，题数不足就 400，不按 KP 模式降级成少几题。
-    if (modelSpecial && rows.length < input.count) {
-      throw new BadRequestException(`题量超过可练题数（当前 ${rows.length} 题）`);
+    let rows: QuestionRow[];
+    if (paperPosition) {
+      const wrong = await this.questionsRepo.findPaperPositionWrongQuestions(
+        input.studentId, input.subjectId,
+        paperPosition.grade, paperPosition.semester, paperPosition.questionNo, input.count,
+      );
+      const remaining = input.count - wrong.length;
+      const untried = remaining > 0
+        ? await this.questionsRepo.findPaperPositionUntriedQuestions(
+            input.studentId, input.subjectId,
+            paperPosition.grade, paperPosition.semester, paperPosition.questionNo, remaining,
+          )
+        : [];
+      rows = [...wrong, ...untried];
+    } else if (modelSpecial) {
+      rows = await this.questionsRepo.findModelSpecialQuestions(
+        input.studentId, input.subjectId, modelSpecial.category,
+        modelSpecial.model, input.count,
+      );
+    } else {
+      rows = await this.questionsRepo.findRandomByKpAndType(
+        input.studentId,
+        input.subjectId,
+        input.kpId as number,
+        input.type,
+        input.count,
+      );
+    }
+    // 模型专项是「这一组题练这个模型」、试卷题号是「这个题号的题全练」，
+    // 题数不足都直接 400，不按 KP 模式降级成少几题。
+    if ((modelSpecial || paperPosition) && rows.length < input.count) {
+      throw new BadRequestException(
+        paperPosition
+          ? `该题号可练题数不足（当前 ${rows.length} 题）`
+          : `题量超过可练题数（当前 ${rows.length} 题）`,
+      );
     }
     const questions = rows.map((q) => ({
       questionId: q.id,
@@ -984,8 +1024,8 @@ export class TrainingService {
           subject_id: input.subjectId,
           tier_key: String(input.count),
           expected_count: rows.length,
-          ref_type: modelSpecial ? 'model' : 'question',
-          ref_id: null,
+          ref_type: paperPosition ? 'paper_position' : modelSpecial ? 'model' : 'question',
+          ref_id: paperPosition ? paperPosition.questionNo : null,
         });
       } catch (err) {
         this.logger.warn(
