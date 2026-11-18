@@ -1,7 +1,7 @@
 # 专项练习导出 PDF — 设计
 
 > **日期**：2026-11-18
-> **状态**：需求与 5 个口径已与用户确认（§3），本文待用户审阅后转 writing-plans。
+> **状态**：需求与 5 个口径已与用户确认（§3）；2026-11-18 完成实现可行性评审并修正（§4.1 / §4.1.1 / §5 / §6.1），本文待用户确认后转 writing-plans。
 > **范围锚点**：学生端训练轨四个答题页（专项 / 错题 / 变式 / 补偿相似题）导出当前题单为 PDF。
 > **上游**：2026-11-18 brainstorming 会话；本文是导出内容、版式、入口与保存方式的唯一真源。
 
@@ -29,7 +29,7 @@
 
 - 新增可复用的 A4 打印纸面组件与全屏预览层
 - 四个答题页右上角动作区加「导出」入口（与草稿图标同组）
-- 结果弹窗 `AnswerResultList` 底部加「导出 PDF」按钮（做完后仍可导）
+- 结果弹窗 `AnswerResultList` 底部加「导出 PDF」按钮（仅专项 / 错题两页有结果弹窗；做完后仍可导）
 - 新增打印样式：A4 纵向、强制白底黑字、题目尽量不被分页截断
 - 保存位置由系统打印面板的「另存为 PDF」完成（Web / PC App 一致）
 
@@ -64,12 +64,25 @@
 ```ts
 interface PrintMeta {
   subject?: string;   // 学科名，如「数学」
-  title?: string;     // 专项名，如「一元二次方程」；缺省用「{subject}练习」
+  title?: string;     // 可选页眉标题；缺省按「{subject}专项 · {N} 题」拼
   date?: string;      // YYYY-MM-DD，缺省取当天
 }
 ```
 
 不新增接口、不改 DTO；四个页面把已构造好的 `RunnerQuestion[]` 直接传入。
+
+**必须传 `questions`，不能传 `resultQuestions`**（评审修正）：`resultQuestions` 是 `AnswerResultList` 的专用形状，专项页缺 `options`（`TargetedRunPage.tsx:145`）、错题页连 `material` 都没有（`ErrorPracticeRunPage.tsx:119`）；拿它导出会丢选项。导出内容与作答进度无关，答到一半和做完后都用同一个 `questions`。
+
+### 4.1.1 各页数据可得性（2026-11-18 实测）
+
+| 页面 | `options` | `material` | `type` | 备注 |
+|---|---|---|---|---|
+| `TargetedRunPage` | 有（`normalizeOptions`） | 有（`materialText`，语文共享材料靠它） | 有 | 唯一材料完整的页面 |
+| `ErrorPracticeRunPage` | 有 | **无**（`TrainingErrorBookEntry` 不含材料字段） | 有 | 错题打印将没有共享材料 |
+| `VariationRunPage` | 有 | **无**（`TrainingVariationItem` 不含材料字段） | 有 | 同上 |
+| `RemediationRunPage` | 有 | **无** | 有 | 同上 |
+
+材料缺失是**后端 DTO 没返回**，不是前端丢字段。本期接受这一限制（数学题材料恒为 null，影响面小）；若以后语文错题需要在导出里带材料，再扩错题/变式/补偿三个接口。
 
 ### 4.2 渲染规则
 
@@ -79,12 +92,13 @@ interface PrintMeta {
 | 材料 | **仅相邻**两题 `material` 字符串完全相同才合并，只印一次；不跨不相邻去重（避免不同文段顺序错乱） |
 | 选项 | `options` 存在且非空时，按 `A/B/C/D...` 前缀逐行打印；选项文本走同一 Markdown/KaTeX 渲染 |
 | 作答留白 | `choice` / `multi_choice` / `true_false`：不留额外空白（只印选项）；`fill_blank`：24mm；`short_answer` / `proof` / `calculation`：52mm；未知或缺失类型：40mm |
-| 题面 | 走 `preprocessMarkdown` + 与答题页相同的 remark/rehype 插件集，确保公式、表格、图片与屏幕一致 |
+| 题面 | 走 `preprocessMarkdown` + 与答题页相同的 remark/rehype 插件集；材料走 `preprocessMaterialMarkdown`；**组件用 `markdownComponents`，不用 `draggableQuestionMarkdownComponents`**（后者带拖拽草稿行为，打印不需要） |
 | 答案 / 解析 | 不渲染 |
 
 ### 4.3 页眉与页脚
 
-- 页眉一行：左侧 `学科 · 专项名`，右侧日期；下方 0.5pt 细线。
+- 页眉一行：左侧 `{学科}专项 · {N} 题`，右侧日期；下方 0.5pt 细线。
+- **不显示知识点名**：配置页写交接体时没带 `title`，运行页只有 `questionId` 列表。为了不把 `runTitle` 改掉（它会进发分文案和练习记录标题），四个页面本期都**不传** `meta.title`；要印知识点名另开小改。
 - 不印姓名 / 班级 / 分数（用户选的是标准版式，不是正式卷子）。
 - 不自行排页码（浏览器打印面板的页眉页脚由用户决定，见 §6.3）。
 
@@ -96,10 +110,12 @@ interface PrintMeta {
 
 | 文件 | 职责 |
 |---|---|
-| `apps/web/src/components/business/print/PrintPaper.tsx` | 纯展示：`PrintMeta` + `RunnerQuestion[]` → A4 纸面 DOM（`.print-sheet`） |
-| `apps/web/src/components/business/print/PrintPreview.tsx` | `createPortal` 到 `document.body` 的全屏预览层（`.print-portal`）+ 工具栏；对外只暴露 `{ open, meta, questions, onClose }` |
-| `apps/web/src/components/business/print/usePrint.ts` | 打印动作：等待纸面图片 decode（最长 3s）→ `window.print()`；无副作用、不抛错 |
-| `apps/web/src/styles/print.css` | 屏幕预览样式 + `@media print` + `@page`；在 `main.tsx` 与 `global.css` 一起引入 |
+| `apps/web/src/components/business/print/PrintPaper.tsx` | 纯展示：`PrintMeta` + `RunnerQuestion[]` → A4 纸面 DOM（`.print-sheet`）；`forwardRef` 暴露根节点给打印动作等图片加载 |
+| `apps/web/src/components/business/print/PrintPreview.tsx` | `createPortal` 到 `document.body` 的全屏预览层（`.print-portal`）+ 工具栏；对外只暴露 `{ open, meta, questions, onClose }`；打开时锁 `body` 滚动、`Esc` 关闭 |
+| `apps/web/src/components/business/print/usePrint.ts` | `usePdfPrint(ref)`：对纸面内所有 `img` 调 `decode()`，`Promise.race` 3s 超时 → `window.print()`；无副作用、不抛错 |
+| `apps/web/src/styles/print.css` | 屏幕预览样式 + `@media print` + `@page`；在 `main.tsx` 的 `global.css` 之后引入 |
+
+四个页面各自新增 `printOpen` 状态，并把 `<PrintPreview>` 挂在**页面根节点**（不在 `phase === 'result'` 分支里），这样答题态和结果态都能覆盖。
 
 ### 5.2 预览层结构
 
@@ -110,11 +126,13 @@ interface PrintMeta {
   │    └─ 右：「导出 PDF」主按钮 / 「关闭」次级按钮
   └─ .print-sheet (210mm 宽, 白底, 14mm/12mm 内边距, 屏幕态带阴影)
        └─ .print-doc
-            ├─ .print-head (学科 · 专项名 / 日期)
+            ├─ .print-head (学科专项 · N 题 / 日期)
             └─ .print-q × N（每题 break-inside: avoid）
 ```
 
 用 portal 的原因：答题页根节点是 `h-screen` + `overflow` 容器，结果弹窗还带 `max-h-[80vh]` + 内部滚动；直接把纸面渲染在页面里会被裁切。
+
+窄屏（< 900px）预览：`.print-sheet` 按 `width: 210mm` 固定、外层横向滚动，**不用 `transform: scale`**（缩放会让屏幕字号与打印不一致，预览失真）。打印态不受影响。
 
 ### 5.3 打印样式要点
 
@@ -122,15 +140,17 @@ interface PrintMeta {
 @page { size: A4; margin: 14mm 12mm; }
 
 @media print {
-  body > #root { display: none !important; }
+  /* 不只隐藏 #root：图片放大浮层等也 portal 到 body，漏掉会印到纸上 */
+  body > *:not(.print-portal) { display: none !important; }
   .print-portal { position: static; background: #fff; overflow: visible; }
   .print-toolbar { display: none !important; }
   .print-sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
 }
 ```
 
-- 字体：正文 10.5pt / 行高 1.75；页眉 9pt；专项名 13pt 粗体。
-- 强制白底黑字：在 `.print-sheet` 内覆盖主题 token（`--text-primary:#111`、`--text-secondary:#444`、`--learn-card-bg:#fff`、`--learn-card-border:#ddd` 等），保证夜间模式导出仍是白纸。
+- 字体：正文 10.5pt / 行高 1.75；页眉 9pt。
+- 强制白底黑字：`.print-sheet` 在 `#root` 之外，拿不到主题 CSS 变量，必须**自带一套**（`--text-primary:#111`、`--text-secondary:#444`、`--bg-subtle:#d4d4d4`、`--brand-500:#111`、`--learn-card-bg:#fff`、`--learn-card-border:#ddd`），保证夜间模式导出仍是白纸。
+- **不依赖底色表达层次**：浏览器打印默认 `printBackground=false`（打印面板同理），浅色块不会印出来；材料/题目层次只用边框与字重。
 - 图片：`max-width:100%; height:auto; break-inside: avoid;`；表格 `thead` 跨页重复。
 - 题目块 `break-inside: avoid`；单题超过一页时允许自然分页（Chromium 行为，不做特殊处理）。
 
@@ -143,11 +163,11 @@ interface PrintMeta {
 | 页面 | 位置 | 触发 |
 |---|---|---|
 | 四个答题页（`TargetedRunPage` / `ErrorPracticeRunPage` / `VariationRunPage` / `RemediationRunPage`） | 右上角 `absolute top-4 right-4` 动作组。该容器现在包在 `{!draftOpen && ...}` 里、只放草稿图标，需拆成**常驻容器**：`导出` 始终渲染，`草稿` 仍随面板开合 | 打开预览层 |
-| `AnswerResultList`（四个页面的结果态） | 底部按钮区，新增次级按钮「导出 PDF」（`确认` 左侧，`gap-3` 居中） | 打开预览层 |
+| `AnswerResultList`（**仅专项 / 错题两页**的结果态；变式与补偿答完直接离开、没有结果弹窗） | 底部按钮区，新增次级按钮「导出 PDF」（`确认` 左侧，`gap-3` 居中） | 打开预览层 |
 
 - 按钮为线性 SVG + 文本「导出」，aria-label「导出 PDF」；题单为空时不渲染（现有页面已在空题单时提前 return，正常不会出现）。
-- 结果态传入的是页面已有的 `resultQuestions`（同为 `RunnerQuestion[]`）。
-- 结果弹窗新增可选 prop `onExport?: () => void`；不传时底部布局与现在完全一致（只有「确认」）。
+- **答题态与结果态都传同一个 `questions`（`RunnerQuestion[]`）**，不要传 `resultQuestions`（缺选项，见 §4.1）。
+- 结果弹窗新增可选 prop `onExport?: () => void`；不传时底部布局与现在完全一致（只有「确认」，`ExamResultPage` 不受影响）。
 - 四个页面各自新增一个 `printOpen` 状态；预览层关闭时回到原页面状态（不改动答题进度、不触发导航守卫）。
 
 ### 6.2 预览层状态机
@@ -170,11 +190,13 @@ interface PrintMeta {
 | 场景 | 处理 |
 |---|---|
 | 图片未加载完就打印 | `usePrint` 对纸面内所有 `img` 调 `decode()`，`Promise.race` 3s 超时后照常打印（缺图不阻塞整份导出） |
+| 图片加载失败（404） | `MarkdownImg` 现有的 `onError` 会隐藏破图；打印不额外处理 |
 | 用户取消打印 | 无副作用，预览层保持打开 |
-| 公式超宽 | `.katex-display` 允许溢出滚动在屏幕态；打印态按正常换行，不做裁剪 |
+| 公式超宽 | 屏幕态允许横向滚动；打印态按正常换行，不做裁剪 |
 | `material` 相同但不连续 | 各自独立打印（规则见 §4.2） |
-| 夜间模式 / 家长主题 | 纸面内 token 强制覆盖，输出恒为白底黑字 |
+| 夜间模式 / 家长主题 | `.print-sheet` 自带 token，不与页面主题耦合，输出恒为白底黑字 |
 | 预览层嵌套滚动 | portal 在 body 下、`position: fixed`，不受页面 `overflow:hidden` 影响 |
+| 打印时草稿面板 / 图片放大浮层开着 | `body > *:not(.print-portal)` 一并隐藏，不会印到纸上 |
 
 ---
 
@@ -183,6 +205,7 @@ interface PrintMeta {
 | 层级 | 内容 |
 |---|---|
 | 渲染测试 `PrintPaper.test.tsx` | ① 3 道题 → 题号连续 1/2/3；② 相邻同材料只出现一次、不相邻同材料出现两次；③ 选择题打印 A/B/C/D 且无留白块；④ `fill_blank` / `short_answer` 渲染对应 `data-testid="answer-space"` 高度类；⑤ 不渲染答案/解析 |
+| 渲染测试 `PrintPreview.test.tsx` | ① `open=false` 不渲染；② 打开后出现「导出 PDF」「关闭」；③ `Esc` 调 `onClose`；④ 点「导出 PDF」调 `window.print`（`vi.spyOn(window, 'print').mockImplementation(() => {})`，jsdom 默认未实现会报错） |
 | 渲染测试 `AnswerResultList` 现有用例 | 不传 `onExport` 时布局不变；传 `onExport` 时出现「导出 PDF」按钮并可点击 |
 | 手工冒烟（必须） | Chrome 打印预览目视：公式、图片、分页、页眉；再在 PC App 内点一次，确认打印面板能弹出 |
 
@@ -209,9 +232,9 @@ interface PrintMeta {
 ## 11. 验收标准
 
 1. 数学专项生成 3 道题后，点右上角「导出」→ 预览显示 3 道题 → 点「导出 PDF」→ 系统打印面板 → 另存为 PDF → 文件可选保存目录，打开后公式与图片清晰、白底黑字、题号连续。
-2. 答完题进入结果弹窗后，仍能从底部导出同一份题单。
-3. 物理/化学/道法/语文知识点专项、中考模型、试卷题号、薄弱点、同类型、错题、变式、补偿相似题各入口均能导出，内容与当前题单一致。
-4. 语文共享材料的连续两题，材料只出现一次。
+2. 专项、错题两页答完进入结果弹窗后，仍能从底部导出同一份题单（变式/补偿没有结果弹窗，用顶栏入口）。
+3. 物理/化学/道法/语文知识点专项、中考模型、试卷题号、薄弱点、同类型、错题、变式、补偿相似题各入口均能导出，内容与当前题单一致（错题/变式/补偿不含共享材料，见 §4.1.1）。
+4. 语文专项里共享同一段材料的连续两题，材料只出现一次。
 5. 夜间模式下导出，PDF 仍是白底黑字。
 6. 导出的 PDF 不含答案与解析。
 7. PC App 内点「导出 PDF」能弹出打印面板（若不能，记录现象并按 §9 升级处理）。
