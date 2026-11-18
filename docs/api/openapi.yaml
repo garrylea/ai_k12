@@ -6307,10 +6307,48 @@ paths:
                             items:
                               $ref: '#/components/schemas/TrainingModelSpecial'
 
+  /training/paper-positions:
+    get:
+      tags: [Training]
+      summary: 试卷题号选项与题号清单
+      description: >-
+        student JWT。subjectId 仅支持 1（数学），否则 400。grade 与 semester 必须同时出现；
+        semester 仅 first/second。typicalQuestionCount 是该年级学期卷面题数的众数（并列取较大），
+        positions 固定为 1..该值，无题题号三个数都为 0。
+      operationId: listPaperPositions
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: subjectId
+          required: true
+          schema: { type: integer, enum: [1] }
+        - in: query
+          name: grade
+          required: false
+          schema: { type: string }
+        - in: query
+          name: semester
+          required: false
+          schema: { type: string, enum: [first, second] }
+      responses:
+        '200':
+          description: 选项与题号清单
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PaperPositionsResult'
+        '400':
+          description: 非数学 / grade 与 semester 只给一个 / 组合不存在
+
   /training/targeted/start:
     post:
       tags: [Training]
-      summary: 专项练习开练（按知识点或中考模型抽题）
+      summary: 专项练习开练（按知识点、中考模型或试卷题号抽题）
       description: >-
         专项练习配置完成后开练（student JWT）。KP 模式 count 限 1-20、type 白名单
         choice|fill_blank|true_false|short_answer|proof|calculation 或 null（不限题型，
@@ -6322,6 +6360,10 @@ paths:
         请求体不变；题池排除后为空时返回 { questions: [] }。
         模型微专题模式（传 category+model 代替 kpId）：仅 subjectId=1，type 必须 null，
         count 只能 1/2，题单按 q.id ASC，会话 ref_type='model'。
+        试卷题号模式（传 paperQuestionNo+grade+semester 代替 kpId）：仅 subjectId=1，
+        type 必须 null，题号 1..typicalQuestionCount；未清错题同题号优先（level 降序、
+        同级别最近入本在前），不足用从未做过的同题号题补足，仍不足 400；
+        会话 ref_type='paper_position'、ref_id=题号。
       operationId: startTargetedPractice
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -11150,15 +11192,43 @@ components:
         modelName: { type: string, example: 倍长中线 }
         questionCount: { type: integer, example: 2 }
 
+    PaperPositionsResult:
+      type: object
+      properties:
+        options:
+          type: array
+          items:
+            type: object
+            properties:
+              grade: { type: string }
+              semester: { type: string, enum: [first, second] }
+              paperCount: { type: integer }
+              typicalQuestionCount: { type: integer }
+        grade: { type: string, nullable: true }
+        semester: { type: string, nullable: true, enum: [first, second] }
+        typicalQuestionCount: { type: integer, nullable: true }
+        positions:
+          type: array
+          items:
+            type: object
+            properties:
+              questionNo: { type: integer }
+              total: { type: integer }
+              wrongCount: { type: integer }
+              untriedCount: { type: integer }
+
     TargetedStartRequest:
       type: object
       required: [subjectId, type, count]
-      description: kpId 与 category+model 二选一；模型模式 type 必须 null、count 只能 1/2。
+      description: kpId / category+model / paperQuestionNo+grade+semester 三选一；模型与 paper 模式 type 必须 null。
       properties:
         subjectId: { type: integer }
         kpId: { type: integer, description: 知识点 id；与 category+model 二选一 }
         category: { type: string, description: 模型大类 code；必须与 model 同时出现 }
         model: { type: string, description: 模型 code；必须与 category 同时出现 }
+        paperQuestionNo: { type: integer, description: 卷面题号；必须与 grade、semester 同时出现 }
+        grade: { type: string, description: 年级；必须与 semester、paperQuestionNo 同时出现 }
+        semester: { type: string, enum: [first, second], description: 学期 }
         type:
           type: string
           nullable: true
