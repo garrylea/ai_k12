@@ -19,7 +19,7 @@
 
 **改动文件**：`apps/server/src/database/repositories/questions.repo.ts`（4 个查询）、`apps/server/src/modules/training/training.service.ts`、`training.controller.ts`、`apps/web/src/services/api.ts`、`apps/web/src/pages/student/training/PaperPositionPanel.tsx`、`TargetedConfigPage.tsx`；API 文档 §4.18/§5 与 `docs/api/openapi.yaml` 同步。
 
-**验证**：`apps/server` `npm test` 202 files / 2727 tests 全绿；`apps/web` `npm test` 183 files / 1781 tests 全绿 + `npm run build` 通过。只读 SQL 冒烟（主库 `ai_k12`）：subject_id=1 选项 6 组（初三上 28×4 卷 / 21×1 / 29×1，初三下 28×7 / 26×1，众数均 28）；student_id=1 初三上返回 29 个题号，第 24 题 `total=5 / wrong=0 / untried=5`，未做补足查询 `LIMIT 2` 命中 id 5031、6638；student_id=7 同题号错题池 `LIMIT 2` 命中 id 6638（level=1）。
+**验证**：`apps/server` `npm test` 202 files / 2727 tests 全绿；`apps/web` `npm test` 183 files / 1781 tests 全绿 + `npm run build` 通过。只读 SQL 冒烟（主库 `ai_k12`）：subject_id=1 选项 6 组（初三上 28×4 卷 / 21×1 / 29×1，初三下 28×7 / 26×1，众数均 28）；student_id=1 初三上 `countPaperPositionQuestions` 返回 29 行（question_no 1..29），接口清单只出 1..28（`typicalQuestionCount=28`，第 29 题号仅 29 题卷独有故不出现），第 24 题 `total=5 / wrong=0 / untried=5`，未做补足查询 `LIMIT 2` 命中 id 5031、6638；student_id=7 同题号错题池 `LIMIT 2` 命中 id 6638（level=1）。
 
 **已知限制**：① 题号只近似同题型——按「卷面题位」抽题，不承诺题型严格一致（361/362/356 三张卷的 24 题分别是实际应用/二次函数）；② 错题级别 ≠ 次数——`level` 只在清零后重做再错时 +1，同级别按最近进入错题本时间排序（非最近答错时间）；③ 卷长取众数（并列取较大），29 题卷独有的第 29 题不出现在清单里；④ 只做数学，非数学 400。
 

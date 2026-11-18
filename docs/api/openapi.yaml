@@ -6343,7 +6343,7 @@ paths:
                       data:
                         $ref: '#/components/schemas/PaperPositionsResult'
         '400':
-          description: 非数学 / grade 与 semester 只给一个 / 组合不存在
+          description: 非数学 / grade 与 semester 只给一个 / semester 非法值（`semester 仅允许 first | second`） / 组合不存在
 
   /training/targeted/start:
     post:
@@ -11233,12 +11233,12 @@ components:
           type: string
           nullable: true
           enum: [choice, fill_blank, true_false, short_answer, proof, calculation]
-          description: 题型过滤；模型模式必须 null
+          description: 题型过滤；模型模式与试卷题号模式必须 null
         count:
           type: integer
           minimum: 1
           maximum: 20
-          description: 模型模式必须是家长已开启档位，且不超过该模型可练数
+          description: 模型模式与试卷题号模式都必须是家长已开启的档位，且不超过可练数（模型模式为该模型可练数，试卷题号模式为该题号可练数）
 
     TargetedStartResult:
       type: object
