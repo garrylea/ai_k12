@@ -322,4 +322,36 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(params).toEqual([7, 1, 7, 1, 7, 7, 7, 1, '初三', 'first', 7, 1]);
     expect(rows[0].wrong_count).toBe(2);
   });
+
+  it('findPaperPositionWrongQuestions：JOIN 未清错题本 + level 降序 + LIMIT ?', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    await repo.findPaperPositionWrongQuestions(7, 1, '初三', 'first', 24, 3);
+
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('JOIN main_error_books meb');
+    expect(sql).toContain('meb.is_cleared = 0');
+    expect(sql).toContain('MIN(pq.question_no) AS question_no');
+    expect(sql).toContain('GROUP BY q.id');
+    expect(sql).toContain('ORDER BY wrong_level DESC, last_wrong_at DESC, q.id ASC');
+    expect(sql).toContain('LIMIT ?');
+    expect(params).toEqual([7, 1, 1, '初三', 'first', 24, 7, 1, 3]);
+  });
+
+  it('findPaperPositionUntriedQuestions：排除三张作答表 + 错题本 + hidden', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    await repo.findPaperPositionUntriedQuestions(7, 1, '初三', 'first', 24, 2);
+
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('NOT EXISTS (');
+    expect(sql).toContain('FROM special_answer_records sar');
+    expect(sql).toContain('FROM exam_answers ea');
+    expect(sql).toContain('FROM practice_results pr');
+    expect(sql).toContain('FROM main_error_books meb');
+    expect(sql).toContain('FROM student_hidden_questions shq');
+    expect(sql).toContain('ORDER BY q.id ASC');
+    expect(sql).toContain('LIMIT ?');
+    expect(params).toEqual([1, '初三', 'first', 24, 7, 1, 7, 1, 7, 7, 7, 2]);
+  });
 });

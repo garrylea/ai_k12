@@ -356,6 +356,91 @@ export class QuestionsRepository {
     return rows as PaperPositionCountRow[];
   }
 
+  /** 错题优先池：未清错题本中的同题号题，level 高→低、同级别最近答错在前。 */
+  async findPaperPositionWrongQuestions(
+    studentId: number,
+    subjectId: number,
+    grade: string,
+    semester: string,
+    questionNo: number,
+    limit: number,
+  ): Promise<QuestionRow[]> {
+    const sql = `SELECT q.*, MIN(pq.question_no) AS question_no,
+        MAX(meb.level) AS wrong_level, MAX(meb.created_at) AS last_wrong_at
+      FROM paper_questions pq
+      JOIN exam_papers p ON p.id = pq.paper_id
+      JOIN questions q ON q.id = pq.question_id
+      JOIN main_error_books meb ON meb.question_id = q.id
+        AND meb.student_id = ? AND meb.subject_id = ? AND meb.is_cleared = 0
+      WHERE p.subject_id = ? AND p.grade = ? AND p.semester = ? AND pq.question_no = ?
+        AND q.is_active = 1 AND q.answer <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM student_hidden_questions shq
+          WHERE shq.student_id = ? AND shq.subject_id = ? AND shq.question_id = q.id
+        )
+      GROUP BY q.id
+      ORDER BY wrong_level DESC, last_wrong_at DESC, q.id ASC
+      LIMIT ?`;
+    // pool.query：LIMIT ? 不能走 execute 的 server-side prepare（仓库既有约定）。
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      sql,
+      [studentId, subjectId, subjectId, grade, semester, questionNo, studentId, subjectId, limit],
+    );
+    return rows as QuestionRow[];
+  }
+
+  /** 补足池：不在错题本、且三处都无已判记录的题；id 升序确定性取。 */
+  async findPaperPositionUntriedQuestions(
+    studentId: number,
+    subjectId: number,
+    grade: string,
+    semester: string,
+    questionNo: number,
+    limit: number,
+  ): Promise<QuestionRow[]> {
+    const sql = `SELECT q.*, MIN(pq.question_no) AS question_no
+      FROM paper_questions pq
+      JOIN exam_papers p ON p.id = pq.paper_id
+      JOIN questions q ON q.id = pq.question_id
+      WHERE p.subject_id = ? AND p.grade = ? AND p.semester = ? AND pq.question_no = ?
+        AND q.is_active = 1 AND q.answer <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM student_hidden_questions shq
+          WHERE shq.student_id = ? AND shq.subject_id = ? AND shq.question_id = q.id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM main_error_books meb
+          WHERE meb.student_id = ? AND meb.subject_id = ?
+            AND meb.question_id = q.id AND meb.is_cleared = 0
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM special_answer_records sar
+          JOIN special_practice_sessions sps ON sps.id = sar.session_id
+          WHERE sar.question_id = q.id AND sps.student_id = ?
+            AND sar.is_correct IS NOT NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM exam_answers ea
+          JOIN exam_sessions es ON es.id = ea.session_id
+          WHERE ea.question_id = q.id AND es.student_id = ?
+            AND ea.is_correct IS NOT NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM practice_results pr
+          WHERE pr.question_id = q.id AND pr.student_id = ?
+        )
+      GROUP BY q.id
+      ORDER BY q.id ASC
+      LIMIT ?`;
+    // pool.query：同上，LIMIT ? 必须走 client-side escaping。
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      sql,
+      [subjectId, grade, semester, questionNo, studentId, subjectId,
+        studentId, subjectId, studentId, studentId, studentId, limit],
+    );
+    return rows as QuestionRow[];
+  }
+
   /** 补偿套题抽题（2026-09-21）：同考点 + 同题型 + 难度档（数组）随机取题。
    *  谓词与 findRandomByKpAndType 同源（「不再展示」排除、空答案排除、is_active）；
    *  难度由调用方按放宽阶梯（先同档，再 ±1 档）分次传入；
