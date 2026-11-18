@@ -230,3 +230,43 @@ describe('VocabularyConfigPage sessionId 交接链', () => {
     expect(stored).toEqual({ sessionId: null, questions: [STARTED_WORD] });
   });
 });
+
+describe('VocabularyConfigPage 错词模式', () => {
+  beforeEach(() => {
+    optionsMock.mockReset();
+    getRulesMock.mockReset();
+    startMock.mockReset();
+    optionsMock.mockResolvedValue(OPTIONS);
+    getRulesMock.mockResolvedValue(rulesOf(VOCAB_TIERS));
+    startMock.mockResolvedValue({ questions: [STARTED_WORD], poolSize: 1, sessionId: 88 });
+  });
+
+  it('勾「我错过的词」后出题顺序锁定为「错次从多到少」，四个排序胶囊不再出现', async () => {
+    await renderPage();
+    // 「随机」在出题顺序和出题方向各有一个：初始 2 个，锁定后只剩方向那个
+    expect(screen.getAllByRole('button', { name: '随机' })).toHaveLength(2);
+
+    fireEvent.click(screen.getByLabelText(/我错过的词/));
+
+    expect(screen.getByTestId('order-locked-wrong-first')).toHaveTextContent('错次从多到少');
+    for (const label of ['字母序', '倒序', '指定字母开头']) {
+      expect(screen.queryByRole('button', { name: label })).toBeNull();
+    }
+    expect(screen.getAllByRole('button', { name: '随机' })).toHaveLength(1);
+  });
+
+  it('错词模式开练：order 归为 random、letter 置 null，交接体带 fromWrongPool', async () => {
+    await renderPage();
+    // 先选过「指定字母开头」，勾错词后不应再把字母带进请求（会与错次排序打架）
+    fireEvent.click(screen.getByRole('button', { name: '指定字母开头' }));
+    fireEvent.click(screen.getByLabelText(/我错过的词/));
+
+    await clickStart();
+
+    expect(startMock).toHaveBeenCalledWith(expect.objectContaining({
+      onlyMyWrong: true, order: 'random', letter: null,
+    }));
+    const stored: unknown = JSON.parse(sessionStorage.getItem('training:vocabulary') ?? 'null');
+    expect(stored).toEqual({ sessionId: 88, questions: [STARTED_WORD], fromWrongPool: true });
+  });
+});

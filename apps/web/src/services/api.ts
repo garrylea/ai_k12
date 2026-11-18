@@ -2092,6 +2092,8 @@ export function judgeVocabularyWord(payload: {
   title?: string;
   questionCount?: number;
   questionOrder?: number;
+  /** 本题来自错词池：答对时服务端把该词移出错词池（只清错次，不删背过记录）。 */
+  fromWrongPool?: boolean;
 }): Promise<VocabularyJudgeResult> {
   return fetchApi<VocabularyJudgeResult>('/training/vocabulary/judge', {
     method: 'POST',

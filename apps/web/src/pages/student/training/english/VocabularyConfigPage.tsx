@@ -83,8 +83,10 @@ export default function VocabularyConfigPage() {
         levelPool,
         // tierKey 对这个任务是纯数字字符串（家长端不能新增档位），直接当词数
         count: Number(tierKey),
-        order,
-        letter: order === 'letter' ? letter : null,
+        // 勾了「我错过的词」时后端固定按错次降序、字母筛选一并不生效；
+        // 这里归成 random 只是让请求与生效口径一致（否则 order=letter + letter 会被控制器判为矛盾）。
+        order: onlyMyWrong ? 'random' : order,
+        letter: !onlyMyWrong && order === 'letter' ? letter : null,
         direction,
         onlyNotLearned,
         onlyMyWrong,
@@ -97,7 +99,11 @@ export default function VocabularyConfigPage() {
         return;
       }
       // 词单 + 会话 id 交给 run 页：sessionId 是收尾发分的唯一凭据（可能是 null = 降级不发分）
-      const handoff: VocabularyRunHandoff = { sessionId: res.sessionId, questions: res.questions };
+      const handoff: VocabularyRunHandoff = {
+        sessionId: res.sessionId,
+        questions: res.questions,
+        ...(onlyMyWrong ? { fromWrongPool: true } : {}),
+      };
       sessionStorage.setItem('training:vocabulary', JSON.stringify(handoff));
       navigate('/student/training/english/vocabulary/run');
     } catch {
@@ -205,22 +211,34 @@ export default function VocabularyConfigPage() {
         <section className="mt-8">
           <h2 className="text-lg font-bold text-[var(--text-primary)]">出题顺序</h2>
           <div className="flex flex-wrap gap-3 mt-3">
-            {ORDER_OPTIONS.map((opt) => {
-              const active = order === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  onClick={() => setOrder(opt.value)}
-                  className={`${PILL_BASE} ${active ? 'text-white' : 'bg-white text-[var(--text-secondary)]'}`}
-                  style={active ? { backgroundColor: 'var(--brand-500)' } : CARD_BORDER}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
+            {onlyMyWrong ? (
+              // 错词模式由服务端固定按错次降序（学生自己的错次）。不渲染一排点了也没用的按钮，
+              // 只显示当前实际生效的顺序。
+              <span
+                className={`${PILL_BASE} text-white`}
+                style={{ backgroundColor: 'var(--brand-500)' }}
+                data-testid="order-locked-wrong-first"
+              >
+                错次从多到少
+              </span>
+            ) : (
+              ORDER_OPTIONS.map((opt) => {
+                const active = order === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setOrder(opt.value)}
+                    className={`${PILL_BASE} ${active ? 'text-white' : 'bg-white text-[var(--text-secondary)]'}`}
+                    style={active ? { backgroundColor: 'var(--brand-500)' } : CARD_BORDER}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })
+            )}
           </div>
 
-          {order === 'letter' && (
+          {!onlyMyWrong && order === 'letter' && (
             <div className="mt-4 rounded-2xl bg-white p-4" style={CARD_BORDER}>
               <p className="mb-3 text-xs text-[var(--text-secondary)]">
                 只出这个字母开头的词（按字母序）

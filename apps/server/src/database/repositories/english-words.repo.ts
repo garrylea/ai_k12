@@ -34,6 +34,8 @@ export interface EnglishWordPoolRow extends RowDataPacket {
   has_extended_sense: number;
   error_count: number;
   sort_order: number;
+  /** 学生自己的错次；未 JOIN 进度表时为 NULL（见 findPool 的 select 列）。 */
+  wrong_count: number | null;
 }
 
 /**
@@ -157,9 +159,14 @@ export class EnglishWordsRepository {
       );
     }
     const params: (string | number)[] = [];
-    let sql = `SELECT ${POOL_COLS} FROM english_words ew`;
-
     const needProgressJoin = wantsStudentFilter && studentId !== null;
+    // 错词模式要按学生自己的错次降序出词，JOIN 存在时把 swp.wrong_count 一并选出；
+    // 不 JOIN 的查询补 NULL 保持行形状一致，调用方不必区分两种形状。
+    const poolCols = needProgressJoin
+      ? `${POOL_COLS}, swp.wrong_count AS wrong_count`
+      : `${POOL_COLS}, NULL AS wrong_count`;
+    let sql = `SELECT ${poolCols} FROM english_words ew`;
+
     if (needProgressJoin) {
       // 注意参数顺序：JOIN 的 student_id 出现在 WHERE 之前，必须先 push
       sql += ` LEFT JOIN student_word_progress swp
@@ -238,10 +245,15 @@ export class EnglishWordsRepository {
    * 全局错次自增（**只增**，不提供清零）。
    * 行级锁 + 自增表达式，多学生同时答错同一词也安全。
    * 学生自己的错次另存 progress 表，两者互不影响——「移除易错标记」只动学生那一份。
+   *
+   * **封顶 INT 上限**：列是 `INT`（有符号，最大值 2147483647）。MySQL 严格模式下
+   * `error_count + 1` 越界会让 UPDATE 直接报 1264 并抛错——而这条写发生在判题路径上，
+   * 会把一次正常的判题变成 500。`LEAST(..., 2147483647)` 让计数停在最大值继续可用，
+   * 比换 BIGINT 省一次 DDL；封顶后「易错词」排序仍按最大值并列，不影响语义。
    */
   async incrementErrorCount(wordId: number): Promise<void> {
     await this.pool.execute(
-      `UPDATE english_words SET error_count = error_count + 1 WHERE id = ?`,
+      `UPDATE english_words SET error_count = LEAST(error_count + 1, 2147483647) WHERE id = ?`,
       [wordId],
     );
   }

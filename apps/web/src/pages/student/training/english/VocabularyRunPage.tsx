@@ -41,6 +41,8 @@ export default function VocabularyRunPage() {
   const [finished, setFinished] = useState(false);
   // 配置页交接来的会话 id：收尾发分的唯一凭据；null = 会话 INSERT 降级（不发分）
   const [sessionId, setSessionId] = useState<number | null>(null);
+  // 词单来自「我错过的词」：判题时回传，答对后服务端把该词移出错词池
+  const [fromWrongPool, setFromWrongPool] = useState(false);
 
   // 词根族：只缓存当前展开的那个词，翻页即收起
   const [familyOpen, setFamilyOpen] = useState(false);
@@ -72,6 +74,7 @@ export default function VocabularyRunPage() {
     }
     setQuestions(handoff.questions);
     setSessionId(handoff.sessionId);
+    setFromWrongPool(handoff.fromWrongPool === true);
     setEntries(handoff.questions.map((q) => ({ question: q, answer: '', submitted: false })));
   }, [navigate]);
 
@@ -95,6 +98,7 @@ export default function VocabularyRunPage() {
       title: '英语背单词',
       questionCount: questions?.length ?? 1,
       questionOrder: index + 1,
+      ...(fromWrongPool ? { fromWrongPool: true } : {}),
     })
       .then((result: VocabularyJudgeResult) => {
         setEntries((prev) =>
@@ -260,6 +264,7 @@ export default function VocabularyRunPage() {
           onToggleCollapsed={() => setFeedCollapsed((v) => !v)}
           onClearMark={handleClearMark}
           cleared={cleared}
+          fromWrongPool={fromWrongPool}
         />
       </div>
 

@@ -155,6 +155,25 @@ describe('VocabularyRunPage 完成发分', () => {
     expect(screen.getByText('本轮成绩')).toBeTruthy();
   });
 
+  it('词单来自错词池：判题回传 fromWrongPool（服务端据此在答对后移出错词池）', async () => {
+    sessionStorage.setItem(
+      KEY,
+      JSON.stringify({ sessionId: 88, questions: [QUESTION], fromWrongPool: true }),
+    );
+
+    await finishOnlyWord();
+
+    expect(judgeMock).toHaveBeenCalledWith(expect.objectContaining({ fromWrongPool: true }));
+  });
+
+  it('普通词单不回传 fromWrongPool（避免普通背词答对就洗白错次）', async () => {
+    seed(88);
+
+    await finishOnlyWord();
+
+    expect(judgeMock.mock.calls[0][0]).not.toHaveProperty('fromWrongPool');
+  });
+
   it('balance 为 null（award_failed）：提示稍后到账 + 重试，不 push 假分；点重试再调一次 complete', async () => {
     seed(88);
     const retry = deferred<CompleteTrainingSessionResult>();

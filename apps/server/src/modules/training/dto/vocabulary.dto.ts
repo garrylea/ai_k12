@@ -102,6 +102,11 @@ export interface VocabularyJudgeInput {
   answer: string;
   /** 作答记录旁路写入（Task 3，2026-11-01）：全可选，缺 sessionUid 时不写、向后兼容。 */
   sessionUid?: string;
+  /**
+   * 本次判题是否来自错词池（`onlyMyWrong` 抽出的词）。
+   * 答对时服务端据此把该词的错次清零（移出错词池）；缺省 false = 不动错次。
+   */
+  fromWrongPool?: boolean;
   title?: string;
   questionCount?: number;
   questionOrder?: number;

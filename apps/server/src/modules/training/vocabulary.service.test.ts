@@ -48,6 +48,7 @@ const poolRow = (id: number, w: string, extra: PoolOverrides = {}): EnglishWordP
     has_extended_sense: 0,
     error_count: 0,
     sort_order: id,
+    wrong_count: null,
     ...extra,
   }) as EnglishWordPoolRow;
 
@@ -258,6 +259,35 @@ describe('VocabularyService.start — 抽题与顺序', () => {
       onlyExtendedSense: true,
       studentId: 9,
     });
+  });
+
+  it('错词模式按学生错次降序出词，压过所选顺序，且不把字母过滤带进 SQL', async () => {
+    const rows = [word(1, 'aaa', CARE_MEANINGS), word(2, 'bbb', CARE_MEANINGS), word(3, 'ccc', CARE_MEANINGS)];
+    const pool = [
+      poolRow(1, 'aaa', { wrong_count: 1 }),
+      poolRow(2, 'bbb', { wrong_count: 5 }),
+      poolRow(3, 'ccc', { wrong_count: 2 }),
+    ];
+    const { service, wordsRepo } = harness({ rows, pool });
+    const { questions } = await service.start(
+      startInput({ onlyMyWrong: true, order: 'letter', letter: 'a', count: 10 }),
+      9,
+    );
+    expect(questions.map((q) => q.prompt)).toEqual(['bbb', 'ccc', 'aaa']);
+    // 错次排序与字母筛选互斥：这一模式下 letter 一律不透传
+    expect(wordsRepo.findPool.mock.calls[0][0].letter).toBeNull();
+  });
+
+  it('错次相同时按课标原序（sort_order）稳定排序', async () => {
+    const rows = [word(1, 'aaa', CARE_MEANINGS), word(2, 'bbb', CARE_MEANINGS), word(3, 'ccc', CARE_MEANINGS)];
+    const pool = [
+      poolRow(1, 'aaa', { wrong_count: 3, sort_order: 30 }),
+      poolRow(2, 'bbb', { wrong_count: 3, sort_order: 10 }),
+      poolRow(3, 'ccc', { wrong_count: 3, sort_order: 20 }),
+    ];
+    const { service } = harness({ rows, pool });
+    const { questions } = await service.start(startInput({ onlyMyWrong: true, count: 10 }), 9);
+    expect(questions.map((q) => q.prompt)).toEqual(['bbb', 'ccc', 'aaa']);
   });
 
   it('抽到的词中途被删（findByIds 少一行）不炸，按取到的行出题', async () => {
@@ -662,6 +692,31 @@ describe('VocabularyService.judge — 记账规则', () => {
     h.progressRepo.findByStudentAndWord.mockResolvedValueOnce({ learned: 1, wrong_count: 3 });
     const res = await h.service.judge(judgeInput({ senseIndex: 0, answer: '地址' }), 9);
     expect(res.progress).toEqual({ learned: true, wrongCount: 3 });
+  });
+
+  it('fromWrongPool + correct → 清该学生该词的错次（移出错词池，保留 learned）', async () => {
+    const h = harness();
+    await h.service.judge(judgeInput({ senseIndex: 0, answer: '地址', fromWrongPool: true }), 9);
+    expect(h.progressRepo.clearWrongCount).toHaveBeenCalledWith(9, 1);
+    // 只清错次，不删行、不退回 learned
+    expect(h.recordResult.mock.calls[0][0]).toMatchObject({ learned: 1, wrongDelta: 0 });
+  });
+
+  it('没带 fromWrongPool 或答错时都不清错次（普通背词不洗白错次记录）', async () => {
+    const normal = harness();
+    await normal.service.judge(judgeInput({ senseIndex: 0, answer: '地址' }), 9);
+    expect(normal.progressRepo.clearWrongCount).not.toHaveBeenCalled();
+
+    const wrong = harness({ judgeVerdict: 'wrong' });
+    await wrong.service.judge(judgeInput({ senseIndex: 0, answer: '住址', fromWrongPool: true }), 9);
+    expect(wrong.progressRepo.clearWrongCount).not.toHaveBeenCalled();
+  });
+
+  it('清错次失败（DB 故障）只 warn，判题照常返回', async () => {
+    const h = harness();
+    h.progressRepo.clearWrongCount.mockRejectedValueOnce(new Error('db down'));
+    const res = await h.service.judge(judgeInput({ senseIndex: 0, answer: '地址', fromWrongPool: true }), 9);
+    expect(res.verdict).toBe('correct');
   });
 });
 

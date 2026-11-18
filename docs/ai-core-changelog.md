@@ -8,6 +8,23 @@
 
 ---
 
+## 2026-11-18 英语背单词错词池：按错次降序、答对自动移出、错次封顶
+
+**背景**：原实现里「我错过的词」只是 `wrong_count > 0` 的过滤，出词仍按随机/字母序；答对只置 `learned`，`wrong_count` 永不清零，学生反复看到同一批错词、看不到「错题数在减少」，缺乏成就感。用户裁决按「错得多先复习、答对即移出」调整。
+
+**改动**：
+- 仓储 `findPool` 在 JOIN 进度表时一并选出 `swp.wrong_count`（不 JOIN 时补 `NULL`，行形状一致）。
+- `VocabularyService.selectPool` 在 `onlyMyWrong` 时按「`wrong_count` 降序 → `sort_order` → `id`」排序，**压过随机/字母序**；该模式下 `letter` 不传给仓储（避免「只出 a 开头」与「错得最多」互斥）。
+- 判题请求新增可选 `fromWrongPool`（前端从 sessionStorage 交接体透传）；`verdict='correct'` 时调 `clearWrongCount` **只清该学生该词的 `wrong_count`**，保留 `learned` / `last_seen_at`（不删行，避免词重新掉进「只出没背过的」、当日「今日已背」回退）。清除失败只 warn，不阻断判题。普通背词答对不清错次。
+- `english_words.error_count` 与 `student_word_progress.wrong_count` 自增改为 `LEAST(..., 2147483647)`：两列都是有符号 INT，严格模式下越界会让 UPDATE 报 1264、把判题打成 500。
+- 前端配置页：勾「我错过的词」时顺序区换成不可点的「错次从多到少」，并隐藏字母选择；开练请求归为 `order='random'`、`letter=null`；答题清单对「错词答对且 wrongCount 已为 0」的行标「已移出错词」。
+
+**改动文件**：`english-words.repo.ts`、`student-word-progress.repo.ts`、`vocabulary.service.ts`、`vocabulary.controller.ts`、`dto/vocabulary.dto.ts`、`VocabularyConfigPage.tsx`、`VocabularyRunPage.tsx`、`run-handoff.ts`、`AnswerFeedList.tsx`、`api.ts`；API 文档 §4.18/§6.22、`docs/api/openapi.yaml`、`docs/constraints/专项子系统.md` 同步。
+
+**验证**：`apps/server` `npm test` 202 files / 2734 tests 全绿；`apps/web` `npm test` 183 files / 1787 tests 全绿；两端 `tsc` 通过。新增用例覆盖：错次降序 + 同错次稳定排序、错词模式不带 letter、`fromWrongPool` 透传、答对清错次/答错或普通模式不清、清错次失败不影响判题、两条 SQL 的封顶写法、前端锁定文案与交接体。
+
+**已知限制**：① 自动移出只在「我错过的词」模式生效（普通模式答对不动错次记录）；② 是按「一次答对」移出，不是「连对 N 次」，与现有「移除易错标记」同粒度；③ 错次封顶后「易错词（全平台高频）」在同为最大值的词之间按课标原序并列，不再区分先后。
+
 ## 2026-11-18 专项练习新增「试卷题号」模式
 
 **背景**：学生要按「初三上 · 第 24 题」这类卷面题位练专项，而不是按知识点或模型标签；同一题位跨卷近似同题型（北京卷 24 题多为圆综）。只支持数学。

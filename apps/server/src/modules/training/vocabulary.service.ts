@@ -177,15 +177,17 @@ export class VocabularyService {
     // 僻义的三档判题口径（含 off_target）建立在「题面给单词 + 语境、学生答中文」之上，
     // 所以勾「只出熟词僻义」时方向强制英→中；若允许中→英，off_target 这一档将失去意义。
     const direction: VocabularyDirection = input.onlyExtendedSense ? 'en2cn' : input.direction;
+    const onlyMyWrong = input.onlyMyWrong === true;
 
     const pool = await this.wordsRepo.findPool({
       levelPool: this.normalizeLevelPool(input.levelPool),
       onlyNotLearned: input.onlyNotLearned === true,
-      onlyMyWrong: input.onlyMyWrong === true,
+      onlyMyWrong,
       onlyCommonWrong: input.onlyCommonWrong === true,
       onlyExtendedSense: input.onlyExtendedSense === true,
-      // 只在「指定字母开头」模式下才把字母交给仓储；字母本身在仓储里还会再白名单校验一次
-      letter: order === 'letter' ? (input.letter ?? null) : null,
+      // 只在「指定字母开头」模式下才把字母交给仓储；错词模式按错次降序，字母过滤会让
+      // 「错得最多」和「只出 a 开头」互相打架，故一并不生效（前端同时禁用该选项）。
+      letter: order === 'letter' && !onlyMyWrong ? (input.letter ?? null) : null,
       studentId,
     });
 
@@ -193,7 +195,7 @@ export class VocabularyService {
       return { questions: [], poolSize: 0, sessionId: null };
     }
 
-    const selected = this.selectPool(pool, order, count);
+    const selected = this.selectPool(pool, order, count, onlyMyWrong);
     const rows = await this.wordsRepo.findByIds(selected.map((r) => r.id));
     // findByIds 用 IN 取数，返回顺序由 DB 决定；按选中顺序还原，否则「字母序」看着是乱的
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -256,12 +258,28 @@ export class VocabularyService {
     return raw === 'junior' || raw === 'senior' || raw === 'all' ? raw : 'all';
   }
 
-  /** 排序 + 截断。（仓储已按 sort_order 返回，这里按所选模式重排，四种模式共用一次查询。） */
+  /**
+   * 排序 + 截断。（仓储已按 sort_order 返回，这里按所选模式重排，四种模式共用一次查询。）
+   *
+   * 错词模式（onlyMyWrong）**压过**出题顺序：按学生自己的错次降序，同错次按课标原序。
+   * 理由：这一模式存在的意义就是先复习错得最多的词；如果再洗牌，错 5 次和错 1 次机会均等。
+   */
   private selectPool(
     pool: EnglishWordPoolRow[],
     order: VocabularyOrder,
     count: number,
+    onlyMyWrong: boolean,
   ): EnglishWordPoolRow[] {
+    if (onlyMyWrong) {
+      return [...pool]
+        .sort(
+          (a, b) =>
+            (b.wrong_count ?? 0) - (a.wrong_count ?? 0)
+            || a.sort_order - b.sort_order
+            || a.id - b.id,
+        )
+        .slice(0, count);
+    }
     switch (order) {
       case 'random':
         return this.shuffle(pool).slice(0, count);
@@ -455,6 +473,19 @@ export class VocabularyService {
     // 极端情况下只差一个计数不值得引入分布式事务的复杂度。
     if (delta.wrongDelta === 1) {
       await this.wordsRepo.incrementErrorCount(row.id);
+    }
+
+    // 错词池答对 = 这个词已经会了：把学生自己的错次清零，下一轮不再出现在「我错过的词」里。
+    // 只在错词模式生效（2026-11-18 用户裁决）——普通背词答对不动错次记录，避免一次答对就洗白。
+    // 清错次而非删行：保留 learned 与 last_seen_at，否则该词会重新掉进「只出没背过的」池、
+    // 当天「今日已背 N 词」也会当场回退。返回体里的 progress 在本段之后读取，故回 wrongCount=0。
+    if (outcome.verdict === 'correct' && input.fromWrongPool === true) {
+      try {
+        await this.progressRepo.clearWrongCount(studentId, row.id);
+      } catch (err) {
+        // 副属性写入失败不该把一次正常判题打成 500
+        this.logger.warn('错词答对后清除错次失败（已忽略，不影响判题）', err);
+      }
     }
 
     // 专项日志（Phase 1B）：英语的作答单位是「词的一个义项」，一行记一道题。

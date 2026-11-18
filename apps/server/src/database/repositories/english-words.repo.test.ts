@@ -307,11 +307,13 @@ describe('EnglishWordsRepository 其余方法', () => {
     expect(params).toEqual(['care']);
   });
 
-  it('incrementErrorCount：自增表达式，绝不用读改写', async () => {
+  it('incrementErrorCount：自增表达式（封顶 INT 上限），绝不用读改写', async () => {
     const { pool, repo } = repoWith([]);
     await repo.incrementErrorCount(12);
     const [sql, params] = pool.execute.mock.calls[0];
-    expect(sql).toContain('UPDATE english_words SET error_count = error_count + 1');
+    expect(sql).toContain(
+      'UPDATE english_words SET error_count = LEAST(error_count + 1, 2147483647)',
+    );
     expect(sql).toContain('WHERE id = ?');
     expect(params).toEqual([12]);
   });

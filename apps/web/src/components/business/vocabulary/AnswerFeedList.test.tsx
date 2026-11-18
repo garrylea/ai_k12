@@ -135,8 +135,49 @@ describe('AnswerFeedList', () => {
     expect(screen.getByTestId('clear-mark-3')).toBeInTheDocument();
   });
 
-  it('图标是线性 SVG 垃圾桶（项目硬规则：禁 emoji）', () => {
+  it('错词模式答对（服务端已清错次）→ 显示「已移出错词」', () => {
     render(
+      <AnswerFeedList
+        entries={[entry({
+          result: judgeResult({ verdict: 'correct', progress: { learned: true, wrongCount: 0 } }),
+        })]}
+        collapsed={false}
+        onToggleCollapsed={vi.fn()}
+        onClearMark={vi.fn()}
+        cleared={{}}
+        fromWrongPool
+      />,
+    );
+    expect(screen.getByTestId('moved-out-wrong-1')).toHaveTextContent('已移出错词');
+  });
+
+  it('没开错词模式 / 错次没清掉（wrongCount > 0）时不谎报已移出', () => {
+    const props = {
+      collapsed: false,
+      onToggleCollapsed: vi.fn(),
+      onClearMark: vi.fn(),
+      cleared: {},
+      entries: [entry({
+        result: judgeResult({ verdict: 'correct', progress: { learned: true, wrongCount: 0 } }),
+      })],
+    };
+    const first = render(<AnswerFeedList {...props} />);
+    expect(screen.queryByTestId('moved-out-wrong-1')).toBeNull();
+    first.unmount();
+
+    render(
+      <AnswerFeedList
+        {...props}
+        entries={[entry({
+          result: judgeResult({ verdict: 'correct', progress: { learned: true, wrongCount: 2 } }),
+        })]}
+        fromWrongPool
+      />,
+    );
+    expect(screen.queryByTestId('moved-out-wrong-1')).toBeNull();
+  });
+
+  it('图标是线性 SVG 垃圾桶（项目硬规则：禁 emoji）', () => {    render(
       <AnswerFeedList
         entries={[entry({ question: question({ wordId: 3 }), result: judgeResult({ wordId: 3, verdict: 'wrong' }) })]}
         collapsed={false}

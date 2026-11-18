@@ -58,6 +58,9 @@ export class StudentWordProgressRepository {
    * 所以本方法**不判断结论**，只做算术——记账规则只有一处。
    *
    * 用行别名（`AS new`）而非已弃用的 `VALUES()`：MySQL 8.0.20 起后者会打弃用告警。
+   *
+   * `wrong_count` 也封顶 INT 上限（同 english_words.error_count）：列是有符号 INT，
+   * 严格模式下越界的自增会直接报错、把判题打成 500。
    */
   async recordResult(input: RecordWordResultInput): Promise<void> {
     await this.pool.execute(
@@ -66,7 +69,7 @@ export class StudentWordProgressRepository {
        VALUES (?, ?, ?, ?, ?, NOW(3)) AS new
        ON DUPLICATE KEY UPDATE
          learned = GREATEST(student_word_progress.learned, new.learned),
-         wrong_count = student_word_progress.wrong_count + new.wrong_count,
+         wrong_count = LEAST(student_word_progress.wrong_count + new.wrong_count, 2147483647),
          last_result = new.last_result,
          last_seen_at = new.last_seen_at`,
       [input.studentId, input.wordId, input.learned, input.wrongDelta, input.lastResult],

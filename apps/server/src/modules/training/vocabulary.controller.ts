@@ -136,6 +136,8 @@ export class VocabularyController {
       title?: string;
       questionCount?: number;
       questionOrder?: number;
+      /** 本次题来自错词池：答对时服务端把该词移出错词池（只清 wrong_count）。 */
+      fromWrongPool?: boolean;
     },
     @CurrentUser() user: JwtUser,
   ) {
@@ -159,6 +161,7 @@ export class VocabularyController {
         title: typeof dto.title === 'string' ? dto.title : undefined,
         questionCount: typeof dto.questionCount === 'number' ? dto.questionCount : undefined,
         questionOrder: typeof dto.questionOrder === 'number' ? dto.questionOrder : undefined,
+        fromWrongPool: dto.fromWrongPool === true,
       },
       this.studentIdOf(user),
     );

@@ -20,8 +20,10 @@ describe('StudentWordProgressRepository.recordResult', () => {
     expect(sql).toContain('ON DUPLICATE KEY UPDATE');
     // 答对过就永远是 1，之后答错也不回退
     expect(sql).toContain('learned = GREATEST(student_word_progress.learned, new.learned)');
-    // 错次只增（清零是另一条独立 UPDATE）
-    expect(sql).toContain('wrong_count = student_word_progress.wrong_count + new.wrong_count');
+    // 错次只增（清零是另一条独立 UPDATE）；封顶 INT 上限，严格模式越界会报 1264
+    expect(sql).toContain(
+      'wrong_count = LEAST(student_word_progress.wrong_count + new.wrong_count, 2147483647)',
+    );
     expect(sql).toContain('last_result = new.last_result');
     // 时间戳用 DB 时钟（NOW(3)）算，不由应用传 —— 免得应用与 DB 时钟漂移；
     // 冲突分支把 new.last_seen_at 抄过去，也就顺带刷新了「今日已背」的判定依据

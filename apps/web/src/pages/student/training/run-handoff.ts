@@ -21,6 +21,8 @@ export interface TargetedRunHandoff {
 export interface VocabularyRunHandoff {
   sessionId: number | null;
   questions: VocabularyQuestionItem[];
+  /** 词单来自「我错过的词」：判题时回传，答对即移出错词池。 */
+  fromWrongPool?: boolean;
 }
 
 /**
@@ -32,27 +34,36 @@ export interface VocabularyRunHandoff {
  */
 export function parseRunHandoff<T>(
   raw: string | null,
-): { sessionId: number | null; questions: T[]; title?: string; mode?: 'similar' | 'redo' } | null {
+): {
+  sessionId: number | null;
+  questions: T[];
+  title?: string;
+  mode?: 'similar' | 'redo';
+  fromWrongPool?: boolean;
+} | null {
   if (!raw) return null;
   try {
     const value: unknown = JSON.parse(raw);
     if (value == null || typeof value !== 'object' || Array.isArray(value)) return null;
-    const { sessionId, questions, title, mode } = value as {
+    const { sessionId, questions, title, mode, fromWrongPool } = value as {
       sessionId?: unknown;
       questions?: unknown;
       title?: unknown;
       mode?: unknown;
+      fromWrongPool?: unknown;
     };
     // sessionId 必须显式存在且为 number | null；缺字段视为形状不对
     if (sessionId !== null && typeof sessionId !== 'number') return null;
     if (!Array.isArray(questions)) return null;
     if (title !== undefined && typeof title !== 'string') return null;
     if (mode !== undefined && mode !== 'similar' && mode !== 'redo') return null;
+    if (fromWrongPool !== undefined && typeof fromWrongPool !== 'boolean') return null;
     return {
       sessionId,
       questions: questions as T[],
       ...(title !== undefined ? { title } : {}),
       ...(mode !== undefined ? { mode } : {}),
+      ...(fromWrongPool !== undefined ? { fromWrongPool } : {}),
     };
   } catch {
     return null;

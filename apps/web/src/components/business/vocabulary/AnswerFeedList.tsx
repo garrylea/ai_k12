@@ -22,6 +22,11 @@ interface Props {
   onClearMark: (wordId: number) => void;
   /** 已清过标记的词（本地状态，避免重复请求） */
   cleared: Record<number, boolean>;
+  /**
+   * 本轮词单来自「我错过的词」：答对即由服务端清除错次、移出错词池。
+   * 以判题返回的 `progress.wrongCount === 0` 为准确认已移出（清除失败时不谎报）。
+   */
+  fromWrongPool?: boolean;
 }
 
 /** 结论 → 标记与配色。`off_target` 单独一档：学生答的没错，只是没答到考点。 */
@@ -74,6 +79,7 @@ export default function AnswerFeedList({
   onToggleCollapsed,
   onClearMark,
   cleared,
+  fromWrongPool = false,
 }: Props) {
   const answered = entries.filter((e) => e.submitted);
   if (answered.length === 0) return null;
@@ -133,6 +139,16 @@ export default function AnswerFeedList({
                     </span>
                   )}
                   {m && <span className="text-xs text-[var(--text-secondary)]">{m.label}</span>}
+                  {fromWrongPool
+                    && e.result?.verdict === 'correct'
+                    && e.result.progress.wrongCount === 0 && (
+                      <span
+                        className="rounded bg-[var(--bg-subtle)] px-1.5 py-0.5 text-xs text-[var(--success)]"
+                        data-testid={`moved-out-wrong-${e.question.wordId}`}
+                      >
+                        已移出错词
+                      </span>
+                    )}
 
                   {/* 「移除易错标记」只对答错的词显示：它清的是上一轮累计的错次 */}
                   {e.result?.verdict === 'wrong' && !cleared[e.question.wordId] && (

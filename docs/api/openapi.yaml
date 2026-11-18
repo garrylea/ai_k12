@@ -12143,7 +12143,11 @@ components:
             random=逐题在**本词出得了的方向**里等概率掷（没音标的词不会有 ph2en 题）。
             勾 onlyExtendedSense 时服务端强制 en2cn；熟词僻义题恒为 en2cn（见 start 说明）
         onlyNotLearned: { type: boolean, description: 只出没背过的 }
-        onlyMyWrong: { type: boolean, description: 只出我错过的词 }
+        onlyMyWrong:
+          type: boolean
+          description: >-
+            只出我错过的词。置 true 时出词顺序固定按该学生的 wrong_count 降序
+            （同错次按 sort_order、id），压过 order；letter 在该模式下不生效
         onlyCommonWrong: { type: boolean, description: 只出全平台高频易错词 }
         onlyExtendedSense:
           type: boolean
@@ -12197,6 +12201,13 @@ components:
           description: >-
             学生作答原文；空/纯空白走 unanswered（不计对错）。
             注意 ph2en 的作答是英文单词，判题与 cn2en 同路（纯程序比对，不调 LLM）
+        fromWrongPool:
+          type: boolean
+          default: false
+          description: >-
+            本题来自「我错过的词」抽题池。判 correct 时服务端把该学生该词的 wrong_count
+            清零（移出错词池，保留 learned 与 last_seen_at）；其它结论不动。
+            缺省 false = 不动错次（普通背词答对不洗白）。
 
     VocabularyStandardMeaning:
       type: object

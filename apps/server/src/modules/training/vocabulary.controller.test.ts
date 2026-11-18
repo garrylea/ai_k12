@@ -166,6 +166,14 @@ describe('VocabularyController — judge 入参校验', () => {
     await controller.judge({ wordId: 1, senseIndex: 0, promptKind: 'en2cn', answer: 123 as never }, STUDENT);
     expect(service.judge.mock.calls[0][0].answer).toBe('');
   });
+
+  it('fromWrongPool 透传（缺省为 false，显式 true 才移出错词池）', async () => {
+    const { controller, service } = makeController();
+    await controller.judge({ wordId: 1, senseIndex: 0, promptKind: 'en2cn', answer: '地址' }, STUDENT);
+    expect(service.judge.mock.calls[0][0].fromWrongPool).toBe(false);
+    await controller.judge({ wordId: 1, senseIndex: 0, promptKind: 'en2cn', answer: '地址', fromWrongPool: true }, STUDENT);
+    expect(service.judge.mock.calls[1][0].fromWrongPool).toBe(true);
+  });
 });
 
 describe('VocabularyController — 其它端点', () => {
