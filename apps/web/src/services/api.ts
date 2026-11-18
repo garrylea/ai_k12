@@ -1322,6 +1322,49 @@ export function getModelSpecials(
   );
 }
 
+/** 试卷学期口径：后端只认 first | second（同时给 grade 才按此过滤）。 */
+export type TrainingSemester = 'first' | 'second';
+
+/** 该生有试卷的「年级 + 学期」组合；typicalQuestionCount 为可练题号数。 */
+export interface TrainingPaperPositionOption {
+  grade: string;
+  semester: TrainingSemester;
+  paperCount: number;
+  typicalQuestionCount: number;
+}
+
+/** 单个题号的抽题池统计：total = 可练总数，wrongCount = 错题数，untriedCount = 未做数。 */
+export interface TrainingPaperPosition {
+  questionNo: number;
+  total: number;
+  wrongCount: number;
+  untriedCount: number;
+}
+
+export interface TrainingPaperPositionsResult {
+  options: TrainingPaperPositionOption[];
+  grade: string | null;
+  semester: TrainingSemester | null;
+  typicalQuestionCount: number | null;
+  positions: TrainingPaperPosition[];
+}
+
+/** 试卷题号选项；带 grade+semester 时同时返回题号清单。 */
+export function getPaperPositions(
+  subjectId: number,
+  grade?: string,
+  semester?: TrainingSemester,
+): Promise<TrainingPaperPositionsResult> {
+  const qs = new URLSearchParams({ subjectId: String(subjectId) });
+  if (grade && semester) {
+    qs.set('grade', grade);
+    qs.set('semester', semester);
+  }
+  return fetchApi<TrainingPaperPositionsResult>(
+    `/training/paper-positions?${qs.toString()}`,
+  );
+}
+
 /** 专项练习题单条目：白名单序列化（无 answer/explanation），options 为 JSON 数组（字符串选项）。 */
 export interface TargetedPracticeQuestion {
   questionId: number;
@@ -1337,9 +1380,10 @@ export interface TargetedPracticeQuestion {
 }
 
 /**
- * 专项练习开练入参（两种抽题口径，互斥）：
+ * 专项练习开练入参（三种抽题口径，互斥）：
  * - 知识点（含语文/英语等既有专项）：`kpId`；
  * - 中考模型微专题：`category` + `model`，题型恒为不限（`type: null`）。
+ * - 试卷题号：`grade` + `semester` + `paperQuestionNo`，题型恒为不限（`type: null`）。
  */
 export type StartTargetedPayload =
   | {
@@ -1347,6 +1391,9 @@ export type StartTargetedPayload =
       kpId: number;
       category?: never;
       model?: never;
+      grade?: never;
+      semester?: never;
+      paperQuestionNo?: never;
       type: string | null;
       count: number;
     }
@@ -1355,6 +1402,20 @@ export type StartTargetedPayload =
       kpId?: never;
       category: string;
       model: string;
+      grade?: never;
+      semester?: never;
+      paperQuestionNo?: never;
+      type: null;
+      count: number;
+    }
+  | {
+      subjectId: number;
+      kpId?: never;
+      category?: never;
+      model?: never;
+      grade: string;
+      semester: TrainingSemester;
+      paperQuestionNo: number;
       type: null;
       count: number;
     };
