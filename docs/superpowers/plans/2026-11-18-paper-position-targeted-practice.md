@@ -273,7 +273,7 @@ Expected: FAIL（方法不存在）。
 在 `countPaperPositionQuestions` 之后追加：
 
 ```ts
-/** 错题优先池：未清错题本中的同题号题，level 高→低、同级别最近答错在前。 */
+/** 错题优先池：未清错题本中的同题号题，level 高→低、同级别最近入本在前。 */
 async findPaperPositionWrongQuestions(
   studentId: number,
   subjectId: number,
@@ -1840,7 +1840,7 @@ git commit -m "feat(web): 专项练习接入试卷题号模式"
 在 §5 的「模型专项」段之后补：
 
 ```md
-**试卷题号（2026-11-18）**：专项页切到「试卷题号」→ `GET /api/training/paper-positions?subjectId=1` 取年级/学期选项 → 选年级+学期后再取 1..N 题号清单（每题带错题数/未做数）→ 选题号与家长已开档位（≤可练数）→ `POST /api/training/targeted/start` 传 `{grade, semester, paperQuestionNo, type:null, count}` → 服务端先取未清错题本中的同题号题（level 降序、同级别最近答错在前），不足再用从未做过的同题号题补足；仍不足 400 → 建 `training_sessions`（`math_targeted`, `ref_type='paper_position'`, `ref_id=题号`）→ 复用 `TargetedRunPage`。
+**试卷题号（2026-11-18）**：专项页切到「试卷题号」→ `GET /api/training/paper-positions?subjectId=1` 取年级/学期选项 → 选年级+学期后再取 1..N 题号清单（每题带错题数/未做数）→ 选题号与家长已开档位（≤可练数）→ `POST /api/training/targeted/start` 传 `{grade, semester, paperQuestionNo, type:null, count}` → 服务端先取未清错题本中的同题号题（level 降序、同级别最近入本在前），不足再用从未做过的同题号题补足；仍不足 400 → 建 `training_sessions`（`math_targeted`, `ref_type='paper_position'`, `ref_id=题号`）→ 复用 `TargetedRunPage`。
 ```
 
 - [ ] **Step 2: 同步 openapi.yaml**
