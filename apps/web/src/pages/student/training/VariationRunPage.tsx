@@ -4,6 +4,8 @@ import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import type { RunnerQuestion } from '@/components/business/answer/types';
 import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
+import { PrintIconButton } from '@/components/business/print/PrintIconButton';
+import { PrintPreview } from '@/components/business/print/PrintPreview';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import { Modal, PageHeader } from '@/components/base';
 import { toast } from '@/components/base/Toast';
@@ -40,6 +42,7 @@ export default function VariationRunPage() {
   const [hints, setHints] = useState<Record<string, string>>({});
   const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
   const [draftOpen, setDraftOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
   const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
   const [exitConfirm, setExitConfirm] = useState<{ open: boolean; answered: number }>({
     open: false,
@@ -212,12 +215,11 @@ export default function VariationRunPage() {
           )}
         </div>
 
-        {/* 草稿入口：背景层右上角 absolute（DOM 顺序说明同 RemediationRunPage） */}
-        {!draftOpen && (
-          <div className="absolute top-4 right-4">
-            <DraftIconButton onClick={() => setDraftOpen(true)} />
-          </div>
-        )}
+        {/* 导出与草稿入口：背景层右上角 absolute（DOM 顺序说明同 RemediationRunPage） */}
+        <div className="absolute top-4 right-4 flex items-center gap-2">
+          <PrintIconButton onClick={() => setPrintOpen(true)} />
+          {!draftOpen && <DraftIconButton onClick={() => setDraftOpen(true)} />}
+        </div>
         {discussQ && (
           <DiscussDrawer
             mode="training"
@@ -249,6 +251,13 @@ export default function VariationRunPage() {
             </div>
           </Modal>
         )}
+
+        <PrintPreview
+          open={printOpen}
+          questions={questions}
+          meta={{ subject: '数学' }}
+          onClose={() => setPrintOpen(false)}
+        />
 
         <RunExitGuard
           guardRef={guardRef}

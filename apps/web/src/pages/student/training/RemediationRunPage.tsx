@@ -4,6 +4,8 @@ import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import type { RunnerQuestion } from '@/components/business/answer/types';
 import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
+import { PrintIconButton } from '@/components/business/print/PrintIconButton';
+import { PrintPreview } from '@/components/business/print/PrintPreview';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import { Modal, PageHeader } from '@/components/base';
 import { toast } from '@/components/base/Toast';
@@ -37,6 +39,7 @@ export default function RemediationRunPage() {
   // 页面级草稿抽屉：始终可见图标，切题即清空；currentQ 由 QuestionRunner.onQuestionChange 喂
   const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
   const [draftOpen, setDraftOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
   const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
   // 退出确认（X 按钮）：answered 由 QuestionRunner 传出
   const [exitConfirm, setExitConfirm] = useState<{ open: boolean; answered: number }>({
@@ -224,11 +227,10 @@ export default function RemediationRunPage() {
         {/* 草稿入口：背景层右上角 absolute，仅面板收起时显示。
             DOM 顺序：草稿这行必须排在 DiscussDrawer 之前——讨论抽屉要盖住它、关闭钮才可点
             （同 TargetedRunPage 的层级说明）。 */}
-        {!draftOpen && (
-          <div className="absolute top-4 right-4">
-            <DraftIconButton onClick={() => setDraftOpen(true)} />
-          </div>
-        )}
+        <div className="absolute top-4 right-4 flex items-center gap-2">
+          <PrintIconButton onClick={() => setPrintOpen(true)} />
+          {!draftOpen && <DraftIconButton onClick={() => setDraftOpen(true)} />}
+        </div>
         {discussQ && (
           <DiscussDrawer
             mode="training"
@@ -263,6 +265,13 @@ export default function RemediationRunPage() {
             </div>
           </Modal>
         )}
+
+        <PrintPreview
+          open={printOpen}
+          questions={questions}
+          meta={{ subject: '数学' }}
+          onClose={() => setPrintOpen(false)}
+        />
 
         {/* 浏览器返回/路由跳转拦截（X 确认已同步置 guardRef.current=false 故不二次弹） */}
         <RunExitGuard
