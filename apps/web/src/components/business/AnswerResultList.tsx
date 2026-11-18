@@ -43,6 +43,8 @@ interface Props {
   referenceAnswers?: Record<string, string | null>;
   /** 结果页自评提交（考试结果页传）；返回后父层更新 answers 消除 needsSelfAssess */
   onSelfAssess?: (n: string, assessment: 'correct' | 'incorrect') => Promise<void>;
+  /** 结果页导出当前题单为 PDF（专项/错题页传；考试结果页不传） */
+  onExport?: () => void;
 }
 
 /** 刷新等待上限（秒），与后端 explanation-wait 端点 120s 对齐。 */
@@ -71,6 +73,7 @@ export function AnswerResultList({
   onWaitExplanation,
   referenceAnswers,
   onSelfAssess,
+  onExport,
 }: Props) {
   const [expandedN, setExpandedN] = useState<string | null>(null);
   // 解析缓存：初值来自父层末题后批量拉取；单题刷新后回写。
@@ -357,7 +360,15 @@ export function AnswerResultList({
         </div>
 
         {/* ═══ Footer ═══ */}
-        <div className="shrink-0 px-5 py-3 border-t border-[var(--bg-subtle)] flex justify-center">
+        <div className="shrink-0 px-5 py-3 border-t border-[var(--bg-subtle)] flex items-center justify-center gap-3">
+          {onExport && (
+            <button
+              onClick={onExport}
+              className="px-5 py-2.5 rounded-[10px] border border-[var(--bg-subtle)] text-sm font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-base)] transition-colors"
+            >
+              导出 PDF
+            </button>
+          )}
           <button
             onClick={onClose}
             className="px-8 py-2.5 rounded-[10px] bg-[var(--brand-500)] text-white text-sm font-semibold hover:bg-[var(--brand-600)] transition-colors shadow-sm"
