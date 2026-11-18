@@ -660,6 +660,26 @@ describe('TrainingService.startTargetedPractice', () => {
       studentId: 7, subjectId: 1, paperPosition: { grade: '初三', semester: 'first', questionNo: 29 },
       type: null, count: 1,
     })).rejects.toThrow('题号超出卷面范围（1-28）');
+    // 范围校验只需要卷长众数，不需要跑题号清单的全量聚合
+    expect(deps.questionsRepo.countPaperPositionQuestions).not.toHaveBeenCalled();
+  });
+
+  it('paper 模式：开练只解析选项取卷长，不调用 countPaperPositionQuestions', async () => {
+    const deps = mk({
+      questionsRepo: {
+        listPaperPositionOptions: vi.fn().mockResolvedValue([
+          { grade: '初三', semester: 'first', question_count: 28, papers: 6 },
+        ]),
+        countPaperPositionQuestions: vi.fn().mockResolvedValue([]),
+        findPaperPositionWrongQuestions: vi.fn().mockResolvedValue([{ ...questionRow, id: 21, question_no: 24 }]),
+      } as never,
+    });
+    const r = await mkSvc(deps).startTargetedPractice({
+      studentId: 7, subjectId: 1, paperPosition: { grade: '初三', semester: 'first', questionNo: 24 },
+      type: null, count: 1,
+    });
+    expect(r.questions.map((q) => q.questionId)).toEqual([21]);
+    expect(deps.questionsRepo.countPaperPositionQuestions).not.toHaveBeenCalled();
   });
 });
 

@@ -197,7 +197,7 @@ export class TrainingController {
    *  白名单必须在服务层之前挡：范围校验放行 1-20 的任意整数，`count=13` 能绕过档位设计。
    *  `listTierKeys` 内部先 `ensureRules`，从未发过分的全新学生拿到默认档位而不是空数组。
    *
-   *  **模型微专题（2026-11-15）**：`{category, model}` 与 `kpId` 二选一。模型模式只支持数学、
+   *  **模型微专题（2026-11-15）**：`{category, model}`、`kpId` 与试卷题号三选一。模型模式只支持数学、
    *  不筛题型、限 1-2 题，同样受家长档位约束（档位未开则 400）。
    *
    *  **试卷题号（2026-11-18）**：`{grade, semester, paperQuestionNo}` 与 kpId / 模型三选一。

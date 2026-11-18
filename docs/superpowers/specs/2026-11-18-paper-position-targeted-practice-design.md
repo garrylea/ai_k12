@@ -67,7 +67,7 @@
 | 可判题 | `questions.is_active=1` 且 `answer <> ''`（空答案无法判题，与现有专项抽题池同口径） |
 | `total` | 该题号下、**已排除该生「不再展示」之后**的可判题数（接口直接给这个数，前端不二次过滤） |
 | 在错题本中 | 该生 + 该学科存在 `main_error_books.is_cleared=0 AND question_id=该题` |
-| 从未做过 | 该生对该题没有**已判**记录：`special_answer_records.is_correct IS NOT NULL`、`exam_answers.is_correct IS NOT NULL`、`practice_results` 三处均无 |
+| 从未做过 | 该生对该题没有**已判**记录：`special_answer_records.is_correct IS NOT NULL`、`exam_answers.is_correct IS NOT NULL`、`practice_results` 三处均无（主线跳过未答 `practice_results.method='unanswered'` 的占位行不算做过） |
 | 可练数 `availableCount` | `在错题本中 + 从未做过`，且不在该生「不再展示」清单；**这才是本次能被抽到的题数** |
 | 共 N 题 | 该「年级+学期」下 `exam_papers.question_count` 的众数（并列取较大值）；题号列表为 `1..N` |
 

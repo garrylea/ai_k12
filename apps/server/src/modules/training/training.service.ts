@@ -53,6 +53,14 @@ import type {
   InterpretationSentenceJudgeItem,
 } from './dto/interpretation.dto.js';
 
+/** 试卷题号：一个「年级 + 学期」的卷面统计（题目清单接口与开练校验共用）。 */
+export interface PaperPositionOption {
+  grade: string;
+  semester: string;
+  paperCount: number;
+  typicalQuestionCount: number;
+}
+
 /** 把 diff 渲染成一行可读文本，作为 LLM 错因输入：床前明月[光→先][漏:疑][多:啊]。 */
 export function renderBodyDiff(ops: DictationDiffOp[]): string {
   return ops
@@ -795,23 +803,19 @@ export class TrainingService {
   private static readonly SEMESTER_ORDER: Record<string, number> = { first: 0, second: 1 };
 
   /**
-   * 试卷题号：选项 + 题号清单。
-   * 不传 grade/semester 只回选项；两者必须同时出现。
-   * 题号列表固定为 1..typicalQuestionCount（该组合下卷面题数的众数，并列取较大），
-   * 没有题的题号补 0，前端据此置灰。
+   * 试卷题号：校验 + 选项聚合 + 众数（**轻量**，不跑题号计数）。
+   *
+   * 开练只需要 `typicalQuestionCount` 做题号范围校验，若走 `listPaperPositions`
+   * 会顺带跑 `countPaperPositionQuestions`（全题号 GROUP BY + 四个相关 EXISTS）——
+   * 那是给题号清单用的，开练一次也不用。两条路径共用本方法，区别只在要不要计数。
+   *
+   * 不传 grade/semester 只回选项清单，`option` 为 null。
    */
-  async listPaperPositions(
-    studentId: number,
+  private async resolvePaperOption(
     subjectId: number,
     grade?: string | null,
     semester?: string | null,
-  ): Promise<{
-    options: Array<{ grade: string; semester: string; paperCount: number; typicalQuestionCount: number }>;
-    grade: string | null;
-    semester: string | null;
-    typicalQuestionCount: number | null;
-    positions: Array<{ questionNo: number; total: number; wrongCount: number; untriedCount: number }>;
-  }> {
+  ): Promise<{ options: PaperPositionOption[]; option: PaperPositionOption | null }> {
     if (subjectId !== SUBJECT_MATH) {
       throw new BadRequestException('试卷题号仅支持数学');
     }
@@ -850,12 +854,38 @@ export class TrainingService {
       }));
 
     if (grade == null || semester == null) {
-      return { options, grade: null, semester: null, typicalQuestionCount: null, positions: [] };
+      return { options, option: null };
     }
 
     const option = options.find((o) => o.grade === grade && o.semester === semester);
     if (!option) {
       throw new BadRequestException('该年级学期暂无试卷');
+    }
+    return { options, option };
+  }
+
+  /**
+   * 试卷题号：选项 + 题号清单。
+   * 不传 grade/semester 只回选项；两者必须同时出现。
+   * 题号列表固定为 1..typicalQuestionCount（该组合下卷面题数的众数，并列取较大），
+   * 没有题的题号补 0，前端据此置灰。
+   */
+  async listPaperPositions(
+    studentId: number,
+    subjectId: number,
+    grade?: string | null,
+    semester?: string | null,
+  ): Promise<{
+    options: PaperPositionOption[];
+    grade: string | null;
+    semester: string | null;
+    typicalQuestionCount: number | null;
+    positions: Array<{ questionNo: number; total: number; wrongCount: number; untriedCount: number }>;
+  }> {
+    const { options, option } = await this.resolvePaperOption(subjectId, grade, semester);
+
+    if (!option || grade == null || semester == null) {
+      return { options, grade: null, semester: null, typicalQuestionCount: null, positions: [] };
     }
 
     const countRows = await this.questionsRepo.countPaperPositionQuestions(
@@ -954,14 +984,15 @@ export class TrainingService {
   }> {
     const paperPosition = input.paperPosition ?? null;
     if (paperPosition) {
-      const meta = await this.listPaperPositions(
-        input.studentId, input.subjectId, paperPosition.grade, paperPosition.semester,
+      // 只解析选项取卷长众数：开练不跑 countPaperPositionQuestions（题号清单才有用）。
+      const { option } = await this.resolvePaperOption(
+        input.subjectId, paperPosition.grade, paperPosition.semester,
       );
-      if (meta.typicalQuestionCount == null) {
+      if (!option) {
         throw new BadRequestException('该年级学期暂无试卷');
       }
-      if (paperPosition.questionNo < 1 || paperPosition.questionNo > meta.typicalQuestionCount) {
-        throw new BadRequestException(`题号超出卷面范围（1-${meta.typicalQuestionCount}）`);
+      if (paperPosition.questionNo < 1 || paperPosition.questionNo > option.typicalQuestionCount) {
+        throw new BadRequestException(`题号超出卷面范围（1-${option.typicalQuestionCount}）`);
       }
     }
     const modelSpecial = input.modelSpecial ?? null;

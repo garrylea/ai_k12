@@ -6352,14 +6352,16 @@ paths:
       description: >-
         专项练习配置完成后开练（student JWT）。KP 模式 count 限 1-20、type 白名单
         choice|fill_blank|true_false|short_answer|proof|calculation 或 null（不限题型，
-        非法 400）；模型模式 count 只能 1/2。题单白名单序列化：只出 questionId/text/type/options，
+        非法 400）；模型/试卷题号模式 count 必须是家长已开启档位且不超过可练数
+        （1/2 只适用于倍长中线）。题单白名单序列化：只出 questionId/text/type/options，
         answer/explanation 等字段一律剥离（防答案泄露）；options 为 JSON 字符串
         parse 后的数组（无/坏 JSON 为 null）。抽不到题返回空数组（空集合非错误，
         前端判空显示提示）。选题时基于 JWT user.sub（studentId）排除该生已标记的
         「不再展示」题（LEFT JOIN student_hidden_questions ... IS NULL），
         请求体不变；题池排除后为空时返回 { questions: [] }。
         模型微专题模式（传 category+model 代替 kpId）：仅 subjectId=1，type 必须 null，
-        count 只能 1/2，题单按 q.id ASC，会话 ref_type='model'。
+        count 必须是家长已开启档位且不超过可练数（1/2 只适用于倍长中线），
+        题单按 q.id ASC，会话 ref_type='model'。
         试卷题号模式（传 paperQuestionNo+grade+semester 代替 kpId）：仅 subjectId=1，
         type 必须 null，题号 1..typicalQuestionCount；未清错题同题号优先（level 降序、
         同级别最近入本在前），不足用从未做过的同题号题补足，仍不足 400；

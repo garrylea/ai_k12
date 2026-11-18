@@ -304,7 +304,8 @@ export class QuestionsRepository {
    * 「试卷题号」每个题号的三个数：
    * - total：排除 hidden 后的可判题数；
    * - wrong_count：未清错题本中的题数；
-   * - untried_count：不在错题本、且专项/考试/主线三处都无已判记录的题数。
+   * - untried_count：不在错题本、且专项/考试/主线三处都无已判记录的题数
+   *   （主线跳过未答 `method='unanswered'` 的占位行不算做过）。
    * 参数顺序：错题 2 + 未做 5 + 范围 3 + hidden 2。
    */
   async countPaperPositionQuestions(
@@ -337,6 +338,7 @@ export class QuestionsRepository {
         ) AND NOT EXISTS (
           SELECT 1 FROM practice_results pr
           WHERE pr.question_id = q.id AND pr.student_id = ?
+            AND pr.method <> 'unanswered'
         ) THEN q.id END) AS untried_count
       FROM paper_questions pq
       JOIN exam_papers p ON p.id = pq.paper_id
@@ -389,7 +391,7 @@ export class QuestionsRepository {
     return rows as QuestionRow[];
   }
 
-  /** 补足池：不在错题本、且三处都无已判记录的题；id 升序确定性取。 */
+  /** 补足池：不在错题本、且三处都无已判记录的题（主线跳过未答 `method='unanswered'` 不算做过）；id 升序确定性取。 */
   async findPaperPositionUntriedQuestions(
     studentId: number,
     subjectId: number,
@@ -428,6 +430,7 @@ export class QuestionsRepository {
         AND NOT EXISTS (
           SELECT 1 FROM practice_results pr
           WHERE pr.question_id = q.id AND pr.student_id = ?
+            AND pr.method <> 'unanswered'
         )
       GROUP BY q.id
       ORDER BY q.id ASC

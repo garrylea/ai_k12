@@ -235,6 +235,8 @@ export default function TargetedConfigPage() {
     const reqId = ++paperReqIdRef.current;
     setPosStatus('loading');
     setPosError(null);
+    // 清掉上个年级/学期的卷长，避免加载中面板仍显示「共 N 题」
+    setTypicalQuestionCount(null);
     try {
       const data = await getPaperPositions(subject, grade, semester);
       // 只有最后发出的那次请求可以落地：极快切学期时先发的响应可能后到，
@@ -333,6 +335,7 @@ export default function TargetedConfigPage() {
     if (paperOptionsSubjectRef.current !== subjectId) return;
     setPaperQuestionNo(null);
     setPaperTierKey(null);
+    setEmptyHint(false);
     void loadPaperPositions(subjectId, paperGrade, paperSemester);
   }, [mode, subjectId, paperGrade, paperSemester, loadPaperPositions]);
 

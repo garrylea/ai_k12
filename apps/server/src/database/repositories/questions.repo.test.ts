@@ -315,6 +315,8 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(sql).toContain('FROM exam_answers ea');
     expect(sql).toContain('JOIN exam_sessions es');
     expect(sql).toContain('FROM practice_results pr');
+    // 主线跳过未答（method='unanswered'）只是占位行，不算「做过」
+    expect(sql).toContain("pr.method <> 'unanswered'");
     expect(sql).toContain('sar.is_correct IS NOT NULL');
     expect(sql).toContain('ea.is_correct IS NOT NULL');
     expect(sql).toContain('FROM student_hidden_questions shq');
@@ -348,6 +350,8 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(sql).toContain('FROM special_answer_records sar');
     expect(sql).toContain('FROM exam_answers ea');
     expect(sql).toContain('FROM practice_results pr');
+    // 主线跳过未答（method='unanswered'）只是占位行，不算「做过」
+    expect(sql).toContain("pr.method <> 'unanswered'");
     expect(sql).toContain('FROM main_error_books meb');
     expect(sql).toContain('FROM student_hidden_questions shq');
     expect(sql).toContain('ORDER BY q.id ASC');
