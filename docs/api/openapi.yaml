@@ -6651,12 +6651,12 @@ paths:
         ——在解释专项那三道闸门之上多一道「有含义数据」。只给诗词篇目灌 sentence_meanings，
         「只做诗词」由**数据有无**天然实现，**不设体裁标记列**（以后想让文言文也进这个专项，
         灌数据即可，代码一行不用动）。按 sort_order, id 排序。
-        只出篇名 + 册次——深层含义与作者情感是判题答案，一律不下发（防答案泄露）。
+        只出篇名 + 年级 + 册次——深层含义与作者情感是判题答案，一律不下发（防答案泄露）。
       operationId: listMeaningPassages
       security: [{ bearerAuth: [] }]
       responses:
         '200':
-          description: 含义专项篇目清单（只含篇名与册次）
+          description: 含义专项篇目清单（只含篇名、年级与册次）
           content:
             application/json:
               schema:
@@ -6672,15 +6672,17 @@ paths:
       tags: [Training]
       summary: 语文含义开练（按册次随机抽或按指定篇目出题）
       description: >-
-        语文含义专项开练（student JWT）。**返回 201**（Nest `@Post` 默认码）。入参形状与解释专项
-        `start` 完全一致：count 限 **1-3** 整数（每篇逐句判，3 篇已是长会话；越界/非整数 400）；
-        semester 限 上册|下册|null（非法 400）；passageIds 为正整数数组或 null——非空时按指定篇目
-        出题（忽略 semester，仅保留抽题池内篇目），否则按册次随机抽题；「全部册次」随机抽时按篇名
-        去重（九上/九下有 9 篇重复收录，跨册取 MIN(id)），指定篇目多于 count 时截断。
+        语文含义专项开练（student JWT）。**返回 201**（Nest `@Post` 默认码）。入参在解释专项
+        `start` 基础上多一个年级维度：count 限 **1-3** 整数（每篇逐句判，3 篇已是长会话；
+        越界/非整数 400）；grade 限 七年级|八年级|九年级|null（非法 400）；
+        semester 限 上册|下册|null（非法 400）；passageIds 为正整数数组或 null——非空时按指定
+        篇目出题（忽略 grade 与 semester，仅保留抽题池内篇目），否则按年级 + 册次随机抽题；
+        「全部册次」随机抽时按篇名去重（九上/九下有 9 篇重复收录，跨册取 MIN(id)；只限年级时
+        同样去重，且子查询同步限该年级），指定篇目多于 count 时截断。
         **整篇句子的 text 一次给全**（顶部原文条要渲染完整一首诗），**answerable 区分「显示」与
         「出题」**：该句没有标准含义时 answerable=false，前端仍把它显示在顶部原文条里、
         但**永不进作答队列**（判题端点也会拒，400）。
-        白名单序列化：只出 passageId/workTitle/semester/sentences[].{index,text,terms,answerable}，
+        白名单序列化：只出 passageId/workTitle/grade/semester/sentences[].{index,text,terms,answerable}，
         meaning（深层含义）/emotion（作者情感）/translation/full_translation 与 author/dynasty/body
         一律剥离（防答案泄露）。terms 每项给两个形式：`term` 原样**带注音**（展示用）、
         `plain` 去注音（前端在原文里高亮定位用）。
@@ -8385,6 +8387,10 @@ components:
         questionAnswer:
           type: string
           nullable: true
+          description: >-
+            标准答案。考试取自 questions.answer；语文含义专项按句回查题库重建
+            （key_terms 该句字词释义 + sentence_meanings 的深层含义/作者情感），
+            不复制进作答记录。其余专项为 null。
         questionAnalysis:
           type: string
           nullable: true
@@ -11923,7 +11929,7 @@ components:
 
     MeaningPassageListResult:
       type: object
-      description: 含义专项篇目清单（只含篇名与册次，标准含义/情感不下发）
+      description: 含义专项篇目清单（只含篇名、年级与册次，标准含义/情感不下发）
       properties:
         passages:
           type: array
@@ -11936,22 +11942,32 @@ components:
       properties:
         passageId: { type: integer, format: int64 }
         workTitle: { type: string }
+        grade:
+          type: string
+          nullable: true
+          enum: ['七年级', '八年级', '九年级', null]
+          description: 内容管线没给年级时为 null，前端只显示册次
         semester: { type: string, enum: ['上册', '下册'] }
-      required: [passageId, workTitle, semester]
+      required: [passageId, workTitle, grade, semester]
 
     MeaningStartRequest:
       type: object
       properties:
+        grade:
+          type: string
+          nullable: true
+          enum: ['七年级', '八年级', '九年级', null]
+          description: null=全部年级；passageIds 非空时忽略
         semester:
           type: string
           nullable: true
           enum: ['上册', '下册', null]
-          description: null=全部册次
+          description: null=全部册次；passageIds 非空时忽略
         passageIds:
           type: array
           nullable: true
           items: { type: integer, format: int64 }
-          description: 非空时按指定篇目出题（忽略 semester）
+          description: 非空时按指定篇目出题（忽略 grade 与 semester）
         count:
           type: integer
           minimum: 1
@@ -11974,12 +11990,16 @@ components:
       properties:
         passageId: { type: integer, format: int64 }
         workTitle: { type: string }
+        grade:
+          type: string
+          nullable: true
+          enum: ['七年级', '八年级', '九年级', null]
         semester: { type: string, enum: ['上册', '下册'] }
         sentences:
           type: array
           items:
             $ref: '#/components/schemas/MeaningSentence'
-      required: [passageId, workTitle, semester, sentences]
+      required: [passageId, workTitle, grade, semester, sentences]
 
     MeaningSentence:
       type: object

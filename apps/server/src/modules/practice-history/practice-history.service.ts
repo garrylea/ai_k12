@@ -2,7 +2,10 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { ExamSessionsRepository } from '../../database/repositories/exam-sessions.repo.js';
 import { SpecialPracticeSessionsRepository } from '../../database/repositories/special-practice-sessions.repo.js';
 import { SpecialAnswerRecordsRepository } from '../../database/repositories/special-answer-records.repo.js';
-import { ChinesePassagesRepository, toSentences } from '../../database/repositories/chinese-passages.repo.js';
+import {
+  ChinesePassagesRepository, toSentences, toKeyTerms, toSentenceMeanings,
+  type PassageSentence,
+} from '../../database/repositories/chinese-passages.repo.js';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import { SUBJECT_CHINESE, SUBJECT_MATH, SUBJECT_PHYSICS } from '../../common/subject-config.js';
 import { chineseSimilarKpId } from '../../common/chinese-similar.util.js';
@@ -15,6 +18,37 @@ import type {
   PracticeHistoryListResult,
   PracticeHistoryQuestion,
 } from './practice-history.dto.js';
+
+/**
+ * 含义专项的标准答案（历史回放用）。
+ *
+ * 判题时标准答案本来就来自题库（`key_terms` / `sentence_meanings`），**不复制进
+ * 作答记录**——题库才是唯一真源，复制一份会随内容修订漂移。历史详情按句回查题库重建。
+ *
+ * 与 `MeaningService` 同一安全口径：`sentence_meanings` 与 `sentences` 长度不等时
+ * **整篇不取含义**（下标可能串句），只保留年级无关的字词标准。
+ */
+function buildMeaningStandards(
+  row: { key_terms: unknown; sentence_meanings: unknown },
+  sentences: PassageSentence[],
+): Array<string | null> {
+  const meanings = toSentenceMeanings(row.sentence_meanings);
+  const aligned = meanings.length === sentences.length ? meanings : [];
+  const terms = toKeyTerms(row.key_terms);
+  return sentences.map((_, index) => {
+    const meaning = aligned[index] ?? null;
+    const sentenceTerms = terms.filter((t) => t.sentenceIndex === index && t.gloss.trim() !== '');
+    const lines: string[] = [];
+    if (sentenceTerms.length > 0) {
+      lines.push('**重点字词**', sentenceTerms.map((t) => `- ${t.term}：${t.gloss}`).join('\n'));
+    }
+    if (meaning) {
+      if (meaning.meaning.trim() !== '') lines.push('**深层含义**', meaning.meaning);
+      if (meaning.emotion.trim() !== '') lines.push('**作者情感**', meaning.emotion);
+    }
+    return lines.length > 0 ? lines.join('\n\n') : null;
+  });
+}
 
 /**
  * 练习记录查询（Task 4，2026-11-01）。
@@ -180,14 +214,24 @@ export class PracticeHistoryService {
       ? await this.questionsRepo.findKpRefsByQuestionIds(questionIds)
       : null;
 
-    // 语文三专项的「题」是 passage+sentence：按需批量回放篇名与句原文（同篇只查一次）。
-    const passageCache = new Map<number, { title: string; sentences: string[] }>();
+    // 语文三专项的「题」是 passage+sentence：按需批量回放篇名、句原文与**含义标准答案**
+    // （同篇只查一次）。标准答案不写进作答记录，历史记录靠回查题库补齐。
+    const isMeaningSession = session.module === 'chinese_meaning';
+    const passageCache = new Map<
+      number,
+      { title: string; sentences: string[]; standards: Array<string | null> }
+    >();
     const loadPassage = async (id: number) => {
       if (passageCache.has(id)) return passageCache.get(id)!;
       const row = await this.passagesRepo.findById(id);
+      const sentences = row ? toSentences(row.sentences) : [];
       const entry = row
-        ? { title: row.work_title, sentences: toSentences(row.sentences).map((s) => s.text) }
-        : { title: '', sentences: [] };
+        ? {
+            title: row.work_title,
+            sentences: sentences.map((s) => s.text),
+            standards: buildMeaningStandards(row, sentences),
+          }
+        : { title: '', sentences: [], standards: [] };
       passageCache.set(id, entry);
       return entry;
     };
@@ -195,10 +239,14 @@ export class PracticeHistoryService {
     const questions = await Promise.all(answers.map(async (a): Promise<PracticeHistoryQuestion> => {
       let passageTitle: string | null = null;
       let passageSentence: string | null = null;
+      let standardAnswer: string | null = null;
       if (a.ref_type === 'passage' && a.ref_id !== null) {
         const p = await loadPassage(a.ref_id);
         passageTitle = p.title || null;
         passageSentence = a.sentence_index !== null ? (p.sentences[a.sentence_index] ?? null) : null;
+        if (isMeaningSession && a.sentence_index !== null) {
+          standardAnswer = p.standards[a.sentence_index] ?? null;
+        }
       }
       const qid = a.question_id;
       const canRedo = qid != null && a.question_is_active === 1;
@@ -220,7 +268,7 @@ export class PracticeHistoryService {
         questionContent: a.question_content,
         // 专项侧没有 material（语文专项的"材料"是篇名+句原文，走 passageTitle/passageSentence）
         materialText: null,
-        questionAnswer: a.question_answer,
+        questionAnswer: standardAnswer ?? a.question_answer,
         questionAnalysis: a.question_analysis,
         questionSource: a.question_source ?? null,
         questionNo: a.question_paper_no ?? null,

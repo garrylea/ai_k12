@@ -36,6 +36,12 @@ describe('MeaningController.start', () => {
       .rejects.toThrow(BadRequestException);
   });
 
+  it('grade 非法 → 400', async () => {
+    const { controller } = makeController();
+    await expect(controller.startMeaning({ grade: '高一', semester: null, passageIds: null, count: 1 }))
+      .rejects.toThrow(BadRequestException);
+  });
+
   it('passageIds 非正整数 → 400', async () => {
     const { controller } = makeController();
     await expect(controller.startMeaning({ semester: null, passageIds: [0], count: 1 }))
@@ -60,8 +66,18 @@ describe('MeaningController.start', () => {
 
   it('合法入参透传给 service', async () => {
     const { controller, service } = makeController();
-    await controller.startMeaning({ semester: '上册', passageIds: [3], count: 2 });
-    expect(service.startMeaning).toHaveBeenCalledWith({ semester: '上册', passageIds: [3], count: 2 });
+    await controller.startMeaning({ grade: '九年级', semester: '上册', passageIds: [3], count: 2 });
+    expect(service.startMeaning).toHaveBeenCalledWith({
+      grade: '九年级', semester: '上册', passageIds: [3], count: 2,
+    });
+  });
+
+  it('省略 grade 时按 null 透传（向后兼容旧客户端）', async () => {
+    const { controller, service } = makeController();
+    await controller.startMeaning({ semester: '上册', passageIds: null, count: 1 });
+    expect(service.startMeaning).toHaveBeenCalledWith({
+      grade: null, semester: '上册', passageIds: null, count: 1,
+    });
   });
 });
 

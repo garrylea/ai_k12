@@ -6,6 +6,9 @@ import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import type { MeaningJudgeResult, MeaningPassageItem, MeaningPassageListItem } from './dto/meaning.dto.js';
 
+/** 初中三个年级是当前内容管线的口径；不在白名单的值一律 400。 */
+const MEANING_GRADES = new Set(['七年级', '八年级', '九年级']);
+
 /**
  * 语文古诗文「含义」专项（2026-09-17）。
  *
@@ -21,7 +24,7 @@ import type { MeaningJudgeResult, MeaningPassageItem, MeaningPassageListItem } f
 export class MeaningController {
   constructor(private readonly meaningService: MeaningService) {}
 
-  /** 篇目清单（配置页「指定篇目」用；只出篇名 + 册次，没有内容）。 */
+  /** 篇目清单（配置页「指定篇目」用；只出篇名 + 年级 + 册次，没有内容）。 */
   @Get('passages')
   async listPassages(): Promise<{ passages: MeaningPassageListItem[] }> {
     return this.meaningService.listMeaningPassages();
@@ -29,15 +32,25 @@ export class MeaningController {
 
   /**
    * 开练：count 限 1-3（每篇逐句判，3 篇已是长会话）；
-   * semester 限 上册|下册|null；passageIds 非空时按指定篇目出题（忽略 semester）。
+   * grade 限 七年级|八年级|九年级|null；semester 限 上册|下册|null；
+   * passageIds 非空时按指定篇目出题（忽略 grade/semester）。
    */
   @Post('start')
   async startMeaning(
-    @Body() dto: { semester: string | null; passageIds: number[] | null; count: number },
+    @Body() dto: {
+      grade?: string | null;
+      semester: string | null;
+      passageIds: number[] | null;
+      count: number;
+    },
   ): Promise<{ passages: MeaningPassageItem[] }> {
     const { count } = dto;
     if (!Number.isInteger(count) || count < 1 || count > 3) {
       throw new BadRequestException('count 仅允许 1-3 的整数');
+    }
+    const grade = dto.grade ?? null;
+    if (grade !== null && !MEANING_GRADES.has(grade)) {
+      throw new BadRequestException('grade 仅允许 七年级 | 八年级 | 九年级 | null');
     }
     const semester = dto.semester ?? null;
     if (semester !== null && semester !== '上册' && semester !== '下册') {
@@ -48,7 +61,7 @@ export class MeaningController {
         (!Array.isArray(passageIds) || passageIds.some((id) => !Number.isInteger(id) || id < 1))) {
       throw new BadRequestException('passageIds 须为正整数数组或 null');
     }
-    return this.meaningService.startMeaning({ semester, passageIds, count });
+    return this.meaningService.startMeaning({ grade, semester, passageIds, count });
   }
 
   /**

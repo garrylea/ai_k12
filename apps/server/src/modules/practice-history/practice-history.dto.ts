@@ -38,6 +38,7 @@ export interface PracticeHistoryQuestion {
   questionContent: string | null;
   /** 材料（questions.material_text，语文/英语阅读材料、物化题内材料）。无材料为 null。 */
   materialText: string | null;
+  /** 标准答案（考试取自 questions.answer；语文含义专项按句回查题库重建）。 */
   questionAnswer: string | null;
   questionAnalysis: string | null;
   /** 题目来源（questions.source，如「北京市西城区九年级模拟测试试卷」）；用于溯源。 */

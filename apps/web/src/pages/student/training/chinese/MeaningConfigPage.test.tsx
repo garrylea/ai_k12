@@ -15,8 +15,8 @@ vi.mock('@/services/api', async (importOriginal) => {
 const fetchMock = vi.mocked(fetchMeaningPassages);
 
 const PASSAGES = [
-  { passageId: 1, workTitle: '行路难', semester: '上册' },
-  { passageId: 2, workTitle: '酬乐天扬州初逢席上见赠', semester: '下册' },
+  { passageId: 1, workTitle: '行路难', grade: '九年级', semester: '上册' },
+  { passageId: 2, workTitle: '酬乐天扬州初逢席上见赠', grade: '九年级', semester: '下册' },
 ];
 
 describe('MeaningConfigPage', () => {
@@ -35,9 +35,9 @@ describe('MeaningConfigPage', () => {
     return result;
   };
 
-  it('渲染三档范围、1/2/3 篇数与开始按钮', async () => {
+  it('渲染全部 + 由数据推导的年级册次档、1/2/3 篇数与开始按钮', async () => {
     await renderPage();
-    for (const label of ['全部', '上册', '下册']) {
+    for (const label of ['全部', '九上', '九下']) {
       expect(screen.getByRole('button', { name: label })).toBeTruthy();
     }
     for (const label of ['1 首', '2 首', '3 首']) {

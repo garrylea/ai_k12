@@ -194,6 +194,64 @@ describe('PracticeHistoryService.getDetail', () => {
     expect(h.passagesRepo.findById).toHaveBeenCalledTimes(1);
   });
 
+  it('含义专项：标准答案按句回查题库（字词 + 深层含义 + 情感），不依赖作答记录', async () => {
+    h.specialSessionsRepo.findByIdOwned.mockResolvedValue(
+      mkSpecialSession({ subject_id: 2, module: 'chinese_meaning' }),
+    );
+    h.specialAnswersRepo.countBySession.mockResolvedValue({ total: 1, correct: 1 });
+    h.specialAnswersRepo.listBySession.mockResolvedValue([
+      {
+        id: 1, session_id: 5, question_id: null, ref_type: 'passage', ref_id: 42,
+        sentence_index: 1, question_order: 1,
+        answer_text: '{"terms":[{"term":"疑","answer":"好像"}],"meaning":"写思乡","emotion":"思乡"}',
+        is_correct: 1, score: null, method: 'ai', analysis: null, judged_at: null,
+        question_content: null, question_answer: null, question_analysis: null,
+        question_is_active: null,
+      },
+    ]);
+    h.passagesRepo.findById.mockResolvedValue({
+      id: 42, work_title: '静夜思',
+      sentences: [
+        { text: '床前明月光，疑是地上霜。', translation: '' },
+        { text: '举头望明月，低头思故乡。', translation: '' },
+      ],
+      key_terms: [
+        { term: '疑', gloss: '好像', sentenceIndex: 0 },
+        { term: '举头', gloss: '抬头', sentenceIndex: 1 },
+      ],
+      sentence_meanings: [
+        { meaning: '写月光如霜。', emotion: '孤寂' },
+        { meaning: '写游子思乡。', emotion: '思乡' },
+      ],
+    });
+    const r = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
+    expect(r!.questions[0].questionAnswer).toBe(
+      '**重点字词**\n\n- 举头：抬头\n\n'
+      + '**深层含义**\n\n写游子思乡。\n\n**作者情感**\n\n思乡',
+    );
+  });
+
+  it('非含义专项：不回填标准答案（解释/默写不受影响）', async () => {
+    h.specialSessionsRepo.findByIdOwned.mockResolvedValue(mkSpecialSession());
+    h.specialAnswersRepo.listBySession.mockResolvedValue([
+      {
+        id: 1, session_id: 5, question_id: null, ref_type: 'passage', ref_id: 42,
+        sentence_index: 0, question_order: 1, answer_text: '{"translation":"月光"}',
+        is_correct: 0, score: null, method: 'ai', analysis: null, judged_at: null,
+        question_content: null, question_answer: null, question_analysis: null,
+        question_is_active: null,
+      },
+    ]);
+    h.passagesRepo.findById.mockResolvedValue({
+      id: 42, work_title: '静夜思',
+      sentences: [{ text: '床前明月光，疑是地上霜。', translation: '月光' }],
+      key_terms: [{ term: '疑', gloss: '好像', sentenceIndex: 0 }],
+      sentence_meanings: [{ meaning: '写月光如霜。', emotion: '孤寂' }],
+    });
+    const r = await h.service.getDetail({ studentId: 7, source: 'special', sessionId: 5 });
+    expect(r!.questions[0].questionAnswer).toBeNull();
+  });
+
   it('考试详情：在架 + 有答案 + 有 KP → canRedo/canSimilar 为 true', async () => {
     h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ subject_id: 1 }));
     h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([{

@@ -282,7 +282,9 @@ function QuestionCard({
       {/* 正确答案 */}
       {q.questionAnswer ? (
         <div className="mb-2 text-sm">
-          <span className="text-[var(--text-tertiary)]">正确答案：</span>
+          <span className="text-[var(--text-tertiary)]">
+            {isChineseSpecial ? '标准答案：' : '正确答案：'}
+          </span>
           {/* breaks：库里的证明/解答是「一行一步」的纯文本，不保留换行会挤成一整段，
               看上去就像没渲染的原文（2026-11-15 用户反馈）。
               normalizeAnswerMath：裸 LaTeX 补 $、修 $ 错位与 \text 损坏、夹在公式中间的插图单独切出 */}

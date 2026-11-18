@@ -289,14 +289,22 @@ export class ChinesePassagesRepository {
     return rows;
   }
 
-  /** 含义专项随机抽篇（semester=null 即「全部册次」） */
+  /**
+   * 含义专项随机抽篇（semester=null 即「全部册次」，grade=null 即「全部年级」）。
+   * 年级与册次是**两个维度**：只给 grade 时仍跨上下册，因此也需要按篇名去重。
+   */
   async findRandomVerifiedForMeaning(
     semester: string | null,
+    grade: string | null,
     count: number,
   ): Promise<ChinesePassageRow[]> {
     const params: unknown[] = [];
     let sql = `SELECT ${SELECT_COLS} FROM chinese_passages dp
        WHERE ${ChinesePassagesRepository.MEANING_GATE_SQL}`;
+    if (grade != null) {
+      sql += ' AND dp.grade = ?';
+      params.push(grade);
+    }
     if (semester != null) {
       sql += ' AND dp.semester = ?';
       params.push(semester);
@@ -304,13 +312,16 @@ export class ChinesePassagesRepository {
       // 「全部册次」按**篇名**去重（同 findRandomVerifiedForInterpretation）：
       // 九上/九下有 9 篇重复收录，不过滤册次时同一篇会被抽到两次。
       // ⚠️ 只在无册次过滤时加：子查询跨册取 MIN(id)，外层若已按册过滤会把该册的行整体排除掉。
+      // 子查询必须带上同一个 grade 条件，否则指定年级时会选中另一年级的同名行。
       sql += ` AND dp.id = (
         SELECT MIN(dp2.id) FROM chinese_passages dp2
           WHERE dp2.work_title = dp.work_title
             AND dp2.verified = 1 AND dp2.is_active = 1
             AND JSON_LENGTH(dp2.sentences) > 0
             AND dp2.sentence_meanings IS NOT NULL
+            ${grade != null ? 'AND dp2.grade = ?' : ''}
       )`;
+      if (grade != null) params.push(grade);
     }
     sql += ' ORDER BY RAND() LIMIT ?';
     params.push(count);

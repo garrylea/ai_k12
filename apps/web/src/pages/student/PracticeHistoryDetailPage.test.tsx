@@ -274,6 +274,32 @@ describe('PracticeHistoryDetailPage', () => {
     expect(screen.getByText('唐')).toBeInTheDocument();
   });
 
+  it('含义专项：详情回放标准答案（接口回查题库后填充 questionAnswer）', async () => {
+    getDetailMock.mockResolvedValue({
+      session: { ...SPECIAL_SESSION, module: 'chinese_meaning', title: '含义专项·静夜思' },
+      questions: [
+        {
+          questionId: null, questionOrder: 1,
+          answerText: '{"terms":[{"term":"疑","answer":"好像"}],"meaning":"写思乡","emotion":"思乡"}',
+          isCorrect: true, score: null, method: 'ai', analysis: null, judgedAt: null,
+          materialText: null,
+          questionContent: null,
+          questionAnswer: '**重点字词**\n\n- 疑：好像\n\n**深层含义**\n\n写游子思乡。\n\n**作者情感**\n\n思乡',
+          questionAnalysis: null,
+          refType: 'passage', refId: 42, sentenceIndex: 0,
+          passageTitle: '静夜思', passageSentence: '床前明月光，疑是地上霜。',
+          canRedo: false, canSimilar: false,
+        },
+      ],
+    });
+    renderAt('special', '5');
+    await waitFor(() => expect(screen.getByText('标准答案：')).toBeInTheDocument());
+    // 「我的答案」与「标准答案」各出现一次
+    expect(screen.getAllByText('疑：好像')).toHaveLength(2);
+    expect(screen.getByText('写游子思乡。')).toBeInTheDocument();
+    expect(screen.getAllByText('思乡')).toHaveLength(2);
+  });
+
   it('解析缺失时显示「解析未生成」', async () => {
     getDetailMock.mockResolvedValue({
       session: EXAM_SESSION,

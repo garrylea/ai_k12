@@ -17,10 +17,12 @@ import type { PointsAwardReason } from '../../points/dto/points.dto.js';
  */
 export type MeaningMethod = 'ai' | 'unanswered' | 'undetermined';
 
-/** 配置页篇目清单项（供「指定篇目」勾选）。只有名字，没有内容。 */
+/** 配置页篇目清单项（供「指定篇目」勾选）。只有名字与年级/册次，没有内容。 */
 export interface MeaningPassageListItem {
   passageId: number;
   workTitle: string;
+  /** 七年级 / 八年级 / 九年级；NULL = 内容管线没给年级（前端只显示册次）。 */
+  grade: string | null;
   semester: string;
 }
 
@@ -51,6 +53,7 @@ export interface MeaningSentenceItem {
 export interface MeaningPassageItem {
   passageId: number;
   workTitle: string;
+  grade: string | null;
   semester: string;
   sentences: MeaningSentenceItem[];
 }

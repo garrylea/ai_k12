@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-11-18 含义专项：篇目清单透出年级；练习记录回放含义标准答案
+
+**背景**：学生端「古诗文含义」配置页只有「全部/上册/下册」，学生看不出是哪一年级；练习记录详情只看得到自己的作答，标准答案、判定依据都看不到。排查结论：① 年级字段 `chinese_passages.grade` 库里有、Repo 也查了，但 `MeaningService.listMeaningPassages` 映射 DTO 时丢掉；且当前含义题库只收了九年级 34 首（17 上 + 17 下），七/八年级未入库。② 含义判题时标准答案已算出，但作答记录只写学生作答与对错，`questionAnswer` 依赖 `LEFT JOIN questions`，语文专项 `question_id` 为 NULL 恒空。
+
+**改动**：
+- 后端：`MeaningPassageListItem` / `MeaningPassageItem` 增加 `grade: string | null`；`GET /api/training/meaning/passages` 原样返回；`POST /api/training/meaning/start` 新增可选 `grade`（白名单 七年级/八年级/九年级/null），随机抽题按「年级 + 册次」过滤；只限年级时仍按篇名去重，且去重子查询同步限该年级。
+- 前端：配置页范围档改为**从篇目数据推导**的「九上/九下」组合（不写死，未来七八年级入库自动出现），篇目列表逐项显示年级册次；开练请求透传 `grade`。
+- 练习记录详情：`ref_type='passage'` 且会话 `module='chinese_meaning'` 时，按 `sentence_index` 回查题库，重建「重点字词 / 深层含义 / 作者情感」Markdown 填进 `questionAnswer`（**不复制进作答记录**，题库仍是唯一真源）；历史记录立即生效。前端语文专项的答案块标题改为「标准答案」。
+- 不做：逐项 ✓/✗ 与 LLM 评语的历史回放（需判题时另存判题明细，旧记录无法回溯），`score`/得分点/扣分点概念仍不引入。
+
+**改动文件**：`chinese-passages.repo.ts`、`meaning.service.ts`、`meaning.controller.ts`、`dto/meaning.dto.ts`、`practice-history.service.ts`、`practice-history.dto.ts`、`MeaningConfigPage.tsx`、`PracticeHistoryDetailPage.tsx`、`api.ts`；API 文档 §4.18/§4.29 与 `docs/api/openapi.yaml` 同步。
+
+**验证**：`apps/server` / `apps/web` 全量测试 + `tsc`（见提交）。
+
 ## 2026-11-18 英语背单词错词池：按错次降序、答对自动移出、错次封顶
 
 **背景**：原实现里「我错过的词」只是 `wrong_count > 0` 的过滤，出词仍按随机/字母序；答对只置 `learned`，`wrong_count` 永不清零，学生反复看到同一批错词、看不到「错题数在减少」，缺乏成就感。用户裁决按「错得多先复习、答对即移出」调整。

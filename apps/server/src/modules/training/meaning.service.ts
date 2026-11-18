@@ -110,11 +110,16 @@ export class MeaningService {
     return meanings;
   }
 
-  /** 配置页篇目清单：只出篇名与册次。 */
+  /** 配置页篇目清单：只出篇名、年级与册次。 */
   async listMeaningPassages(): Promise<{ passages: MeaningPassageListItem[] }> {
     const rows = await this.passageRepo.findVerifiedForMeaning();
     return {
-      passages: rows.map((r) => ({ passageId: r.id, workTitle: r.work_title, semester: r.semester })),
+      passages: rows.map((r) => ({
+        passageId: r.id,
+        workTitle: r.work_title,
+        grade: r.grade ?? null,
+        semester: r.semester,
+      })),
     };
   }
 
@@ -126,13 +131,14 @@ export class MeaningService {
    * `author` / `dynasty` / `body` 一律不下发。
    */
   async startMeaning(input: {
+    grade: string | null;
     semester: string | null;
     passageIds: number[] | null;
     count: number;
   }): Promise<{ passages: MeaningPassageItem[] }> {
     const rows = input.passageIds && input.passageIds.length > 0
       ? await this.passageRepo.findVerifiedByIdsForMeaning(input.passageIds)
-      : await this.passageRepo.findRandomVerifiedForMeaning(input.semester, input.count);
+      : await this.passageRepo.findRandomVerifiedForMeaning(input.semester, input.grade, input.count);
 
     const passages: MeaningPassageItem[] = [];
     for (const r of rows) {
@@ -158,6 +164,7 @@ export class MeaningService {
       passages.push({
         passageId: r.id,
         workTitle: r.work_title,
+        grade: r.grade ?? null,
         semester: r.semester,
         sentences: items,
       });

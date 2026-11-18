@@ -1843,11 +1843,18 @@ export interface MeaningSentenceItem {
   answerable: boolean;
 }
 
-export interface MeaningPassageItem { passageId: number; workTitle: string; semester: string }
+export interface MeaningPassageItem {
+  passageId: number;
+  workTitle: string;
+  /** 七/八/九年级；null = 内容缺年级，只按册次展示。 */
+  grade: string | null;
+  semester: string;
+}
 
 export interface MeaningPassageDetail {
   passageId: number;
   workTitle: string;
+  grade: string | null;
   semester: string;
   sentences: MeaningSentenceItem[];
 }
@@ -1891,6 +1898,7 @@ export function fetchMeaningPassages(): Promise<{ passages: MeaningPassageItem[]
 }
 
 export function startMeaning(payload: {
+  grade?: string | null;
   semester: string | null;
   passageIds: number[] | null;
   count: number;

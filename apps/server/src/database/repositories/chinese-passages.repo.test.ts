@@ -243,7 +243,7 @@ describe('ChinesePassagesRepository — 含义专项抽题池', () => {
   it('findRandomVerifiedForMeaning：semester=null 时按篇名去重，子查询同样守含义门禁', async () => {
     const pool = mockPool([]);
     const repo = new ChinesePassagesRepository(pool as any);
-    await repo.findRandomVerifiedForMeaning(null, 3);
+    await repo.findRandomVerifiedForMeaning(null, null, 3);
     const [sql, params] = pool.query.mock.calls[0];
     expect(sql).not.toContain('dp.semester = ?');
     expect(sql).toContain('MIN(dp2.id)');
@@ -261,11 +261,33 @@ describe('ChinesePassagesRepository — 含义专项抽题池', () => {
     // 同解释专项：子查询跨册取 MIN(id)，外层若已按册过滤会把该册的行整体排除掉
     const pool = mockPool([]);
     const repo = new ChinesePassagesRepository(pool as any);
-    await repo.findRandomVerifiedForMeaning('上册', 3);
+    await repo.findRandomVerifiedForMeaning('上册', null, 3);
     const [sql, params] = pool.query.mock.calls[0];
     expect(sql).not.toContain('MIN(dp2.id)');
     expect(sql).toContain('dp.semester = ?');
     expect(params).toEqual(['上册', 3]);
+  });
+
+  it('findRandomVerifiedForMeaning：只指定年级时仍按篇名去重，且子查询同步限该年级', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findRandomVerifiedForMeaning(null, '九年级', 2);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('MIN(dp2.id)');
+    expect(sql).toContain('dp.grade = ?');
+    // 外层 1 个 grade + 子查询 1 个 grade + LIMIT
+    expect(params).toEqual(['九年级', '九年级', 2]);
+  });
+
+  it('findRandomVerifiedForMeaning：年级 + 册次同时过滤，不走去重子查询', async () => {
+    const pool = mockPool([]);
+    const repo = new ChinesePassagesRepository(pool as any);
+    await repo.findRandomVerifiedForMeaning('下册', '九年级', 1);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).not.toContain('MIN(dp2.id)');
+    expect(sql).toContain('dp.grade = ?');
+    expect(sql).toContain('dp.semester = ?');
+    expect(params).toEqual(['九年级', '下册', 1]);
   });
 
   it('findVerifiedByIdsForMeaning：空数组直接返回空，不查库', async () => {

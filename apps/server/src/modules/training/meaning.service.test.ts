@@ -68,10 +68,12 @@ function makeService(overrides: {
 }
 
 describe('MeaningService.listMeaningPassages', () => {
-  it('只出 passageId/workTitle/semester，含义与情感一律不下发', async () => {
+  it('只出 passageId/workTitle/grade/semester，含义与情感一律不下发', async () => {
     const { service } = makeService();
     const res = await service.listMeaningPassages();
-    expect(res.passages).toEqual([{ passageId: 12, workTitle: '酬乐天扬州初逢席上见赠', semester: '上册' }]);
+    expect(res.passages).toEqual([{
+      passageId: 12, workTitle: '酬乐天扬州初逢席上见赠', grade: '九年级', semester: '上册',
+    }]);
     const json = JSON.stringify(res);
     expect(json).not.toContain('新事物');
     expect(json).not.toContain('豁达乐观');
@@ -82,7 +84,7 @@ describe('MeaningService.listMeaningPassages', () => {
 describe('MeaningService.startMeaning', () => {
   it('下发整篇句子 text，answerable 标记有标准含义的句子，且不泄露答案', async () => {
     const { service } = makeService();
-    const res = await service.startMeaning({ semester: null, passageIds: null, count: 1 });
+    const res = await service.startMeaning({ grade: null, semester: null, passageIds: null, count: 1 });
     expect(res.passages[0]?.sentences).toEqual([
       { index: 0, text: '巴山楚水凄凉地，二十三年弃置身。', terms: [], answerable: true },
       { index: 1, text: '沉舟侧畔千帆过，病树前头万木春。',
@@ -98,7 +100,7 @@ describe('MeaningService.startMeaning', () => {
   it('某句没有标准含义时 answerable=false，但 text 仍下发（诗要完整显示）', async () => {
     const partial = { ...PASSAGE, sentence_meanings: [{ meaning: '写凄凉。', emotion: '辛酸' }, null] };
     const { service } = makeService({ random: [partial] });
-    const res = await service.startMeaning({ semester: null, passageIds: null, count: 1 });
+    const res = await service.startMeaning({ grade: null, semester: null, passageIds: null, count: 1 });
     expect(res.passages[0]?.sentences[1]?.answerable).toBe(false);
     expect(res.passages[0]?.sentences[1]?.text).toBe('沉舟侧畔千帆过，病树前头万木春。');
   });
@@ -107,10 +109,19 @@ describe('MeaningService.startMeaning', () => {
     // sentences 2 句、sentence_meanings 只有 1 项：错位对齐时 meanings[i] 描述的是另一句
     const mismatched = { ...PASSAGE, sentence_meanings: [{ meaning: '写凄凉。', emotion: '辛酸' }] };
     const { service } = makeService({ random: [mismatched] });
-    const res = await service.startMeaning({ semester: null, passageIds: null, count: 1 });
+    const res = await service.startMeaning({ grade: null, semester: null, passageIds: null, count: 1 });
     expect(res.passages).toEqual([]);
     // 对不上就一句都不判，标准含义更不能泄露出去
     expect(JSON.stringify(res)).not.toContain('写凄凉');
+  });
+
+  it('按年级 + 册次开练时两个维度都传给仓储，并回填篇目年级', async () => {
+    const { service, repo } = makeService();
+    const res = await service.startMeaning({
+      grade: '九年级', semester: '上册', passageIds: null, count: 1,
+    });
+    expect(repo.findRandomVerifiedForMeaning).toHaveBeenCalledWith('上册', '九年级', 1);
+    expect(res.passages[0]?.grade).toBe('九年级');
   });
 
   it('指定篇目走 byIds 路径并按 count 截断，不碰随机抽题', async () => {
@@ -120,7 +131,7 @@ describe('MeaningService.startMeaning', () => {
       { ...PASSAGE, id: 3, work_title: '篇三' },
     ];
     const { service, repo } = makeService({ byIds });
-    const res = await service.startMeaning({ semester: null, passageIds: [1, 2, 3], count: 2 });
+    const res = await service.startMeaning({ grade: null, semester: null, passageIds: [1, 2, 3], count: 2 });
     expect(repo.findVerifiedByIdsForMeaning).toHaveBeenCalledWith([1, 2, 3]);
     expect(repo.findRandomVerifiedForMeaning).not.toHaveBeenCalled();
     expect(res.passages).toHaveLength(2);
