@@ -282,3 +282,44 @@ describe('QuestionsRepository.findKpRefsByQuestionIds', () => {
     expect(sql).toContain('LEFT JOIN knowledge_points pk ON pk.id = kp.parent_kp_id');
   });
 });
+
+describe('QuestionsRepository — 试卷题号', () => {
+  const optionsRow = { grade: '初三', semester: 'first', question_count: 28, papers: 5 };
+
+  it('listPaperPositionOptions：按 grade/semester/question_count 分组，只统计可判题', async () => {
+    const pool = mockPool([optionsRow]);
+    const repo = new QuestionsRepository(pool as any);
+    const rows = await repo.listPaperPositionOptions(1);
+
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('COUNT(DISTINCT p.id) AS papers');
+    expect(sql).toContain("p.semester IN ('first', 'second')");
+    expect(sql).toContain('GROUP BY p.grade, p.semester, p.question_count');
+    expect(sql).toContain('q.is_active = 1');
+    expect(sql).toContain("q.answer <> ''");
+    expect(params).toEqual([1]);
+    expect(rows).toEqual([optionsRow]);
+  });
+
+  it('countPaperPositionQuestions：三张作答表都参与「从未做过」判定', async () => {
+    const pool = mockPool([{ question_no: 24, total: 6, wrong_count: 2, untried_count: 3 }]);
+    const repo = new QuestionsRepository(pool as any);
+    const rows = await repo.countPaperPositionQuestions(7, 1, '初三', 'first');
+
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain('COUNT(DISTINCT CASE WHEN EXISTS (');
+    expect(sql).toContain('FROM main_error_books meb');
+    expect(sql).toContain('meb.is_cleared = 0');
+    expect(sql).toContain('FROM special_answer_records sar');
+    expect(sql).toContain('JOIN special_practice_sessions sps');
+    expect(sql).toContain('FROM exam_answers ea');
+    expect(sql).toContain('JOIN exam_sessions es');
+    expect(sql).toContain('FROM practice_results pr');
+    expect(sql).toContain('sar.is_correct IS NOT NULL');
+    expect(sql).toContain('ea.is_correct IS NOT NULL');
+    expect(sql).toContain('FROM student_hidden_questions shq');
+    expect(sql).toContain('GROUP BY pq.question_no');
+    expect(params).toEqual([7, 1, 7, 1, 7, 7, 7, 1, '初三', 'first', 7, 1]);
+    expect(rows[0].wrong_count).toBe(2);
+  });
+});

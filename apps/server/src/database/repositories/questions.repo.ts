@@ -24,6 +24,20 @@ const PAPER_QUESTION_NO_SQL = `COALESCE((
   LIMIT 1
 ), q.group_order)`;
 
+export interface PaperPositionOptionRow extends RowDataPacket {
+  grade: string;
+  semester: string;
+  question_count: number;
+  papers: number;
+}
+
+export interface PaperPositionCountRow extends RowDataPacket {
+  question_no: number;
+  total: number;
+  wrong_count: number;
+  untried_count: number;
+}
+
 @Injectable()
 export class QuestionsRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
@@ -271,6 +285,75 @@ export class QuestionsRepository {
       sql, [studentId, subjectId, category, model, count],
     );
     return rows as QuestionRow[];
+  }
+
+  /** 「试卷题号」选项：按年级+学期+卷面题数分组统计卷数（只算可判题，避免空卷占位）。 */
+  async listPaperPositionOptions(subjectId: number): Promise<PaperPositionOptionRow[]> {
+    const sql = `SELECT p.grade, p.semester, p.question_count, COUNT(DISTINCT p.id) AS papers
+      FROM exam_papers p
+      JOIN paper_questions pq ON pq.paper_id = p.id
+      JOIN questions q ON q.id = pq.question_id
+      WHERE p.subject_id = ? AND p.semester IN ('first', 'second')
+        AND q.is_active = 1 AND q.answer <> ''
+      GROUP BY p.grade, p.semester, p.question_count`;
+    const [rows] = await this.pool.query<RowDataPacket[]>(sql, [subjectId]);
+    return rows as PaperPositionOptionRow[];
+  }
+
+  /**
+   * 「试卷题号」每个题号的三个数：
+   * - total：排除 hidden 后的可判题数；
+   * - wrong_count：未清错题本中的题数；
+   * - untried_count：不在错题本、且专项/考试/主线三处都无已判记录的题数。
+   * 参数顺序：错题 2 + 未做 5 + 范围 3 + hidden 2。
+   */
+  async countPaperPositionQuestions(
+    studentId: number,
+    subjectId: number,
+    grade: string,
+    semester: string,
+  ): Promise<PaperPositionCountRow[]> {
+    const sql = `SELECT pq.question_no,
+        COUNT(DISTINCT q.id) AS total,
+        COUNT(DISTINCT CASE WHEN EXISTS (
+          SELECT 1 FROM main_error_books meb
+          WHERE meb.student_id = ? AND meb.subject_id = ?
+            AND meb.question_id = q.id AND meb.is_cleared = 0
+        ) THEN q.id END) AS wrong_count,
+        COUNT(DISTINCT CASE WHEN NOT EXISTS (
+          SELECT 1 FROM main_error_books meb
+          WHERE meb.student_id = ? AND meb.subject_id = ?
+            AND meb.question_id = q.id AND meb.is_cleared = 0
+        ) AND NOT EXISTS (
+          SELECT 1 FROM special_answer_records sar
+          JOIN special_practice_sessions sps ON sps.id = sar.session_id
+          WHERE sar.question_id = q.id AND sps.student_id = ?
+            AND sar.is_correct IS NOT NULL
+        ) AND NOT EXISTS (
+          SELECT 1 FROM exam_answers ea
+          JOIN exam_sessions es ON es.id = ea.session_id
+          WHERE ea.question_id = q.id AND es.student_id = ?
+            AND ea.is_correct IS NOT NULL
+        ) AND NOT EXISTS (
+          SELECT 1 FROM practice_results pr
+          WHERE pr.question_id = q.id AND pr.student_id = ?
+        ) THEN q.id END) AS untried_count
+      FROM paper_questions pq
+      JOIN exam_papers p ON p.id = pq.paper_id
+      JOIN questions q ON q.id = pq.question_id
+      WHERE p.subject_id = ? AND p.grade = ? AND p.semester = ?
+        AND q.is_active = 1 AND q.answer <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM student_hidden_questions shq
+          WHERE shq.student_id = ? AND shq.subject_id = ? AND shq.question_id = q.id
+        )
+      GROUP BY pq.question_no`;
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      sql,
+      [studentId, subjectId, studentId, subjectId, studentId, studentId, studentId,
+        subjectId, grade, semester, studentId, subjectId],
+    );
+    return rows as PaperPositionCountRow[];
   }
 
   /** 补偿套题抽题（2026-09-21）：同考点 + 同题型 + 难度档（数组）随机取题。
