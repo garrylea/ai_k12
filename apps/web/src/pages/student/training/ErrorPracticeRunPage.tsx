@@ -23,7 +23,9 @@ import {
 } from '@/services/api';
 import { normalizeOptions } from './normalizeOptions';
 import { usePointsFeedback } from './points-feedback';
-import { parseSubjectId } from '@/constants';
+import { parseSubjectId, subjectName } from '@/constants';
+import { PrintIconButton } from '@/components/business/print/PrintIconButton';
+import { PrintPreview } from '@/components/business/print/PrintPreview';
 
 /** 列表页写入的题单键（读后即删，防止刷新后重复进入旧题单）。 */
 const SESSION_KEY = 'training:errors';
@@ -43,6 +45,7 @@ export default function ErrorPracticeRunPage() {
   const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
   // 页面级草稿抽屉：始终可见图标，切题即清空（草稿不保存）
   const [draftOpen, setDraftOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
   const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
   // 退出确认（X 按钮）：answered 由 QuestionRunner 传出
   const [exitConfirm, setExitConfirm] = useState<{ open: boolean; answered: number }>({ open: false, answered: 0 });
@@ -252,6 +255,7 @@ export default function ErrorPracticeRunPage() {
                   return res.explanation;
                 }}
                 onClose={() => navigate(`/student/training/errors${subjectQuery}`)}
+                onExport={() => setPrintOpen(true)}
               />
             </div>
           </div>
@@ -301,11 +305,10 @@ export default function ErrorPracticeRunPage() {
                 DOM 顺序：草稿这行必须排在 DiscussDrawer 之前——DraftPanel 内里的 canvas 是 absolute，
                 同层 z-index:auto 的定位元素按 DOM 序绘制，排在后面的一方才压在上面（讨论抽屉要盖住面板）；
                 图标则在 DiscussDrawer 之前，抽屉才能盖住它、关闭钮才可点。 */}
-            {!draftOpen && (
-              <div className="absolute top-4 right-4">
-                <DraftIconButton onClick={() => setDraftOpen(true)} />
-              </div>
-            )}
+            <div className="absolute top-4 right-4 flex items-center gap-2">
+              <PrintIconButton onClick={() => setPrintOpen(true)} />
+              {!draftOpen && <DraftIconButton onClick={() => setDraftOpen(true)} />}
+            </div>
             {discussQ && phase === 'answering' && (
               <DiscussDrawer
                 mode="training"
@@ -343,6 +346,12 @@ export default function ErrorPracticeRunPage() {
             </div>
           </Modal>
         )}
+        <PrintPreview
+          open={printOpen}
+          questions={questions}
+          meta={{ subject: subjectName(subjectId) }}
+          onClose={() => setPrintOpen(false)}
+        />
         {/* 浏览器返回/路由跳转拦截（X 确认已同步置 guardRef.current=false 故不二次弹） */}
         <RunExitGuard
           guardRef={guardRef}
