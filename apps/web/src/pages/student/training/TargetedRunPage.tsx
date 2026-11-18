@@ -7,6 +7,8 @@ import { RemediationOfferCard } from '@/components/business/RemediationOfferCard
 import { DiscussDrawer, DiscussIconButton } from '@/components/business/DiscussDrawer';
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
+import { PrintIconButton } from '@/components/business/print/PrintIconButton';
+import { PrintPreview } from '@/components/business/print/PrintPreview';
 import { Modal } from '@/components/base';
 import { CelebrationOverlay } from '@/components/business';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
@@ -57,6 +59,8 @@ export default function TargetedRunPage() {
   const [discussQ, setDiscussQ] = useState<RunnerQuestion | null>(null);
   // 页面级草稿抽屉：始终可见图标，切题即清空（草稿不保存）；currentQ 由 QuestionRunner.onQuestionChange 喂
   const [draftOpen, setDraftOpen] = useState(false);
+  // 打印预览：答题态与结果态共用同一个入口
+  const [printOpen, setPrintOpen] = useState(false);
   const [currentQ, setCurrentQ] = useState<RunnerQuestion | null>(null);
   // 退出确认（X 按钮）：answered 由 QuestionRunner 传出
   const [exitConfirm, setExitConfirm] = useState<{ open: boolean; answered: number }>({ open: false, answered: 0 });
@@ -316,6 +320,7 @@ export default function TargetedRunPage() {
               return res.explanation;
             }}
             onClose={() => navigate(exitTarget)}
+            onExport={() => setPrintOpen(true)}
           />
         ) : (
           <>
@@ -385,11 +390,11 @@ export default function TargetedRunPage() {
                 DOM 顺序：草稿这行必须排在 DiscussDrawer 之前——DraftPanel 内里的 canvas 是 absolute，
                 同层 z-index:auto 的定位元素按 DOM 序绘制，排在后面的一方才压在上面（讨论抽屉要盖住面板）；
                 图标则在 DiscussDrawer 之前，抽屉才能盖住它、关闭钮才可点。 */}
-            {!draftOpen && (
-              <div className="absolute top-4 right-4">
-                <DraftIconButton onClick={() => setDraftOpen(true)} />
-              </div>
-            )}
+            {/* 导出常驻；草稿仍随面板开合（DOM 顺序说明见下方 DiscussDrawer） */}
+            <div className="absolute top-4 right-4 flex items-center gap-2">
+              <PrintIconButton onClick={() => setPrintOpen(true)} />
+              {!draftOpen && <DraftIconButton onClick={() => setDraftOpen(true)} />}
+            </div>
             {discussQ && phase === 'answering' && (
               <DiscussDrawer
                 mode="training"
@@ -456,6 +461,13 @@ export default function TargetedRunPage() {
         {/* 段位晋升 / 全屏庆祝（决策表在 points-feedback，本页不自己判断何时弹） */}
         <CelebrationOverlay {...celebrationProps} />
 
+        {/* 打印预览：答题态 / 结果态共用，只导出题干与选项 */}
+        <PrintPreview
+          open={printOpen}
+          questions={questions}
+          meta={{ subject: subjectName(subjectId) }}
+          onClose={() => setPrintOpen(false)}
+        />
         {/* 浏览器返回/路由跳转拦截（X 确认已同步置 guardRef.current=false 故不二次弹） */}
         <RunExitGuard
           guardRef={guardRef}
