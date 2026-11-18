@@ -69,3 +69,69 @@ describe('TrainingController.startTargetedPractice — 学科任务码（cn_targ
     expect(pointRulesService.listTierKeys).toHaveBeenCalledWith(7, 'chemistry_targeted');
   });
 });
+
+describe('TrainingController.getPaperPositions', () => {
+  it('透传 subjectId + grade/semester + studentId', async () => {
+    const service = { listPaperPositions: vi.fn().mockResolvedValue({ options: [] }) };
+    const controller = new TrainingController(service as never, {} as never, {} as never, {} as never);
+    await controller.getPaperPositions(1, USER, '初三', 'first');
+    expect(service.listPaperPositions).toHaveBeenCalledWith(7, 1, '初三', 'first');
+  });
+
+  it('缺省 grade/semester 传 null', async () => {
+    const service = { listPaperPositions: vi.fn().mockResolvedValue({ options: [] }) };
+    const controller = new TrainingController(service as never, {} as never, {} as never, {} as never);
+    await controller.getPaperPositions(1, USER, undefined, undefined);
+    expect(service.listPaperPositions).toHaveBeenCalledWith(7, 1, null, null);
+  });
+});
+
+describe('TrainingController.startTargetedPractice — 试卷题号校验', () => {
+  function makeController(allowed = ['1', '2', '3', '5', '10']) {
+    const service = { startTargetedPractice: vi.fn().mockResolvedValue({ questions: [], sessionId: null }) };
+    const pointRulesService = { listTierKeys: vi.fn().mockResolvedValue(allowed) };
+    return {
+      controller: new TrainingController(service as never, {} as never, {} as never, pointRulesService as never),
+      service,
+    };
+  }
+
+  it('三选一互斥：paper 字段与 kpId 同给 400', async () => {
+    const { controller } = makeController();
+    await expect(controller.startTargetedPractice({
+      subjectId: 1, kpId: 3, grade: '初三', semester: 'first', paperQuestionNo: 24, type: null, count: 2,
+    }, USER)).rejects.toThrow('三选一');
+  });
+
+  it('缺 grade/semester 400；type 非 null 400；非数学 400', async () => {
+    const { controller } = makeController();
+    await expect(controller.startTargetedPractice({
+      subjectId: 1, grade: '初三', paperQuestionNo: 24, type: null, count: 2,
+    }, USER)).rejects.toThrow('必须同时出现');
+
+    await expect(controller.startTargetedPractice({
+      subjectId: 1, grade: '初三', semester: 'first', paperQuestionNo: 24, type: 'choice', count: 2,
+    }, USER)).rejects.toThrow('试卷题号不支持题型筛选');
+
+    await expect(controller.startTargetedPractice({
+      subjectId: 4, grade: '初三', semester: 'first', paperQuestionNo: 24, type: null, count: 2,
+    }, USER)).rejects.toThrow('试卷题号仅支持数学');
+
+    await expect(controller.startTargetedPractice({
+      subjectId: 1, grade: '初三', semester: 'third', paperQuestionNo: 24, type: null, count: 2,
+    }, USER)).rejects.toThrow('semester 仅允许 first | second');
+  });
+
+  it('合法请求透传 paperPosition、type 归一为 null', async () => {
+    const { controller, service } = makeController();
+    await controller.startTargetedPractice({
+      subjectId: 1, grade: '初三', semester: 'first', paperQuestionNo: 24, type: null, count: 2,
+    }, USER);
+    expect(service.startTargetedPractice).toHaveBeenCalledWith(expect.objectContaining({
+      subjectId: 1,
+      paperPosition: { grade: '初三', semester: 'first', questionNo: 24 },
+      type: null,
+      count: 2,
+    }));
+  });
+});

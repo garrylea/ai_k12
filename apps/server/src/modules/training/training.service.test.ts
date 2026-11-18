@@ -807,7 +807,7 @@ describe('TrainingController.startTargetedPractice — 档位白名单（定案 
   });
 
   it.each([
-    [{ subjectId: 1, kpId: 3, category: 'geometry_synthesis', model: 'median_doubling', type: null, count: 2 }, '二选一'],
+    [{ subjectId: 1, kpId: 3, category: 'geometry_synthesis', model: 'median_doubling', type: null, count: 2 }, '三选一'],
     [{ subjectId: 1, category: 'geometry_synthesis', type: null, count: 2 }, '同时出现'],
     [{ subjectId: 4, category: 'geometry_synthesis', model: 'median_doubling', type: null, count: 2 }, '仅支持数学'],
     [{ subjectId: 1, category: 'x', model: 'y', type: null, count: 2 }, '不支持的模型专项'],

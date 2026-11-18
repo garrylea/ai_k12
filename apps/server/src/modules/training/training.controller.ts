@@ -168,6 +168,19 @@ export class TrainingController {
     return this.trainingService.waitForExplanation(questionId);
   }
 
+  /** 试卷题号选项 + 题号清单：subjectId 必填；grade/semester 同时给或同时不给。 */
+  @Get('paper-positions')
+  async getPaperPositions(
+    @Query('subjectId', ParseIntPipe) subjectId: number,
+    @CurrentUser() user: JwtUser,
+    @Query('grade') grade?: string,
+    @Query('semester') semester?: string,
+  ) {
+    return this.trainingService.listPaperPositions(
+      user.sub, subjectId, grade ?? null, semester ?? null,
+    );
+  }
+
   /** 模型微专题清单：白名单模型 + 该生可练题数（非数学返回空）。 */
   @Get('model-specials')
   async listModelSpecials(
@@ -185,7 +198,10 @@ export class TrainingController {
    *  `listTierKeys` 内部先 `ensureRules`，从未发过分的全新学生拿到默认档位而不是空数组。
    *
    *  **模型微专题（2026-11-15）**：`{category, model}` 与 `kpId` 二选一。模型模式只支持数学、
-   *  不筛题型、限 1-2 题，同样受家长档位约束（档位未开则 400）。 */
+   *  不筛题型、限 1-2 题，同样受家长档位约束（档位未开则 400）。
+   *
+   *  **试卷题号（2026-11-18）**：`{grade, semester, paperQuestionNo}` 与 kpId / 模型三选一。
+   *  只支持数学、不筛题型；服务层信任控制器已校验，因此互斥与非数学判断必须留在这里。 */
   @Post('targeted/start')
   async startTargetedPractice(
     @Body() dto: {
@@ -193,6 +209,9 @@ export class TrainingController {
       kpId?: number;
       category?: string;
       model?: string;
+      paperQuestionNo?: number;
+      grade?: string;
+      semester?: string;
       type: string | null;
       count: number;
     },
@@ -201,19 +220,37 @@ export class TrainingController {
     const hasKp = Number.isInteger(dto.kpId) && (dto.kpId as number) > 0;
     const hasCategory = typeof dto.category === 'string' && dto.category.trim() !== '';
     const hasModel = typeof dto.model === 'string' && dto.model.trim() !== '';
+    const hasPaperNo = Number.isInteger(dto.paperQuestionNo) && (dto.paperQuestionNo as number) > 0;
+    const hasGrade = typeof dto.grade === 'string' && dto.grade.trim() !== '';
+    const hasSemester = typeof dto.semester === 'string' && dto.semester.trim() !== '';
+    const hasPaperPosition = hasPaperNo || hasGrade || hasSemester;
 
-    if (hasKp && (hasCategory || hasModel)) {
-      throw new BadRequestException('kpId 与 category+model 必须二选一');
-    }
-    if (!hasKp && !hasCategory && !hasModel) {
-      throw new BadRequestException('kpId 与 category+model 必须二选一');
+    const modes = [hasKp, hasCategory || hasModel, hasPaperPosition].filter(Boolean).length;
+    if (modes !== 1) {
+      throw new BadRequestException('kpId、category+model 与 paperQuestionNo 必须三选一');
     }
     if (!hasKp && hasCategory !== hasModel) {
       throw new BadRequestException('category 与 model 必须同时出现');
     }
+    if (hasPaperPosition) {
+      if (!hasPaperNo || !hasGrade || !hasSemester) {
+        throw new BadRequestException('paperQuestionNo、grade、semester 必须同时出现');
+      }
+      if (dto.subjectId !== SUBJECT_MATH) {
+        throw new BadRequestException('试卷题号仅支持数学');
+      }
+      if (dto.semester !== 'first' && dto.semester !== 'second') {
+        throw new BadRequestException('semester 仅允许 first | second');
+      }
+      if (dto.type !== null && dto.type !== undefined) {
+        throw new BadRequestException('试卷题号不支持题型筛选');
+      }
+    }
 
-    const special = hasKp ? null : findModelSpecial(dto.category, dto.model);
-    if (!hasKp) {
+    const special = hasKp || hasPaperPosition
+      ? null
+      : findModelSpecial(dto.category, dto.model);
+    if (!hasKp && !hasPaperPosition) {
       if (dto.subjectId !== SUBJECT_MATH) {
         throw new BadRequestException('模型专项仅支持数学');
       }
@@ -248,6 +285,16 @@ export class TrainingController {
       subjectId: dto.subjectId,
       kpId: hasKp ? dto.kpId! : null,
       modelSpecial: special,
+      // 只在试卷题号模式带该字段：kpId / 模型模式的既有 service 入参形状保持不变。
+      ...(hasPaperPosition
+        ? {
+            paperPosition: {
+              grade: dto.grade as string,
+              semester: dto.semester as 'first' | 'second',
+              questionNo: dto.paperQuestionNo as number,
+            },
+          }
+        : {}),
       type: special ? null : type,
       count,
     });
