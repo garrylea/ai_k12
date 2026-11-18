@@ -58,6 +58,8 @@
   --brand-500: #111;
   --learn-card-bg: #fff;
   --learn-card-border: #ddd;
+  --text-tertiary: #666;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   box-sizing: border-box;
   width: 210mm;
@@ -98,8 +100,8 @@
   color: #333;
 }
 
-.print-options { list-style: none; margin: 1.5mm 0 0; padding: 0 0 0 9mm; }
-.print-option { display: flex; gap: 2mm; margin-bottom: 1mm; break-inside: avoid; }
+.print-sheet .print-options { list-style: none; margin: 1.5mm 0 0; padding: 0 0 0 9mm; }
+.print-sheet .print-option { display: flex; gap: 2mm; margin-bottom: 1mm; break-inside: avoid; }
 .print-opt-label { flex: 0 0 5mm; font-weight: 600; }
 .print-opt-text { flex: 1 1 auto; min-width: 0; }
 
@@ -116,8 +118,9 @@
 body.print-open { overflow: hidden; }
 
 @media print {
-  /* 不只隐藏 #root：图片放大浮层等也 portal 到 body，漏掉会印到纸上 */
-  body > *:not(.print-portal) { display: none !important; }
+  /* 不只隐藏 #root：图片放大浮层等也 portal 到 body，漏掉会印到纸上。
+     仅在预览层打开时生效，否则应用内任意 Cmd/Ctrl+P 会印出空白页。 */
+  body.print-open > *:not(.print-portal) { display: none !important; }
   body { overflow: visible !important; }
   .print-portal {
     position: static;
