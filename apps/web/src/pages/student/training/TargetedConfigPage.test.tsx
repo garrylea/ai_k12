@@ -6,6 +6,7 @@ import {
   getKnowledgePoints,
   getModelSpecials,
   getMyPointRules,
+  getPaperPositions,
   startTargetedPractice,
   type MyPointRules,
   type PointRuleTier,
@@ -33,6 +34,7 @@ vi.mock('@/services/api', async (importOriginal) => {
     getKnowledgePoints: vi.fn(),
     getMyPointRules: vi.fn(),
     getModelSpecials: vi.fn(),
+    getPaperPositions: vi.fn(),
     startTargetedPractice: vi.fn(),
   };
 });
@@ -40,6 +42,7 @@ vi.mock('@/services/api', async (importOriginal) => {
 const getKpsMock = vi.mocked(getKnowledgePoints);
 const getRulesMock = vi.mocked(getMyPointRules);
 const getModelSpecialsMock = vi.mocked(getModelSpecials);
+const getPaperPositionsMock = vi.mocked(getPaperPositions);
 const startMock = vi.mocked(startTargetedPractice);
 
 /** 中考模型：倍长中线（2 题）与手拉手（5 题）。 */
@@ -543,5 +546,62 @@ describe('中考模型模式', () => {
       type: null,
       count: 1,
     });
+  });
+});
+
+describe('试卷题号模式', () => {
+  const POSITIONS = [
+    { questionNo: 1, total: 5, wrongCount: 2, untriedCount: 3 },
+    { questionNo: 24, total: 6, wrongCount: 1, untriedCount: 1 },
+  ];
+
+  beforeEach(() => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
+    getPaperPositionsMock.mockReset();
+    getPaperPositionsMock.mockResolvedValue({
+      options: [
+        { grade: '初三', semester: 'first', paperCount: 7, typicalQuestionCount: 28 },
+      ],
+      grade: null, semester: null, typicalQuestionCount: null, positions: [],
+    });
+    startMock.mockReset();
+    startMock.mockResolvedValue({ questions: [STARTED_QUESTION], sessionId: 9 });
+  });
+
+  it('切到试卷题号：拉选项+清单，选题号与档位后按 paper 字段开练', async () => {
+    getPaperPositionsMock.mockImplementation(async (_s, grade) => grade
+      ? { options: [{ grade: '初三', semester: 'first', paperCount: 7, typicalQuestionCount: 28 }],
+          grade: '初三', semester: 'first', typicalQuestionCount: 28, positions: POSITIONS }
+      : { options: [{ grade: '初三', semester: 'first', paperCount: 7, typicalQuestionCount: 28 }],
+          grade: null, semester: null, typicalQuestionCount: null, positions: [] });
+
+    await renderPage('/?subjectId=1');
+    fireEvent.click(screen.getByRole('button', { name: '试卷题号' }));
+    await waitFor(() => expect(getPaperPositionsMock).toHaveBeenCalledWith(1, '初三', 'first'));
+
+    fireEvent.click(await screen.findByRole('button', { name: '第24题，可练2题' }));
+    // 可练 2 题：只应出现 1/2 档，3 档不可选
+    await waitFor(() => expect(screen.getByRole('button', { name: /^1 题/ })).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /^3 题/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /^2 题/ }));
+    fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith({
+      subjectId: 1,
+      grade: '初三',
+      semester: 'first',
+      paperQuestionNo: 24,
+      type: null,
+      count: 2,
+    }));
+  });
+
+  it('非数学不显示试卷题号入口', async () => {
+    getKpsMock.mockResolvedValue(KPS);
+    getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
+    await renderPage('/?subjectId=2');
+    expect(screen.queryByRole('button', { name: '试卷题号' })).toBeNull();
   });
 });

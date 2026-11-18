@@ -5,12 +5,17 @@ import { StudentAccountActions } from '@/components/business';
 import {
   getKnowledgePoints,
   getModelSpecials,
+  getPaperPositions,
   startTargetedPractice,
   type TrainingKnowledgePoint,
   type TrainingModelSpecial,
+  type TrainingPaperPosition,
+  type TrainingPaperPositionOption,
+  type TrainingSemester,
 } from '@/services/api';
 import { MATH_TASK_CODE, pickPracticeCount, tierStatus, usePointTiers } from './point-tiers';
 import { ModelSpecialPanel } from './ModelSpecialPanel';
+import { PaperPositionPanel, SEMESTER_LABELS } from './PaperPositionPanel';
 import { TierChip } from './TierChip';
 import type { TargetedRunHandoff } from './run-handoff';
 import {
@@ -128,13 +133,26 @@ export default function TargetedConfigPage() {
   const [startError, setStartError] = useState<string | null>(null);
   const [emptyHint, setEmptyHint] = useState(false);
 
-  // 专项模式：知识点（原行为）/ 中考模型
-  const [mode, setMode] = useState<'kp' | 'model'>('kp');
+  // 专项模式：知识点（原行为）/ 中考模型 / 试卷题号
+  const [mode, setMode] = useState<'kp' | 'model' | 'paper'>('kp');
   const [modelStatus, setModelStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
   const [modelError, setModelError] = useState<string | null>(null);
   const [modelSpecials, setModelSpecials] = useState<TrainingModelSpecial[]>([]);
   const [selectedModel, setSelectedModel] = useState<TrainingModelSpecial | null>(null);
   const [modelTierKey, setModelTierKey] = useState<string | null>(null);
+
+  // 试卷题号：选项（年级+学期）与题号清单是两次请求，状态分开存
+  const [paperStatus, setPaperStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [paperError, setPaperError] = useState<string | null>(null);
+  const [paperOptions, setPaperOptions] = useState<TrainingPaperPositionOption[]>([]);
+  const [paperGrade, setPaperGrade] = useState<string | null>(null);
+  const [paperSemester, setPaperSemester] = useState<TrainingSemester | null>(null);
+  const [posStatus, setPosStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
+  const [posError, setPosError] = useState<string | null>(null);
+  const [paperPositions, setPaperPositions] = useState<TrainingPaperPosition[]>([]);
+  const [typicalQuestionCount, setTypicalQuestionCount] = useState<number | null>(null);
+  const [paperQuestionNo, setPaperQuestionNo] = useState<number | null>(null);
+  const [paperTierKey, setPaperTierKey] = useState<string | null>(null);
 
   // 学科 query 的当前值：并发请求回来时用它判断响应是否已过期
   const subjectIdRef = useRef(subjectId);
@@ -179,6 +197,52 @@ export default function TargetedConfigPage() {
     }
   }, [subjectId]);
 
+  const loadPaperOptions = useCallback(async () => {
+    const requested = subjectId;
+    setPaperStatus('loading');
+    setPaperError(null);
+    try {
+      const data = await getPaperPositions(requested);
+      if (subjectIdRef.current !== requested) return;
+      setPaperOptions(data.options);
+      // 默认年级/学期必须回写到页面状态：面板只在显示层兜底，不会通知页面，
+      // 页面状态留 null 的话位置加载 effect 永远不触发（Task 7 review）。
+      const first = data.options[0] ?? null;
+      setPaperGrade(first?.grade ?? null);
+      setPaperSemester(first?.semester ?? null);
+      setPaperQuestionNo(null);
+      setPaperTierKey(null);
+      setPaperStatus('ok');
+    } catch {
+      if (subjectIdRef.current !== requested) return;
+      setPaperStatus('error');
+      setPaperError('试卷题号加载失败');
+      setPaperOptions([]);
+      setPaperGrade(null);
+      setPaperSemester(null);
+    }
+  }, [subjectId]);
+
+  const loadPaperPositions = useCallback(async (
+    subject: number, grade: string, semester: TrainingSemester,
+  ) => {
+    setPosStatus('loading');
+    setPosError(null);
+    try {
+      const data = await getPaperPositions(subject, grade, semester);
+      if (subjectIdRef.current !== subject) return;
+      setPaperPositions(data.positions);
+      setTypicalQuestionCount(data.typicalQuestionCount);
+      setPosStatus('ok');
+    } catch {
+      if (subjectIdRef.current !== subject) return;
+      setPosStatus('error');
+      setPosError('试卷题号加载失败');
+      setPaperPositions([]);
+      setTypicalQuestionCount(null);
+    }
+  }, []);
+
   useEffect(() => {
     // 学科 query 变化时回到知识点模式并清空模型缓存
     setMode('kp');
@@ -187,6 +251,18 @@ export default function TargetedConfigPage() {
     setModelSpecials([]);
     setSelectedModel(null);
     setModelTierKey(null);
+    // 试卷题号状态一并清空（与模型模式一致）
+    setPaperStatus('idle');
+    setPaperError(null);
+    setPaperOptions([]);
+    setPaperGrade(null);
+    setPaperSemester(null);
+    setPosStatus('idle');
+    setPosError(null);
+    setPaperPositions([]);
+    setTypicalQuestionCount(null);
+    setPaperQuestionNo(null);
+    setPaperTierKey(null);
   }, [subjectId]);
 
   const eligibleModelTiers = useMemo(() => {
@@ -209,6 +285,40 @@ export default function TargetedConfigPage() {
     }
   }, [mode, selectedModel, eligibleModelTiers, modelTierKey]);
 
+  const selectedPosition = useMemo(
+    () => paperPositions.find((p) => p.questionNo === paperQuestionNo) ?? null,
+    [paperPositions, paperQuestionNo],
+  );
+  const paperAvailable = selectedPosition
+    ? selectedPosition.wrongCount + selectedPosition.untriedCount
+    : 0;
+  const eligiblePaperTiers = useMemo(() => {
+    if (!selectedPosition || tiers == null) return [];
+    return tiers.filter((t) => {
+      const n = Number(t.tierKey);
+      return Number.isInteger(n) && n >= 1 && n <= paperAvailable;
+    });
+  }, [selectedPosition, tiers, paperAvailable]);
+
+  useEffect(() => {
+    if (mode !== 'paper') return;
+    if (!selectedPosition || eligiblePaperTiers.length === 0) {
+      setPaperTierKey(null);
+      return;
+    }
+    if (paperTierKey == null || !eligiblePaperTiers.some((t) => t.tierKey === paperTierKey)) {
+      const count = pickPracticeCount(eligiblePaperTiers);
+      setPaperTierKey(count == null ? null : String(count));
+    }
+  }, [mode, selectedPosition, eligiblePaperTiers, paperTierKey]);
+
+  useEffect(() => {
+    if (mode !== 'paper' || !paperGrade || !paperSemester) return;
+    setPaperQuestionNo(null);
+    setPaperTierKey(null);
+    void loadPaperPositions(subjectId, paperGrade, paperSemester);
+  }, [mode, subjectId, paperGrade, paperSemester, loadPaperPositions]);
+
   const selectModel = (next: TrainingModelSpecial) => {
     setSelectedModel(next);
     setModelTierKey(null);
@@ -216,11 +326,12 @@ export default function TargetedConfigPage() {
     setEmptyHint(false);
   };
 
-  const selectMode = (next: 'kp' | 'model') => {
+  const selectMode = (next: 'kp' | 'model' | 'paper') => {
     setMode(next);
     setStartError(null);
     setEmptyHint(false);
     if (next === 'model' && modelStatus === 'idle') void loadModelSpecials();
+    if (next === 'paper' && paperStatus === 'idle') void loadPaperOptions();
   };
 
   const canStartModel = selectedModel != null
@@ -250,6 +361,45 @@ export default function TargetedConfigPage() {
         sessionId: res.sessionId,
         questions: res.questions,
         title: selectedModel.modelName,
+      };
+      sessionStorage.setItem('training:targeted', JSON.stringify(handoff));
+      navigate(`/student/training/targeted/run${subjectQuery}`);
+    } catch (err) {
+      setStartError(err instanceof Error ? err.message : '开练失败，请重试');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const canStartPaper = paperQuestionNo != null
+    && paperGrade != null
+    && paperSemester != null
+    && paperTierKey != null
+    && eligiblePaperTiers.some((t) => t.tierKey === paperTierKey)
+    && !starting;
+
+  const startPaperPractice = async () => {
+    if (!canStartPaper || paperQuestionNo == null || paperGrade == null || paperSemester == null || paperTierKey == null) return;
+    setStarting(true);
+    setStartError(null);
+    setEmptyHint(false);
+    try {
+      const res = await startTargetedPractice({
+        subjectId,
+        grade: paperGrade,
+        semester: paperSemester,
+        paperQuestionNo,
+        type: null,
+        count: Number(paperTierKey),
+      });
+      if (res.questions.length === 0) {
+        setEmptyHint(true);
+        return;
+      }
+      const handoff: TargetedRunHandoff = {
+        sessionId: res.sessionId,
+        questions: res.questions,
+        title: `${paperGrade}${SEMESTER_LABELS[paperSemester]} · 第${paperQuestionNo}题`,
       };
       sessionStorage.setItem('training:targeted', JSON.stringify(handoff));
       navigate(`/student/training/targeted/run${subjectQuery}`);
@@ -333,11 +483,12 @@ export default function TargetedConfigPage() {
             </Button>
           </div>
 
-          {/* 专项类型：知识点 / 中考模型（仅数学） */}
+          {/* 专项类型：知识点 / 中考模型 / 试卷题号（仅数学） */}
           {subjectId === SUBJECT_MATH && (
             <div className="mt-6 flex flex-wrap gap-2" role="group" aria-label="专项类型">
               <KpChip label="知识点" active={mode === 'kp'} onClick={() => selectMode('kp')} />
               <KpChip label="中考模型" active={mode === 'model'} onClick={() => selectMode('model')} />
+              <KpChip label="试卷题号" active={mode === 'paper'} onClick={() => selectMode('paper')} />
             </div>
           )}
 
@@ -504,6 +655,41 @@ export default function TargetedConfigPage() {
               onRetryTiers={() => void loadTiers()}
               onSelectTier={setModelTierKey}
               onStart={() => void startModelPractice()}
+            />
+          )}
+          {mode === 'paper' && (
+            <PaperPositionPanel
+              options={paperOptions}
+              optionsStatus={paperStatus}
+              optionsError={paperError}
+              grade={paperGrade}
+              semester={paperSemester}
+              onSelectGrade={(g) => {
+                setPaperGrade(g);
+                const next = paperOptions.find((o) => o.grade === g);
+                if (next) setPaperSemester(next.semester);
+              }}
+              onSelectSemester={setPaperSemester}
+              positionsStatus={posStatus}
+              positionsError={posError}
+              positions={paperPositions}
+              typicalQuestionCount={typicalQuestionCount}
+              selectedQuestionNo={paperQuestionNo}
+              onSelectQuestionNo={(n) => { setPaperQuestionNo(n); setEmptyHint(false); }}
+              tiers={tiers}
+              tiersError={tiersError}
+              eligibleTiers={eligiblePaperTiers}
+              tierKey={paperTierKey}
+              starting={starting}
+              startError={startError}
+              emptyHint={emptyHint}
+              onRetryOptions={() => void loadPaperOptions()}
+              onRetryPositions={() => {
+                if (paperGrade && paperSemester) void loadPaperPositions(subjectId, paperGrade, paperSemester);
+              }}
+              onRetryTiers={() => void loadTiers()}
+              onSelectTier={(k) => { setPaperTierKey(k); setEmptyHint(false); }}
+              onStart={() => void startPaperPractice()}
             />
           )}
         </div>
