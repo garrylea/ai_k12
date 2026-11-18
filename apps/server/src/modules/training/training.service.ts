@@ -790,6 +790,107 @@ export class TrainingService {
     return this.knowledgePointsRepo.findBySubject(subjectId);
   }
 
+  /** 学期排序用（API 只认 first/second）。 */
+  private static readonly SEMESTER_ORDER: Record<string, number> = { first: 0, second: 1 };
+
+  /**
+   * 试卷题号：选项 + 题号清单。
+   * 不传 grade/semester 只回选项；两者必须同时出现。
+   * 题号列表固定为 1..typicalQuestionCount（该组合下卷面题数的众数，并列取较大），
+   * 没有题的题号补 0，前端据此置灰。
+   */
+  async listPaperPositions(
+    studentId: number,
+    subjectId: number,
+    grade?: string | null,
+    semester?: string | null,
+  ): Promise<{
+    options: Array<{ grade: string; semester: string; paperCount: number; typicalQuestionCount: number }>;
+    grade: string | null;
+    semester: string | null;
+    typicalQuestionCount: number | null;
+    positions: Array<{ questionNo: number; total: number; wrongCount: number; untriedCount: number }>;
+  }> {
+    if (subjectId !== SUBJECT_MATH) {
+      throw new BadRequestException('试卷题号仅支持数学');
+    }
+    if ((grade == null) !== (semester == null)) {
+      throw new BadRequestException('grade 与 semester 必须同时出现');
+    }
+    if (semester != null && semester !== 'first' && semester !== 'second') {
+      throw new BadRequestException('semester 仅允许 first | second');
+    }
+
+    const rows = await this.questionsRepo.listPaperPositionOptions(subjectId);
+    const grouped = new Map<string, {
+      grade: string; semester: string; paperCount: number; counts: Map<number, number>;
+    }>();
+    for (const r of rows) {
+      const key = `${r.grade}::${r.semester}`;
+      const g = grouped.get(key) ?? {
+        grade: r.grade, semester: r.semester, paperCount: 0, counts: new Map<number, number>(),
+      };
+      const qCount = Number(r.question_count);
+      const papers = Number(r.papers);
+      g.paperCount += papers;
+      g.counts.set(qCount, (g.counts.get(qCount) ?? 0) + papers);
+      grouped.set(key, g);
+    }
+
+    const options = Array.from(grouped.values())
+      .sort((a, b) =>
+        a.grade.localeCompare(b.grade)
+        || (TrainingService.SEMESTER_ORDER[a.semester] ?? 9) - (TrainingService.SEMESTER_ORDER[b.semester] ?? 9))
+      .map((g) => ({
+        grade: g.grade,
+        semester: g.semester,
+        paperCount: g.paperCount,
+        typicalQuestionCount: this.pickTypicalQuestionCount(g.counts),
+      }));
+
+    if (grade == null || semester == null) {
+      return { options, grade: null, semester: null, typicalQuestionCount: null, positions: [] };
+    }
+
+    const option = options.find((o) => o.grade === grade && o.semester === semester);
+    if (!option) {
+      throw new BadRequestException('该年级学期暂无试卷');
+    }
+
+    const countRows = await this.questionsRepo.countPaperPositionQuestions(
+      studentId, subjectId, grade, semester,
+    );
+    const byNo = new Map<number, { total: number; wrong_count: number; untried_count: number }>();
+    for (const r of countRows) {
+      byNo.set(Number(r.question_no), r);
+    }
+    const positions = Array.from({ length: option.typicalQuestionCount }, (_, i) => {
+      const questionNo = i + 1;
+      const r = byNo.get(questionNo);
+      return {
+        questionNo,
+        total: Number(r?.total ?? 0),
+        wrongCount: Number(r?.wrong_count ?? 0),
+        untriedCount: Number(r?.untried_count ?? 0),
+      };
+    });
+
+    return { options, grade, semester, typicalQuestionCount: option.typicalQuestionCount, positions };
+  }
+
+  /** 卷长众数；并列取较大值（宁可多给题位，也不隐藏可练题）。 */
+  private pickTypicalQuestionCount(counts: Map<number, number>): number {
+    let best = 0;
+    let bestPapers = -1;
+    for (const [qCount, papers] of counts) {
+      if (papers > bestPapers || (papers === bestPapers && qCount > best)) {
+        best = qCount;
+        bestPapers = papers;
+      }
+    }
+    return best;
+  }
+
   /** 模型微专题清单：白名单 + 该生可练题数（非数学返回空）。 */
   async listModelSpecials(
     studentId: number,

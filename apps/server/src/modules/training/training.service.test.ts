@@ -16,6 +16,10 @@ const mk = (overrides: any = {}) => ({
     findByIds: vi.fn().mockResolvedValue([]),
     findModelSpecialQuestions: vi.fn().mockResolvedValue([]),
     countModelSpecialQuestions: vi.fn().mockResolvedValue(0),
+    listPaperPositionOptions: vi.fn().mockResolvedValue([]),
+    countPaperPositionQuestions: vi.fn().mockResolvedValue([]),
+    findPaperPositionWrongQuestions: vi.fn().mockResolvedValue([]),
+    findPaperPositionUntriedQuestions: vi.fn().mockResolvedValue([]),
   },
   questionHintsRepo: {
     findByQuestionId: vi.fn().mockResolvedValue(null),
@@ -409,6 +413,51 @@ describe('TrainingService.listModelSpecials', () => {
     });
     const r = await mkSvc(deps).listModelSpecials(7, 1);
     expect(r.specials[0].questionCount).toBe(count);
+  });
+});
+
+describe('TrainingService.listPaperPositions', () => {
+  const optionsRows = [
+    { grade: '初三', semester: 'first', question_count: 28, papers: 5 },
+    { grade: '初三', semester: 'first', question_count: 21, papers: 1 },
+    { grade: '初三', semester: 'first', question_count: 29, papers: 1 },
+    { grade: '初三', semester: 'second', question_count: 28, papers: 10 },
+  ];
+
+  it('众数取 28（并列取较大），选项按学期 first→second', async () => {
+    const deps = mk({ questionsRepo: { listPaperPositionOptions: vi.fn().mockResolvedValue(optionsRows) } as never });
+    const r = await mkSvc(deps).listPaperPositions(7, 1);
+    expect(r.options).toEqual([
+      { grade: '初三', semester: 'first', paperCount: 7, typicalQuestionCount: 28 },
+      { grade: '初三', semester: 'second', paperCount: 10, typicalQuestionCount: 28 },
+    ]);
+    expect(r.positions).toEqual([]);
+    expect(r.typicalQuestionCount).toBeNull();
+  });
+
+  it('题号清单按 1..28 补零并映射三个数', async () => {
+    const deps = mk({
+      questionsRepo: {
+        listPaperPositionOptions: vi.fn().mockResolvedValue(optionsRows),
+        countPaperPositionQuestions: vi.fn().mockResolvedValue([
+          { question_no: 1, total: 5, wrong_count: 2, untried_count: 3 },
+          { question_no: 24, total: 6, wrong_count: 1, untried_count: 4 },
+        ]),
+      } as never,
+    });
+    const r = await mkSvc(deps).listPaperPositions(7, 1, '初三', 'first');
+    expect(r.positions).toHaveLength(28);
+    expect(r.positions[0]).toEqual({ questionNo: 1, total: 5, wrongCount: 2, untriedCount: 3 });
+    expect(r.positions[23]).toEqual({ questionNo: 24, total: 6, wrongCount: 1, untriedCount: 4 });
+    expect(r.positions[2]).toEqual({ questionNo: 3, total: 0, wrongCount: 0, untriedCount: 0 });
+  });
+
+  it('非数学 400；grade/semester 只给一个 400；组合不存在 400', async () => {
+    const deps = mk({ questionsRepo: { listPaperPositionOptions: vi.fn().mockResolvedValue(optionsRows) } as never });
+    const svc = mkSvc(deps);
+    await expect(svc.listPaperPositions(7, 2)).rejects.toThrow('试卷题号仅支持数学');
+    await expect(svc.listPaperPositions(7, 1, '初三', null)).rejects.toThrow('grade 与 semester 必须同时出现');
+    await expect(svc.listPaperPositions(7, 1, '初二', 'first')).rejects.toThrow('该年级学期暂无试卷');
   });
 });
 
