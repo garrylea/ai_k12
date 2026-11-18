@@ -13,6 +13,7 @@ import {
   type TargetedPracticeQuestion,
   type TrainingKnowledgePoint,
   type TrainingModelSpecial,
+  type TrainingPaperPositionsResult,
 } from '@/services/api';
 
 /**
@@ -102,6 +103,15 @@ function rulesOf(tiers: PointRuleTier[]): MyPointRules {
       { taskCode: 'math_targeted', taskName: '数学专项', tiers },
     ],
   };
+}
+
+/** 手动可控的 Promise：在测试里制造「先发的请求后到」的乱序响应。 */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 /** 知识点与档位都在 useEffect 里异步拉取，render 必须包在 act 里等它们落地。 */
@@ -596,6 +606,70 @@ describe('试卷题号模式', () => {
       type: null,
       count: 2,
     }));
+  });
+
+  it('快速切学期：先发的旧学期响应后到，不得覆盖当前学期的题号与开练载荷', async () => {
+    // 同一年级两个学期都有试卷，学期下拉才能切
+    const OPTIONS = [
+      { grade: '初三', semester: 'first' as const, paperCount: 7, typicalQuestionCount: 28 },
+      { grade: '初三', semester: 'second' as const, paperCount: 6, typicalQuestionCount: 26 },
+    ];
+    const firstCall = deferred<TrainingPaperPositionsResult>();
+    const secondCall = deferred<TrainingPaperPositionsResult>();
+    getPaperPositionsMock.mockImplementation((_subject, grade, semester) => {
+      if (!grade || !semester) {
+        return Promise.resolve({
+          options: OPTIONS, grade: null, semester: null, typicalQuestionCount: null, positions: [],
+        });
+      }
+      return semester === 'first' ? firstCall.promise : secondCall.promise;
+    });
+
+    await renderPage('/?subjectId=1');
+    fireEvent.click(screen.getByRole('button', { name: '试卷题号' }));
+    await waitFor(() => expect(getPaperPositionsMock).toHaveBeenCalledWith(1, '初三', 'first'));
+
+    // 切到下学期：发出第二次题号清单请求
+    fireEvent.change(screen.getByLabelText('学期'), { target: { value: 'second' } });
+    await waitFor(() => expect(getPaperPositionsMock).toHaveBeenCalledWith(1, '初三', 'second'));
+
+    // 后发的新学期响应先回来
+    await act(async () => {
+      secondCall.resolve({
+        options: OPTIONS, grade: '初三', semester: 'second', typicalQuestionCount: 26,
+        positions: [{ questionNo: 26, total: 2, wrongCount: 1, untriedCount: 1 }],
+      });
+    });
+    expect(await screen.findByRole('button', { name: '第26题，可练2题' })).toBeTruthy();
+    expect(screen.getByText('共 26 题')).toBeTruthy();
+
+    // 先发的旧学期响应最后才回来：必须被丢弃，界面不能跳回上学期的题号
+    await act(async () => {
+      firstCall.resolve({
+        options: OPTIONS, grade: '初三', semester: 'first', typicalQuestionCount: 28,
+        positions: [{ questionNo: 24, total: 5, wrongCount: 2, untriedCount: 3 }],
+      });
+    });
+    expect(screen.queryByRole('button', { name: /第24题/ })).toBeNull();
+    expect(screen.getByRole('button', { name: '第26题，可练2题' })).toBeTruthy();
+    expect(screen.getByText('共 26 题')).toBeTruthy();
+    expect(screen.queryByText('共 28 题')).toBeNull();
+
+    // 界面看到的是下学期第 26 题，开练载荷必须与之完全一致
+    fireEvent.click(screen.getByRole('button', { name: '第26题，可练2题' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^1 题/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /^2 题/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+    });
+    expect(startMock).toHaveBeenCalledWith({
+      subjectId: 1,
+      grade: '初三',
+      semester: 'second',
+      paperQuestionNo: 26,
+      type: null,
+      count: 2,
+    });
   });
 
   it('非数学不显示试卷题号入口', async () => {

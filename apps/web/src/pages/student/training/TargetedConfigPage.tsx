@@ -156,6 +156,11 @@ export default function TargetedConfigPage() {
 
   // 学科 query 的当前值：并发请求回来时用它判断响应是否已过期
   const subjectIdRef = useRef(subjectId);
+  // 题号清单请求的序号：切年级/学期时后发的请求赢，乱序回来的旧响应必须丢弃
+  const paperReqIdRef = useRef(0);
+  // 选项是针对哪个学科拉到的：切学科的那一帧 mode/grade/semester 还没重置，
+  // 用它挡住「新学科 + 旧年级」的无用请求
+  const paperOptionsSubjectRef = useRef<number | null>(null);
 
   useEffect(() => {
     subjectIdRef.current = subjectId;
@@ -204,6 +209,7 @@ export default function TargetedConfigPage() {
     try {
       const data = await getPaperPositions(requested);
       if (subjectIdRef.current !== requested) return;
+      paperOptionsSubjectRef.current = requested;
       setPaperOptions(data.options);
       // 默认年级/学期必须回写到页面状态：面板只在显示层兜底，不会通知页面，
       // 页面状态留 null 的话位置加载 effect 永远不触发（Task 7 review）。
@@ -226,15 +232,20 @@ export default function TargetedConfigPage() {
   const loadPaperPositions = useCallback(async (
     subject: number, grade: string, semester: TrainingSemester,
   ) => {
+    const reqId = ++paperReqIdRef.current;
     setPosStatus('loading');
     setPosError(null);
     try {
       const data = await getPaperPositions(subject, grade, semester);
+      // 只有最后发出的那次请求可以落地：极快切学期时先发的响应可能后到，
+      // 放过它会让题号清单与当前年级/学期错位（开练带错 paperQuestionNo）。
+      if (reqId !== paperReqIdRef.current) return;
       if (subjectIdRef.current !== subject) return;
       setPaperPositions(data.positions);
       setTypicalQuestionCount(data.typicalQuestionCount);
       setPosStatus('ok');
     } catch {
+      if (reqId !== paperReqIdRef.current) return;
       if (subjectIdRef.current !== subject) return;
       setPosStatus('error');
       setPosError('试卷题号加载失败');
@@ -263,6 +274,9 @@ export default function TargetedConfigPage() {
     setTypicalQuestionCount(null);
     setPaperQuestionNo(null);
     setPaperTierKey(null);
+    // 作废在途请求：旧学科的题号清单回来时不能落到新学科下
+    paperReqIdRef.current += 1;
+    paperOptionsSubjectRef.current = null;
   }, [subjectId]);
 
   const eligibleModelTiers = useMemo(() => {
@@ -314,6 +328,9 @@ export default function TargetedConfigPage() {
 
   useEffect(() => {
     if (mode !== 'paper' || !paperGrade || !paperSemester) return;
+    // 选项还没到当前学科手里：切学科的那一帧 grade/semester 仍是旧值，
+    // 此时发请求会拿新学科 + 旧年级，必错；等选项落地后 effect 会再跑。
+    if (paperOptionsSubjectRef.current !== subjectId) return;
     setPaperQuestionNo(null);
     setPaperTierKey(null);
     void loadPaperPositions(subjectId, paperGrade, paperSemester);
