@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS admins (
   username VARCHAR(50) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   name VARCHAR(50) DEFAULT NULL,
+  role ENUM('admin','researcher') NOT NULL DEFAULT 'admin',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -85,7 +86,7 @@ CREATE TABLE IF NOT EXISTS devices (
 
 CREATE TABLE IF NOT EXISTS auth_sessions (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  role ENUM('admin','parent','student') NOT NULL,
+  role ENUM('admin','parent','student','researcher') NOT NULL,
   user_id INT UNSIGNED NOT NULL,
   token_seq INT UNSIGNED NOT NULL DEFAULT 1,
   updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -1664,6 +1665,29 @@ CREATE TABLE IF NOT EXISTS lesson_completions (
   UNIQUE KEY uniq_lc_student_lesson (student_id, lesson_id),
   KEY idx_lc_student_subject_time (student_id, subject_id, completed_at),
   CONSTRAINT fk_lc_student_id FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== 内容纠错审计日志（2026-11-19）=====
+-- 迁移：tools/db/migrations/2026-11-19_researcher_role.sql
+-- 记录教研角色（及管理员）对内容的前后变更，before/after 以 JSON 留存，供溯源与回放。
+
+CREATE TABLE IF NOT EXISTS content_audit_logs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  actor_id BIGINT NOT NULL,
+  actor_role VARCHAR(16) NOT NULL,
+  actor_name VARCHAR(50) DEFAULT NULL,
+  action VARCHAR(32) NOT NULL,
+  target_type VARCHAR(16) NOT NULL,
+  target_id BIGINT NOT NULL,
+  paper_id BIGINT DEFAULT NULL,
+  before_json JSON DEFAULT NULL,
+  after_json JSON DEFAULT NULL,
+  note VARCHAR(255) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY idx_cal_target (target_type, target_id),
+  KEY idx_cal_actor (actor_id),
+  KEY idx_cal_created (created_at),
+  KEY idx_cal_paper (paper_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
