@@ -40,4 +40,15 @@ export class UploadedFilesRepository {
     );
     return (rows[0] as UploadedFileRow) ?? null;
   }
+
+  async findByUrl(url: string): Promise<UploadedFileRow | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT * FROM uploaded_files WHERE url = ? LIMIT 1', [url],
+    );
+    return (rows[0] as UploadedFileRow) ?? null;
+  }
+
+  async delete(id: number): Promise<void> {
+    await this.pool.execute('DELETE FROM uploaded_files WHERE id = ?', [id]);
+  }
 }

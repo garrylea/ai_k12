@@ -21,6 +21,15 @@ export class FilesService {
   ) {}
 
   async upload(file: Express.Multer.File, uploaderId: number, source: string): Promise<UploadedFileResult> {
+    return this.store(file, uploaderId, source, 'student');
+  }
+
+  async store(
+    file: Express.Multer.File,
+    uploaderId: number,
+    source: string,
+    uploaderType: string,
+  ): Promise<UploadedFileResult> {
     const ext = path.extname(file.originalname); // safe - returns only the last extension, never path segments
     const key = `${source}/${randomUUID()}${ext}`;
     const dest = path.join(this.storageDir, key);
@@ -31,7 +40,7 @@ export class FilesService {
     try {
       fileId = await this.filesRepo.create({
         uploader_id: uploaderId,
-        uploader_type: 'student',
+        uploader_type: uploaderType,
         url: `/uploads/${key}`,
         mime_type: file.mimetype,
         size_bytes: file.size,

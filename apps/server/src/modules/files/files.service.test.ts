@@ -6,6 +6,7 @@ vi.mock('node:fs/promises', () => ({
   unlink: vi.fn().mockResolvedValue(undefined),
 }));
 
+import * as fs from 'node:fs/promises';
 import { FilesService } from './files.service.js';
 
 function makeFile(mimetype: string, originalname: string) {
@@ -58,5 +59,40 @@ describe('FilesService.upload — PDF extraction auto-start', () => {
       expect(refineryService.createTask).not.toHaveBeenCalled();
       expect(result.taskId).toBeUndefined();
     }
+  });
+});
+
+describe('FilesService.store — 按调用方指定 role/source 落盘', () => {
+  it('store() 落盘到 research 子目录并按角色写 uploader_type', async () => {
+    const { service, filesRepo } = setup();
+    const file = makeFile('image/png', 'a.png');
+
+    const res = await service.store(file, 7, 'research', 'researcher');
+
+    expect(res.url).toMatch(/^\/uploads\/research\/[0-9a-f-]+\.png$/);
+    expect(filesRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      uploader_id: 7, uploader_type: 'researcher', source: 'research',
+    }));
+    // 真正写到磁盘的 research 子目录（不是只在 DB 里写 research 前缀）
+    const dest = vi.mocked(fs.writeFile).mock.calls.at(-1)![0] as string;
+    expect(dest).toMatch(/\/research\/[0-9a-f-]+\.png$/);
+  });
+
+  it('upload() 薄包装仍以 student 身份落库（学生行为不变）', async () => {
+    const { service, filesRepo } = setup();
+
+    await service.upload(makeFile('image/png', 'a.png'), 7, 'research');
+
+    expect(filesRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      uploader_id: 7, uploader_type: 'student', source: 'research',
+    }));
+  });
+
+  it('research 来源的 PDF 也遵守 source !== freeform 的自动建任务条件', async () => {
+    const { service, refineryService } = setup();
+
+    await service.store(makeFile('application/pdf', 'a.pdf'), 7, 'research', 'researcher');
+
+    expect(refineryService.createTask).toHaveBeenCalledWith(1, 7, 'research');
   });
 });

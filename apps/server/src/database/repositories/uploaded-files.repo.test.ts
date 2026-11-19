@@ -42,3 +42,39 @@ describe('UploadedFilesRepository.findByUrlAndOwner', () => {
     await expect(repo.findByUrlAndOwner('/uploads/missing.jpg', 7)).resolves.toBeNull();
   });
 });
+
+describe('UploadedFilesRepository.findByUrl / delete', () => {
+  it('findByUrl 只按 url 精确查，delete 调 DELETE', async () => {
+    const pool = mockPool();
+    const repo = new UploadedFilesRepository(pool as any);
+
+    await repo.findByUrl('/uploads/research/x.png');
+    expect(pool.execute).toHaveBeenCalledWith(
+      'SELECT * FROM uploaded_files WHERE url = ? LIMIT 1',
+      ['/uploads/research/x.png'],
+    );
+
+    await repo.delete(5);
+    expect(pool.execute).toHaveBeenCalledWith('DELETE FROM uploaded_files WHERE id = ?', [5]);
+  });
+
+  it('findByUrl 命中返回整行、未命中返回 null', async () => {
+    const pool = mockPool();
+    const row = {
+      id: 3,
+      uploader_id: 7,
+      uploader_type: 'researcher',
+      url: '/uploads/research/x.png',
+      mime_type: 'image/png',
+      size_bytes: 10,
+      source: 'research',
+      created_at: new Date('2026-11-19T00:00:00Z'),
+    };
+    pool.execute.mockResolvedValueOnce([[row], []]);
+    const repo = new UploadedFilesRepository(pool as any);
+    await expect(repo.findByUrl('/uploads/research/x.png')).resolves.toEqual(row);
+
+    pool.execute.mockResolvedValueOnce([[], []]);
+    await expect(repo.findByUrl('/uploads/missing.png')).resolves.toBeNull();
+  });
+});
