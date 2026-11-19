@@ -8,6 +8,14 @@
 
 ---
 
+## 2026-11-19 人工补题回写 extracted 时保留原题型/难度
+
+**问题**：北师大附属实验中学卷（paper 662）第 14 题是「二、填空题」的题，补图后库里却变成 `short_answer`，被识别扫描报「题型与同大题不一致（7/8 是填空）」。根因在 `apply_fixes._patch_extracted`：回写 extracted 时按「有选项=choice、无选项=short_answer」重算 `type`，并把 `difficulty` 一律重置为 2。内容类人工修复（补图/改题干）的记录没有 `expected_type`（只有 `type_mismatch` 才带），于是所有**无选项**的填空/计算/证明题只要修过一次内容就会被降级；随后 publish + import 按 jsonl 原样写回库（`db_loader.load_questions` 的 type 变更分支），扫描再把降级结果报成异常。
+
+**修法（最小）**：`_patch_extracted` 先定位原行，`type` 取 `expected_type`（人工明确指定）> 有选项则 `choice` > **原行 type** > `short_answer`；`difficulty` 保留原值、仅原行没有时用 2。新增题目（原行不存在）行为不变。测试：`tests/test_apply_fixes.py::test_write_back_keeps_existing_type_and_difficulty`。
+
+**存量**：paper 662 第 14 题的库内 `type` 仍是 `short_answer`，需要单独把该行改回 `fill_blank`（改库另行确认）。
+
 ## 2026-11-18 含义专项：篇目清单透出年级；练习记录回放含义标准答案
 
 **背景**：学生端「古诗文含义」配置页只有「全部/上册/下册」，学生看不出是哪一年级；练习记录详情只看得到自己的作答，标准答案、判定依据都看不到。排查结论：① 年级字段 `chinese_passages.grade` 库里有、Repo 也查了，但 `MeaningService.listMeaningPassages` 映射 DTO 时丢掉；且当前含义题库只收了九年级 34 首（17 上 + 17 下），七/八年级未入库。② 含义判题时标准答案已算出，但作答记录只写学生作答与对错，`questionAnswer` 依赖 `LEFT JOIN questions`，语文专项 `question_id` 为 NULL 恒空。

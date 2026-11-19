@@ -288,6 +288,34 @@ def test_apply_writes_back_to_extracted_and_clears_publish_checkpoint(tmp_path):
     assert f"{rel}/{src}" not in ckpt.get("published", [])
 
 
+def test_write_back_keeps_existing_type_and_difficulty(tmp_path):
+    """无选项的题（填空/计算/证明）做内容修复时，不得把题型降级成简答题。
+
+    2026-11-19 北师大实验第 14 题：填空题丢图后补图，回写按「无选项 = short_answer」
+    重算，extracted 变 short_answer，重导后库里也变，被扫描报成「同大题题型不一致」。
+    """
+    out = tmp_path / "output"
+    rel = "数学/初中/first/2025/卷C"
+    src = "卷C"
+    ext_file = out / "extracted" / rel / f"{src}.jsonl"
+    ext_file.parent.mkdir(parents=True)
+    rows = [{"group_order": 14, "content": "原题", "answer": "", "type": "fill_blank",
+             "difficulty": 3, "group_id": "二"}]
+    ext_file.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                        encoding="utf-8")
+
+    rec = dict(REC, rel_path=rel, source=src, group_order=14, content="补图后的题",
+               options=None, answer="")
+    cur = FakeCursor(paper=(54, 4), existing=9001)
+
+    A.apply_record(cur, rec, apply=True, assets_root=tmp_path / "assets", output_dir=out)
+
+    row = json.loads(ext_file.read_text(encoding="utf-8").strip())
+    assert row["content"] == "补图后的题"
+    assert row["type"] == "fill_blank"
+    assert row["difficulty"] == 3
+
+
 def test_write_back_keeps_raw_md_refs(tmp_path):
     """extracted 保留 md 原始引用（images/...），物化只发生在 publish。"""
     out = tmp_path / "output"

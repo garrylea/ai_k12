@@ -76,17 +76,22 @@ def _patch_extracted(rec: dict, *, content: str, answer: str,
 
     rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
     go = int(rec["group_order"])
+    pos = next((i for i, r in enumerate(rows) if int(r.get("group_order") or -1) == go), None)
+    existing = rows[pos] if pos is not None else None
+    # 题型/难度以原行为准：无选项不等于简答题——填空/计算/证明题同样没有选项，
+    # 补内容时若按「有选项=choice、否则 short_answer」重算，会把填空题降级
+    # （2026-11-19 北师大实验第 14 题：补图后变 short_answer，被扫描报题型不一致）。
     payload = {
         "group_order": go,
-        "type": rec.get("expected_type") or ("choice" if options else "short_answer"),
-        "difficulty": 2,
+        "type": rec.get("expected_type") or (
+            "choice" if options else (existing or {}).get("type") or "short_answer"),
+        "difficulty": (existing or {}).get("difficulty") or 2,
         "content": content,
         "options": options,
         "answer": answer,
         "material_text": material_text,
         "needs_review": False,
     }
-    pos = next((i for i, r in enumerate(rows) if int(r.get("group_order") or -1) == go), None)
     if pos is None:
         pos = next((i for i, r in enumerate(rows) if int(r.get("group_order") or 0) > go), len(rows))
         sibling = rows[pos] if pos < len(rows) else (rows[-1] if rows else {})
