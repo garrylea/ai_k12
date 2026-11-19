@@ -6,6 +6,7 @@ import {
 } from '../../database/repositories/research-papers.repo.js';
 import type { AuditActor } from '../../database/repositories/content-audit.repo.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
+import { ResearchImagesService } from './research-images.service.js';
 
 export interface AdminPaperQuery {
   subjectId?: number;
@@ -73,6 +74,7 @@ export interface AdminPaperDeleteResult {
   retainedQuestions: number;
   deletedSessions: number;
   deletedAnswers: number;
+  deletedImages: number;
 }
 
 /** 试卷元信息：行是 `p.*`，统一把列名转 camelCase，Date 转 ISO 字符串。 */
@@ -135,11 +137,14 @@ function isForeignKeyConflict(err: unknown): boolean {
  *
  * 删除规则（spec §5 / §7.4）：只删独占题；共享题只解绑；被学生数据引用的独占题保留；
  * 该卷考试会话连同作答一并删除。仓储负责事务，本层只做 id 校验与错误转换。
- * 删卷成功后由仓储在同一事务内写 `paper.delete` 审计；图片清理按计划边界留给 Task 7。
+ * 删卷成功后由仓储在同一事务内写 `paper.delete` 审计；随后清理可删独占题里的 research 图。
  */
 @Injectable()
 export class ResearchPapersService {
-  constructor(private readonly repo: ResearchPapersRepository) {}
+  constructor(
+    private readonly repo: ResearchPapersRepository,
+    private readonly images: ResearchImagesService,
+  ) {}
 
   async list(query: AdminPaperQuery): Promise<AdminPaperListResult> {
     const { items, total } = await this.repo.findPapers(query);
@@ -176,6 +181,8 @@ export class ResearchPapersService {
 
   async remove(id: number, actor: AuditActor): Promise<AdminPaperDeleteResult> {
     this.assertId(id);
+    // 删之前先收图：用与级联删除同一套 exclusive/blocked 口径，只取真正会被物理删的题。
+    const imageUrls = await this.repo.findResearchImageUrlsByPaper(id);
     let outcome;
     try {
       outcome = await this.repo.deletePaperCascade(id, actor);
@@ -188,12 +195,15 @@ export class ResearchPapersService {
     if (!outcome) {
       throw new NotFoundException(`试卷不存在：${id}`);
     }
+    // 事务已 commit，图片清理失败只影响孤儿磁盘文件，不回滚删卷。
+    const cleanup = await this.images.cleanupUnreferenced(imageUrls, actor);
     return {
       paperId: id,
       deletedQuestions: outcome.deletedQuestions,
       retainedQuestions: outcome.retainedQuestions,
       deletedSessions: outcome.deletedSessions,
       deletedAnswers: outcome.deletedAnswers,
+      deletedImages: cleanup.deleted,
     };
   }
 

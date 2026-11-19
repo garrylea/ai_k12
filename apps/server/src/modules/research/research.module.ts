@@ -7,15 +7,21 @@ import { ResearchPapersService } from './research-papers.service.js';
 import { ResearchQuestionsController } from './research-questions.controller.js';
 import { ResearchQuestionsService } from './research-questions.service.js';
 import { ResearchImagesService } from './research-images.service.js';
+import { ResearchImagesController } from './research-images.controller.js';
 import { ResearchAuditController } from './research-audit.controller.js';
 import { ResearchAuditService } from './research-audit.service.js';
+import { FilesModule } from '../files/files.module.js';
 
 /**
  * 教研空间（spec §7）：统一 @Roles('researcher') + JwtAuthGuard/RolesGuard。
  * Task 5/6/7 的详情、题目编辑、图片 controller/provider 在此逐步追加。
  */
 @Module({
-  controllers: [ResearchPapersController, ResearchQuestionsController, ResearchAuditController],
+  imports: [FilesModule],
+  controllers: [
+    ResearchPapersController, ResearchQuestionsController, ResearchImagesController,
+    ResearchAuditController,
+  ],
   providers: [
     ResearchPapersRepository,
     ResearchQuestionsRepository,

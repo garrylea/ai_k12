@@ -296,3 +296,51 @@ describe('ResearchPapersRepository.deletePaperCascade', () => {
     expect(conn.release).toHaveBeenCalledTimes(1);
   });
 });
+
+const U1 = '/uploads/research/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.png';
+const U2 = '/uploads/research/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg';
+
+describe('ResearchPapersRepository.findResearchImageUrlsByPaper', () => {
+  it('只取「真正被物理删的独占题」五字段里的 research 图 URL，并去重', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[], []]) };
+    pool.execute
+      .mockResolvedValueOnce([[{ qid: 1 }, { qid: 2 }, { qid: 3 }], []]) // exclusiveIds
+      .mockResolvedValueOnce([[{ qid: 2 }], []])                        // blocked（学生数据引用）
+      .mockResolvedValueOnce([[{                                        // 仅可删题 1、3 的五字段
+        content: `看这里 ${U1} 还有 ${U1}`,
+        options: JSON.stringify([{ label: 'A', text: U2 }]),
+        answer: null,
+        explanation: '题库静态图 questions/x.png 不算',
+        approach: `https://example.com/x.png ${U1}`,
+      }], []]);
+    const repo = mkRepo(pool);
+
+    const urls = await repo.findResearchImageUrlsByPaper(42);
+
+    expect(urls).toEqual([U1, U2]);
+    // 第三跳只查可删题（1、3），blocked 的题 2 不进来。
+    const [sql, params] = pool.execute.mock.calls[2] as [string, unknown[]];
+    expect(sql).toContain('FROM questions WHERE id IN');
+    expect(params).toEqual([1, 3]);
+  });
+
+  it('可删独占题为空 → 返回 []，不再查题目五字段', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[], []]) };
+    pool.execute
+      .mockResolvedValueOnce([[{ qid: 1 }], []])
+      .mockResolvedValueOnce([[{ qid: 1 }], []]); // 全被引用 → deletable 为空
+    const repo = mkRepo(pool);
+
+    expect(await repo.findResearchImageUrlsByPaper(42)).toEqual([]);
+    expect(pool.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('整卷无独占题 → 一次查询后即返回 []', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[], []]) };
+    pool.execute.mockResolvedValueOnce([[], []]);
+    const repo = mkRepo(pool);
+
+    expect(await repo.findResearchImageUrlsByPaper(42)).toEqual([]);
+    expect(pool.execute).toHaveBeenCalledTimes(1);
+  });
+});

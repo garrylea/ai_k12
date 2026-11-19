@@ -191,6 +191,28 @@ export class ResearchPapersRepository {
     return { paper: paperRows[0], questions: rows };
   }
 
+  /**
+   * 删卷前收集「真正会被物理删除的独占题」五字段里的 research 图 URL。
+   * 用与 deletePaperCascade 同一套 exclusive/blocked 口径：共享题与被学生数据引用的
+   * 独占题都保留，其图不能清。结果供 service 在删卷 commit 后调 cleanupUnreferenced。
+   */
+  async findResearchImageUrlsByPaper(paperId: number): Promise<string[]> {
+    const exclusiveIds = await findExclusiveIds(this.pool, paperId);
+    const blocked = await findBlockedIds(this.pool, exclusiveIds, paperId);
+    const deletable = exclusiveIds.filter((id) => !blocked.has(id));
+    if (deletable.length === 0) return [];
+    const ph = deletable.map(() => '?').join(',');
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT content, options, answer, explanation, approach FROM questions WHERE id IN (${ph})`,
+      deletable,
+    );
+    const re = /\/uploads\/research\/[0-9a-f-]+\.[a-zA-Z0-9]+/g;
+    return [...new Set(rows.flatMap((r) =>
+      ['content', 'options', 'answer', 'explanation', 'approach']
+        .flatMap((k) => String(r[k] ?? '').match(re) ?? []))),
+    ];
+  }
+
   async countImpact(paperId: number): Promise<PaperImpact> {
     const [questionRows] = await this.pool.execute<RowDataPacket[]>(
       'SELECT COUNT(*) AS cnt FROM paper_questions WHERE paper_id = ?',

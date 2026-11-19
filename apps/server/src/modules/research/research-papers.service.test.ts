@@ -38,14 +38,26 @@ function mkRepo(over: Record<string, any> = {}) {
       paperTitle: '汇文卷', deletedQuestions: 14, retainedQuestions: 0,
       deletedSessions: 1, deletedAnswers: 5,
     }),
+    findResearchImageUrlsByPaper: vi.fn().mockResolvedValue([]),
     ...over,
   };
 }
 
-function mkSvc(repo = mkRepo()) {
+function mkImages(over: Record<string, any> = {}) {
   return {
-    svc: new ResearchPapersService(repo as unknown as ResearchPapersRepository),
+    cleanupUnreferenced: vi.fn().mockResolvedValue({ deleted: 0, skipped: 0 }),
+    ...over,
+  };
+}
+
+function mkSvc(repo = mkRepo(), images = mkImages()) {
+  return {
+    svc: new ResearchPapersService(
+      repo as unknown as ResearchPapersRepository,
+      images as any,
+    ),
     repo,
+    images,
   };
 }
 
@@ -95,12 +107,12 @@ describe('ResearchPapersService.preview', () => {
 });
 
 describe('ResearchPapersService.remove', () => {
-  it('成功：返回四个计数，不透出 paperTitle', async () => {
+  it('成功：返回四个计数 + deletedImages，不透出 paperTitle', async () => {
     const { svc } = mkSvc();
     const out = await svc.remove(446, ACTOR);
     expect(out).toEqual({
       paperId: 446, deletedQuestions: 14, retainedQuestions: 0,
-      deletedSessions: 1, deletedAnswers: 5,
+      deletedSessions: 1, deletedAnswers: 5, deletedImages: 0,
     });
     expect('paperTitle' in out).toBe(false);
   });
@@ -117,8 +129,31 @@ describe('ResearchPapersService.remove', () => {
     expect(r.deletePaperCascade).toHaveBeenCalledWith(42, ACTOR);
     expect(out).toEqual({
       paperId: 42, deletedQuestions: 2, retainedQuestions: 0,
-      deletedSessions: 1, deletedAnswers: 3,
+      deletedSessions: 1, deletedAnswers: 3, deletedImages: 0,
     });
+  });
+
+  // Task 7：删卷前收集真正被物理删的独占题里的 research 图，commit 成功后清理。
+  it('删卷前收图 URL，删卷成功后 cleanupUnreferenced(urls, actor) 并回传 deletedImages', async () => {
+    const urls = ['/uploads/research/a.png', '/uploads/research/b.png'];
+    const repo = mkRepo({ findResearchImageUrlsByPaper: vi.fn().mockResolvedValue(urls) });
+    const images = mkImages({ cleanupUnreferenced: vi.fn().mockResolvedValue({ deleted: 2, skipped: 0 }) });
+    const { svc } = mkSvc(repo, images);
+
+    const out = await svc.remove(446, ACTOR);
+
+    expect(repo.findResearchImageUrlsByPaper).toHaveBeenCalledWith(446);
+    expect(repo.findResearchImageUrlsByPaper.mock.invocationCallOrder[0])
+      .toBeLessThan(repo.deletePaperCascade.mock.invocationCallOrder[0]);
+    expect(images.cleanupUnreferenced).toHaveBeenCalledWith(urls, ACTOR);
+    expect(out.deletedImages).toBe(2);
+  });
+
+  it('无可清理图时以空数组调用 cleanup（无副作用，deletedImages=0）', async () => {
+    const { svc, images } = mkSvc();
+    const out = await svc.remove(446, ACTOR);
+    expect(images.cleanupUnreferenced).toHaveBeenCalledWith([], ACTOR);
+    expect(out.deletedImages).toBe(0);
   });
 
   it('操作者身份（sub/role/name）原样传给仓储审计写入', async () => {
