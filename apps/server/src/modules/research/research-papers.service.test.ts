@@ -29,6 +29,7 @@ function mkRepo(over: Record<string, any> = {}) {
   return {
     findPapers: vi.fn().mockResolvedValue({ items: [row()], total: 1 }),
     findPaper: vi.fn().mockResolvedValue({ id: 446, title: '汇文卷', subjectName: '道德与法治' }),
+    findPaperDetail: vi.fn().mockResolvedValue({ paper: { id: 446, title: '汇文卷' }, questions: [] }),
     countImpact: vi.fn().mockResolvedValue({
       questionCount: 14, sharedCount: 0, exclusiveCount: 14,
       deletableCount: 14, retainedCount: 0, sessionCount: 1, answerCount: 5,
@@ -146,5 +147,107 @@ describe('ResearchPapersService.remove', () => {
     const boom = new Error('db down');
     const { svc } = mkSvc(mkRepo({ deletePaperCascade: vi.fn().mockRejectedValue(boom) }));
     await expect(svc.remove(446, ACTOR)).rejects.toBe(boom);
+  });
+});
+
+describe('ResearchPapersService.detail', () => {
+  function detailQuestion(over: Record<string, unknown> = {}) {
+    return {
+      id: 9,
+      question_no: 1,
+      type: 'choice',
+      difficulty: 'medium',
+      full_score: 5,
+      content: '题干',
+      options: '[{"label":"A","text":"甲","isCorrect":true}]',
+      answer: 'B',
+      explanation: '解析',
+      approach: '思路',
+      source: '汇文',
+      source_year: 2026,
+      textbook_page: 'P12',
+      answer_verified: 1,
+      is_active: 1,
+      ...over,
+    };
+  }
+
+  it('detail 返回题目五字段原值且不剥离 answer/explanation/approach', async () => {
+    const repo = mkRepo({
+      findPaperDetail: vi.fn().mockResolvedValue({
+        paper: { id: 1, title: '卷A' },
+        questions: [detailQuestion()],
+      }),
+    });
+    const { svc } = mkSvc(repo);
+
+    const res = await svc.detail(1);
+
+    expect(repo.findPaperDetail).toHaveBeenCalledWith(1);
+    expect(res.questions[0].content).toBe('题干');
+    expect(res.questions[0].answer).toBe('B');
+    expect(res.questions[0].explanation).toBe('解析');
+    expect(res.questions[0].approach).toBe('思路');
+  });
+
+  it('字段名映射 camelCase：questionNo/sourceYear/textbookPage/answerVerified/isActive，且不泄漏原始行', async () => {
+    const repo = mkRepo({
+      findPaperDetail: vi.fn().mockResolvedValue({
+        paper: {
+          id: 1, subject_id: 9, subject_name: '道德与法治', title: '卷A',
+          created_at: new Date('2026-11-07T01:15:00.029Z'),
+        },
+        questions: [detailQuestion()],
+      }),
+    });
+    const { svc } = mkSvc(repo);
+
+    const res = await svc.detail(1);
+
+    expect(res.paper).toEqual({
+      id: 1, subjectId: 9, subjectName: '道德与法治', title: '卷A',
+      createdAt: '2026-11-07T01:15:00.029Z',
+    });
+    expect(res.questions[0]).toEqual({
+      id: 9,
+      questionNo: 1,
+      type: 'choice',
+      content: '题干',
+      options: [{ label: 'A', text: '甲' }],
+      answer: 'B',
+      explanation: '解析',
+      approach: '思路',
+      source: '汇文',
+      sourceYear: 2026,
+      textbookPage: 'P12',
+      answerVerified: true,
+      isActive: true,
+    });
+  });
+
+  it('options 用 parseOptions 解析并剥 isCorrect；坏 JSON → null', async () => {
+    const repo = mkRepo({
+      findPaperDetail: vi.fn().mockResolvedValue({
+        paper: { id: 1, title: '卷A' },
+        questions: [detailQuestion({ id: 10, options: '{bad' })],
+      }),
+    });
+    const { svc } = mkSvc(repo);
+
+    const res = await svc.detail(1);
+
+    expect(res.questions[0].options).toBeNull();
+  });
+
+  it('试卷不存在时 404', async () => {
+    const repo = mkRepo({ findPaperDetail: vi.fn().mockResolvedValue(null) });
+    const { svc } = mkSvc(repo);
+
+    await expect(svc.detail(999)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('id 非正数 → 400', async () => {
+    const { svc } = mkSvc();
+    await expect(svc.detail(0)).rejects.toBeInstanceOf(BadRequestException);
   });
 });

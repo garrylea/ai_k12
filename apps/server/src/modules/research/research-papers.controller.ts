@@ -69,4 +69,10 @@ export class ResearchPapersController {
   remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) {
     return this.service.remove(id, user);
   }
+
+  /** 试卷详情：必须在 :id/delete-preview 之后声明，否则 preview 会被当成 id 解析。 */
+  @Get(':id')
+  detail(@Param('id', ParseIntPipe) id: number) {
+    return this.service.detail(id);
+  }
 }

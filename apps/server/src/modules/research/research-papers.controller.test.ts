@@ -14,6 +14,7 @@ const GUARDS_METADATA = '__guards__';
 function makeController() {
   const service = {
     list: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 }),
+    detail: vi.fn().mockResolvedValue({ paper: { id: 1 }, questions: [] }),
     preview: vi.fn().mockResolvedValue({ paperId: 1 }),
     remove: vi.fn().mockResolvedValue({ paperId: 1 }),
   };
@@ -35,6 +36,18 @@ describe('ResearchPapersController 路由形状', () => {
     expect(Reflect.getMetadata(METHOD_METADATA, ResearchPapersController.prototype.preview)).toBe(RequestMethod.GET);
     expect(Reflect.getMetadata(PATH_METADATA, ResearchPapersController.prototype.remove)).toBe(':id');
     expect(Reflect.getMetadata(METHOD_METADATA, ResearchPapersController.prototype.remove)).toBe(RequestMethod.DELETE);
+  });
+
+  it('详情路由是 GET :id，且声明在 :id/delete-preview 之后（否则 preview 被当 id 解析）', async () => {
+    expect(Reflect.getMetadata(PATH_METADATA, ResearchPapersController.prototype.detail)).toBe(':id');
+    expect(Reflect.getMetadata(METHOD_METADATA, ResearchPapersController.prototype.detail)).toBe(RequestMethod.GET);
+
+    const methods = Object.getOwnPropertyNames(ResearchPapersController.prototype);
+    expect(methods.indexOf('preview')).toBeLessThan(methods.indexOf('detail'));
+
+    const { controller, service } = makeController();
+    await controller.detail(42);
+    expect(service.detail).toHaveBeenCalledWith(42);
   });
 });
 

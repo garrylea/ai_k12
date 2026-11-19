@@ -172,6 +172,25 @@ export class ResearchPapersRepository {
     return { id: Number(row.id), title: String(row.title), subjectName: String(row.subject_name) };
   }
 
+  /** 试卷详情：先取卷元信息（不存在直接 null），再按卷内题号取题目原始字段。 */
+  async findPaperDetail(paperId: number): Promise<{
+    paper: Record<string, unknown>; questions: Record<string, unknown>[];
+  } | null> {
+    const [paperRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT p.*, s.name AS subject_name FROM exam_papers p
+         JOIN subjects s ON s.id = p.subject_id WHERE p.id = ?`, [paperId],
+    );
+    if (paperRows.length === 0) return null;
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT q.id, pq.question_no, q.type, q.difficulty, q.full_score, q.content, q.options,
+              q.answer, q.explanation, q.approach, q.source, q.source_year, q.textbook_page,
+              q.answer_verified, q.is_active
+         FROM paper_questions pq JOIN questions q ON q.id = pq.question_id
+        WHERE pq.paper_id = ? ORDER BY pq.question_no`, [paperId],
+    );
+    return { paper: paperRows[0], questions: rows };
+  }
+
   async countImpact(paperId: number): Promise<PaperImpact> {
     const [questionRows] = await this.pool.execute<RowDataPacket[]>(
       'SELECT COUNT(*) AS cnt FROM paper_questions WHERE paper_id = ?',

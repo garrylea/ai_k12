@@ -5,6 +5,7 @@ import {
   type PaperImpact,
 } from '../../database/repositories/research-papers.repo.js';
 import type { AuditActor } from '../../database/repositories/content-audit.repo.js';
+import { parseOptions } from '../../common/utils/parse-options.util.js';
 
 export interface AdminPaperQuery {
   subjectId?: number;
@@ -45,12 +46,66 @@ export interface AdminPaperDeletePreview extends PaperImpact {
   subjectName: string;
 }
 
+/** 教研端试卷详情：题目五字段给当前原值（与学生端相反，不剥离 answer/explanation/approach）。 */
+export interface ResearchQuestionDetail {
+  id: number;
+  questionNo: number;
+  type: string;
+  content: string;
+  options: unknown[] | null;
+  answer: string;
+  explanation: string | null;
+  approach: string | null;
+  source: string | null;
+  sourceYear: number | null;
+  textbookPage: string | null;
+  answerVerified: boolean;
+  isActive: boolean;
+}
+
+export interface ResearchPaperDetailResult {
+  paper: Record<string, unknown>;
+  questions: ResearchQuestionDetail[];
+}
+
 export interface AdminPaperDeleteResult {
   paperId: number;
   deletedQuestions: number;
   retainedQuestions: number;
   deletedSessions: number;
   deletedAnswers: number;
+}
+
+/** 试卷元信息：行是 `p.*`，统一把列名转 camelCase，Date 转 ISO 字符串。 */
+function toPaperDetail(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [
+      key.replace(/_([a-z])/g, (_, ch: string) => ch.toUpperCase()),
+      value instanceof Date ? value.toISOString() : value,
+    ]),
+  );
+}
+
+/** 题目行 → DTO：字段名 camelCase，options 走 parseOptions 剥 isCorrect，五字段原样下发。 */
+function toQuestionDetail(row: Record<string, unknown>): ResearchQuestionDetail {
+  const str = (v: unknown) => (v == null ? '' : String(v));
+  const nullableStr = (v: unknown) => (v == null ? null : String(v));
+  const nullableNum = (v: unknown) => (v == null ? null : Number(v));
+  return {
+    id: Number(row.id),
+    questionNo: Number(row.question_no),
+    type: str(row.type),
+    content: str(row.content),
+    options: parseOptions(row.options == null ? null : String(row.options)),
+    answer: str(row.answer),
+    explanation: nullableStr(row.explanation),
+    approach: nullableStr(row.approach),
+    source: nullableStr(row.source),
+    sourceYear: nullableNum(row.source_year),
+    textbookPage: nullableStr(row.textbook_page),
+    answerVerified: Number(row.answer_verified) === 1,
+    isActive: Number(row.is_active) === 1,
+  };
 }
 
 function toItem(row: AdminPaperListRow): AdminPaperItem {
@@ -91,6 +146,19 @@ export class ResearchPapersService {
   async list(query: AdminPaperQuery): Promise<AdminPaperListResult> {
     const { items, total } = await this.repo.findPapers(query);
     return { items: items.map(toItem), total, page: query.page, pageSize: query.pageSize };
+  }
+
+  /** 试卷详情：元信息 + 题目列表，题目五字段给教研可见的当前原值。 */
+  async detail(id: number): Promise<ResearchPaperDetailResult> {
+    this.assertId(id);
+    const data = await this.repo.findPaperDetail(id);
+    if (!data) {
+      throw new NotFoundException(`试卷不存在：${id}`);
+    }
+    return {
+      paper: toPaperDetail(data.paper),
+      questions: data.questions.map(toQuestionDetail),
+    };
   }
 
   async preview(id: number): Promise<AdminPaperDeletePreview> {
