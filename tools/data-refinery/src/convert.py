@@ -3,11 +3,68 @@
 import base64
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
 from scanner import Material
+
+
+def _needs_rasterize(pdf: Path) -> bool:
+    """判断是否为「文字层正常但公式/数字是大量小图」的混合型 PDF。
+
+    这类 PDF 直接喂 MinerU 会丢掉所有小图（选项数字/坐标等）；把整页渲染成图片
+    后 MinerU 才能把它们识别出来。采样前 3 页，单页命中条件：
+      文字层>30字 且 小图数>=15 且 小图占比>=0.7
+    小图 = get_image_info() 的 displayed bbox 高<=30pt 且 宽<=120pt。
+    命中页数 >= max(1, 采样页数-1) 判为混合型（2 页卷只需 1 页命中）。
+    打不开/异常一律返回 False，绝不影响原转换流程。
+    """
+    try:
+        import fitz
+        # mupdf_display_errors 是进程级全局量：关掉 "cannot find object in xref" 噪音，
+        # finally 恢复原值（pdf_emphasis 等模块也用 fitz，不能永久改它）。
+        prev = fitz.TOOLS.mupdf_display_errors
+        fitz.TOOLS.mupdf_display_errors(False)
+        try:
+            with fitz.open(pdf) as doc:
+                n = min(3, doc.page_count)
+                required = max(1, n - 1)
+                hits = 0
+                for page in doc[:n]:
+                    text_len = len(page.get_text("text").strip())
+                    try:
+                        infos = page.get_image_info()
+                    except Exception:
+                        continue
+                    small = sum(
+                        1 for info in infos
+                        if (info["bbox"][3] - info["bbox"][1]) <= 30
+                        and (info["bbox"][2] - info["bbox"][0]) <= 120
+                    )
+                    ratio = small / len(infos) if infos else 0
+                    if text_len > 30 and small >= 15 and ratio >= 0.7:
+                        hits += 1
+                        if hits >= required:
+                            return True
+                return False
+        finally:
+            fitz.TOOLS.mupdf_display_errors(prev)
+    except Exception:
+        return False
+
+
+def _rasterize(src: Path, dst: Path) -> None:
+    """把 PDF 每页渲染成 100DPI 图片，拼成一份纯图片 PDF。"""
+    import fitz
+    with fitz.open(src) as doc, fitz.open() as out:
+        for page in doc:
+            pix = page.get_pixmap(dpi=100)
+            new = out.new_page(width=page.rect.width, height=page.rect.height)
+            new.insert_image(new.rect, pixmap=pix)
+        out.save(dst)
 
 
 def token_problem_message(token: str | None) -> str | None:
@@ -147,9 +204,29 @@ class Converter:
         if reconvert:
             # Clear all output before re-converting from scratch
             if target_dir.exists():
-                import shutil
                 shutil.rmtree(target_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        self._runner.run(material.input_paths, target_dir)
+        inputs = material.input_paths
+        tmp_dir = None
+        if inputs and inputs[0].suffix.lower() == ".pdf":
+            try:
+                if _needs_rasterize(inputs[0]):
+                    tmp_dir = tempfile.mkdtemp(prefix="refinery-raster-")
+                    # 保留原文件名（原 stem）：runner 按 stem 跳过已有 .md 的 resume 才不失效
+                    staged = Path(tmp_dir) / inputs[0].name
+                    _rasterize(inputs[0], staged)
+                    inputs = [staged]
+                    print(f"[rasterize] {inputs[0].name} → 100DPI 图片页（混合型 PDF）", flush=True)
+            except Exception as e:
+                print(f"[WARN] 栅格化失败，用原 PDF 继续: {inputs[0].name}: {e}", flush=True)
+                if tmp_dir:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                tmp_dir = None
+
+        try:
+            self._runner.run(inputs, target_dir)
+        finally:
+            if tmp_dir:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
         return target_dir

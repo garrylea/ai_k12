@@ -322,6 +322,10 @@ _OPTION_MARK_RE = re.compile(r'[\(（]([A-Da-d])[\)）]')
 # 裸字母行内标记：'A. 文本'（点后须有内容）。前导不可是英文/数字（排除 '△ABC.'、'1A.' 之类），
 # 但允许紧跟中文标点或括号（语文卷常见 '…的一项是(2分)A.呼之欲出 B.恰到好处'，无空格）。
 _BARE_INLINE_RE = re.compile(r'(?<![A-Za-z0-9])([A-D])[.．](?=\s*\S)')
+# 兜底：MinerU 栅格化后选项间的空格会丢（`-2C.1` 这种数字紧贴下一选项字母）。
+# 上面的负向前瞻 (?<![A-Za-z0-9]) 会把紧跟数字的 C/D 挡掉，导致凑不齐 ABCD。
+# 只在严格正则失败后启用，且必须凑齐连续 A→B→C→D 四个标记才采纳。
+_BARE_INLINE_LOOSE_RE = re.compile(r'([A-D])[.．](?=\s*\S)')
 # 裸字母竖排行：行首单独 'A' / 'A.' / 'A、'（选项内容/配图在标记行之间）
 _BARE_LINE_RE = re.compile(r'^\s*([A-D])\s*[.、．]?\s*$')
 # 行首小问起点 (1)/（1）/1）（OCR 常丢左括号）：用来判断 A-D 是否属于某个小问。
@@ -357,6 +361,15 @@ def _find_option_marks(content: str) -> list[tuple[int, int, str]] | None:
     for i in range(len(line_marks) - 3):
         if [mk[2] for mk in line_marks[i:i + 4]] == ['A', 'B', 'C', 'D']:
             return line_marks[i:i + 4]
+    # 兜底：上面都凑不齐时，用宽松正则找连续 ABCD。只认严格连续的四个标记，
+    # 这样孤立的 '1A.'（题号）或图片名 '图A.jpg' 凑不齐四个，不会被误当选项。
+    loose = list(_BARE_INLINE_LOOSE_RE.finditer(content))
+    for i, m in enumerate(loose):
+        if m.group(1).upper() == 'A' and i + 3 < len(loose):
+            seq = [loose[j].group(1).upper() for j in range(i, i + 4)]
+            if seq == ['A', 'B', 'C', 'D']:
+                return [(x.start(), x.end(), x.group(1).upper())
+                        for x in loose[i:i + 4]]
     return None
 
 

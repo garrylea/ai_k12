@@ -533,3 +533,36 @@ def test_answer_missing_uses_db_and_only_when_md_has_answers(tmp_path):
     issues = R.scan_paper("卷A", Path("数学/x/卷A"), md2, rows, None, [],
                           db_answers={1: ""})
     assert not [i for i in issues if i["kind"] == "answer_missing"]
+
+
+class TestRedoPrune:
+    """--redo 重做卷时，先清掉旧 issue 快照，避免栅格化后已修好的题还挂着旧误报。"""
+
+    def test_prune_only_rescanned_source(self):
+        records = [
+            {"source": "卷A", "group_order": 3, "kind": "incomplete_content"},
+            {"source": "卷A", "group_order": 16, "kind": "missing"},
+            {"source": "卷B", "group_order": 5, "kind": "incomplete_content"},
+        ]
+        # jobs: (jsonl_path, rel_dir, source) —— 本次只重扫卷A
+        jobs = [("数学/x/卷A.jsonl", Path("数学/x"), "卷A")]
+        kept, n = R._prune_records_for_redo(records, jobs)
+        assert n == 2
+        assert kept == [records[2]]  # 卷B 不动
+
+    def test_prune_all_when_all_rescanned(self):
+        records = [
+            {"source": "卷A", "group_order": 3, "kind": "incomplete_content"},
+            {"source": "卷B", "group_order": 5, "kind": "incomplete_content"},
+        ]
+        jobs = [
+            ("数学/x/卷A.jsonl", Path("数学/x"), "卷A"),
+            ("数学/x/卷B.jsonl", Path("数学/x"), "卷B"),
+        ]
+        kept, n = R._prune_records_for_redo(records, jobs)
+        assert n == 2 and kept == []
+
+    def test_no_prune_when_no_jobs(self):
+        records = [{"source": "卷A", "group_order": 3, "kind": "incomplete_content"}]
+        kept, n = R._prune_records_for_redo(records, [])
+        assert n == 0 and kept == records

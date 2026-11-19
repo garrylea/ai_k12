@@ -796,3 +796,51 @@ def test_file_matching_paper_and_answer_pair_resolves_to_paper(monkeypatch, caps
     for name, argv in seen:
         flag = "--materials" if name == "convert_main" else ("--book" if name == "publish_main" else "--file")
         assert argv[argv.index(flag) + 1] == "语文/初中/second/2026/海淀九年级语文（上）期中语文试题"
+
+
+def test_scan_entry_passes_redo_to_scan_run(monkeypatch):
+    """--redo 必须传到第 7 步扫描，否则重新转出的卷旧 issue 记录不会被清。"""
+    seen = {}
+
+    def fake_scan_run(subject, file, *, write, redo=False):
+        seen.update(subject=subject, file=file, write=write, redo=redo)
+        return []
+
+    import recognition_scan
+    monkeypatch.setattr(recognition_scan, "run", fake_scan_run)
+    # _scan_entry 内部 `from recognition_scan import run as scan_run`，上面已替换模块属性
+
+    args = _args(["--subject", "数学", "--file", "海淀数学(9)", "--redo"])
+    import_cli._scan_entry(args)([])
+    assert seen["redo"] is True
+
+    # 不带 --redo 时默认为 False
+    seen.clear()
+    args2 = _args(["--subject", "数学", "--file", "海淀数学(9)"])
+    import_cli._scan_entry(args2)([])
+    assert seen["redo"] is False
+
+
+def test_rebuild_flags_discard_old_fix_records(monkeypatch):
+    """重转卷（--re-extract/--redo/--reconvert）时作废旧补题记录，避免覆盖新切题结果。"""
+    import manual_fix
+    _stub_all(monkeypatch)
+    # 用真实存在的一份卷名，避免 _resolve_file 0 命中中止
+    seen = []
+    monkeypatch.setattr(
+        manual_fix, "discard_fixes_for_source",
+        lambda src, **kw: seen.append(src) or 0,
+    )
+    # 同时让 import_cli 的延迟 import 拿到同一个函数（延迟 import 在 _execute 内 from manual_fix import）
+    monkeypatch.setattr(import_cli._execute.__globals__.get("manual_fix", manual_fix),
+                        "discard_fixes_for_source",
+                        lambda src, **kw: seen.append(src) or 0)
+
+    import_cli.main(["--subject", "数学", "--file", "数学(9)", "--re-extract", "--skip-review"])
+    assert seen, "重转时应调用 discard_fixes_for_source"
+    assert "数学(9)" in seen[0] or "数学" in seen[0]
+
+    # 不带重建标志时不调用
+    seen.clear()
+    import_cli.main(["--subject", "数学", "--file", "数学(9)", "--skip-review"])
+    assert seen == []

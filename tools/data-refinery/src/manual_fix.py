@@ -473,16 +473,20 @@ def _line_edit(text: str) -> str | None:
         c.warn("指令不认识；" + _EDIT_HINT)
 
 
-def _confirm_text(text: str) -> tuple[str, str]:
-    """录入后必须显式选号确认；返回 (动作, 正文)，动作 ∈ ok / redo / skip。
+def _confirm_text(text: str, label: str = "题干") -> tuple[str, str]:
+    """录入后必须显式选号确认；返回 (动作, 正文)，动作 ∈ ok / redo / clear / skip。
 
     为什么不再用「回车=确认」：粘贴内容尾部常带空行，回车会被这些空行瞬间吃掉，
     用户还没看清就跳到下一步，然后在答案处敲编辑指令、以为程序没反应。
+    `label` 区分「题干 / 答案」：答案语境的提示词、第 4 项（放弃整题 vs 留空答案）不同；
+    答案第 4 项返回 clear（留空答案、本题照常记录），不是 skip（放弃整题）。
     """
     c = console()
+    is_answer = label == "答案"
+    give_up = "留空（不填答案）" if is_answer else "放弃本题"
     while True:
-        c.block("内容已收到", text, max_lines=6)
-        c.legend([("1", "确认继续"), ("2", "逐行编辑"), ("3", "重新粘贴"), ("4", "放弃本题")])
+        c.block(f"{label}已收到", text, max_lines=6)
+        c.legend([("1", "确认继续"), ("2", "逐行编辑"), ("3", "重新输入"), ("4", give_up)])
         c.prompt("选择 › ")
         raw = _read_line()
         if raw is None:                 # 输入流结束：当作放弃，避免死等
@@ -507,11 +511,11 @@ def _confirm_text(text: str) -> tuple[str, str]:
         if ans == "3" or low in ("r", "redo"):
             return "redo", ""
         if ans == "4" or low in ("s", "skip"):
-            return "skip", ""
+            return ("clear" if is_answer else "skip"), ""
         if re.match(r"^[dci]\s+\d+", ans):
             c.warn("要删/改行，请先按 2 进入编辑")
             continue
-        c.warn("请按 1/2/3/4 选择（1 确认 / 2 编辑 / 3 重粘 / 4 放弃）")
+        c.warn("请按 1/2/3/4 选择（1 确认 / 2 编辑 / 3 重新输入 / 4 " + give_up + "）")
 
 
 _IMG_REF_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
@@ -573,6 +577,32 @@ def _apply_image_placeholders(text: str, refs: list[str]) -> str:
     return text
 
 
+def discard_fixes_for_source(source_file: str, *, fixes_dir: Path | None = None) -> int:
+    """重转卷（--reconvert/--re-extract/--redo）时，把该卷的旧补题记录移进 _discarded/。
+
+    栅格化重转后，之前为「公式丢失版」手工补的题已过时：留着会在第 9 步被重新应用，
+    覆盖刚修好的切题结果（2026-11-18 海淀数学(9) Q1 实测）。移到 _discarded/ 是仓库
+    既有的作废约定：apply_fixes 只认顶层 *.jsonl，recognition_scan 也会据此重开 issue。
+    返回移走的记录条数。
+    """
+    out_dir = Path(fixes_dir) if fixes_dir else FIXES_DIR
+    if not out_dir.exists():
+        return 0
+    discarded = out_dir / "_discarded"
+    moved = 0
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    for f in sorted(out_dir.glob("*.jsonl")):
+        # 文件名就是卷名（manual_fix 落盘约定）。source_file 通常是精确卷名（import_cli
+        # 解析后的 chosen.name）；也兼容关键词——只要两边分词互相命中即可。
+        if not (match_keyword(f.stem, source_file) or match_keyword(source_file, f.stem)):
+            continue
+        discarded.mkdir(parents=True, exist_ok=True)
+        dest = discarded / f"{f.stem}.{stamp}{f.suffix}"
+        shutil.move(str(f), str(dest))
+        moved += 1
+    return moved
+
+
 def _current_question(issue: dict) -> dict | None:
     """从 extracted JSONL 取这道题的当前版本（有图/选项才能做保留原图）。"""
     rel = issue.get("rel_path")
@@ -594,7 +624,7 @@ def _ask_image_mode(count: int) -> str:
     c.write("")
     c.write(f"这一题原有 {count} 张图，怎么处理？")
     c.legend([("1", "保留原图（只改文字）"),
-              ("2", "换图（给图片路径，不识别文字）"),
+              ("2", "换图/配图（给图片路径，正文可写 [图1][图2]，不识别文字）"),
               ("3", "重新截图识别（MinerU，可能再认错）")])
     while True:
         c.prompt("选择 1/2/3（回车=1）› ")
@@ -611,11 +641,34 @@ def _ask_image_mode(count: int) -> str:
         c.warn("请输入 1、2 或 3")
 
 
+def _natural_key(p: Path):
+    """文件名按数字自然序：crop_2.png < crop_10.png（裁剪软件常这样导出）。"""
+    return [int(s) if s.isdigit() else s.lower() for s in re.split(r"(\d+)", p.name)]
+
+
+def _confirm_image_order(c, paths: list[Path]) -> list[Path] | None:
+    """列出图片清单让用户确认顺序；回车确认，或输入 3,1,2 重排，s 取消。"""
+    c.write(f"  识别到 {len(paths)} 张（按文件名顺序）：")
+    for i, p in enumerate(paths, 1):
+        c.write(f"    图{i}  {p.name}")
+    while True:
+        c.prompt("顺序对吗？回车确认 / 输入新顺序如 3,1,2 / s 取消 › ")
+        raw = (_read_line() or "").strip().lower()
+        if raw in ("", "y", "ok"):
+            return paths
+        if raw == "s":
+            return None
+        idx = [int(x) for x in re.split(r"[,，\s]+", raw) if x.isdigit()]
+        if sorted(idx) == list(range(1, len(paths) + 1)):
+            return [paths[i - 1] for i in idx]
+        c.warn(f"请输入 1..{len(paths)} 的一个排列，或回车确认")
+
+
 def _ask_new_images(paper_md_dir: Path) -> list[str]:
-    """换图：一个或多个图片路径（逗号分隔）→ 原样拷进 images/；回车/剪贴板也可。"""
+    """配图：图片路径 / @目录（按文件名顺序批量导入）/ 回车剪贴板 → 原样拷进 images/。"""
     c = console()
     while True:
-        c.prompt("图片路径（多个用逗号；直接回车读剪贴板；s 取消）› ")
+        c.prompt("图片路径（@目录=批量导入；多个用逗号；回车读剪贴板；s 取消）› ")
         raw = _read_line()
         if raw is None:
             return []
@@ -633,7 +686,23 @@ def _ask_new_images(paper_md_dir: Path) -> list[str]:
                     continue
         else:
             for part in re.split(r"[,，]", raw):
-                p = Path(part.strip().strip("'\"")).expanduser()
+                token = part.strip().strip("'\"")
+                if token.startswith("@"):
+                    d = Path(token[1:]).expanduser()
+                    if not d.is_absolute():
+                        d = Path.cwd() / d
+                    if not d.is_dir():
+                        c.warn(f"找不到目录：{d}")
+                        continue
+                    imgs = sorted((p for p in d.iterdir()
+                                   if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES),
+                                  key=_natural_key)
+                    if not imgs:
+                        c.warn(f"目录里没有图片：{d}")
+                        continue
+                    paths.extend(imgs)
+                    continue
+                p = Path(token).expanduser()
                 if not p.is_absolute():
                     p = Path.cwd() / p
                 if not p.exists():
@@ -643,27 +712,112 @@ def _ask_new_images(paper_md_dir: Path) -> list[str]:
                     c.warn(f"不是图片：{p.name}")
                     continue
                 paths.append(p)
-        refs = _copy_new_images(paths, paper_md_dir)
+        if not paths:
+            c.warn("没有收到图片，请重新给路径，或按 s 取消本题")
+            continue
+        confirmed = _confirm_image_order(c, paths)
+        if not confirmed:
+            continue
+        refs = _copy_new_images(confirmed, paper_md_dir)
         if refs:
             c.ok(f"已拷入 {len(refs)} 张图：" + "、".join(r.split("/")[-1] for r in refs))
+            c.info("[图1]=第1张、[图2]=第2张…（正文里按这个写占位符）")
             return refs
-        c.warn("没有收到图片，请重新给路径，或按 s 取消本题")
+        c.warn("拷图失败，请重新给路径，或按 s 取消本题")
 
 
-def _collect_content(paper_md_dir: Path, *, allow_images: bool = True) -> str | None:
+def _collect_multi_image_flow(paper_md_dir: Path, out_refs: list[str]) -> str | None:
+    """多图+题干处理：逐张「裁剪→⌘C→回车」收图，eof 结束；再读带 [图N] 的题干。
+
+    每张图从剪贴板读出后立刻存进临时目录、清空剪贴板（防止没重新裁剪就重复收同一张），
+    最后统一拷进该卷 images/，refs 写入 out_refs 供占位符替换。返回题干正文。
+    """
+    c = console()
+    tmp_root = Path(tempfile.mkdtemp(prefix="refinery-multi-"))
+    try:
+        paths: list[Path] = []
+        seen_hashes: set[str] = set()
+        i = 1
+        while True:
+            c.prompt(f"请裁剪图{i} 并复制（⌘C），完成后回车；图片给完输入 eof › ")
+            raw = _read_line()
+            if raw is None:
+                return None
+            raw = raw.strip().lower()
+            if raw in ("eof", "end", "结束"):
+                break
+            with tempfile.TemporaryDirectory(prefix="refinery-clip-") as tmp:
+                clip = _clipboard_to_path(Path(tmp))
+                if clip is None or not clip.exists() or clip.stat().st_size == 0:
+                    c.warn("剪贴板里没有图片：先裁好图并复制，再回车；或输入 eof 结束")
+                    continue
+                if clip.suffix.lower() not in IMAGE_SUFFIXES:
+                    c.warn("剪贴板里不是图片（是文件？）：请直接复制图片本身")
+                    continue
+                data = clip.read_bytes()
+                # 内容去重：剪贴板清空在 macOS 上不一定生效，没重新裁剪就回车会重复收同一张。
+                # 和已收图内容相同 → 默认拒收重裁；确需同一张可输入 y 强制收下。
+                chash = hashlib.sha1(data).hexdigest()
+                if chash in seen_hashes:
+                    c.prompt("这张和已收的某张完全相同——是忘了重新裁剪吗？"
+                             " 回车=重新裁 / y=确实要同一张 › ")
+                    ans = (_read_line() or "").strip().lower()
+                    if ans != "y":
+                        continue
+                saved = tmp_root / f"fig_{i:02d}{clip.suffix.lower()}"
+                saved.write_bytes(data)
+                paths.append(saved)
+                seen_hashes.add(chash)
+            _clear_clipboard()          # 尽力清空（失败也不影响去重兜底）
+            c.ok(f"图{i} 已收下 → {saved}")
+            i += 1
+        if not paths:
+            c.warn("一张图片都没收到，已取消本题")
+            return None
+        out_refs.extend(_copy_new_images(paths, paper_md_dir))
+        c.info(f"已收 {len(paths)} 张图：[图1]=第1张、[图2]=第2张…")
+        c.write("请输入题干，在要显示图片的地方写 [图1]/[图2]…，输入 EOF 结束：")
+        text = _read_block("")
+        return text or None
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+def _clear_clipboard() -> None:
+    """尽量清空系统剪贴板（macOS/Linux）；失败无所谓，只是防重复收图。"""
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["osascript", "-e", 'set the clipboard to ""'],
+                           capture_output=True, timeout=5)
+        elif shutil.which("xclip"):
+            subprocess.run(["xclip", "-selection", "clipboard", "/dev/null"],
+                           capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _collect_content(paper_md_dir: Path, *, allow_images: bool = True,
+                     out_refs: list[str] | None = None,
+                     first_line: str | None = None,
+                     label: str = "题干") -> str | None:
     """读人工输入；返回 Markdown 正文，跳过时返回 None。
 
-    先问用哪种方式（1 粘贴 / 2 图片路径 / 3 文件 / 4 剪贴板），再预览确认。
+    先问用哪种方式（1 粘贴 / 2 图片路径 / 3 文件 / 4 剪贴板 / 5 多图+题干），再预览确认。
     直接粘贴正文也认：首行不是这些命令就当成正文的第一行。
     空行也认：截图后按 ⌘V 时终端送不出任何字符，用户接着按的回车就是这里读到的
     空行 —— 此时先探一次剪贴板，有图就按图片处理，没图再走原来的「粘贴文本」。
+    `out_refs` 非空列表时，选 5 会把配好的图片引用写进去。
+    `first_line`：调用方已读好的首行（答案录入要先识别 e/r/s 命令），有则不重复读。
+    `label`：提示词语境，'题干' 或 '答案'（答案的确认框第 4 项是留空而非放弃整题）。
     """
     c = console()
+    pre_read = first_line
     while True:
-        tip = ("选择方式 1/3（纯文字；或直接粘贴正文）› " if not allow_images
-               else "选择方式 1/2/3/4（或直接粘贴正文 / ⌘V 图片后回车）› ")
+        tip = (f"选择{label}输入方式 1/3（纯文字；或直接粘贴{label}）› " if not allow_images
+               else f"选择{label}输入方式 1/2/3/4/5（5=多图+{label}；或直接粘贴{label} / ⌘V 图片后回车）› ")
         c.prompt(tip)
-        first = _read_line()
+        first = pre_read if pre_read is not None else _read_line()
+        pre_read = None
         if first is None:
             return None
         first = first.strip()
@@ -676,12 +830,17 @@ def _collect_content(paper_md_dir: Path, *, allow_images: bool = True) -> str | 
         if first in ("e", "r"):
             # 还没录内容就想改：说清楚该按什么，别把这个字母吃进正文
             c.warn("还没有可修改的内容；请按 1 粘贴正文 / 2 图片路径 / "
-                   "3 文件路径 / 4 剪贴板图片")
+                   "3 文件路径 / 4 剪贴板图片 / 5 多图+题干")
             continue
         if low in ("2", "4") and not allow_images:
             c.warn("当前是「纯文字」模式：图片请在上一步按 1/2 处理，这里只收文字")
             continue
-        if low == "4":
+        if low == "5":
+            if out_refs is None:
+                c.warn("当前流程不支持多图+题干（纯文字模式）")
+                continue
+            text = _collect_multi_image_flow(paper_md_dir, out_refs)
+        elif low == "4":
             text = _from_clipboard(paper_md_dir)
         elif low == "1" or first == "":
             text = _from_clipboard(paper_md_dir, silent=True) if first == "" else None
@@ -706,9 +865,11 @@ def _collect_content(paper_md_dir: Path, *, allow_images: bool = True) -> str | 
                   "已拒收，请只粘贴题目本身")
             continue
 
-        action, text = _confirm_text(text)
+        action, text = _confirm_text(text, label=label)
         if action == "redo":
             continue
+        if action == "clear":       # 答案留空：返回空串（不是 None，本题照常记录）
+            return ""
         if action == "skip":
             return None
         return text
@@ -737,6 +898,26 @@ _CONTENT_KINDS = ("incomplete_content", "merged_content", "type_mismatch",
                   "options_incomplete", "answer_missing")
 
 
+def _copyable_question_text(issue: dict) -> str:
+    """当前题的完整题干 + 选项，供整段拷贝（补题时只想改选项，题干要能原样拷下来）。
+
+    优先取 extracted 里的最新版本（_current_question）；取不到再退回 issue 的 excerpt。
+    选项按 label 逐行列全，图片引用原样保留；**不走终端宽度截断**。
+    """
+    row = _current_question(issue) or {}
+    content = (row.get("content") or "").strip()
+    options = row.get("options") or []
+    if not content:
+        return (issue.get("excerpt") or "").strip()
+    lines = [content]
+    for opt in options:
+        label = (opt.get("label") or "").strip()
+        text = (opt.get("text") or "").strip()
+        if label:
+            lines.append(f"{label}. {text}".rstrip())
+    return "\n".join(lines)
+
+
 def _print_context(issue: dict, index: int | None = None, total: int | None = None) -> None:
     c = console()
     kind = _KIND_TEXT.get(issue.get("kind"), issue.get("kind") or "识别问题")
@@ -761,7 +942,12 @@ def _print_context(issue: dict, index: int | None = None, total: int | None = No
         from cli_ui import wrap_items
         for i, line in enumerate(wrap_items(reasons, c.width - 8)):
             c.write(f"  {c.paint('依据' if i == 0 else '    ', 'dim')}  {line}")
-    c.block("证据", issue.get("excerpt") or "", max_lines=5)
+    # 完整题干 + 选项，逐行原样输出（不按终端宽度截断），可整段拷贝下来改。
+    full = _copyable_question_text(issue)
+    c.write("")
+    c.write(f"  {c.paint('当前题目（完整，可整段拷贝；只需改选项就复制题干再补选项）', 'dim')}")
+    for line in full.splitlines():
+        c.write(f"  {line}")
 
 
 def _targets(issue: dict) -> list[tuple[int, str]]:
@@ -796,21 +982,55 @@ def _targets(issue: dict) -> list[tuple[int, str]]:
     return seq
 
 
+def _collect_answer(paper_md_dir: Path, c) -> str | None:
+    """答案录入：支持富输入（1文本/2图片/3文件/4剪贴板/5多图+答案）。
+
+    规则（和题干行为一致，但不打断简单的单行答案）：
+    - e/r/s → 返工/跳过命令，原样返回给调用方识别（e 改题面 / r 重录题面 / s 放弃整题）；
+    - 1/2/3/4/5/@路径/含 `[图N]` → 进富输入菜单；确认框里「3 重新输入」只重输答案，
+      「4 留空」= 本题不填答案（照常记录），都不会重输题干；
+    - 其它（含空行=留空）→ 直接当答案文本（不用每次都敲 EOF）。
+    返回的答案可能含 `![](images/...)`，由 apply_fixes 的 rewrite_fields 物化。
+    """
+    first = _read_line()
+    if first is None:
+        return None
+    raw = first.strip()
+    cmd = raw.lower()
+    # 命令只认小写：英语选项答案可能是大写 E/S，不能被当命令吞掉
+    if raw == cmd and cmd in ("s", "skip", "e", "edit", "r", "redo"):
+        return cmd
+    # 富输入触发：菜单命令 / @文件 / 占位符。空行仍当「答案为空」（原行为）。
+    rich = (cmd in ("1", "2", "3", "4", "5") or first.strip().startswith("@")
+            or bool(_IMG_PLACEHOLDER_RE.search(first)))
+    if not rich:
+        return first.strip()
+    answer_refs: list[str] = []
+    text = _collect_content(paper_md_dir, allow_images=True,
+                            out_refs=answer_refs, first_line=first, label="答案")
+    if text is None:
+        return None
+    if text.strip() == "":
+        return ""            # 选「留空」：即使收了图也不往空答案里塞
+    if answer_refs:
+        text = _apply_image_placeholders(text, answer_refs)
+    return text
+
+
 def _ask_answer_only(issue: dict, target_no: int, original: dict,
                      c) -> list[dict]:
     """只补答案：题面/选项/图片一律不动，写库时也走 answer_only 分支。"""
     c.info("只补答案：题面、选项、图片都不动")
+    md_path = Path(issue.get("md") or "")
+    paper_md_dir = md_path.parent if md_path.name else (FIXES_DIR.parent / "md")
     answer = ""
     while True:
-        c.prompt(f"第 {target_no} 题答案（e 重输 / s 跳过）› ")
-        raw = _read_line()
-        if raw is None:
-            return []
-        text = raw.strip()
-        if text.lower() in ("s", "skip"):
+        c.prompt(f"第 {target_no} 题答案（1文本/2图片/3文件/4剪贴板/5多图+题干）› ")
+        text = _collect_answer(paper_md_dir, c)
+        if text is None:
             c.warn(f"第 {target_no} 题已跳过")
             return []
-        if not text or text.lower() == "e":
+        if text in ("e", "edit"):   # 只补答案模式下 e 就是重来
             continue
         if any(m in text for m in _ECHO_MARKERS):
             c.warn("答案里混进了界面文字，请重输")
@@ -880,9 +1100,15 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
         if not new_refs:
             c.warn(f"第 {target_no} 题没有换图，已跳过")
             return []
+    # ocr 模式选「多图+题干」（菜单 5）时，图片引用会从 _collect_content 回填到这里
+    multi_refs: list[str] = []
 
     def prep(text: str) -> str:
-        """按图片策略加工文字：保留原图补引用 / 换图替换占位符。"""
+        """按图片策略加工文字：保留原图补引用 / 换图替换占位符。
+
+        ocr 模式下：选了多图流程 → 用刚收的图替换 [图N]；或正文写了 [图N] 但没走
+        多图流程 → 这时才问图片路径、拷图并替换。没写占位符就完全走原 ocr 流程。
+        """
         if mode == "keep":
             out = _append_missing_images(text, orig_refs)
             if out != text:
@@ -890,6 +1116,14 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
             return out
         if mode == "replace":
             return _apply_image_placeholders(text, new_refs)
+        # ocr 模式
+        if multi_refs:
+            return _apply_image_placeholders(text, multi_refs)
+        if _IMG_PLACEHOLDER_RE.search(text):
+            refs = _ask_new_images(paper_md_dir)
+            if refs:
+                return _apply_image_placeholders(text, refs)
+            c.warn("正文写了 [图N] 但没配图，占位符保留原样")
         return text
 
     if mode != "ocr":
@@ -897,9 +1131,11 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                   ("s", "跳过本题"), ("q", "退出")])
     else:
         c.legend([("1", "粘贴文本"), ("2", "图片路径"), ("3", "文件路径"),
-                  ("4", "剪贴板图片"), ("s", "跳过本题"), ("q", "退出")])
+                  ("4", "剪贴板图片"), ("5", "多图+题干（逐张裁剪配图）"),
+                  ("s", "跳过本题"), ("q", "退出")])
 
-    content = _collect_content(paper_md_dir, allow_images=(mode == "ocr"))
+    content = _collect_content(paper_md_dir, allow_images=(mode == "ocr"),
+                               out_refs=multi_refs)
     if content is None:
         c.warn(f"第 {target_no} 题未录入，已跳过")
         return []
@@ -944,11 +1180,15 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                      f"{'/'.join(o['label'] for o in options)}")
             else:
                 c.ok(f"第 {target} 题 · 题干 {len(stem)} 字{mat_note} · 无选项（按简答题处理）")
-            hint = "答案（可留空；e 改题面 / r 重录 / s 放弃本题）› "
+            hint = ("答案（1文本/2图片/3文件/4剪贴板/5多图+答案；直接输入或回车留空；"
+                    "e 改题面 / r 重录 / s 放弃本题）› ")
             c.prompt(f"第 {target} 题{hint}" if multi else hint)
-            answer = (_read_line() or "").strip()
+            answer = _collect_answer(paper_md_dir, c)
+            if answer is None or answer in ("s", "skip"):
+                c.warn(f"第 {target} 题已放弃，不记录")
+                break
 
-            # 只认**小写**单字母：英语选项答案可能是大写 E，不能被当成命令
+            # _collect_answer 把 e/r 原样返回，交给这里做「改题面/重录」（针对 stem）
             if answer in ("e", "edit"):
                 edited = _line_edit(body)
                 if edited is None:
@@ -965,13 +1205,10 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 else:
                     c.warn("没有收到新内容，保留原题面")
                 continue
-            if answer in ("s", "skip"):
-                c.warn(f"第 {target} 题已放弃，不记录")
-                break
 
             if re.match(r"^[dci]\s+\d+", answer):
                 c.warn("要删/改行，请按 e 进入编辑后再改")
-                continue
+                answer = ""
             if any(m in answer for m in _ECHO_MARKERS):
                 c.warn("答案里混进了界面文字，已置空")
                 answer = ""

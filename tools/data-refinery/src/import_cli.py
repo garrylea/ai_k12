@@ -454,7 +454,7 @@ def _scan_entry(args):
     def _run(_argv) -> int:
         from recognition_scan import run as scan_run
         issues = scan_run(args.subject or getattr(args, "_resolved_subject", None) or "物理",
-                          args.file, write=not args.dry_run)
+                          args.file, write=not args.dry_run, redo=args.redo)
         args._scanned_sources = {i["source"] for i in issues}
         if args.dry_run:
             for it in issues:
@@ -541,6 +541,15 @@ def _execute(args) -> int:
     resolve_rc = _resolve_file(args, RefineryConfig.from_env())
     if resolve_rc is not None:
         return resolve_rc
+
+    # 重转卷时，先作废该卷的旧补题记录：栅格化重转后旧的手工补题已过时，
+    # 留着会在第 9 步被重新应用、覆盖刚修好的切题结果（2026-11-18 海淀数学(9) 实测）。
+    rebuild = args.reconvert or args.re_extract or args.redo
+    if rebuild and args.file and not args.dry_run:
+        from manual_fix import discard_fixes_for_source
+        n = discard_fixes_for_source(args.file)
+        if n:
+            print(f"[rebuild] 该卷旧补题记录已作废（移入 _discarded/）：{n} 条", flush=True)
 
     stages = []
     if not args.skip_convert:

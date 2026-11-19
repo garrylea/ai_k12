@@ -647,13 +647,24 @@ def _load_db_answers(keys: list[str]) -> dict[str, dict[int, str]] | None:
     return out
 
 
+def _prune_records_for_redo(records: list[dict], jobs: list[tuple]) -> tuple[list[dict], int]:
+    """redo：丢弃本次重扫卷的旧记录（栅格化/MinerU 重转后，旧 excerpt/理由已失效）。
+
+    只清本次实际重扫的卷（jobs），不碰同科其它卷。返回 (保留记录, 清除条数)。
+    """
+    in_scope = {src for _, _, src in jobs}
+    kept = [r for r in records if r.get("source") not in in_scope]
+    return kept, len(records) - len(kept)
+
+
 def run(subject: str, file: str | None = None, *, write: bool = True,
-        sources: set[str] | None = None) -> list[dict]:
+        sources: set[str] | None = None, redo: bool = False) -> list[dict]:
     """扫描一个学科（可再按卷名子串 / 精确卷名集合收窄），返回本次检出的问题列表。
 
     write=True 时把新条目追加进 output/recognition_issues.jsonl（按
     (source, group_order, kind) 去重，可重复执行）。`sources` 给 just-written 的卷用：
-    写库后只复扫这几卷，不惊动同科其它卷。
+    写库后只复扫这几卷，不惊动同科其它卷。`redo=True` 时先清掉本次重扫卷的旧记录，
+    再由新扫描重建——否则栅格化后已修好的题（如选项从 0/4 变 4/4）的旧误报会一直挂着。
     """
     extracted_root = ROOT / "output" / "extracted"
     md_root = ROOT / "output" / "md"
@@ -702,6 +713,11 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
 
     ISSUES_FILE.parent.mkdir(parents=True, exist_ok=True)
     records = _read_jsonl(ISSUES_FILE)
+    pruned = 0
+    if redo:
+        records, pruned = _prune_records_for_redo(records, jobs)
+        if pruned:
+            print(f"[redo] 清除 {pruned} 条旧 issue 记录（本次重扫的卷，旧快照已失效）", flush=True)
     current = {(i["source"], i["group_order"], i["kind"]) for i in all_issues}
     scanned = {i["source"] for i in all_issues}
     closed = _auto_close_stale(records, current, scanned,
@@ -718,7 +734,7 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
     reopened = reopen_unbacked(records, all_issues, present=present_by_source)
     changed = reopen_changed(records, all_issues)
 
-    if closed or filled or reopened or changed:
+    if closed or filled or reopened or changed or pruned:
         _write_jsonl(ISSUES_FILE, records)
         if closed:
             print(f"[ok] 自动收口 {closed} 条噪声题记录", flush=True)

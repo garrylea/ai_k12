@@ -1657,3 +1657,29 @@ def test_text_options_with_trailing_image_not_treated_as_image_options():
     """文字选项 + 题干配图：不能把最后那张图当成 D（35中题8 就是这种缺 D）。"""
     content = "题干\nA. 1    B. 2    C. 3\n![](images/fig.jpg)"
     assert split_options(content)[1] is None
+
+
+def test_split_options_digits_glued_to_next_label():
+    """MinerU 栅格化后选项间空格丢失（`-2C.1`、`-2D.1` 数字紧贴字母），
+    严格正则的负向前瞻会把 C/D 挡掉。兜底须凑齐连续 ABCD 拆出 4 项（海淀数学(9) 题1）。"""
+    content = (
+        "一元二次方程 $x^{2} - x - 2 = 0$ 的二次项系数、一次项系数和常数项分别是"
+        "A.0，1，2 B.0，-1，-2C.1，1，2D.1，-1，-2"
+    )
+    stem, opts = split_options(content)
+    assert "分别是" in stem and "A." not in stem
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+    assert opts[2]["text"] == "1，1，2" and opts[3]["text"] == "1，-1，-2"
+
+
+def test_split_options_loose_fallback_ignores_lone_label():
+    """兜底必须凑齐连续 ABCD：孤立 '1A.'（题号）不能当选项。"""
+    stem, opts = split_options("1A. 这是第一题的题干文字，后面没有别的选项标记")
+    assert opts is None
+
+
+def test_split_options_loose_fallback_ignores_image_name():
+    """图片名 '图A.jpg' 里的 'A.' 不能当选项（即便走宽松兜底也凑不齐四个）。"""
+    content = "![](images/图A.jpg)\n这是一段题干文字"
+    stem, opts = split_options(content)
+    assert opts is None

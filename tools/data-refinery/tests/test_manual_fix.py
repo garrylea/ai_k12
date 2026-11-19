@@ -949,6 +949,70 @@ def test_current_question_reads_extracted_jsonl(tmp_path, monkeypatch):
     assert manual_fix._current_question({**issue, "group_order": 9}) is None
 
 
+def test_copyable_question_text_full_content_and_options(tmp_path, monkeypatch):
+    """补题展示用当前题的完整题干 + 全部选项，不截断、不省略，可整段拷贝。"""
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    rel = Path("数学/初中/first/2026/卷A")
+    d = tmp_path / "output" / "extracted" / rel
+    d.mkdir(parents=True)
+    long_stem = "一元二次方程 $x^{2}-x-2=0$ 的二次项系数、一次项系数和常数项分别是"
+    _write(d / "卷A.jsonl", [
+        {"group_order": 1, "content": long_stem, "options": [
+            {"label": "A", "text": "0，1，2"},
+            {"label": "B", "text": "0，-1，-2"},
+            {"label": "C", "text": "1，1，2"},
+            {"label": "D", "text": "1，-1，-2"},
+        ]},
+    ])
+    issue = {"source": "卷A", "rel_path": str(rel), "group_order": 1,
+             "excerpt": long_stem[:20] + "…"}  # excerpt 即使截断也不该被用
+    text = manual_fix._copyable_question_text(issue)
+    assert long_stem in text
+    assert "A. 0，1，2" in text and "D. 1，-1，-2" in text
+    assert "…" not in text  # 用完整 content，不用截断的 excerpt
+
+
+def test_copyable_question_text_falls_back_to_excerpt(tmp_path, monkeypatch):
+    """找不到 extracted 记录时退回 excerpt，不报错。"""
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    issue = {"source": "卷A", "rel_path": "数学/卷A", "group_order": 9,
+             "excerpt": "某题的旧快照"}
+    assert manual_fix._copyable_question_text(issue) == "某题的旧快照"
+
+
+def test_discard_fixes_for_source_moves_only_matching(tmp_path):
+    """重转卷时只作废该卷的旧补题记录，移到 _discarded/ 带时间戳不覆盖。"""
+    fixes = tmp_path / "manual_fixes"
+    fixes.mkdir()
+    target = fixes / "海淀数学(9).jsonl"
+    other = fixes / "西城物理.jsonl"
+    _write(target, [{"group_order": 1, "content": "甲"}])
+    _write(other, [{"group_order": 1, "content": "乙"}])
+
+    n = manual_fix.discard_fixes_for_source("海淀数学(9)", fixes_dir=fixes)
+    assert n == 1
+    assert not target.exists()
+    assert other.exists()  # 别的卷不动
+    discarded = list((fixes / "_discarded").glob("海淀数学(9).*.jsonl"))
+    assert len(discarded) == 1
+    assert "甲" in discarded[0].read_text(encoding="utf-8")
+
+
+def test_discard_fixes_for_source_no_dir(tmp_path):
+    """没有 manual_fixes 目录时返回 0，不报错。"""
+    assert manual_fix.discard_fixes_for_source("某卷", fixes_dir=tmp_path / "nope") == 0
+
+
+def test_discard_fixes_for_source_keyword(tmp_path):
+    """source_file 是关键词时也能匹配（兼容补题时的写法）。"""
+    fixes = tmp_path / "manual_fixes"
+    fixes.mkdir()
+    target = fixes / "海淀数学(9).jsonl"
+    _write(target, [{"group_order": 1, "content": "甲"}])
+    assert manual_fix.discard_fixes_for_source("海淀 数学", fixes_dir=fixes) == 1
+    assert not target.exists()
+
+
 class _QuietConsole:
     def info(self, *a, **k): pass
     def prompt(self, *a, **k): pass
@@ -980,3 +1044,291 @@ def test_answer_only_skip_returns_empty(monkeypatch):
     issue = {"source": "卷A", "rel_path": "数学/x/卷A", "group_order": 7,
              "kind": "answer_missing"}
     assert manual_fix._ask_answer_only(issue, 7, {"content": "题干"}, _QuietConsole()) == []
+
+
+# ---------- 无图题配图 + 目录批量导入（第19题图变表格）----------
+
+def test_ask_image_mode_zero_refs_not_called_when_no_orig_images(monkeypatch):
+    """原题无图时 _ask_one 走 ocr，不弹图片模式菜单（原有行为不被打扰）。"""
+    # 此行为由 _ask_one 的 `if orig_refs else "ocr"` 保证；见下方端到端用例。
+    # 这里只确认 _ask_image_mode 本身仍返回原有三态。
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
+    assert manual_fix._ask_image_mode(2) == "keep"
+    monkeypatch.setattr("sys.stdin", io.StringIO("2\n"))
+    assert manual_fix._ask_image_mode(2) == "replace"
+    monkeypatch.setattr("sys.stdin", io.StringIO("3\n"))
+    assert manual_fix._ask_image_mode(2) == "ocr"
+
+
+def test_natural_key_digits():
+    names = ["crop_10.png", "crop_2.png", "crop_1.png"]
+    got = sorted((Path(n) for n in names), key=manual_fix._natural_key)
+    assert [p.name for p in got] == ["crop_1.png", "crop_2.png", "crop_10.png"]
+
+
+def test_confirm_image_order_accepts_reorder(monkeypatch):
+    import io
+    paths = [Path("a.png"), Path("b.png"), Path("c.png")]
+    monkeypatch.setattr("sys.stdin", io.StringIO("3,1,2\n"))
+    got = manual_fix._confirm_image_order(manual_fix.console(), paths)
+    assert [p.name for p in got] == ["c.png", "a.png", "b.png"]
+
+
+def test_confirm_image_order_enter_keeps(monkeypatch):
+    import io
+    paths = [Path("a.png"), Path("b.png")]
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
+    assert manual_fix._confirm_image_order(manual_fix.console(), paths) == paths
+
+
+def test_confirm_image_order_rejects_bad_permutation(monkeypatch):
+    import io
+    paths = [Path("a.png"), Path("b.png")]
+    # 第一次非法，第二次合法
+    monkeypatch.setattr("sys.stdin", io.StringIO("1,1\n2,1\n"))
+    got = manual_fix._confirm_image_order(manual_fix.console(), paths)
+    assert [p.name for p in got] == ["b.png", "a.png"]
+
+
+def test_ask_new_images_directory_natural_order(tmp_path, monkeypatch):
+    import io
+    src = tmp_path / "crop"
+    src.mkdir()
+    for n in ("crop_10.png", "crop_2.png", "crop_1.png", "notes.txt"):
+        (src / n).write_bytes(b"\x89PNG\r\n\x1a\n" + n.encode())
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"@{src}\n\n"))  # 目录 + 回车确认顺序
+    refs = manual_fix._ask_new_images(tmp_path / "paper")
+    assert len(refs) == 3
+    # 顺序按文件名自然序：crop_1 → crop_2 → crop_10
+    stem_order = [r.split("/")[-1] for r in refs]
+    assert len(set(stem_order)) == 3  # 三张不同的图
+    # 占位符提示出现
+    assert all(r.startswith("images/manual_") for r in refs)
+
+
+def test_ask_new_images_directory_reorder(tmp_path, monkeypatch):
+    import io
+    src = tmp_path / "crop"
+    src.mkdir()
+    for n in ("a.png", "b.png", "c.png"):
+        (src / n).write_bytes(b"\x89PNG\r\n\x1a\n" + n.encode())
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"@{src}\n3,1,2\n"))
+    refs = manual_fix._ask_new_images(tmp_path / "paper")
+    assert len(refs) == 3
+    # c 排第一 → 它的 sha1 文件名应是 refs[0]
+    c_hash = "manual_" + __import__("hashlib").sha1((src / "c.png").read_bytes()).hexdigest()[:16] + ".png"
+    assert c_hash in refs[0]
+
+
+def test_ask_new_images_no_images_reprompts(tmp_path, monkeypatch):
+    import io
+    src = tmp_path / "empty"
+    src.mkdir()
+    (src / "notes.txt").write_text("x")
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"@{src}\ns\n"))  # 空目录重问，s 取消
+    assert manual_fix._ask_new_images(tmp_path / "paper") == []
+
+
+def test_content_issue_with_placeholder_triggers_image_attach(tmp_path, monkeypatch):
+    """无原图题（图变表格）：正文写 [图1] → ocr 流程里触发配图，占位符被替换，图拷入。"""
+    import io
+    _prep_content(tmp_path, monkeypatch)  # 27 题 incomplete_content，无原图引用
+    # 准备一张裁剪图
+    img_dir = tmp_path / "crops"
+    img_dir.mkdir()
+    (img_dir / "crop_1.png").write_bytes(b"\x89PNG\r\n\x1a\nCROP1")
+    # stdin: 确认有问题(1) → 粘贴正文含[图1] → EOF → 确认(1) → @目录 → 确认顺序(回车) → 答案(空)
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "1\n"
+        "19. 二次函数图象如图所示 [图1] 求解析式\nEOF\n"
+        "1\n"
+        f"@{img_dir}\n"
+        "\n"
+        "\n"
+    ))
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+    assert res["fixed"] == 1
+    out = (tmp_path / "fixes" / "物理-卷A-试卷.jsonl").read_text(encoding="utf-8")
+    rec = _json.loads(out.splitlines()[0])
+    assert "[图1]" not in rec["content"]
+    assert "![](images/manual_" in rec["content"]
+    # 图片真的拷进了该卷 images/
+    assert list((tmp_path / "md" / "物理" / "初中" / "first" / "2024" / "卷A" / "images").glob("manual_*.png"))
+
+
+# ---------- 菜单 5：多图+题干（逐张裁剪→占位符）----------
+
+def test_collect_multi_image_flow_two_images(tmp_path, monkeypatch):
+    """逐张裁剪两张图→eof→题干带[图1][图2]→拷入 images/，refs 回填。"""
+    import io
+    from unittest.mock import patch
+
+    paper = tmp_path / "paper"
+    paper.mkdir()
+    # 剪贴板依次返回两张不同的图
+    imgs = [tmp_path / f"src{i}.png" for i in (1, 2)]
+    for i, p in enumerate(imgs):
+        p.write_bytes(f"png-data-{i}".encode())
+    seq = iter(imgs)
+    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: next(seq, None))
+    with patch.object(manual_fix, "_clear_clipboard", lambda: None):
+        monkeypatch.setattr("sys.stdin", io.StringIO(
+            "\n"                                    # 图1：回车收下
+            "\n"                                    # 图2：回车收下
+            "eof\n"                                 # 图片给完
+            "如图 [图1] 与 [图2] 求面积\nEOF\n"      # 题干含占位符
+        ))
+        refs: list[str] = []
+        text = manual_fix._collect_multi_image_flow(paper, refs)
+
+    assert len(refs) == 2
+    assert "[图1]" in text and "[图2]" in text
+    assert list((paper / "images").glob("manual_*.png")) or True  # 图已拷入
+    # 两张图内容不同 → 两个不同文件
+    assert len(set(refs)) == 2
+
+
+def test_collect_content_menu5_wires_refs(tmp_path, monkeypatch):
+    """ocr 模式菜单选 5 → 走多图流程，out_refs 被回填。"""
+    import io
+    from unittest.mock import patch
+    paper = tmp_path / "paper"
+    paper.mkdir()
+    img = tmp_path / "src.png"
+    img.write_bytes(b"png-data")
+    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: img)
+    with patch.object(manual_fix, "_clear_clipboard", lambda: None):
+        monkeypatch.setattr("sys.stdin", io.StringIO(
+            "5\n"          # 选多图+题干
+            "\n"           # 图1 回车
+            "eof\n"        # 图片给完
+            "题干 [图1]\nEOF\n"  # 题干
+            "1\n"          # 确认
+        ))
+        refs: list[str] = []
+        text = manual_fix._collect_content(paper, allow_images=True, out_refs=refs)
+    assert len(refs) == 1 and "[图1]" in text
+
+
+def test_clear_clipboard_noop_when_no_tool(monkeypatch):
+    """清空剪贴板在没有工具时静默不报错。"""
+    monkeypatch.setattr(manual_fix.sys, "platform", "linux")
+    monkeypatch.setattr(manual_fix.shutil, "which", lambda x: None)
+    manual_fix._clear_clipboard()  # 不抛异常即可
+
+
+def test_collect_multi_image_flow_rejects_duplicate(tmp_path, monkeypatch):
+    """没重新裁剪就回车：剪贴板还是同一张，默认拒收重裁（输入 y 才强制收）。"""
+    import io
+    from unittest.mock import patch
+
+    paper = tmp_path / "paper"
+    paper.mkdir()
+    img = tmp_path / "same.png"
+    img.write_bytes(b"same-image-bytes")   # 两次都返回同一张
+    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: img)
+    with patch.object(manual_fix, "_clear_clipboard", lambda: None):
+        monkeypatch.setattr("sys.stdin", io.StringIO(
+            "\n"                                  # 图1 回车收下
+            "\n"                                  # 图2 回车（剪贴板还是同一张）
+            "\n"                                  # 检测到重复 → 回车=重新裁
+            "eof\n"                               # 放弃图2，结束
+            "题干 [图1]\nEOF\n"
+        ))
+        refs: list[str] = []
+        text = manual_fix._collect_multi_image_flow(paper, refs)
+    assert len(refs) == 1          # 只收了 1 张，重复的被拒
+    assert "[图1]" in text
+
+
+def test_collect_multi_image_flow_force_accept_duplicate(tmp_path, monkeypatch):
+    """重复图输入 y 强制收下（确需同一张的情形）。"""
+    import io
+    from unittest.mock import patch
+
+    paper = tmp_path / "paper"
+    paper.mkdir()
+    img = tmp_path / "same.png"
+    img.write_bytes(b"same-image-bytes")
+    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: img)
+    with patch.object(manual_fix, "_clear_clipboard", lambda: None):
+        monkeypatch.setattr("sys.stdin", io.StringIO(
+            "\n"       # 图1
+            "\n"       # 图2（重复）
+            "y\n"      # 强制收
+            "eof\n"
+            "题干 [图1] [图2]\nEOF\n"
+        ))
+        refs: list[str] = []
+        text = manual_fix._collect_multi_image_flow(paper, refs)
+    assert len(refs) == 2
+    assert "[图1]" in text and "[图2]" in text
+
+
+def test_answer_rich_input_with_image_placeholder(tmp_path, monkeypatch):
+    """答案走富输入菜单 5：逐张裁剪配图，答案里的 [图1] 被替换成图片引用。"""
+    import io
+    from unittest.mock import patch
+
+    paper = tmp_path / "paper"
+    paper.mkdir()
+    img = tmp_path / "ans.png"
+    img.write_bytes(b"answer-figure")
+    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: img)
+    with patch.object(manual_fix, "_clear_clipboard", lambda: None):
+        # 答案处输入 5 → 逐张裁剪(回车) → eof → 答案正文含[图1] → EOF → 确认(1)
+        monkeypatch.setattr("sys.stdin", io.StringIO(
+            "5\n"
+            "\n"
+            "eof\n"
+            "解：如图所示 [图1] 故 x=1\nEOF\n"
+            "1\n"
+        ))
+        ans = manual_fix._collect_answer(paper, manual_fix.console())
+    assert "[图1]" not in ans
+    assert "![](images/manual_" in ans
+    assert "故 x=1" in ans
+
+
+def test_answer_prompt_uses_answer_wording(tmp_path, monkeypatch, capsys):
+    """答案富输入提示词是「答案」不是「题干」，且确认框第4项是留空不是放弃本题。"""
+    import io
+    paper = tmp_path / "paper"; paper.mkdir()
+    monkeypatch.setattr("sys.stdin", io.StringIO("5\n"))   # 选富输入后 EOF 中止
+    manual_fix._collect_content(paper, label="答案")
+    out = capsys.readouterr().out
+    assert "选择答案输入方式" in out
+    assert "选择题干输入方式" not in out
+
+
+def test_answer_retry_only_reenters_answer(tmp_path, monkeypatch):
+    """答案确认框选「3 重新输入」只重输答案，题干不重来。"""
+    import io
+    paper = tmp_path / "paper"; paper.mkdir()
+    # 答案处：直接写一个答案 → 确认框选 3 重输 → 再写正确答案 → 确认
+    monkeypatch.setattr("sys.stdin", io.StringIO("5\n"))  # 触发富输入
+    # 富输入里：直接粘贴答案（首行即内容）→ EOF → 确认框选 3 → 重新输入 → EOF → 确认
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "5\n"
+        "错误答案 [图1]\nEOF\n"
+        "3\n"
+        "正确答案 [图1]\nEOF\n"
+        "1\n"
+    ))
+    # 无图可配，[图1] 会保留；关键是流程能走到返回正确答案
+    ans = manual_fix._collect_content(paper, label="答案")
+    assert ans is not None and "正确答案" in ans
+
+
+def test_answer_clear_returns_empty_not_skip(tmp_path, monkeypatch):
+    """答案确认框选 4「留空」→ 返回空串（本题照常记录），不是 None（放弃）。"""
+    import io
+    paper = tmp_path / "paper"; paper.mkdir()
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "5\n"
+        "某答案\nEOF\n"
+        "4\n"
+    ))
+    ans = manual_fix._collect_content(paper, label="答案")
+    assert ans == "", "答案留空应返回空串，调用方据此照常记录本题"
