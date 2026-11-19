@@ -165,7 +165,6 @@ describe('ResearchPapersService.detail', () => {
       approach: '思路',
       source: '汇文',
       source_year: 2026,
-      textbook_page: 'P12',
       answer_verified: 1,
       is_active: 1,
       ...over,
@@ -190,7 +189,7 @@ describe('ResearchPapersService.detail', () => {
     expect(res.questions[0].approach).toBe('思路');
   });
 
-  it('字段名映射 camelCase：questionNo/sourceYear/textbookPage/answerVerified/isActive，且不泄漏原始行', async () => {
+  it('字段名映射 camelCase：questionNo/sourceYear/answerVerified/isActive，且不泄漏原始行', async () => {
     const repo = mkRepo({
       findPaperDetail: vi.fn().mockResolvedValue({
         paper: {
@@ -219,10 +218,11 @@ describe('ResearchPapersService.detail', () => {
       approach: '思路',
       source: '汇文',
       sourceYear: 2026,
-      textbookPage: 'P12',
       answerVerified: true,
       isActive: true,
     });
+    // questions 表无 textbook_page 列，DTO 不得透出该字段。
+    expect('textbookPage' in res.questions[0]).toBe(false);
   });
 
   it('options 用 parseOptions 解析并剥 isCorrect；坏 JSON → null', async () => {

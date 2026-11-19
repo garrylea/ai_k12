@@ -58,7 +58,6 @@ export interface ResearchQuestionDetail {
   approach: string | null;
   source: string | null;
   sourceYear: number | null;
-  textbookPage: string | null;
   answerVerified: boolean;
   isActive: boolean;
 }
@@ -102,7 +101,6 @@ function toQuestionDetail(row: Record<string, unknown>): ResearchQuestionDetail 
     approach: nullableStr(row.approach),
     source: nullableStr(row.source),
     sourceYear: nullableNum(row.source_year),
-    textbookPage: nullableStr(row.textbook_page),
     answerVerified: Number(row.answer_verified) === 1,
     isActive: Number(row.is_active) === 1,
   };

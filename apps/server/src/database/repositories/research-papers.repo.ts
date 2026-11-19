@@ -183,7 +183,7 @@ export class ResearchPapersRepository {
     if (paperRows.length === 0) return null;
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT q.id, pq.question_no, q.type, q.difficulty, q.full_score, q.content, q.options,
-              q.answer, q.explanation, q.approach, q.source, q.source_year, q.textbook_page,
+              q.answer, q.explanation, q.approach, q.source, q.source_year,
               q.answer_verified, q.is_active
          FROM paper_questions pq JOIN questions q ON q.id = pq.question_id
         WHERE pq.paper_id = ? ORDER BY pq.question_no`, [paperId],
