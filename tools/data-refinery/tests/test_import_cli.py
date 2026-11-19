@@ -611,6 +611,74 @@ class TestAnswersFileEntry:
         _, calls = self._run(monkeypatch, tmp_path, "a.jsonl", "{}\n", paper_id=362)
         assert calls == [["--records", str(tmp_path / "a.jsonl"), "--apply", "--yes"]]
 
+    def _run_pdf(self, monkeypatch, tmp_path, *, file_kw=None, dry_run=False,
+                 paper_id=None, lookup=667, with_md=True):
+        from types import SimpleNamespace
+
+        import answer_extract_cli
+        import answer_importer_cli
+
+        input_dir = tmp_path / "crawler" / "data"
+        rel = Path("语文") / "初中" / "first" / "2026" / "八中试卷答案"
+        pdf = input_dir / rel.with_suffix(".pdf")
+        pdf.parent.mkdir(parents=True, exist_ok=True)
+        pdf.write_bytes(b"%PDF-1.3\n%\xc4\xe5\xf2\xe5\xeb\xa7")  # 不会真读内容
+        md = tmp_path / "out" / "md" / rel / f"{rel.name}.md"
+        if with_md:
+            md.parent.mkdir(parents=True, exist_ok=True)
+            md.write_text("# 参考答案\n1. A\n", encoding="utf-8")
+        cfg = SimpleNamespace(input_dir=input_dir, output_dir=tmp_path / "out",
+                              mineru_bin="mineru", mineru_timeout=1, mineru_token=None)
+        monkeypatch.setattr(import_cli.RefineryConfig, "from_env",
+                            staticmethod(lambda *a, **k: cfg))
+        lookup_kw = []
+        monkeypatch.setattr(import_cli, "_lookup_paper_id",
+                            lambda c, kw: lookup_kw.append(kw) or lookup)
+        extract_calls, import_calls = [], []
+        monkeypatch.setattr(answer_extract_cli, "main",
+                            lambda argv: extract_calls.append(argv) or 0)
+        monkeypatch.setattr(answer_importer_cli, "main",
+                            lambda argv: import_calls.append(argv) or 0)
+        args = SimpleNamespace(answers=str(pdf), file=file_kw,
+                               dry_run=dry_run, paper_id=paper_id)
+        rc = import_cli._answers_file_entry(args)()
+        return rc, lookup_kw, extract_calls, import_calls, md
+
+    def test_pdf_strips_answer_suffix_and_writes_doc(self, monkeypatch, tmp_path):
+        """PDF → 文件名去「答案」定位卷 → 复用 md → 提取文档 → --doc 回写。"""
+        rc, lookup_kw, extract_calls, import_calls, md = self._run_pdf(
+            monkeypatch, tmp_path)
+        assert rc == 0
+        assert lookup_kw == ["八中试卷"]  # 「答案」已剥掉，否则查库 0 命中
+        doc = tmp_path / "out" / "answers" / "八中试卷答案.md"
+        assert extract_calls == [[
+            "--input-dir", str(md.parent), "--file", "八中试卷答案",
+            "--subject", "chinese", "--out", str(doc),
+        ]]
+        assert import_calls == [[
+            "--doc", str(doc), "--paper-id", "667", "--apply", "--yes",
+        ]]
+
+    def test_pdf_dry_run_does_not_apply(self, monkeypatch, tmp_path):
+        _, _, _, import_calls, _ = self._run_pdf(monkeypatch, tmp_path, dry_run=True)
+        assert import_calls == [[
+            "--doc", str(tmp_path / "out" / "answers" / "八中试卷答案.md"),
+            "--paper-id", "667",
+        ]]
+
+    def test_pdf_explicit_paper_id_skips_lookup(self, monkeypatch, tmp_path):
+        _, lookup_kw, _, import_calls, _ = self._run_pdf(
+            monkeypatch, tmp_path, paper_id=362)
+        assert lookup_kw == []
+        assert "--paper-id" in import_calls[0]
+        assert import_calls[0][import_calls[0].index("--paper-id") + 1] == "362"
+
+    def test_pdf_no_unique_paper_returns_2_without_extracting(self, monkeypatch, tmp_path):
+        rc, _, extract_calls, import_calls, _ = self._run_pdf(
+            monkeypatch, tmp_path, lookup=None)
+        assert rc == 2
+        assert extract_calls == [] and import_calls == []  # 定位失败不浪费 MinerU
+
 
 def test_parse_args_accepts_answers():
     assert parse_args(["--answers", "a.md"]).answers == "a.md"
@@ -634,16 +702,43 @@ def test_paper_id_must_be_positive():
         parse_args(["--answers", "a.md", "--paper-id", "0"])
 
 
+def test_answers_rejects_conflicting_flags():
+    """--answers 只导答案：范围/重建参数与其它动作参数一律硬冲突，直接停下。"""
+    import pytest
+
+    for extra in (
+        ["--subject", "语文"], ["--stage", "初中"], ["--term", "first"],
+        ["--year", "2026"], ["--file", "八中"], ["--files", "八中,海淀"],
+        ["--preview"], ["--cards-only"], ["--fix-only"],
+        ["--reconvert"], ["--re-extract"], ["--re-publish"], ["--redo"],
+    ):
+        with pytest.raises(SystemExit):
+            parse_args(["--answers", "a.pdf"] + extra)
+
+
+def test_answers_conflict_message_names_the_flags(capsys):
+    """报错要逐一点名冲突参数，用户一眼看到是哪几个要去掉。"""
+    import pytest
+
+    with pytest.raises(SystemExit):
+        parse_args(["--answers", "a.pdf", "--subject", "语文", "--year", "2026"])
+    err = capsys.readouterr().err
+    assert "--subject" in err and "--year" in err and "--answers 只做答案导入" in err
+
+
 def test_answers_only_detection():
-    """只给 --answers 时只做答案导入；给了范围/重建参数才走完整管线。"""
+    """只给 --answers 时只做答案导入（范围/重建组合已在 parse_args 处硬拒绝）。"""
+    from types import SimpleNamespace
+
     assert import_cli._answers_only(parse_args(["--answers", "a.md"]))
     assert import_cli._answers_only(parse_args(["--answers", "a.md", "--dry-run"]))
-    assert not import_cli._answers_only(
-        parse_args(["--answers", "a.md", "--subject", "数学"]))
-    assert not import_cli._answers_only(
-        parse_args(["--answers", "a.md", "--files", "西城35中"]))
-    assert not import_cli._answers_only(
-        parse_args(["--answers", "a.md", "--re-extract"]))
+    assert import_cli._answers_only(parse_args(["--answers", "a.md", "--paper-id", "667"]))
+    base = dict(answers="a.md", file=None, files=None, subject=None, stage=None,
+                term=None, year=None, reconvert=False, re_extract=False,
+                re_publish=False, redo=False)
+    assert not import_cli._answers_only(SimpleNamespace(**{**base, "subject": "数学"}))
+    assert not import_cli._answers_only(SimpleNamespace(**{**base, "files": "西城35中"}))
+    assert not import_cli._answers_only(SimpleNamespace(**{**base, "re_extract": True}))
     assert not import_cli._answers_only(parse_args(["--subject", "数学"]))
 
 

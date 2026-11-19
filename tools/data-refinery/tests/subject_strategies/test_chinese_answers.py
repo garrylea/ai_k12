@@ -148,6 +148,56 @@ def test_markdown_heading_question_number():
     assert answers[2].answer.startswith("评分参考")
 
 
+def test_inline_multi_number_answer_lines():
+    """答案 PDF 把多题答案粘在一行（八中 2026 期中语文答案实测）：
+    `1.… 2.A`、`…4.D5.A6.D`、`(三)…12.A13.A14.①…`、`(一)…16.B17.A`。
+
+    `(三)/(一)` 开头的行原本会被小节标题规则整行跳过（丢 12-14、16-17），
+    行首题号又会把同行后面的题吞进同一块（题1 尾部粘「2.A」）。两种都要修好。
+    """
+    text = """# 卷
+
+# 参考答案
+
+1.书写：略（正楷书写，无错字、工整即可得分） 2.A
+
+3.“典”指遵从学习前人的法度规范；“则”指可以流传后世的范式准则。4.D5.A6.D
+
+(三)《醉翁亭记》12-14 题（7 分）12.A13.A14.①鱼鸟共乐 ②观听无邪 ③与民同乐
+
+(一)非连续性文本 16-18 题（7 分）16.B17.A
+"""
+    answers = {a.no: a for a in _case(text)}
+    assert sorted(answers) == [1, 2, 3, 4, 5, 6, 12, 13, 14, 16, 17]
+    assert answers[1].answer.startswith("书写：略")
+    assert "2.A" not in answers[1].answer
+    assert answers[2].answer == "A"
+    assert answers[3].answer.startswith("“典”指")
+    assert "4.D5.A6.D" not in answers[3].answer
+    assert answers[4].answer == "D"
+    assert answers[5].answer == "A"
+    assert answers[6].answer == "D"
+    assert answers[12].answer == "A"
+    assert answers[13].answer == "A"
+    assert answers[14].answer.startswith("①鱼鸟共乐")
+    assert answers[16].answer == "B"
+    assert answers[17].answer == "A"
+    joined = "\n".join(a.answer for a in answers.values())
+    assert "12-14" not in joined and "16-18" not in joined and "7 分" not in joined
+
+
+def test_inline_split_keeps_regressing_number_as_continuation():
+    """行内拆分不能误伤回退编号：评分细则里的「1.… 2.…」仍是上一题续行。"""
+    text = SAMPLE.replace(
+        "说明：1. 字数不足 600字，每少 50字扣 1分，最多扣 3分。",
+        "说明：1. 字数不足 600字，每少 50字扣 1分，最多扣 3分。 2.另一处扣 2分。",
+    )
+    answers = {a.no: a for a in _case(text)}
+    assert sorted(answers) == [1, 2, 3, 4, 5]
+    assert "字数不足" in answers[5].answer
+    assert "另一处" in answers[5].answer
+
+
 def test_subject_codes_shared_mapping():
     """publish/extract/答案提取共用一份学科映射（subject_codes）。"""
     from subject_codes import SUBJECT_NAME_TO_CODE, subject_code_for_path

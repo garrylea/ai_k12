@@ -837,11 +837,11 @@ class TestLoadQuestionsPaperGrouping:
              "group_id": "一", "group_order": 1,
              "options": [{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"}],
              "material_text": "新文段", "needs_review": False}
-        chash = content_hash(q["content"], q["options"])
+        chash = content_hash(q["content"], q["options"], q["material_text"])
         loader, queries = _make_loader_seq({
             "FROM subjects WHERE code": [[(1,)]],
             "FROM paper_questions pq JOIN questions q": [
-                [(501, chash, 0, "choice", 2, 1, "旧文段")]
+                [(501, chash, 0, "choice", 2, 1, "旧文段", q["source"] if "source" in q else None)]
             ],
         })
         loader.load_questions([q], paper=(_paper_meta(), 9))
@@ -1019,3 +1019,39 @@ def test_guard_accepts_materialized_paths():
         material_text="![](questions/physics/abcd/3/fig_01.jpg)",
         options=[{"label": "A", "text": "![](questions/physics/abcd/3/opt_a.jpg)"}],
     )
+
+
+def test_content_hash_includes_material_fingerprint():
+    """同题干不同材料的题必须是不同 hash；无材料时与旧口径一致。"""
+    from db_loader import content_hash, material_fingerprint
+
+    stem = "文段中的画线句存在问题，请你修改。"
+    mat_a = "甲材料内容" * 30
+    mat_b = "乙材料内容" * 30
+    assert content_hash(stem, None, mat_a) != content_hash(stem, None, mat_b)
+    assert content_hash(stem, None, mat_a) == content_hash(stem, None, "  " + mat_a + "  ")
+    assert content_hash(stem) == content_hash(stem, None, None)  # 存量非材料题 hash 不变
+    assert len(material_fingerprint(mat_a)) == 20 + 10 + 20  # 长材料只取头中尾 50 字
+
+
+def test_cross_paper_shared_row_is_split():
+    """同题号旧行属于别的卷时新建独立行，不再共用材料/答案。"""
+    from db_loader import content_hash
+
+    q = {"subject_id": "chinese", "group_id": "一", "group_order": 7,
+         "type": "short_answer", "difficulty": 2,
+         "content": "文段中的画线句存在问题，请你修改。",
+         "material_text": "八中的展板材料", "answer": "八中答案",
+         "source": "八中卷", "needs_review": False, "knowledge_points": []}
+    chash = content_hash(q["content"], q["options"] if "options" in q else None,
+                         q["material_text"])
+    loader, queries = _make_loader_seq({
+        "FROM subjects WHERE code": [[(2,)]],
+        "FROM paper_questions pq JOIN questions q":
+            [[(501, "旧hash", 0, "short_answer", 2, 1, "海淀的趣味创新材料", "海淀卷")]],
+        "SELECT LAST_INSERT_ID()": [[(999,)]],
+    })
+    loader.load_questions([q], paper=(_paper_meta(), 667))
+    inserts = [a for sql, a in queries if sql.startswith("INSERT INTO questions")]
+    assert inserts and inserts[0][15] == chash  # 新行用带材料指纹的 hash
+    assert not [a for sql, a in queries if sql.startswith("UPDATE questions")]  # 旧行没被覆盖

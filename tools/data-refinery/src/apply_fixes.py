@@ -372,7 +372,7 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         except MissingImageError as e:
             return f"跳过：{e}"
 
-    chash = content_hash(content, options)
+    chash = content_hash(content, options, raw_material)
     _patch_extracted(
         rec, content=raw_content, answer=raw_answer,
         material_text=raw_material, options=raw_options,

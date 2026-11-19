@@ -48,18 +48,41 @@ def normalize_content(content: str | None) -> str:
     return s.lower()
 
 
-def content_hash(content: str | None, options=None) -> str:
-    """题干（+ 选项）规范化后的 SHA-256（64 位 hex），存 questions.content_hash 用于去重。
+_MAT_HEAD, _MAT_MID, _MAT_TAIL = 20, 10, 20
 
-    必须带选项：`下列说法正确的是` 这类客观题题干完全相同、只有选项不同
-    （2026-10-31 实测北师大实验卷题7/题17），只按题干哈希会把第 17 题判成第 7 题，
-    而 questions.content_hash 上有唯一索引，重复哈希直接插不进去。
-    无选项（填空/解答）时与旧口径完全一致。
+
+def material_fingerprint(material: str | None) -> str:
+    """材料指纹：归一后取前 20 + 中点 10 + 后 20 字，避免整段长材料进哈希。
+
+    语文阅读题的题干常是通用句（「文段中的画线句存在问题，请你修改」），
+    不同卷材料完全不同；只按题干哈希会把它们合并成同一道 `questions` 行
+    （实测 9 份卷共用一个 id，材料/答案互相覆盖）。取头中尾足以区分，
+    且材料再长也只多 50 字，不会带来性能问题。
+    """
+    s = normalize_content(material)
+    if not s:
+        return ""
+    if len(s) <= _MAT_HEAD + _MAT_MID + _MAT_TAIL:
+        return s
+    mid = len(s) // 2
+    return s[:_MAT_HEAD] + s[mid - _MAT_MID // 2:mid + _MAT_MID // 2] + s[-_MAT_TAIL:]
+
+
+def content_hash(content: str | None, options=None, material: str | None = None) -> str:
+    """题干（+ 选项 + 材料指纹）规范化后的 SHA-256，存 questions.content_hash 去重。
+
+    必须带选项：`下列说法正确的是` 这类题题干相同、选项不同（2026-10-31 实测）。
+    必须带材料指纹：跨卷同题干不同材料的语文阅读题不能被合并（2026-11-19 实测
+    9 份卷共用一个 questions.id=5167，材料/答案互相覆盖）。
+    无材料时与旧口径完全一致——存量非材料题的哈希不变。
     """
     base = normalize_content(content)
     sig = options_signature(options)
     if sig:
         base = f"{base}\x1f{sig}"
+    mat = material_fingerprint(material)
+    if mat:
+        base = f"{base}\x1fmat:{mat}"
     return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
@@ -1324,7 +1347,7 @@ class DbLoader:
                 options=opts,
                 context=f"paper={paper[1] if paper else '-'} 题{q.get('group_order', i)}",
             )
-            chash = content_hash(content, opts)
+            chash = content_hash(content, opts, q.get("material_text"))
             qid: int | None = None
 
             # 1) 同卷同题：优先按 group_order（卷面题号）匹配 —— 重抽后题目行数可能变
@@ -1335,7 +1358,7 @@ class DbLoader:
                 if go is not None:
                     exist = self._query(
                         "SELECT q.id, q.content_hash, q.answer_verified, q.type, "
-                        "q.difficulty, q.is_active, q.material_text FROM paper_questions pq "
+                        "q.difficulty, q.is_active, q.material_text, q.source FROM paper_questions pq "
                         "JOIN questions q ON q.id = pq.question_id "
                         "WHERE pq.paper_id=%s AND pq.group_order=%s",
                         (paper[1], go),
@@ -1343,12 +1366,17 @@ class DbLoader:
                 else:
                     exist = self._query(
                         "SELECT q.id, q.content_hash, q.answer_verified, q.type, "
-                        "q.difficulty, q.is_active, q.material_text FROM paper_questions pq "
+                        "q.difficulty, q.is_active, q.material_text, q.source FROM paper_questions pq "
                         "JOIN questions q ON q.id = pq.question_id "
                         "WHERE pq.paper_id=%s AND pq.question_no=%s",
                         (paper[1], i),
                     )
-                if exist:
+                # 跨卷共用行：同题号的旧行属于**别的卷**（题干通用、材料不同被旧哈希
+                # 合并）→ 不能原址更新，否则 9 份卷共用一行、材料/答案互相覆盖。
+                # 走 else 另建独立行；末尾按 linked_ids 清掉本卷对旧行的关联。
+                same_paper = (not exist or len(exist[0]) <= 7 or not exist[0][7]
+                              or not q.get("source") or exist[0][7] == q.get("source"))
+                if exist and same_paper:
                     qid = int(exist[0][0])
                     old_hash = exist[0][1]
                     verified = int(exist[0][2] or 0)
@@ -1414,6 +1442,10 @@ class DbLoader:
                         else:
                             self._update_question_row(qid, sid, q, content, opts, chash)
                             updated += 1
+                elif exist:
+                    print(f"[split] paper={paper[1]} 题{go if go is not None else i} "
+                          f"旧行 #{exist[0][0]} 属于「{exist[0][7]}」，本卷「{q.get('source')}」"
+                          f"另建独立题（材料/答案不再共用）", flush=True)
 
             # 2) 同卷同题号、只是关联被摘掉的旧行：**更新它**，绝不新建同号题
             #    （2026-11-01 人大附：题 7/18/23 都因此在卷内出现两份）

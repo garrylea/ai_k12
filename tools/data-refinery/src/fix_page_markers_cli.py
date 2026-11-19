@@ -174,7 +174,8 @@ def plan_fixes(rows: list[dict], paper_map: dict[int, tuple[int, int]],
         if "content" in changed:
             old_hash = row.get("content_hash")
             if old_hash:
-                new_hash = content_hash(changed["content"], row.get("options"))
+                new_hash = content_hash(changed["content"], row.get("options"),
+                                        row.get("material_text"))
                 if new_hash == old_hash:
                     new_hash = None
                 elif hash_exists is not None and hash_exists(new_hash, qid):

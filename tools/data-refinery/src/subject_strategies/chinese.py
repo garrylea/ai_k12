@@ -25,6 +25,7 @@ from question_splitter import (
     is_group_header,
     is_main_stem,
     is_part_header,
+    split_inline_stems,
     split_options as split_options_abcd,
 )
 from subject_strategies.types import ExtractedAnswer, MaterialPolicy
@@ -334,13 +335,30 @@ def _align_by_number(lines: list[str]) -> list[tuple[int, list[str]]]:
         if not line.strip():
             continue
         norm = line.translate(_FULLWIDTH_TO_HALF)
+        # markdown 标题前缀；偏移同时供紧凑拆题与下面的判题复用
+        head = _HEADING_RE.match(norm)
+        offset = head.end() if head else 0
+
+        # 紧凑答案行：一行多题。必须在结构行 skip 和 is_main_stem 之前处理：
+        # 这类行以 `(三)…` 开头会被 _SECTION_HEADER_RE 整行跳过，行首的 1/12
+        # 又会把后面几题吞进同一块。用原文（不用 norm）拆，避免把中文标点写成半角。
+        inline = split_inline_stems(line[offset:])
+        if len(inline) >= 2:
+            nums = [n for n, _ in inline]
+            if nums[0] > last_no and all(b > a for a, b in zip(nums, nums[1:])):
+                flush()  # 先收掉上一题（如 11.诗歌情感…）
+                for n, text in inline:
+                    rest = _ANSWER_PREFIX_RE.sub("", text).strip()
+                    blocks.append((n, [rest] if rest else []))
+                    last_no = n
+                current_no, current_lines = None, []
+                continue
+
         if (_SECTION_HEADER_RE.match(norm) or is_group_header(norm)[0]
                 or is_page_marker_line(norm)):
             continue
 
         # 剥掉 markdown 标题前缀再判题号（'## 27．评分参考'）；norm 与原文等长，偏移可直接回切
-        head = _HEADING_RE.match(norm)
-        offset = head.end() if head else 0
         ok, n = is_main_stem(norm[offset:])
         bare_stem = False
         if not ok:
@@ -348,7 +366,7 @@ def _align_by_number(lines: list[str]) -> list[tuple[int, list[str]]]:
             bare = _BARE_STEM_RE.match(norm[offset:])
             if bare:
                 ok, n, bare_stem = True, int(bare.group(1)), True
-        if not ok and _HEADING_RE.match(norm):
+        if not ok and head:
             # 小节标题（'## 名著阅读（5分）' 这类不带数字序号的）：不是答案正文，
             # 也不能当上一题的续行（否则会拼进上一题答案，海淀 2026 题15 实测）。
             continue

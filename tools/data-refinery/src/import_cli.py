@@ -66,6 +66,10 @@ def parse_args(argv=None):
   python src/import_cli.py --file "202507-海淀-模拟二-试卷"
   python src/import_cli.py --subject 物理 --files "一零一中学,人大附中,北师大实验"
   python src/import_cli.py --subject 语文 --re-extract --re-publish   # 只重抽+重发布
+  python src/import_cli.py --answers /path/to/八中语文期中试卷答案.pdf --paper-id 667
+                                                          # PDF 答案：自动转 md→提取→回写
+  python src/import_cli.py --answers 题解.md                          # 只导 .md 答案
+  python src/import_cli.py --answers 题解.md --dry-run                # 只看会改哪些题
         """,
     )
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all",
@@ -85,12 +89,16 @@ def parse_args(argv=None):
                         help="跳过卷面元数据（output/meta sidecar），文件名缺区县时不再补")
     parser.add_argument("--skip-load", action="store_true", help="跳过 db_loader（只到 published）")
     parser.add_argument("--answers", metavar="PATH",
-                        help="指定答案/解析文件：.md 按卷答案文档（# 试卷：… + ## 题号 + "
-                             "答案/思路/解析）或 .jsonl 记录；第 6 步直接写入，"
-                             "非 dry-run 时自动 --apply --yes")
+                        help="指定答案/解析文件：.pdf 答案 PDF（自动转 md → 按学科提取 → "
+                             "回写）、.md 按卷答案文档（# 试卷：… + ## 题号 + 答案/思路/解析）、"
+                             ".jsonl 记录；第 6 步写入，非 dry-run 自动 --apply --yes。"
+                             "只做答案导入，不能与范围参数 --subject/--stage/--term/--year/"
+                             "--file/--files、--preview/--cards-only/--fix-only、"
+                             "--reconvert/--re-extract/--re-publish/--redo 同用；"
+                             "可搭配 --paper-id / --dry-run")
     parser.add_argument("--paper-id", type=int, default=None,
-                        help="试卷 id：--answers 的 .md 卷名重名（如「昌平一中」命中多卷）时"
-                             "直接指定，优先于按 --file 反查")
+                        help="试卷 id：--answers 的答案定位不到唯一卷时直接指定（.md/.pdf 均可用），"
+                             "优先于 --file 反查与 PDF 文件名去「答案」匹配")
     parser.add_argument("--skip-answers", action="store_true", help="跳过第 6 步答案回填")
     parser.add_argument("--skip-review", action="store_true",
                         help="发现缺题时不进入人工补题（只打印清单与补题命令）")
@@ -123,6 +131,26 @@ def parse_args(argv=None):
                          "其它情况请用 --file/--subject 等范围参数")
         if args.paper_id <= 0:
             parser.error("--paper-id 必须是正整数")
+    if args.answers:
+        # --answers 只做答案导入，任何会把流程拉回 convert~入库/其它动作的参数都冲突，
+        # 必须显式报错停下，不能默默跑整条管线（用户带 --subject/--year 时以为是只补答案）。
+        conflicts = []
+        for given, flag in (
+            (args.subject, "--subject"), (args.stage, "--stage"), (args.term, "--term"),
+            (args.year, "--year"), (args.file, "--file"), (args.files, "--files"),
+            (args.preview, "--preview"), (args.cards_only, "--cards-only"),
+            (args.fix_only, "--fix-only"),
+            (args.reconvert, "--reconvert"), (args.re_extract, "--re-extract"),
+            (args.re_publish, "--re-publish"), (args.redo, "--redo"),
+        ):
+            if given:
+                conflicts.append(flag)
+        if conflicts:
+            parser.error(
+                "--answers 只做答案导入，不能与 " + " / ".join(conflicts) + " 同用"
+                "（这些参数会拉起 convert~入库整条管线或别的操作）。"
+                "只导答案时可加 --paper-id / --dry-run。"
+            )
     if args.fix_only:
         # 这些开关和「只补题」语义相反：同给会让用户以为会重建/导入，实际都被跳过
         for given, flag in (            (args.answers, "--answers"),
@@ -417,10 +445,110 @@ def _lookup_paper_id(cfg, keyword: str) -> int | None:
         conn.close()
 
 
-def _answers_file_entry(args):
-    """第 6 步（--answers 指定文件）：.jsonl 走 --records，.md 走 --doc。
+# 答案文件名 → 试卷名：与 answer_merger._answer_name_variants（试卷 → 答案名）
+# 互为反向，后缀表同源、最长优先剥一次。
+_ANSWER_SUFFIXES = ("（答案）", "(答案)", "-答案", "_答案", "答案")
 
-    定位优先级：显式 `--paper-id` > `--file` 反查 > 文档里的 `# 试卷：<标题>`。
+
+def _strip_answer_suffix(name: str) -> str:
+    """答案 PDF 名去掉「答案」类后缀，得到用于定位试卷的关键词。"""
+    for mark in _ANSWER_SUFFIXES:
+        if name.endswith(mark) and len(name) > len(mark):
+            return name[: -len(mark)]
+    return name
+
+
+def _pdf_paper_id(cfg, args, pdf: Path) -> tuple[int | None, str]:
+    """(paper_id, 匹配依据)：显式 --paper-id > --file 反查 > 文件名去「答案」。"""
+    if args.paper_id is not None:
+        return args.paper_id, "显式 --paper-id"
+    if args.file:
+        pid = _lookup_paper_id(cfg, args.file)
+        if pid is not None:
+            return pid, f"--file 关键词「{args.file}」"
+    stem = _strip_answer_suffix(pdf.stem)
+    pid = _lookup_paper_id(cfg, stem)
+    if pid is not None:
+        return pid, f"文件名去「答案」：「{stem}」"
+    return None, f"文件名去「答案」后「{stem}」未唯一命中"
+
+
+def _pdf_answer_md(cfg, pdf: Path) -> tuple[Path, Path]:
+    """答案 PDF → (转换后的 md, 素材相对路径)；md 已存在则直接复用，零 API 调用。"""
+    try:
+        rel = pdf.relative_to(cfg.input_dir).with_suffix("")
+    except ValueError:
+        raise ValueError(
+            f"答案 PDF 不在素材目录 {cfg.input_dir} 下：{pdf}；"
+            "试卷定位依赖素材目录结构，请把文件放进素材目录或用 --paper-id 指定卷"
+        )
+    md_path = cfg.output_dir / "md" / rel / f"{rel.name}.md"
+    if md_path.exists():
+        print(f"[convert] 复用已转换的答案 md：{md_path}", flush=True)
+        return md_path, rel
+    from convert import Converter, MineruRunner, token_problem_message
+    from scanner import Material
+
+    problem = token_problem_message(cfg.mineru_token)
+    if problem:
+        raise ValueError(problem)
+    runner = MineruRunner(cfg.mineru_bin, cfg.mineru_timeout, cfg.mineru_token)
+    Converter(runner, cfg.output_dir / "md").convert(
+        Material(kind="pdf", source_dir=pdf.parent, rel_path=rel, input_paths=[pdf])
+    )
+    if not md_path.exists():
+        raise ValueError(f"MinerU 转换完成但未生成答案 md：{md_path}")
+    return md_path, rel
+
+
+def _run_pdf_answers(args, pdf: Path, importer_main) -> int:
+    """PDF 答案：转换 → 学科策略提取 → answer_importer --doc 回写。"""
+    from answer_extract_cli import main as extract_main
+    from subject_codes import subject_code_for_path
+
+    pdf = pdf.resolve()  # 相对路径也能算 material.rel_path 与 md 落点
+    cfg = RefineryConfig.from_env()
+    # 先定卷再转换：定位失败时不浪费 MinerU 调用
+    paper_id, basis = _pdf_paper_id(cfg, args, pdf)
+    if paper_id is None:
+        print(f"[ERROR] 答案文件「{pdf.name}」无法唯一定位试卷：{basis}。请用 --paper-id 指定；"
+              f"可先 python3 src/answer_importer_cli.py --list-papers <关键词> 查候选。",
+              flush=True)
+        return 2
+    print(f"[匹配] 依据={basis} → paper_id={paper_id}", flush=True)
+
+    try:
+        md_path, rel = _pdf_answer_md(cfg, pdf)
+    except ValueError as e:
+        print(f"[ERROR] {e}", flush=True)
+        return 2
+    subject = subject_code_for_path(rel, default="")
+    if not subject:
+        print(f"[ERROR] 无法从 {rel} 识别学科，无法选答案提取策略；"
+              "请把答案 PDF 放到标准学科目录下。", flush=True)
+        return 2
+
+    doc = cfg.output_dir / "answers" / f"{pdf.stem}.md"
+    # 不传 --dry-run：answer_extract_cli 在写文档前就 return，importer 会无文件可读
+    rc = extract_main([
+        "--input-dir", str(md_path.parent), "--file", md_path.stem,
+        "--subject", subject, "--out", str(doc),
+    ])
+    if rc not in (None, 0):
+        print(f"[ERROR] 答案提取失败（返回 {rc}），已停止", flush=True)
+        return rc
+    argv = ["--doc", str(doc), "--paper-id", str(paper_id)]
+    if not args.dry_run:
+        argv += ["--apply", "--yes"]
+    return importer_main(argv)
+
+
+def _answers_file_entry(args):
+    """第 6 步（--answers 指定文件）：.jsonl 走 --records，.md 走 --doc，
+    .pdf 先转 md → 按学科策略提取答案文档 → 再走 --doc。
+
+    定位优先级：显式 `--paper-id` > `--file` 反查 > PDF 文件名去「答案」后缀
+    > 文档里的 `# 试卷：<标题>`。
     前两者都是为了避免卷名重名（如「昌平一中」同时命中语文卷和数学卷）时
     定位到别的卷。
     """
@@ -431,6 +559,8 @@ def _answers_file_entry(args):
         if not path.exists():
             print(f"[ERROR] --answers 文件不存在：{path}", flush=True)
             return 2
+        if path.suffix.lower() == ".pdf":
+            return _run_pdf_answers(args, path, importer_main)
         is_jsonl = path.suffix.lower() == ".jsonl"
         argv = ["--records", str(path)] if is_jsonl else ["--doc", str(path)]
         if is_jsonl:

@@ -61,11 +61,17 @@ _NORM_RE = re.compile(r"[^\w\u4e00-\u9fff]")
 # 取正文开头多少个归一化字符去 md 里定位归属（太短会命中图注/表格里的重复短语）
 _BODY_KEY_LEN = 14
 
-# 这些学科的「原文缺失型」缺陷（画线句/加点字/图片内表格/未随卷给出的材料）按设计
-# 就是 is_complete=false、只报告不修复（真源 question_labeler._UNREPAIRED_OK）。
-# 把它们也当「内容不完整」报出来，30 张语文卷能出 197 条，真正要修的结构缺陷会被淹没
-# —— 这类学科只保留确定性判据（小问从 (2) 起 / 前后题合并）。改 _UNREPAIRED_OK 时两边同步。
-_UNREPAIRED_OK_SUBJECTS = frozenset({"chinese", "politics", "history", "geography", "biology"})
+# 这些学科的「原文缺失型」缺陷（画线句/加点字/图片内表格/未随卷给出的材料）在标注阶段
+# 按设计 is_complete=false、只报告不修复（真源 question_labeler._UNREPAIRED_OK）。
+# 2026-11-19 起**语文不再豁免扫描上报**：语文的原文缺失型缺陷同样进人工补题队列，由人
+# 决定是否从 PDF 补。此前语文被静默关掉 → 题以 is_active=0 入库、既不进抽题池也不通知
+# 任何人（八中 2026 期中题 7/21 因此从 26 题变成 24 题，用户实测发现）。
+#
+# 注意：这里与 question_labeler._UNREPAIRED_OK **刻意不同步**。那边是标注开关——把语文
+# 删掉会逼 LLM 编造原文（实测大兴题5 编出【甲】【乙】、房山题25 编出不存在的 D）；
+# 这边只控制「是否报给人工」，两者职责不同，不要为了对称而改回去。
+# 道法/历史/地理/生物仍豁免；数学/物理/化学本来就不在名单里（照常上报）。
+_UNREPAIRED_OK_SUBJECTS = frozenset({"politics", "history", "geography", "biology"})
 
 # 确定性判据前缀：命中这些说明问题真在（空题干/小问从2起/前后题合并），
 # 不能因为 LLM 标记消失就自动收口。其余 reason 是 LLM 自由文本。

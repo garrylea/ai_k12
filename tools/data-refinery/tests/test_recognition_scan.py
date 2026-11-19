@@ -294,16 +294,28 @@ def test_reopen_changed_keeps_verdict_when_content_same():
     assert rec["status"] == "resolved"
 
 
-def test_llm_flag_not_reported_for_unrepaired_ok_subjects(tmp_path):
-    """语文/道法这类「原文缺失可接受」的学科，不能把 is_complete=false 全报成缺陷。
+def test_llm_flag_not_reported_for_still_exempt_subjects(tmp_path):
+    """道法/历史/地理/生物这类「原文缺失可接受」的学科，仍不把 is_complete=false 报成缺陷。"""
+    md = _md(tmp_path, "4. 甲\n")
+    rows = [{"group_order": 4, "content": "甲", "type": "choice", "needs_review": True}]
+    labeling = [{"source": "卷A", "group_order": 4, "issues": ["材料缺失，无法确定指代"]}]
+    issues = R.scan_paper("卷A", Path("道法/x/卷A"), md, rows, None, labeling)
+    assert [i for i in issues if i["kind"] == "incomplete_content"] == []
 
-    （实测 30 张语文卷会出 197 条画线句/加点字，真正要修的结构缺陷会被淹没。）
+
+def test_llm_flag_reported_for_chinese(tmp_path):
+    """语文的原文缺失型缺陷也要进人工队列（2026-11-19）。
+
+    回归：八中 2026 期中题 7/21 的画线句在 PDF→md 时丢失，LLM 如实标 needs_review，
+    但旧扫描把语文整个豁免，题被静默藏起来（26 题只剩 24），没人收到通知。
     """
     md = _md(tmp_path, "4. 甲\n")
     rows = [{"group_order": 4, "content": "甲", "type": "choice", "needs_review": True}]
     labeling = [{"source": "卷A", "group_order": 4, "issues": ["画线句丢失，无法确定指代"]}]
     issues = R.scan_paper("卷A", Path("语文/x/卷A"), md, rows, None, labeling)
-    assert [i for i in issues if i["kind"] == "incomplete_content"] == []
+    inc = [i for i in issues if i["kind"] == "incomplete_content"]
+    assert inc and "llm_marked_incomplete" in inc[0]["reasons"]
+    assert "画线句丢失，无法确定指代" in inc[0]["reasons"]
 
 
 def test_empty_stem_is_reported(tmp_path):

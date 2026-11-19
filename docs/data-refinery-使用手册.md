@@ -978,26 +978,54 @@ python src/import_cli.py --subject 语文 --year 2025 --dry-run   # 先看范围
 python src/import_cli.py --subject 语文 --year 2025             # 正式导入
 ```
 
-**指定答案/解析文件（`--answers`，2026-11-05）**：把 §4.8 的按卷答案文档直接交给编排层，第 6 步写入，不用再单独跑 `answer_importer_cli`。
+**指定答案/解析文件（`--answers`，2026-11-05；PDF 支持 2026-11-19）**：把答案交给编排层，第 6 步写入，不用再单独跑 `answer_importer_cli`。三种输入：
+
+| 后缀 | 含义 | 定位方式 |
+|---|---|---|
+| `.pdf` | 答案 PDF（如素材目录里的 `X试卷答案.pdf`） | 自动转 md → 按学科策略提取答案文档 → 回写；匹配规则见下 |
+| `.md` | §4.8 的按卷答案文档（`# 试卷：` + `## 题号` + `答案：`） | 见下方匹配优先级 |
+| `.jsonl` | §4.8 的答案记录 | 自带 `question_id` / `paper_id`+`question_no` / `content_hash`，`--paper-id` 忽略 |
 
 ```bash
-# 新卷：导入 + 答案一次走完
-python src/import_cli.py --subject 数学 --files "西城35中" \
-  --answers output/answers/西城35中期中练习1.md
-
 # 已有卷只补答案：只给 --answers，自动只跑这一步
 python src/import_cli.py --answers output/answers/西城35中期中练习1.md
+
+# 直接给答案 PDF（八中 2026 期中语文）：文件名去「答案」自动定位到 paper 667
+python src/import_cli.py --answers "tools/crawler/data/语文/初中/first/2026/北京市第八中学2026-2027学年上学期九年级期中语文试卷答案.pdf"
+
+# 定位不到唯一卷时显式指定（重名卷的唯一出口）
+python src/import_cli.py --answers "…/八中语文期中试卷答案.pdf" --paper-id 667
+
+# 只看会改哪些题，不写库
+python src/import_cli.py --answers 题解.md --dry-run
 ```
 
-**只给 `--answers`（不带范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入**；同时给 `--subject/--files` 才是「新卷导入 + 答案一次走完」。`.md` 定位优先级：**显式 `--paper-id` > `--file/--files` 卷名关键词反查（须唯一命中）> 文档 `# 试卷：` 标题**；`.jsonl` 直接走 `--records`（自带定位，`--paper-id` 忽略）。非 dry-run 自动 `--apply --yes`。
+**`--answers` 只做答案导入**：自动跳过 convert~入库与识别扫描/补题；**不能与任何范围参数或重建参数同给**（`--subject/--stage/--term/--year/--file/--files`、`--reconvert/--re-extract/--re-publish/--redo`、`--preview/--cards-only/--fix-only`），同给会立即报错停下并逐一点名冲突参数——那些参数会拉起整条管线，和用户「只补答案」的意图相反。要先把新卷导入题库，再单独跑一条 `--answers` 命令补答案（分两条命令）。非 dry-run 自动 `--apply --yes`。`--answers` 写入时会用文档里的答案**覆盖**该题已有答案，正式写库前先用 `--dry-run` 看 diff。
+
+#### 试卷 ↔ 答案如何匹配
+
+**卷级定位**（PDF 与 `.md` 统一按此优先级，命中即停；0 命中或多命中都会报错并提示 `--paper-id`，绝不猜）：
+
+1. 显式 `--paper-id`（重名卷唯一出口，推荐）；
+2. 给了 `--file/--files` 时按卷名关键词查 `exam_papers.title` / `source_key`，须唯一命中；
+3. **PDF 专有**：把答案文件名按 `（答案）` → `(答案)` → `-答案` → `_答案` → `答案` **最长优先剥一次**，再查 `exam_papers`。后缀表与 `answer_merger._answer_name_variants`（试卷→答案名）同源。例：`北京市第八中学…语文试卷答案.pdf` → `北京市第八中学…语文试卷` → paper 667；
+4. `.md` 文档的 `# 试卷：<标题>` 标题（同样同时查 `title` 与 `source_key`）。
+
+运行时会打印 `[匹配] 依据=… → paper_id=…`，可直接看到本次用了哪条规则。注意：PDF 转换出的 md 首行标题（如 `北京市第八中学 2026-2027 学年上学期九年级期中`）会被 paper_meta 归一化成 `2026 北京市第八中学 初三 期中`，**直接拿标题查会 0 命中**，所以 PDF 走「文件名去答案后缀」而不是标题。
+
+**记录级写库**：按 `(paper_id, question_no)` 匹配 `paper_questions`，`question_no` 是**卷面印刷题号**（1、2、3…），本样例 1–26 **没有偏移**。PDF 里 `1.… 2.A`、`(三)…12.A13.A14.…` 这类一行多答案由语文策略的行内拆分还原；拆不出的留空并记 `output/answer_issues.jsonl`，绝不猜。
 
 文档 `# 试卷：` 里的标题**可以直接写素材原名（文件夹名）**，不必改成库里的归一化标题：定位同时查 `exam_papers.title` 和 `source_key`（`--list-papers` 同口径），候选行会并列显示「来源：原名」。例：`# 试卷：2026北京海淀初三（上）期中道德与法治` 能直接命中库里的 `2026 海淀 初三 期中`（#433）。
 
-卷名重名时（例：「昌平一中」同时命中 2024 语文卷 #26 与 2026 数学卷 #362，报「无法唯一定位」）用 `--paper-id` 指定，**不要用 `--file`** —— 给了范围参数就不再是「只导答案」，前 5 步会一起跑：
+卷名重名时（例：「昌平一中」同时命中 2024 语文卷 #26 与 2026 数学卷 #362，报「无法唯一定位」）用 `--paper-id` 指定，**不要用 `--file`** —— `--file` 与 `--answers` 是硬冲突，同给直接报错停下：
 
 ```bash
 python src/import_cli.py --answers 昌平一中题解.md --paper-id 362
 ```
+
+**与 `--answers` 冲突的参数（全部硬冲突，同给直接报错停下）**：范围参数 `--subject/--stage/--term/--year/--file/--files`；重建参数 `--reconvert/--re-extract/--re-publish/--redo`；其它动作 `--preview`（只预览切题，且原实现会在预览中误写库）、`--cards-only`（只写教材卡，与按卷题回写矛盾）、`--fix-only`（只补题，见下）。报错会逐一点名本次给了哪些冲突参数。可搭配 `--paper-id`（重名卷消歧）与 `--dry-run`（只出 diff 不写库）。
+
+**PDF 转换复用**：若 `output/md/…/X答案.md` 已存在（之前导入时转过），直接复用、零 MinerU 调用；否则用 `Converter` 转换（保留扫描件栅格化预检）。答案 PDF 需放在素材目录（`tools/crawler/data`）下——学科识别与试卷定位都依赖该目录结构，放外面请用 `--paper-id` 并把文件移入。
 
 **只补题（`--fix-only`，2026-11-07）**：等价于手写 `--skip-convert --skip-extract --skip-publish --skip-meta --skip-load --skip-answers`，只保留第 7/8/9 步（扫描识别问题 → 人工补题 → 补题入库），**不会重跑 MinerU、切题、图片物化或 db_loader**：
 

@@ -8,6 +8,59 @@
 
 ---
 
+## 2026-11-19 content_hash 纳入材料指纹：修「同题干不同材料跨卷共用一道题」
+
+**问题**：`questions.id=5167`（题干「文段中的画线句存在问题，请你修改」）被 **9 份卷**共用（paper 17/19/24/40/45/49/50/667/668），但各卷材料完全不同（八中是「展板三：南渡新韵…」，海淀模拟二是「趣味创新挑战…纸桥承重赛…」）。后果：材料/答案只保留最后一次导入的那份，其余 8 份卷的学生看到错材料、错答案；用 `questions.source` 查卷也查不到（该行 `source` 是海淀那份）。
+
+**根因**：`db_loader.content_hash()` 只归一「题干 + 选项」，明确不含 `material_text`（旧注释："material_text 不在 content_hash 里"），而 `questions.content_hash` 全局唯一 → 通用题干的语文材料题跨卷撞哈希被合并。
+
+**改动**：
+- `content_hash(content, options, material=None)` 增加材料指纹 `material_fingerprint`：归一后取**前 20 + 中点 10 + 后 20 字**（≤50 字取全部），既区分不同材料，又避免长材料全量进哈希。无材料时哈希与旧口径完全一致（存量非材料题不动）。
+- `db_loader` 写库时传入 `material_text`；同时修**跨卷共用行**：同题号旧行 `source` 属于别的卷时不再原址更新，改为新建独立行（末尾按 `linked_ids` 清掉本卷对旧行的关联），打印 `[split]`。
+- 同步其余 4 个 `content_hash` 调用点（apply_fixes / fix_page_markers_cli / emphasis_cli / migrate_content_hash），避免人工补题/强调回填算出与 db_loader 不一致的哈希。
+- 存量修复：9 份卷各重跑一次 publish + db_loader（增量，不调 LLM）。实测全部拆开，`5167` 只剩 paper 17，`667` 的题 7 变成独立行 #7629；库内重复哈希题数 0。三帆中学顺带拆出另外两条共享行（#5391/#5828）。
+- 测试：`test_content_hash_includes_material_fingerprint`、`test_cross_paper_shared_row_is_split`；相关 254 passed / 10 skipped。
+
+**踩坑**：`--reload-source` 会连带删业务引用（答案/错题本），不要用它修这个；用增量重跑即可，拆分逻辑在 `load_questions` 内。
+
+**批量重跑命令**（一条；只 publish+db_loader，不调 LLM、不导答案）：
+```bash
+cd tools/data-refinery && python src/import_cli.py --subject 语文 --files "202507-海淀-模拟二,东城·东直门中学,202407-大兴,北京三十五中,202507-延庆,202507-海淀-（上）期中,北京三帆中学,北京市第八中学2026-2027,202607-海淀-模拟二" --skip-convert --skip-extract --skip-meta --skip-review --skip-answers
+```
+
+## 2026-11-19 修标注提示词冲突：材料已有 `<u>` 标记时不得再报「画线句缺失」
+
+**问题**：八中 2026 期中题 7 的人工复核依据自相矛盾——先引用材料里的 `<u>人们在</u><u>观展过程中，不仅拓展了审美视野，也获得了深层的审美水平。</u>`，又说"画线句具体指哪一句属于只报告项，不得修复"。材料其实带了（`question_labeler._render_with_material` 会把 `material_text` 以 `[同题材料…]` 附在题目前），LLM 也确实看到了，不是没传材料。
+
+**根因**：`prompts/question_labeler/chinese.txt` 同一节里两条规则打架——"判断完整性必须结合材料、材料里已有不算缺失" vs "【只报告】画线句/加点字具体指哪一句"（写成无条件），还加了"绝对不要自己写一句画线句"，LLM 被后一条压过去机械误报。`_generic.txt` 有同样问题。
+
+**改动**：两条提示词都改成**先证据后规则**：先看材料里有没有 `<u>`/下划线/着重号/【甲】【乙】/段落号等可唯一定位的标记；有且能唯一确定 → 判 `is_complete=true`、禁止报缺失；只有确实没有标记/丢失/多处候选无法确定才走只报告。"绝对不要自己写"改为"不要编造原文没有的，也不要把材料里已有的标记当成丢失"，并给题 7 同款例子。`tests/test_labeler_prompts.py` 加断言锁定。
+
+**仍未做**（用户本次只让改提示词）：人工补题显示仍不带 `material_text`，且粘贴"材料+题干"时语文 `split_material` 是 no-op、`apply_fixes` 会把 `material_text` 写空——带材料题在人工环节仍可能丢材料。
+
+## 2026-11-19 语文「原文缺失型」缺陷不再豁免人工扫描（按学科全量）
+
+**问题**：八中 2026 期中语文卷在题库里挂 26 题，学生端只显示 24。根因是题 7/21 的「画线句」在 PDF→md 时丢失（下划线是图片像素），LLM 如实判 `is_complete=false` → `needs_review` → `is_active=0`；取题接口 `exam-papers.repo.ts:96` 带 `q.is_active=1` 故隐藏。更关键的是这类题**没进人工队列**：`recognition_scan._UNREPAIRED_OK_SUBJECTS` 原含 `chinese`，第 379 行 `report_llm_flag=False`，`needs_review` 根本不写进 `recognition_issues.jsonl`，于是「藏起来且无人知晓」。
+
+**改动**：从 `recognition_scan.py` 的豁免集合移除 `chinese`（道法/历史/地理/生物仍豁免），语文原文缺失型缺陷按学科全量进 `incomplete_content` 人工队列；`question_labeler._UNREPAIRED_OK` **不动**（那是标注开关，删掉会逼 LLM 编出原文——大兴题5 编【甲】【乙】、房山题25 编 D 的旧事故）。两处集合刻意不同步，已在两边注释和 `constraints/数据管线.md` 写清职责差异，避免后人误当作对称而改回去。代价：30 张语文卷约 197 条会进入人工队列——用户裁决「按学科一致处理，不能只改八中」。
+
+**测试**：`tests/test_recognition_scan.py` 原「语文豁免」用例改为道法，并新增语文上报用例（断言 `llm_marked_incomplete` + LLM 原话）。
+
+## 2026-11-19 `import_cli --answers` 支持 PDF 答案 + 行内多题号拆解 + 匹配规则透明化
+
+**问题**：用户按 `import_cli --subject 语文 --year 2026 --answers <答案.pdf>` 导入八中语文答案，第 6 步报 `'utf-8' codec can't decode byte 0xc4 in position 10`。根因是 `--answers` 只认 `.md`/`.jsonl`，`_answers_file_entry` 把**任何非 .jsonl 后缀都当 Markdown**，PDF 被 `answer_importer_cli` 当 UTF-8 文本读；`0xc4` 正是 PDF 头 `%\xc4\xe5…` 的二进制标记，与答案内容无关。
+
+**改动**：
+- `import_cli._answers_file_entry` 新增 `.pdf` 分支：先定 paper_id → 复用已转 md（否则 `Converter.convert`，保留栅格化预检）→ `answer_extract_cli.main` 按学科提取答案文档 → `answer_importer_cli --doc --paper-id` 回写。不传 `--dry-run` 给 extract（它在写文档前就 return，会让 importer 无文件可读）。
+- 卷级定位优先级统一为：`--paper-id` > `--file` 反查 > **PDF 文件名去「答案」后缀**（新增 `_strip_answer_suffix`，与 `answer_merger._answer_name_variants` 同源，最长优先）> `.md` 文档 `# 试卷：` 标题。打印 `[匹配] 依据=… → paper_id=…`。不唯一命中直接报错，不再退回 spaced 标题（实测 0 命中）。先定卷再转换，定位失败不浪费 MinerU。
+- 冲突（同给立即报错并逐一点名）：范围参数 `--subject/--stage/--term/--year/--file/--files`、重建参数 `--reconvert/--re-extract/--re-publish/--redo`、`--preview`（原实现会在预览中真写库，实 bug）、`--cards-only`、`--fix-only`。**起初把范围参数做成「软冲突只写文档」，实测用户带 `--subject 语文 --year 2026 --answers <pdf>` 时命令照跑整条管线，用户明确要求必须打印信息并停下**——已改为硬冲突；只给 `--answers` 时可搭配的只剩 `--paper-id` / `--dry-run`。
+- `--help` 的 `--answers` help 与 epilog 补 PDF / 三种后缀 / 冲突 / 3 条示例；使用手册 §4.11 新增「试卷 ↔ 答案如何匹配」小节。
+- **语文答案行内多题号拆解**：`subject_strategies/chinese.py::_align_by_number` 在结构行跳过与行首 `is_main_stem` 之前，用 `split_inline_stems`（原文，不用归一化文本，避免写回半角标点）拆 `1.… 2.A`、`(三)…12.A13.A14.①…`、`(一)…16.B17.A`。仅在题号严格递增且首个 > last_no 时生效，回退编号续行（作文评分细则 `1. 字数不足…`）不受影响。八中样例从 **17 题 → 26 题、0 issues**，原先空的 12–14、16–17 补齐，Q1/Q3 尾部粘连的 `2.A`/`4.D5.A6.D` 归位。
+
+**坑（保留）**：PDF 转换的 md 首行标题会被 paper_meta 归一化（`北京市第八中学 2026-2027…` → `2026 北京市第八中学 初三 期中`），拿标题查库 0 命中，所以 PDF 走文件名去后缀；`answer_extract_cli` 的 `--file` 关键词要传 md 的 **stem**（`normalize_path` 会剥 `.md`，带后缀反而不命中）。
+
+**测试**：`test_chinese_answers.py` +2（粘连行还原、回退编号不被误拆）；`test_import_cli.py` +5（PDF 派发/去后缀匹配/显式 paper-id/dry-run/定位失败不提取）与冲突参数。相关 83 passed。
+
 ## 2026-11-19 人工补题回写 extracted 时保留原题型/难度
 
 **问题**：北师大附属实验中学卷（paper 662）第 14 题是「二、填空题」的题，补图后库里却变成 `short_answer`，被识别扫描报「题型与同大题不一致（7/8 是填空）」。根因在 `apply_fixes._patch_extracted`：回写 extracted 时按「有选项=choice、无选项=short_answer」重算 `type`，并把 `difficulty` 一律重置为 2。内容类人工修复（补图/改题干）的记录没有 `expected_type`（只有 `type_mismatch` 才带），于是所有**无选项**的填空/计算/证明题只要修过一次内容就会被降级；随后 publish + import 按 jsonl 原样写回库（`db_loader.load_questions` 的 type 变更分支），扫描再把降级结果报成异常。
