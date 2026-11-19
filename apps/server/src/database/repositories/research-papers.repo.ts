@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
+import { ContentAuditRepository, type AuditActor } from './content-audit.repo.js';
 
 export interface AdminPaperFilters {
   subjectId?: number;
@@ -115,7 +116,10 @@ async function findBlockedIds(db: Queryable, ids: number[], paperId: number): Pr
  */
 @Injectable()
 export class ResearchPapersRepository {
-  constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
+  constructor(
+    @Inject('DATABASE_POOL') private readonly pool: Pool,
+    private readonly audit: ContentAuditRepository,
+  ) {}
 
   async findPapers(filters: AdminPaperFilters): Promise<{ items: AdminPaperListRow[]; total: number }> {
     const where: string[] = [];
@@ -210,12 +214,13 @@ export class ResearchPapersRepository {
   }
 
   /**
-   * 单事务级联删除：会话（级联作答）→ 可删独占题 → 试卷（级联剩余关联）。
+   * 单事务级联删除：会话（级联作答）→ 可删独占题 → 试卷（级联剩余关联）→ paper.delete 审计。
    *
    * 顺序不可换：先删本卷会话，后面查到的 `exam_answers` 引用才只来自其它来源。
+   * 审计必须走同一 `conn`（spec §9.2）：插不进去就整笔回滚，卷不会被删。
    * 返回 null 表示卷不存在（service 转 404）；外键冲突原样抛（service 转 409）。
    */
-  async deletePaperCascade(paperId: number): Promise<PaperDeleteOutcome | null> {
+  async deletePaperCascade(paperId: number, actor: AuditActor): Promise<PaperDeleteOutcome | null> {
     const conn = await this.pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -251,6 +256,18 @@ export class ResearchPapersRepository {
       }
 
       await conn.execute('DELETE FROM exam_papers WHERE id = ?', [paperId]);
+
+      // 同一事务连接写审计：审计失败会被下面的 catch 回滚，卷不会被删。
+      await this.audit.appendOnConnection(conn, {
+        actorId: actor.sub,
+        actorRole: actor.role,
+        actorName: actor.name ?? null,
+        action: 'paper.delete',
+        targetType: 'paper',
+        targetId: paperId,
+        paperId,
+      });
+
       await conn.commit();
 
       return {

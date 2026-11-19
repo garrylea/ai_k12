@@ -8,6 +8,28 @@ export interface AuditEntry {
   paperId?: number | null; beforeJson?: unknown; afterJson?: unknown; note?: string | null;
 }
 
+/** 删卷/改题等写审计时从当前用户身上取的最小身份信息。 */
+export interface AuditActor {
+  sub: number;
+  role: string;
+  name?: string | null;
+}
+
+/** 只用到 execute 的最小执行器接口（Pool 与 PoolConnection 都满足）。 */
+type Queryable = { execute(sql: string, values?: unknown): Promise<unknown> };
+
+const INSERT_SQL = `INSERT INTO content_audit_logs
+        (actor_id, actor_role, actor_name, action, target_type, target_id, paper_id, before_json, after_json, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+function insertParams(e: AuditEntry): Array<string | number | null> {
+  return [
+    e.actorId, e.actorRole, e.actorName, e.action, e.targetType, e.targetId,
+    e.paperId ?? null, e.beforeJson == null ? null : JSON.stringify(e.beforeJson),
+    e.afterJson == null ? null : JSON.stringify(e.afterJson), e.note ?? null,
+  ];
+}
+
 export interface AuditFilters {
   actorId?: number;
   action?: string;
@@ -40,15 +62,18 @@ export interface AuditLogRow extends RowDataPacket {
 export class ContentAuditRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
 
+  /** 独立审计写入（不参与业务事务）：仅用于没有外部事务的写路径。 */
   async append(e: AuditEntry): Promise<void> {
-    await this.pool.execute(
-      `INSERT INTO content_audit_logs
-        (actor_id, actor_role, actor_name, action, target_type, target_id, paper_id, before_json, after_json, note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [e.actorId, e.actorRole, e.actorName, e.action, e.targetType, e.targetId,
-       e.paperId ?? null, e.beforeJson == null ? null : JSON.stringify(e.beforeJson),
-       e.afterJson == null ? null : JSON.stringify(e.afterJson), e.note ?? null],
-    );
+    await this.pool.execute(INSERT_SQL, insertParams(e));
+  }
+
+  /**
+   * 在调用方给定的连接上写审计——用于必须和业务操作同一事务的场景（spec §9.2）。
+   * `deletePaperCascade` 传入的是它 `beginTransaction` 拿到的 `PoolConnection`，
+   * 审计插入因此参与同一事务：插入失败会连带整笔删卷回滚，反之亦然。
+   */
+  async appendOnConnection(conn: Queryable, e: AuditEntry): Promise<void> {
+    await conn.execute(INSERT_SQL, insertParams(e));
   }
 
   async findAll(filters: AuditFilters): Promise<{ items: AuditLogRow[]; total: number }> {

@@ -27,6 +27,25 @@ describe('ContentAuditRepository.append', () => {
       '{"title":"旧卷"}', null, null,
     ]);
   });
+
+  it('appendOnConnection 走传入的连接而非 pool（保证同事务）', async () => {
+    const pool = mockPool();
+    const conn = { execute: vi.fn().mockResolvedValue(undefined) };
+    const repo = new ContentAuditRepository(pool as any);
+
+    await repo.appendOnConnection(conn as any, {
+      actorId: 7, actorRole: 'researcher', actorName: null,
+      action: 'paper.delete', targetType: 'paper', targetId: 42, paperId: 42,
+    });
+
+    expect(conn.execute).toHaveBeenCalledTimes(1);
+    expect(pool.execute).not.toHaveBeenCalled();
+    const [sql, params] = conn.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('INSERT INTO content_audit_logs');
+    expect(params).toEqual([
+      7, 'researcher', null, 'paper.delete', 'paper', 42, 42, null, null, null,
+    ]);
+  });
 });
 
 describe('ContentAuditRepository.findAll', () => {

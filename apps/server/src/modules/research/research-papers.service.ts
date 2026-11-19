@@ -1,11 +1,10 @@
 import { BadRequestException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
-import type { JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import {
   ResearchPapersRepository,
   type AdminPaperListRow,
   type PaperImpact,
 } from '../../database/repositories/research-papers.repo.js';
-import { ContentAuditRepository } from '../../database/repositories/content-audit.repo.js';
+import type { AuditActor } from '../../database/repositories/content-audit.repo.js';
 
 export interface AdminPaperQuery {
   subjectId?: number;
@@ -83,14 +82,11 @@ function isForeignKeyConflict(err: unknown): boolean {
  *
  * 删除规则（spec §5 / §7.4）：只删独占题；共享题只解绑；被学生数据引用的独占题保留；
  * 该卷考试会话连同作答一并删除。仓储负责事务，本层只做 id 校验与错误转换。
- * 删卷成功后写 `paper.delete` 审计；图片清理按计划边界留给 Task 7。
+ * 删卷成功后由仓储在同一事务内写 `paper.delete` 审计；图片清理按计划边界留给 Task 7。
  */
 @Injectable()
 export class ResearchPapersService {
-  constructor(
-    private readonly repo: ResearchPapersRepository,
-    private readonly audit: ContentAuditRepository,
-  ) {}
+  constructor(private readonly repo: ResearchPapersRepository) {}
 
   async list(query: AdminPaperQuery): Promise<AdminPaperListResult> {
     const { items, total } = await this.repo.findPapers(query);
@@ -112,11 +108,11 @@ export class ResearchPapersService {
     };
   }
 
-  async remove(id: number, user: JwtUser & { name?: string | null }): Promise<AdminPaperDeleteResult> {
+  async remove(id: number, actor: AuditActor): Promise<AdminPaperDeleteResult> {
     this.assertId(id);
     let outcome;
     try {
-      outcome = await this.repo.deletePaperCascade(id);
+      outcome = await this.repo.deletePaperCascade(id, actor);
     } catch (err) {
       if (isForeignKeyConflict(err)) {
         throw new HttpException({ code: 4201, message: '该试卷正在被使用，请刷新后重试' }, 409);
@@ -126,15 +122,6 @@ export class ResearchPapersService {
     if (!outcome) {
       throw new NotFoundException(`试卷不存在：${id}`);
     }
-    await this.audit.append({
-      actorId: user.sub,
-      actorRole: user.role,
-      actorName: user.name ?? null,
-      action: 'paper.delete',
-      targetType: 'paper',
-      targetId: id,
-      paperId: id,
-    });
     return {
       paperId: id,
       deletedQuestions: outcome.deletedQuestions,

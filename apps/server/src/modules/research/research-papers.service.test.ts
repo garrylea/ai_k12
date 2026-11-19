@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, HttpException, NotFoundException } from '@nestjs/common';
 import { ResearchPapersService } from './research-papers.service.js';
 import type { ResearchPapersRepository, AdminPaperListRow } from '../../database/repositories/research-papers.repo.js';
-import type { ContentAuditRepository } from '../../database/repositories/content-audit.repo.js';
 
 const ACTOR = { sub: 7, role: 'researcher', name: '教研员' } as any;
 
@@ -42,18 +41,10 @@ function mkRepo(over: Record<string, any> = {}) {
   };
 }
 
-function mkAudit() {
-  return { append: vi.fn().mockResolvedValue(undefined) };
-}
-
-function mkSvc(repo = mkRepo(), audit = mkAudit()) {
+function mkSvc(repo = mkRepo()) {
   return {
-    svc: new ResearchPapersService(
-      repo as unknown as ResearchPapersRepository,
-      audit as unknown as ContentAuditRepository,
-    ),
+    svc: new ResearchPapersService(repo as unknown as ResearchPapersRepository),
     repo,
-    audit,
   };
 }
 
@@ -113,36 +104,35 @@ describe('ResearchPapersService.remove', () => {
     expect('paperTitle' in out).toBe(false);
   });
 
-  // brief Step 2：删除成功写 paper.delete 审计。
-  it('DELETE 成功写 paper.delete 审计', async () => {
+  // 审计写入下沉到仓储的删卷事务；service 只负责把操作者身份传下去。
+  it('DELETE 把操作者交给仓储，由其事务内写 paper.delete 审计', async () => {
     const repo = mkRepo();
     repo.deletePaperCascade.mockResolvedValue({
       paperTitle: '卷A', deletedQuestions: 2, retainedQuestions: 0,
       deletedSessions: 1, deletedAnswers: 3,
     });
-    const { svc, audit } = mkSvc(repo);
-    await svc.remove(42, ACTOR);
-    expect(audit.append).toHaveBeenCalledWith(expect.objectContaining({
-      action: 'paper.delete', targetType: 'paper', targetId: 42,
-    }));
+    const { svc, repo: r } = mkSvc(repo);
+    const out = await svc.remove(42, ACTOR);
+    expect(r.deletePaperCascade).toHaveBeenCalledWith(42, ACTOR);
+    expect(out).toEqual({
+      paperId: 42, deletedQuestions: 2, retainedQuestions: 0,
+      deletedSessions: 1, deletedAnswers: 3,
+    });
   });
 
-  it('审计带操作者身份（actorId/actorRole/actorName）', async () => {
-    const { svc, audit } = mkSvc();
+  it('操作者身份（sub/role/name）原样传给仓储审计写入', async () => {
+    const { svc, repo } = mkSvc();
     await svc.remove(446, ACTOR);
-    expect(audit.append).toHaveBeenCalledWith(expect.objectContaining({
-      actorId: 7, actorRole: 'researcher', actorName: '教研员', paperId: 446,
-    }));
+    expect(repo.deletePaperCascade.mock.calls[0][1]).toBe(ACTOR);
   });
 
-  it('卷不存在 → 404，且不写审计', async () => {
-    const { svc, audit } = mkSvc(mkRepo({ deletePaperCascade: vi.fn().mockResolvedValue(null) }));
+  it('卷不存在 → 404', async () => {
+    const { svc } = mkSvc(mkRepo({ deletePaperCascade: vi.fn().mockResolvedValue(null) }));
     await expect(svc.remove(999, ACTOR)).rejects.toBeInstanceOf(NotFoundException);
-    expect(audit.append).not.toHaveBeenCalled();
   });
 
-  it('外键冲突 → 409 / 4201，且不写审计', async () => {
-    const { svc, audit } = mkSvc(mkRepo({
+  it('外键冲突 → 409 / 4201', async () => {
+    const { svc } = mkSvc(mkRepo({
       deletePaperCascade: vi.fn().mockRejectedValue(Object.assign(new Error('fk'), { code: 'ER_ROW_IS_REFERENCED_2' })),
     }));
 
@@ -150,13 +140,11 @@ describe('ResearchPapersService.remove', () => {
     expect(err).toBeInstanceOf(HttpException);
     expect(err.getStatus()).toBe(409);
     expect(err.getResponse()).toMatchObject({ code: 4201 });
-    expect(audit.append).not.toHaveBeenCalled();
   });
 
-  it('其它数据库异常原样抛（不吞成 409），且不写审计', async () => {
+  it('其它数据库异常原样抛（不吞成 409）', async () => {
     const boom = new Error('db down');
-    const { svc, audit } = mkSvc(mkRepo({ deletePaperCascade: vi.fn().mockRejectedValue(boom) }));
+    const { svc } = mkSvc(mkRepo({ deletePaperCascade: vi.fn().mockRejectedValue(boom) }));
     await expect(svc.remove(446, ACTOR)).rejects.toBe(boom);
-    expect(audit.append).not.toHaveBeenCalled();
   });
 });

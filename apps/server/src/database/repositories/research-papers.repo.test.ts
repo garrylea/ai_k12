@@ -1,6 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ResearchPapersRepository } from './research-papers.repo.js';
 
+const ACTOR = { sub: 7, role: 'researcher', name: '教研员' };
+
+/** 审计仓储替身：可设为插入失败，用来验证删卷事务回滚。 */
+function mockAudit(over: { fail?: boolean } = {}) {
+  return {
+    appendOnConnection: vi.fn().mockImplementation((_conn: unknown, _entry: unknown) => {
+      if (over.fail) return Promise.reject(new Error('audit insert failed'));
+      return Promise.resolve();
+    }),
+  };
+}
+
+function mkRepo(pool: unknown, audit = mockAudit()) {
+  return new ResearchPapersRepository(pool as any, audit as any);
+}
+
 /** mysql2 双返回形状：[rows, fields]；SELECT 可能走 execute 或 query。 */
 function mockPool(rows: any[] = [], total = 0) {
   return {
@@ -15,7 +31,7 @@ function mockPool(rows: any[] = [], total = 0) {
 describe('ResearchPapersRepository.findPapers', () => {
   it('分页查询走 pool.query（LIMIT ? 不能走 execute），总数走 execute', async () => {
     const pool = mockPool([{ id: 1 }], 3);
-    const repo = new ResearchPapersRepository(pool as any);
+    const repo = mkRepo(pool);
 
     const out = await repo.findPapers({ page: 2, pageSize: 20 });
 
@@ -30,7 +46,7 @@ describe('ResearchPapersRepository.findPapers', () => {
 
   it('subjectId / year / gradeBand / keyword 全部落到 WHERE 且参数顺序一致', async () => {
     const pool = mockPool([], 0);
-    const repo = new ResearchPapersRepository(pool as any);
+    const repo = mkRepo(pool);
 
     await repo.findPapers({ subjectId: 9, year: 2026, gradeBand: 'junior', keyword: '汇文', page: 1, pageSize: 10 });
 
@@ -45,7 +61,7 @@ describe('ResearchPapersRepository.findPapers', () => {
 
   it('keyword 里的 % _ \\ 被转义，防通配符注入', async () => {
     const pool = mockPool([], 0);
-    const repo = new ResearchPapersRepository(pool as any);
+    const repo = mkRepo(pool);
 
     await repo.findPapers({ keyword: '50%_x\\y', page: 1, pageSize: 20 });
 
@@ -75,7 +91,7 @@ describe('ResearchPapersRepository.countImpact', () => {
         return Promise.resolve([[], []]);
       }),
     };
-    const repo = new ResearchPapersRepository(pool as any);
+    const repo = mkRepo(pool);
 
     const out = await repo.countImpact(446);
 
@@ -98,7 +114,7 @@ describe('ResearchPapersRepository.countImpact', () => {
         return Promise.resolve([[{ cnt: 0 }], []]);
       }),
     };
-    const repo = new ResearchPapersRepository(pool as any);
+    const repo = mkRepo(pool);
     await repo.countImpact(1);
 
     const unionSql = pool.execute.mock.calls
@@ -124,7 +140,7 @@ describe('ResearchPapersRepository.countImpact', () => {
         return Promise.resolve([[{ cnt: 0 }], []]);
       }),
     };
-    const repo = new ResearchPapersRepository(pool as any);
+    const repo = mkRepo(pool);
     await repo.countImpact(77);
 
     const call = pool.execute.mock.calls.find((c) => String(c[0]).includes('SELECT DISTINCT qid FROM'))!;
@@ -170,9 +186,9 @@ function mockConn(overrides: { failOn?: string } = {}) {
 describe('ResearchPapersRepository.deletePaperCascade', () => {
   it('按「会话 → 题 → 卷」顺序删除，只删未被引用的独占题，返回真实计数', async () => {
     const { pool, conn, calls } = mockConn();
-    const repo = new ResearchPapersRepository(pool as any);
+    const repo = mkRepo(pool);
 
-    const out = await repo.deletePaperCascade(446);
+    const out = await repo.deletePaperCascade(446, ACTOR);
 
     expect(out).toEqual({
       paperTitle: '汇文卷',
@@ -195,7 +211,7 @@ describe('ResearchPapersRepository.deletePaperCascade', () => {
     expect(conn.release).toHaveBeenCalledTimes(1);
   });
 
-  it('卷不存在 → 返回 null 并回滚，不提交', async () => {
+  it('卷不存在 → 返回 null 并回滚，不提交，不写审计', async () => {
     const conn = {
       beginTransaction: vi.fn().mockResolvedValue(undefined),
       commit: vi.fn().mockResolvedValue(undefined),
@@ -203,20 +219,24 @@ describe('ResearchPapersRepository.deletePaperCascade', () => {
       release: vi.fn(),
       execute: vi.fn().mockResolvedValue([[], []]),
     };
-    const repo = new ResearchPapersRepository({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+    const audit = mockAudit();
+    const repo = mkRepo({ getConnection: vi.fn().mockResolvedValue(conn) }, audit);
 
-    expect(await repo.deletePaperCascade(999)).toBeNull();
+    expect(await repo.deletePaperCascade(999, ACTOR)).toBeNull();
     expect(conn.rollback).toHaveBeenCalledTimes(1);
     expect(conn.commit).not.toHaveBeenCalled();
+    expect(audit.appendOnConnection).not.toHaveBeenCalled();
   });
 
-  it('外键冲突 → 回滚并原样抛出（由 service 转 409）', async () => {
+  it('外键冲突 → 回滚并原样抛出（由 service 转 409），不写审计', async () => {
     const { pool, conn } = mockConn({ failOn: 'DELETE FROM exam_papers' });
-    const repo = new ResearchPapersRepository(pool as any);
+    const audit = mockAudit();
+    const repo = mkRepo(pool, audit);
 
-    await expect(repo.deletePaperCascade(446)).rejects.toMatchObject({ code: 'ER_ROW_IS_REFERENCED_2' });
+    await expect(repo.deletePaperCascade(446, ACTOR)).rejects.toMatchObject({ code: 'ER_ROW_IS_REFERENCED_2' });
     expect(conn.rollback).toHaveBeenCalledTimes(1);
     expect(conn.commit).not.toHaveBeenCalled();
+    expect(audit.appendOnConnection).not.toHaveBeenCalled();
   });
 
   it('全部题都被引用 → 跳过 DELETE questions，deletedQuestions=0', async () => {
@@ -233,12 +253,46 @@ describe('ResearchPapersRepository.deletePaperCascade', () => {
         return Promise.resolve([{ affectedRows: 0 }, []]);
       }),
     };
-    const repo = new ResearchPapersRepository({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+    const repo = mkRepo({ getConnection: vi.fn().mockResolvedValue(conn) });
 
-    const out = await repo.deletePaperCascade(1);
+    const out = await repo.deletePaperCascade(1, ACTOR);
 
     expect(out?.deletedQuestions).toBe(0);
     expect(out?.retainedQuestions).toBe(1);
     expect(conn.execute.mock.calls.some((c) => String(c[0]).includes('DELETE FROM questions WHERE id IN'))).toBe(false);
+  });
+
+  it('paper.delete 审计写在事务内的同一连接上，且先于 commit', async () => {
+    const { pool, conn } = mockConn();
+    const audit = mockAudit();
+    const repo = mkRepo(pool, audit);
+
+    await repo.deletePaperCascade(446, ACTOR);
+
+    expect(audit.appendOnConnection).toHaveBeenCalledTimes(1);
+    const [sameConn, entry] = audit.appendOnConnection.mock.calls[0] as [unknown, any];
+    // 关键：必须是 beginTransaction 拿到的 conn，不是 pool 上的新连接。
+    expect(sameConn).toBe(conn);
+    expect(entry).toMatchObject({
+      actorId: 7, actorRole: 'researcher', actorName: '教研员',
+      action: 'paper.delete', targetType: 'paper', targetId: 446, paperId: 446,
+    });
+    expect(audit.appendOnConnection.mock.invocationCallOrder[0])
+      .toBeLessThan((conn.commit as any).mock.invocationCallOrder[0]);
+  });
+
+  it('审计插入失败 → 整笔回滚，不提交（卷不会被删）', async () => {
+    const { pool, conn } = mockConn();
+    const audit = mockAudit({ fail: true });
+    const repo = mkRepo(pool, audit);
+
+    await expect(repo.deletePaperCascade(446, ACTOR)).rejects.toThrow('audit insert failed');
+
+    expect(audit.appendOnConnection).toHaveBeenCalledWith(conn, expect.objectContaining({ action: 'paper.delete' }));
+    // 删除语句已下发，但事务回滚且从未 commit —— 删卷未生效。
+    expect(conn.execute.mock.calls.some((c) => String(c[0]).startsWith('DELETE FROM exam_papers'))).toBe(true);
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalledTimes(1);
   });
 });
