@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, RequestMethod } from '@nestjs/common';
 import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
-import { AdminPapersController } from './admin-papers.controller.js';
-import type { AdminPapersService } from './admin-papers.service.js';
+import { ResearchPapersController } from './research-papers.controller.js';
+import type { ResearchPapersService } from './research-papers.service.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { ROLES_KEY } from '../../common/decorators/roles.js';
@@ -17,28 +17,28 @@ function makeController() {
     preview: vi.fn().mockResolvedValue({ paperId: 1 }),
     remove: vi.fn().mockResolvedValue({ paperId: 1 }),
   };
-  return { controller: new AdminPapersController(service as unknown as AdminPapersService), service };
+  return { controller: new ResearchPapersController(service as unknown as ResearchPapersService), service };
 }
 
-describe('AdminPapersController 路由形状', () => {
-  it('类前缀 api/admin/papers，且挂 JwtAuthGuard + RolesGuard + admin 角色', () => {
-    expect(Reflect.getMetadata(PATH_METADATA, AdminPapersController)).toBe('api/admin/papers');
-    const guards = Reflect.getMetadata(GUARDS_METADATA, AdminPapersController) as unknown[];
+describe('ResearchPapersController 路由形状', () => {
+  it('类前缀 api/research/papers，且挂 JwtAuthGuard + RolesGuard + researcher 角色', () => {
+    expect(Reflect.getMetadata(PATH_METADATA, ResearchPapersController)).toBe('api/research/papers');
+    const guards = Reflect.getMetadata(GUARDS_METADATA, ResearchPapersController) as unknown[];
     expect(guards).toEqual([JwtAuthGuard, RolesGuard]);
-    expect(new Reflector().get<string[]>(ROLES_KEY, AdminPapersController)).toEqual(['admin']);
+    expect(new Reflector().get<string[]>(ROLES_KEY, ResearchPapersController)).toEqual(['researcher']);
   });
 
   it('三个方法的路由与方法', () => {
-    expect(Reflect.getMetadata(PATH_METADATA, AdminPapersController.prototype.list)).toBe('/');
-    expect(Reflect.getMetadata(METHOD_METADATA, AdminPapersController.prototype.list)).toBe(RequestMethod.GET);
-    expect(Reflect.getMetadata(PATH_METADATA, AdminPapersController.prototype.preview)).toBe(':id/delete-preview');
-    expect(Reflect.getMetadata(METHOD_METADATA, AdminPapersController.prototype.preview)).toBe(RequestMethod.GET);
-    expect(Reflect.getMetadata(PATH_METADATA, AdminPapersController.prototype.remove)).toBe(':id');
-    expect(Reflect.getMetadata(METHOD_METADATA, AdminPapersController.prototype.remove)).toBe(RequestMethod.DELETE);
+    expect(Reflect.getMetadata(PATH_METADATA, ResearchPapersController.prototype.list)).toBe('/');
+    expect(Reflect.getMetadata(METHOD_METADATA, ResearchPapersController.prototype.list)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(PATH_METADATA, ResearchPapersController.prototype.preview)).toBe(':id/delete-preview');
+    expect(Reflect.getMetadata(METHOD_METADATA, ResearchPapersController.prototype.preview)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(PATH_METADATA, ResearchPapersController.prototype.remove)).toBe(':id');
+    expect(Reflect.getMetadata(METHOD_METADATA, ResearchPapersController.prototype.remove)).toBe(RequestMethod.DELETE);
   });
 });
 
-describe('AdminPapersController.list 入参', () => {
+describe('ResearchPapersController.list 入参', () => {
   it('空 query → 默认 page=1 pageSize=20，空字符串不当作非法数字', async () => {
     const { controller, service } = makeController();
     await controller.list({ subjectId: '', year: '', gradeBand: '', keyword: '' });

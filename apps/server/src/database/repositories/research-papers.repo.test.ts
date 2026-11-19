@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AdminPapersRepository } from './admin-papers.repo.js';
+import { ResearchPapersRepository } from './research-papers.repo.js';
 
 /** mysql2 双返回形状：[rows, fields]；SELECT 可能走 execute 或 query。 */
 function mockPool(rows: any[] = [], total = 0) {
@@ -12,10 +12,10 @@ function mockPool(rows: any[] = [], total = 0) {
   };
 }
 
-describe('AdminPapersRepository.findPapers', () => {
+describe('ResearchPapersRepository.findPapers', () => {
   it('分页查询走 pool.query（LIMIT ? 不能走 execute），总数走 execute', async () => {
     const pool = mockPool([{ id: 1 }], 3);
-    const repo = new AdminPapersRepository(pool as any);
+    const repo = new ResearchPapersRepository(pool as any);
 
     const out = await repo.findPapers({ page: 2, pageSize: 20 });
 
@@ -30,7 +30,7 @@ describe('AdminPapersRepository.findPapers', () => {
 
   it('subjectId / year / gradeBand / keyword 全部落到 WHERE 且参数顺序一致', async () => {
     const pool = mockPool([], 0);
-    const repo = new AdminPapersRepository(pool as any);
+    const repo = new ResearchPapersRepository(pool as any);
 
     await repo.findPapers({ subjectId: 9, year: 2026, gradeBand: 'junior', keyword: '汇文', page: 1, pageSize: 10 });
 
@@ -45,7 +45,7 @@ describe('AdminPapersRepository.findPapers', () => {
 
   it('keyword 里的 % _ \\ 被转义，防通配符注入', async () => {
     const pool = mockPool([], 0);
-    const repo = new AdminPapersRepository(pool as any);
+    const repo = new ResearchPapersRepository(pool as any);
 
     await repo.findPapers({ keyword: '50%_x\\y', page: 1, pageSize: 20 });
 
@@ -53,7 +53,7 @@ describe('AdminPapersRepository.findPapers', () => {
   });
 });
 
-describe('AdminPapersRepository.countImpact', () => {
+describe('ResearchPapersRepository.countImpact', () => {
   it('独占 = 卷内题 - 共享；被引用题从可删里扣除', async () => {
     const pool = {
       execute: vi.fn().mockImplementation((sql: string, params: any[]) => {
@@ -75,7 +75,7 @@ describe('AdminPapersRepository.countImpact', () => {
         return Promise.resolve([[], []]);
       }),
     };
-    const repo = new AdminPapersRepository(pool as any);
+    const repo = new ResearchPapersRepository(pool as any);
 
     const out = await repo.countImpact(446);
 
@@ -98,7 +98,7 @@ describe('AdminPapersRepository.countImpact', () => {
         return Promise.resolve([[{ cnt: 0 }], []]);
       }),
     };
-    const repo = new AdminPapersRepository(pool as any);
+    const repo = new ResearchPapersRepository(pool as any);
     await repo.countImpact(1);
 
     const unionSql = pool.execute.mock.calls
@@ -124,7 +124,7 @@ describe('AdminPapersRepository.countImpact', () => {
         return Promise.resolve([[{ cnt: 0 }], []]);
       }),
     };
-    const repo = new AdminPapersRepository(pool as any);
+    const repo = new ResearchPapersRepository(pool as any);
     await repo.countImpact(77);
 
     const call = pool.execute.mock.calls.find((c) => String(c[0]).includes('SELECT DISTINCT qid FROM'))!;
@@ -167,10 +167,10 @@ function mockConn(overrides: { failOn?: string } = {}) {
   return { pool, conn, calls };
 }
 
-describe('AdminPapersRepository.deletePaperCascade', () => {
+describe('ResearchPapersRepository.deletePaperCascade', () => {
   it('按「会话 → 题 → 卷」顺序删除，只删未被引用的独占题，返回真实计数', async () => {
     const { pool, conn, calls } = mockConn();
-    const repo = new AdminPapersRepository(pool as any);
+    const repo = new ResearchPapersRepository(pool as any);
 
     const out = await repo.deletePaperCascade(446);
 
@@ -203,7 +203,7 @@ describe('AdminPapersRepository.deletePaperCascade', () => {
       release: vi.fn(),
       execute: vi.fn().mockResolvedValue([[], []]),
     };
-    const repo = new AdminPapersRepository({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+    const repo = new ResearchPapersRepository({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
 
     expect(await repo.deletePaperCascade(999)).toBeNull();
     expect(conn.rollback).toHaveBeenCalledTimes(1);
@@ -212,7 +212,7 @@ describe('AdminPapersRepository.deletePaperCascade', () => {
 
   it('外键冲突 → 回滚并原样抛出（由 service 转 409）', async () => {
     const { pool, conn } = mockConn({ failOn: 'DELETE FROM exam_papers' });
-    const repo = new AdminPapersRepository(pool as any);
+    const repo = new ResearchPapersRepository(pool as any);
 
     await expect(repo.deletePaperCascade(446)).rejects.toMatchObject({ code: 'ER_ROW_IS_REFERENCED_2' });
     expect(conn.rollback).toHaveBeenCalledTimes(1);
@@ -233,7 +233,7 @@ describe('AdminPapersRepository.deletePaperCascade', () => {
         return Promise.resolve([{ affectedRows: 0 }, []]);
       }),
     };
-    const repo = new AdminPapersRepository({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+    const repo = new ResearchPapersRepository({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
 
     const out = await repo.deletePaperCascade(1);
 

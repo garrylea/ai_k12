@@ -30,6 +30,7 @@ import { RequestContextMiddleware } from './common/middleware/request-context.mi
 import { DevModule } from './modules/dev/dev.module.js';
 import { PracticeHistoryModule } from './modules/practice-history/practice-history.module.js';
 import { FreeformModule } from './modules/freeform/freeform.module.js';
+import { ResearchModule } from './modules/research/research.module.js';
 
 @Module({
   imports: [
@@ -69,6 +70,8 @@ import { FreeformModule } from './modules/freeform/freeform.module.js';
     PracticeHistoryModule,
     // 自由输入做题（2026-11-08）—— 题图/文字识别成候选题 + 判题 SSE
     FreeformModule,
+    // 教研角色与内容纠错（2026-11-19）—— 试卷管理从 admin 迁来，统一 researcher 角色
+    ResearchModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

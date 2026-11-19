@@ -108,13 +108,13 @@ async function findBlockedIds(db: Queryable, ids: number[], paperId: number): Pr
 }
 
 /**
- * 管理端试卷仓储。
+ * 教研端试卷仓储（由 admin-papers.repo.ts 迁移，SQL 规则原样保留）。
  *
  * 列表分页用 `pool.query`：mysql2 的 `execute` 对 `LIMIT ?` 会预编译失败
  * （护栏测试 `limit-placeholder.guard.test.ts`）。计数/详情用 execute。
  */
 @Injectable()
-export class AdminPapersRepository {
+export class ResearchPapersRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
 
   async findPapers(filters: AdminPaperFilters): Promise<{ items: AdminPaperListRow[]; total: number }> {

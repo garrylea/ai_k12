@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, HttpException, NotFoundException } from '@nestjs/common';
-import { AdminPapersService } from './admin-papers.service.js';
-import type { AdminPapersRepository, AdminPaperListRow } from '../../database/repositories/admin-papers.repo.js';
+import { ResearchPapersService } from './research-papers.service.js';
+import type { ResearchPapersRepository, AdminPaperListRow } from '../../database/repositories/research-papers.repo.js';
+import type { ContentAuditRepository } from '../../database/repositories/content-audit.repo.js';
+
+const ACTOR = { sub: 7, role: 'researcher', name: '教研员' } as any;
 
 function row(over: Partial<AdminPaperListRow> = {}): AdminPaperListRow {
   return {
@@ -39,11 +42,22 @@ function mkRepo(over: Record<string, any> = {}) {
   };
 }
 
-function mkSvc(repo = mkRepo()) {
-  return { svc: new AdminPapersService(repo as unknown as AdminPapersRepository), repo };
+function mkAudit() {
+  return { append: vi.fn().mockResolvedValue(undefined) };
 }
 
-describe('AdminPapersService.list', () => {
+function mkSvc(repo = mkRepo(), audit = mkAudit()) {
+  return {
+    svc: new ResearchPapersService(
+      repo as unknown as ResearchPapersRepository,
+      audit as unknown as ContentAuditRepository,
+    ),
+    repo,
+    audit,
+  };
+}
+
+describe('ResearchPapersService.list', () => {
   it('行 → DTO；题数用 linked_question_count，createdAt 转 ISO', async () => {
     const { svc } = mkSvc();
     const out = await svc.list({ page: 1, pageSize: 20 });
@@ -58,9 +72,18 @@ describe('AdminPapersService.list', () => {
     expect(out.total).toBe(1);
     expect(out.page).toBe(1);
   });
+
+  // brief Step 2：无筛选时不能硬塞 subjectId 进 WHERE。
+  it('list 无筛选时不过滤学科', async () => {
+    const repo = mkRepo();
+    repo.findPapers.mockResolvedValue({ items: [], total: 0 });
+    const svc = mkSvc(repo).svc;
+    await svc.list({ page: 1, pageSize: 20 });
+    expect(repo.findPapers).toHaveBeenCalledWith({ page: 1, pageSize: 20 });
+  });
 });
 
-describe('AdminPapersService.preview', () => {
+describe('ResearchPapersService.preview', () => {
   it('合并试卷元信息与影响面', async () => {
     const { svc } = mkSvc();
     const out = await svc.preview(446);
@@ -75,14 +98,14 @@ describe('AdminPapersService.preview', () => {
   it('id 非正数 → 400', async () => {
     const { svc } = mkSvc();
     await expect(svc.preview(0)).rejects.toBeInstanceOf(BadRequestException);
-    await expect(svc.remove(-1)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.remove(-1, ACTOR)).rejects.toBeInstanceOf(BadRequestException);
   });
 });
 
-describe('AdminPapersService.remove', () => {
+describe('ResearchPapersService.remove', () => {
   it('成功：返回四个计数，不透出 paperTitle', async () => {
     const { svc } = mkSvc();
-    const out = await svc.remove(446);
+    const out = await svc.remove(446, ACTOR);
     expect(out).toEqual({
       paperId: 446, deletedQuestions: 14, retainedQuestions: 0,
       deletedSessions: 1, deletedAnswers: 5,
@@ -90,25 +113,50 @@ describe('AdminPapersService.remove', () => {
     expect('paperTitle' in out).toBe(false);
   });
 
-  it('卷不存在 → 404', async () => {
-    const { svc } = mkSvc(mkRepo({ deletePaperCascade: vi.fn().mockResolvedValue(null) }));
-    await expect(svc.remove(999)).rejects.toBeInstanceOf(NotFoundException);
+  // brief Step 2：删除成功写 paper.delete 审计。
+  it('DELETE 成功写 paper.delete 审计', async () => {
+    const repo = mkRepo();
+    repo.deletePaperCascade.mockResolvedValue({
+      paperTitle: '卷A', deletedQuestions: 2, retainedQuestions: 0,
+      deletedSessions: 1, deletedAnswers: 3,
+    });
+    const { svc, audit } = mkSvc(repo);
+    await svc.remove(42, ACTOR);
+    expect(audit.append).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'paper.delete', targetType: 'paper', targetId: 42,
+    }));
   });
 
-  it('外键冲突 → 409 / 4201', async () => {
-    const { svc } = mkSvc(mkRepo({
+  it('审计带操作者身份（actorId/actorRole/actorName）', async () => {
+    const { svc, audit } = mkSvc();
+    await svc.remove(446, ACTOR);
+    expect(audit.append).toHaveBeenCalledWith(expect.objectContaining({
+      actorId: 7, actorRole: 'researcher', actorName: '教研员', paperId: 446,
+    }));
+  });
+
+  it('卷不存在 → 404，且不写审计', async () => {
+    const { svc, audit } = mkSvc(mkRepo({ deletePaperCascade: vi.fn().mockResolvedValue(null) }));
+    await expect(svc.remove(999, ACTOR)).rejects.toBeInstanceOf(NotFoundException);
+    expect(audit.append).not.toHaveBeenCalled();
+  });
+
+  it('外键冲突 → 409 / 4201，且不写审计', async () => {
+    const { svc, audit } = mkSvc(mkRepo({
       deletePaperCascade: vi.fn().mockRejectedValue(Object.assign(new Error('fk'), { code: 'ER_ROW_IS_REFERENCED_2' })),
     }));
 
-    const err = await svc.remove(446).catch((e) => e);
+    const err = await svc.remove(446, ACTOR).catch((e) => e);
     expect(err).toBeInstanceOf(HttpException);
     expect(err.getStatus()).toBe(409);
     expect(err.getResponse()).toMatchObject({ code: 4201 });
+    expect(audit.append).not.toHaveBeenCalled();
   });
 
-  it('其它数据库异常原样抛（不吞成 409）', async () => {
+  it('其它数据库异常原样抛（不吞成 409），且不写审计', async () => {
     const boom = new Error('db down');
-    const { svc } = mkSvc(mkRepo({ deletePaperCascade: vi.fn().mockRejectedValue(boom) }));
-    await expect(svc.remove(446)).rejects.toBe(boom);
+    const { svc, audit } = mkSvc(mkRepo({ deletePaperCascade: vi.fn().mockRejectedValue(boom) }));
+    await expect(svc.remove(446, ACTOR)).rejects.toBe(boom);
+    expect(audit.append).not.toHaveBeenCalled();
   });
 });

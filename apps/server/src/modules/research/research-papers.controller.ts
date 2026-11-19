@@ -1,9 +1,10 @@
 import { BadRequestException, Controller, Delete, Get, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
-import { AdminPapersService } from './admin-papers.service.js';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
+import { ResearchPapersService } from './research-papers.service.js';
+import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
+import { CurrentUser } from '../../common/decorators/current-user.js';
 
 /** 空字符串 = 未填（前端清空筛选后会带 `x=`），不能让它被 coerce 成 0 后报错。 */
 function optionalInt(min: number, max?: number) {
@@ -31,10 +32,7 @@ const PaperListQuerySchema = z.object({
 /**
  * 裸 ZodError 不是 HttpException，会被全局过滤器兜成 500/5000
  * （`http-exception.filter.ts:20-27`）—— 客户端入参错误必须 400/1001。
- * 同款：`auth.controller.ts` 的 parseInput。
- *
- * 泛型取 schema 本身（`z.output<S>`）而非 `parseInput<T>(z.ZodType<T>)`：后者的 T
- * 会从 zod 的 input 位置推断，而 preprocess 的 input 是 unknown，输出类型会整体退化成 unknown。
+ * 沿用 admin-papers.controller.ts 的 parseQuery（泛型取 schema 本身 z.output<S>）。
  */
 function parseQuery<S extends z.ZodTypeAny>(schema: S, raw: unknown): z.output<S> {
   const parsed = schema.safeParse(raw);
@@ -47,11 +45,12 @@ function parseQuery<S extends z.ZodTypeAny>(schema: S, raw: unknown): z.output<S
   return parsed.data;
 }
 
-@Controller('api/admin/papers')
+/** 试卷列表 / 删除预览 / 删除：从 admin 迁到教研空间，仅 researcher 可访问。 */
+@Controller('api/research/papers')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('admin')
-export class AdminPapersController {
-  constructor(private readonly service: AdminPapersService) {}
+@Roles('researcher')
+export class ResearchPapersController {
+  constructor(private readonly service: ResearchPapersService) {}
 
   /** 试卷列表：全学科分页，keyword 匹配标题。 */
   @Get()
@@ -65,9 +64,9 @@ export class AdminPapersController {
     return this.service.preview(id);
   }
 
-  /** 删除套卷：独占题 + 考试会话 + 逐题作答，单事务。 */
+  /** 删除套卷：独占题 + 考试会话 + 逐题作答，单事务；成功后写 paper.delete 审计。 */
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.service.remove(id);
+  remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: JwtUser) {
+    return this.service.remove(id, user);
   }
 }
