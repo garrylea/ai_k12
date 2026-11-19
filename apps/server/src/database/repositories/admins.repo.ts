@@ -7,6 +7,7 @@ export interface AdminRow extends RowDataPacket {
   password_hash: string;
   name: string | null;
   is_active: number;
+  role: 'admin' | 'researcher';
   deleted_at: Date | null;
 }
 
@@ -16,6 +17,7 @@ export interface Admin {
   passwordHash: string;
   name: string | null;
   isActive: boolean;
+  role: 'admin' | 'researcher';
 }
 
 @Injectable()
@@ -52,6 +54,7 @@ export class AdminsRepository {
       passwordHash: row.password_hash,
       name: row.name,
       isActive: row.is_active === 1,
+      role: row.role,
     };
   }
 }

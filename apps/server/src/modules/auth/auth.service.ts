@@ -36,10 +36,10 @@ export class AuthService {
     if (admin) {
       this.assertActive(admin.isActive);
       await this.assertPassword(password, admin.passwordHash);
-      const seq = await this.bumpSession('admin', admin.id);
+      const seq = await this.bumpSession(admin.role, admin.id);
       return {
-        token: this.jwtService.sign({ sub: admin.id, role: 'admin' as const, seq }),
-        user: { id: admin.id, role: 'admin' as const, name: admin.name, username: admin.username },
+        token: this.jwtService.sign({ sub: admin.id, role: admin.role, seq }),
+        user: { id: admin.id, role: admin.role, name: admin.name, username: admin.username },
       };
     }
 
@@ -158,7 +158,7 @@ export class AuthService {
    * 必须先于签名 await 完成：写库失败直接抛（→ 500），**绝不能**在 seq 未持久化时
    * 签发 token——否则两台设备拿到相同 seq，互踢静默失效（spec §2.3）。
    */
-  private async bumpSession(role: 'admin' | 'parent' | 'student', id: number): Promise<number> {
+  private async bumpSession(role: 'admin' | 'researcher' | 'parent' | 'student', id: number): Promise<number> {
     const seq = await this.authSessionsRepo.bumpAndReturnSeq(role, id);
     this.sessionRegistry.bump(role, id, seq);
     return seq;

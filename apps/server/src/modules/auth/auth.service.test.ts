@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as bcrypt from 'bcrypt';
+import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { SessionRegistry } from '../../common/guards/session-registry.js';
 
@@ -47,7 +48,7 @@ const student = {
   name: '小明', age: 13, grade: '初二', schoolLevel: 'junior', isActive: true,
 };
 const parent = { id: 3, phone: '13800000000', passwordHash: HASH, name: '家长甲', isActive: true };
-const admin = { id: 1, username: 'admin', passwordHash: HASH, name: '超管', isActive: true };
+const admin = { id: 1, username: 'admin', passwordHash: HASH, name: '超管', isActive: true, role: 'admin' };
 
 describe('AuthService.login 三角色', () => {
   it('管理员用户名命中 -> admin token', async () => {
@@ -222,6 +223,53 @@ describe('AuthService.resetPassword', () => {
     // bcrypt 可比对：新哈希确实对应新密码（bcrypt 已在文件顶部 `import * as bcrypt`）
     expect(await bcrypt.compare(dto.newPassword, hash)).toBe(true);
     expect(d.jwtService.sign).not.toHaveBeenCalled(); // 不失效/不新发 token
+  });
+});
+
+describe('AuthService.login 教研角色（admins.role 驱动签发）', () => {
+  // 用真实 JwtService 解码签发结果，断言 token 内的 role，而非只验证 mock 被以某参数调用。
+  const realJwt = new JwtService({ secret: 'test-secret-for-researcher-role' });
+
+  it('admins.role=researcher 时签出 researcher token（解码后 role=researcher）', async () => {
+    const researcher = {
+      id: 7,
+      username: 'researcher',
+      passwordHash: await bcrypt.hash('r123456', 10),
+      name: '教研员',
+      isActive: true,
+      role: 'researcher',
+    };
+    const d = mkDeps({
+      adminsRepo: { findByUsername: vi.fn().mockResolvedValue(researcher) },
+      jwtService: realJwt,
+    });
+    const res = await mkSvc(d).login('researcher', 'r123456');
+
+    expect(res.user.role).toBe('researcher');
+    const decoded = realJwt.verify(res.token) as { sub: number; role: string; seq: number };
+    expect(decoded).toMatchObject({ sub: 7, role: 'researcher' });
+    expect(typeof decoded.seq).toBe('number');
+    expect(d.authSessionsRepo.bumpAndReturnSeq).toHaveBeenCalledWith('researcher', 7);
+  });
+
+  it('admins.role=admin 仍签出 admin token（解码后 role=admin）', async () => {
+    const adminRow = {
+      id: 1,
+      username: 'admin',
+      passwordHash: await bcrypt.hash('admin123', 10),
+      name: '超级管理员',
+      isActive: true,
+      role: 'admin',
+    };
+    const d = mkDeps({
+      adminsRepo: { findByUsername: vi.fn().mockResolvedValue(adminRow) },
+      jwtService: realJwt,
+    });
+    const res = await mkSvc(d).login('admin', 'admin123');
+
+    expect(res.user.role).toBe('admin');
+    const decoded = realJwt.verify(res.token) as { sub: number; role: string };
+    expect(decoded).toMatchObject({ sub: 1, role: 'admin' });
   });
 });
 

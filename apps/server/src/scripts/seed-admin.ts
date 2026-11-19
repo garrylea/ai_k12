@@ -1,8 +1,10 @@
 /**
- * seed：首个管理员账号 + 历史学生占位家长。
+ * seed：首个管理员账号 + 教研账号 + 历史学生占位家长。
  *
  * - 管理员：读 .env 的 ADMIN_INITIAL_USERNAME / ADMIN_INITIAL_PASSWORD（缺省 admin/admin123，
  *   仅开发便利；生产必须显式设置）。已存在同名管理员则跳过（幂等）。
+ * - 教研账号：读 .env 的 RESEARCHER_INITIAL_USERNAME / RESEARCHER_INITIAL_PASSWORD
+ *   （缺省 researcher/research123）。以 role='researcher' 写入 admins；已存在同名则跳过（幂等）。
  * - 占位家长：确保 id=1 的 parent 存在（phone='legacy'），接管 auth 旧实现挂在
  *   parent_id=1 下的存量学生。已存在则不动。
  *
@@ -49,7 +51,29 @@ async function main() {
     console.log(`[seed] 管理员 "${username}" 已创建（初始密码来自 .env，请尽快修改）`);
   }
 
-  // 2) 占位家长（id=1）
+  // 2) 教研账号（role='researcher'，幂等）
+  const rUsername = process.env.RESEARCHER_INITIAL_USERNAME || 'researcher';
+  const rPassword = process.env.RESEARCHER_INITIAL_PASSWORD || 'research123';
+  if (!rPassword || rPassword.length < 6) {
+    console.error('[seed] RESEARCHER_INITIAL_PASSWORD 未设置或长度 <6。');
+    process.exit(1);
+  }
+  const [researcherRows] = await pool.execute<mysql.RowDataPacket[]>(
+    'SELECT id FROM admins WHERE username = ? AND deleted_at IS NULL',
+    [rUsername],
+  );
+  if (researcherRows.length > 0) {
+    console.log(`[seed] 教研账号 "${rUsername}" 已存在，跳过`);
+  } else {
+    const hash = await bcrypt.hash(rPassword, 10);
+    await pool.execute(
+      "INSERT INTO admins (username, password_hash, name, role) VALUES (?, ?, ?, 'researcher')",
+      [rUsername, hash, '教研员'],
+    );
+    console.log(`[seed] 教研账号 "${rUsername}" 已创建`);
+  }
+
+  // 3) 占位家长（id=1）
   const [parentRows] = await pool.execute<mysql.RowDataPacket[]>(
     'SELECT id FROM parents WHERE id = 1',
   );

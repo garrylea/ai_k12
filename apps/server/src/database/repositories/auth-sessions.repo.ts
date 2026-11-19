@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 
 export interface AuthSessionSeqRow {
-  role: 'admin' | 'parent' | 'student';
+  role: 'admin' | 'researcher' | 'parent' | 'student';
   user_id: number;
   token_seq: number;
 }

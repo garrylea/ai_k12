@@ -7,7 +7,7 @@ import {
 
 export interface JwtUser {
   sub: number;
-  role: 'admin' | 'parent' | 'student';
+  role: 'admin' | 'researcher' | 'parent' | 'student';
   /** 仅学生 token 携带（= parent_id）；家长/管理员无。 */
   familyId?: number;
   parentId?: number;

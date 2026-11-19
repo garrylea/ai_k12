@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-type Role = 'admin' | 'parent' | 'student';
+type Role = 'admin' | 'researcher' | 'parent' | 'student';
 
 /**
  * 进程内「当前有效会话序号」注册表（仿 BanRegistry 模式，2026-10-10 单点登录互踢）：

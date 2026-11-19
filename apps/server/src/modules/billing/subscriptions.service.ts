@@ -19,7 +19,7 @@ export interface StatusView {
 }
 
 export interface StatusViewer {
-  role: 'student' | 'parent' | 'admin';
+  role: 'student' | 'parent' | 'admin' | 'researcher';
   sub: number;
 }
 
