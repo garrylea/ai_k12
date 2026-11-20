@@ -335,3 +335,65 @@ describe('ResearchQuestionEditDrawer 图片校验与软上限', () => {
     expect(field('解析').value).toBe('解析原文');
   });
 });
+
+describe('ResearchQuestionEditDrawer review 回归', () => {
+  it('切题后再编辑：新题其它字段不被旧题草稿覆盖（draftsRef 不得在 updater 里回写）', async () => {
+    let finishUpload!: (value: { fileId: number; url: string }) => void;
+    uploadMock.mockImplementation(() => new Promise((resolve) => { finishUpload = resolve; }));
+    const { rerender } = render(
+      <ResearchQuestionEditDrawer
+        question={q({ id: 1, content: '旧题题干', answer: '旧答案', explanation: '旧解析', approach: '旧思路' })}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    // 旧题有在途上传：切题时占位清理的 updater 会真正干活，是 ref 被回写的最危险路径
+    uploadInto('解析', [imageFile()]);
+    await waitFor(() => expect(uploadMock).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <ResearchQuestionEditDrawer
+        question={q({ id: 2, content: '新题题干', answer: '新答案', explanation: '新解析', approach: '新思路' })}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(field('解析').value).toBe('新解析'));
+    await act(async () => { finishUpload({ fileId: 9, url: '/uploads/research/late.png' }); });
+
+    fireEvent.change(field('思路'), { target: { value: '新思路-改' } });
+
+    expect(field('思路').value).toBe('新思路-改');
+    expect(field('题干').value).toBe('新题题干');
+    expect(field('标准答案').value).toBe('新答案');
+    expect(field('解析').value).toBe('新解析');
+    expect(field('选项').value).toBe(JSON.stringify(q().options, null, 2));
+  });
+
+  it('选项为 JSON 文本域：无上传控件，拖拽图片也不会写进 JSON', () => {
+    renderDrawer();
+    const optionsWrapper = field('选项').closest('[data-field]') as HTMLElement;
+    expect(within(optionsWrapper).queryByLabelText('上传图片到选项')).not.toBeInTheDocument();
+    expect(within(optionsWrapper).queryByRole('button', { name: '上传图片' })).not.toBeInTheDocument();
+
+    // markdown 字段仍保留上传控件（以 MARKDOWN_FIELDS 为准）
+    const analysisWrapper = field('解析').closest('[data-field]') as HTMLElement;
+    expect(within(analysisWrapper).getByRole('button', { name: '上传图片' })).toBeInTheDocument();
+
+    fireEvent.drop(field('选项'), { dataTransfer: { files: [imageFile()], types: ['Files'] } });
+    expect(uploadMock).not.toHaveBeenCalled();
+    expect(field('选项').value).toBe(JSON.stringify(q().options, null, 2));
+  });
+
+  it('上传失败占位在预览中标红', async () => {
+    uploadMock.mockRejectedValueOnce(new Error('网络错误'));
+    renderDrawer();
+    uploadInto('解析', [imageFile()]);
+    await waitFor(() => expect(field('解析').value).toContain('上传失败'));
+
+    const mark = screen.getByTestId('preview-explanation').querySelector('.research-upload-failure');
+    expect(mark).not.toBeNull();
+    expect(mark).toHaveTextContent('上传失败');
+    expect(mark).toHaveStyle({ color: 'var(--error)' });
+  });
+});

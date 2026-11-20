@@ -42,12 +42,16 @@ const FIELD_LABEL: Record<FieldKey, string> = {
   explanation: '解析',
   approach: '思路',
 };
+/** 既是 Markdown 预览域，也是唯一允许贴图的域：选项（JSON 文本域）不在其中，
+ *  给它上传按钮会把 `![图N](url)` 写进 JSON，直接把题目变成不可保存状态。 */
 const MARKDOWN_FIELDS: ReadonlySet<FieldKey> = new Set<FieldKey>([
   'content', 'answer', 'explanation', 'approach',
 ]);
 
 const NOTICE = '本次修正仅影响之后的判题，不会修改已有作答记录、错题本、积分与掌握度。';
 const failedToken = (n: number) => `［图${n} 上传失败］`;
+/** 失败标记由本组件生成，预览里补一层标红 span；rehype-raw 会把内联 HTML 渲染成真实元素。 */
+const FAILED_TOKEN_RE = /［图\d+ 上传失败］/g;
 
 function initialDrafts(q: ResearchQuestionDetail): Drafts {
   return {
@@ -59,15 +63,20 @@ function initialDrafts(q: ResearchQuestionDetail): Drafts {
   };
 }
 
-/** 统一 markdown 渲染：/uploads/ 由 markdown.tsx 的 resolveAsset 特判透传。 */
+/** 统一 markdown 渲染：/uploads/ 由 markdown.tsx 的 resolveAsset 特判透传。
+ *  上传失败占位（spec §6.1「标红失败图」）在预览中染成错误色。 */
 function MarkdownBlock({ text }: { text: string }) {
+  const decorated = text.replace(
+    FAILED_TOKEN_RE,
+    (marker) => `<span class="research-upload-failure" style="color:var(--error)">${marker}</span>`,
+  );
   return (
     <ReactMarkdown
       remarkPlugins={markdownRemarkPlugins}
       rehypePlugins={markdownRehypePlugins}
       components={markdownComponents}
     >
-      {preprocessMarkdown(text)}
+      {preprocessMarkdown(decorated)}
     </ReactMarkdown>
   );
 }
@@ -93,28 +102,32 @@ function EditField({ fieldKey, value, markdown, busy, onChange, onFiles }: EditF
         <label htmlFor={id} className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
           {label}
         </label>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          aria-label={`上传图片到${label}`}
-          onChange={(e) => {
-            const files = Array.from(e.target.files ?? []);
-            e.target.value = ''; // 同一文件可重复选
-            if (files.length > 0) onFiles(files);
-          }}
-        />
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => fileRef.current?.click()}
-          className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          上传图片
-        </button>
+        {markdown && (
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              aria-label={`上传图片到${label}`}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = ''; // 同一文件可重复选
+                if (files.length > 0) onFiles(files);
+              }}
+            />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => fileRef.current?.click()}
+              className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              上传图片
+            </button>
+          </>
+        )}
       </div>
       <textarea
         id={id}
@@ -123,6 +136,7 @@ function EditField({ fieldKey, value, markdown, busy, onChange, onFiles }: EditF
         disabled={busy}
         onChange={(e) => onChange(e.target.value)}
         onPaste={(e) => {
+          if (!markdown) return; // JSON 域不接图，保持原生文本粘贴
           const files: File[] = [];
           // 事件对象在 await 后失效：同步读完 clipboardData 再交给上传流程
           for (const item of Array.from(e.clipboardData?.items ?? [])) {
@@ -135,6 +149,11 @@ function EditField({ fieldKey, value, markdown, busy, onChange, onFiles }: EditF
           onFiles(files);
         }}
         onDrop={(e) => {
+          if (!markdown) {
+            // 选项 JSON 域：拦下文件拖拽避免浏览器导航，但绝不写进草稿
+            if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault();
+            return;
+          }
           const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
           if (files.length === 0) {
             if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault();
@@ -195,22 +214,28 @@ export default function ResearchQuestionEditDrawer({
     setField(key, cur.slice(0, idx) + replacement + cur.slice(idx + token.length));
   }, [setField]);
 
-  /** 切题/关闭时按「发起时归属」失效在途上传：abort + 清占位。 */
+  /** 切题/关闭时按「发起时归属」失效在途上传：abort + 清占位。
+   *  绝不在 setState 的函数式 updater 里写 ref（updater 可能被 React 延后到渲染阶段执行，
+   *  会覆盖调用方随后同步写入的 ref，造成切题后旧题草稿复活）。 */
   const abortAllUploads = useCallback(() => {
     const tokensByField = Array.from(tokensRef.current.entries());
     for (const ctrl of abortRef.current.values()) ctrl.abort();
     abortRef.current.clear();
-    setDrafts((prev) => {
-      const next = { ...prev };
-      for (const [key, tokens] of tokensByField) {
-        if (tokens.size === 0) continue;
-        let text = next[key];
-        for (const token of tokens) text = text.split(token).join('');
-        next[key] = text;
+    const cleaned = { ...draftsRef.current };
+    let changed = false;
+    for (const [key, tokens] of tokensByField) {
+      if (tokens.size === 0) continue;
+      let text = cleaned[key];
+      for (const token of tokens) text = text.split(token).join('');
+      if (text !== cleaned[key]) {
+        cleaned[key] = text;
+        changed = true;
       }
-      draftsRef.current = next;
-      return next;
-    });
+    }
+    if (changed) {
+      draftsRef.current = cleaned;
+      setDrafts(cleaned); // 值式提交：ref 与 state 同一次写入，顺序确定
+    }
     for (const tokens of tokensRef.current.values()) tokens.clear();
   }, []);
 
