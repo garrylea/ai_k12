@@ -102,18 +102,20 @@ afterEach(() => {
 });
 
 describe('ResearchPaperDetailPage 加载与表格', () => {
-  it('按路由 id 调 getResearchPaper(Number(id))，渲染七列表格', async () => {
+  it('按路由 id 调 getResearchPaper(Number(id))，渲染八列表格', async () => {
     renderDetail('/research/papers/7');
 
     expect(detailMock).toHaveBeenCalledWith(7);
     const table = await screen.findByTestId('detail-table');
-    for (const header of ['题号', '题型', '题干', '答案', '解析', '来源', '操作']) {
+    for (const header of ['题号', '题型', '题干', '答案', '解析', '思路', '来源', '操作']) {
       expect(within(table).getByRole('columnheader', { name: header })).toBeInTheDocument();
     }
     const row = within(table).getByRole('row', { name: /1.*choice.*B/ });
     expect(within(row).getByText('choice')).toBeInTheDocument();
     expect(within(row).getByText('B')).toBeInTheDocument();
-    expect(within(row).getByText('有')).toBeInTheDocument();
+    // 解析/思路显示正文，教研改完能在列表里看到变化（不再只显示「有/无」）
+    expect(within(row).getByText('乙正确')).toBeInTheDocument();
+    expect(within(row).getByText('排除法')).toBeInTheDocument();
     expect(within(row).getByText('汇文中学 2026')).toBeInTheDocument();
     // 题干走完整富文本渲染，不再截断成摘要
     expect(within(row).getByText(question().content)).toBeInTheDocument();
@@ -139,13 +141,34 @@ describe('ResearchPaperDetailPage 加载与表格', () => {
     expect(stemCell.querySelector('svg')).not.toBeNull();
   });
 
-  it('解析为空 → 解析列显示「无」', async () => {
-    detailMock.mockResolvedValueOnce(detail({ questions: [question({ id: 10, explanation: null })] }));
+  it('解析/思路为空 → 对应列显示「—」', async () => {
+    detailMock.mockResolvedValueOnce(detail({
+      questions: [question({ id: 10, explanation: null, approach: null })],
+    }));
 
     renderDetail();
 
     const table = await screen.findByTestId('detail-table');
-    expect(within(table).getByText('无')).toBeInTheDocument();
+    const row = within(table).getAllByRole('row')[1] as HTMLTableRowElement;
+    expect(row.cells[4]).toHaveTextContent('—'); // 解析
+    expect(row.cells[5]).toHaveTextContent('—'); // 思路
+  });
+
+  it('解析/思路跟题干同一套富文本渲染（不显示原始标记）', async () => {
+    detailMock.mockResolvedValueOnce(detail({
+      questions: [question({
+        explanation: '**结论**：$x=2$',
+        approach: '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" /></svg>',
+      })],
+    }));
+
+    renderDetail();
+    const table = await screen.findByTestId('detail-table');
+    const row = within(table).getAllByRole('row')[1] as HTMLTableRowElement;
+
+    expect(row.cells[4].querySelector('strong')?.textContent).toBe('结论');
+    expect(row.cells[4].querySelector('.katex')).not.toBeNull();
+    expect(row.cells[5].querySelector('svg')).not.toBeNull();
   });
 
   it('加载中 → Skeleton，不出表格/错误/空态', () => {
@@ -220,5 +243,23 @@ describe('ResearchPaperDetailPage 编辑入口契约', () => {
 
     await waitFor(() => expect(detailMock).toHaveBeenCalledTimes(2));
     expect(screen.queryByTestId('drawer-stub')).not.toBeInTheDocument();
+  });
+
+  it('保存后重新拉到的解析/思路直接出现在列表里', async () => {
+    detailMock.mockResolvedValueOnce(detail({ questions: [question({ explanation: null, approach: null })] }));
+    detailMock.mockResolvedValueOnce(detail({
+      questions: [question({ explanation: '新补的解析', approach: '新补的思路' })],
+    }));
+
+    renderDetail();
+    const table = await screen.findByTestId('detail-table');
+    const row = () => within(table).getAllByRole('row')[1] as HTMLTableRowElement;
+    expect(row().cells[4]).toHaveTextContent('—');
+
+    fireEvent.click(within(table).getByRole('button', { name: '编辑' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存完成' }));
+
+    await waitFor(() => expect(row().cells[4]).toHaveTextContent('新补的解析'));
+    expect(row().cells[5]).toHaveTextContent('新补的思路');
   });
 });

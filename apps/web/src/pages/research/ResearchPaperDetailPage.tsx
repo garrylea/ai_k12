@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import {
   markdownComponents,
   markdownRehypePlugins,
-  markdownRemarkPlugins,
+  markdownRemarkPluginsWithBreaks,
   preprocessMarkdown,
 } from '@/components/markdown';
 import {
@@ -17,6 +17,28 @@ import ResearchQuestionEditDrawer from './ResearchQuestionEditDrawer';
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : '操作失败';
+}
+
+/**
+ * 表格里的解析 / 思路单元格：与编辑抽屉、学生端同一套 markdown 管线
+ * （Markdown + LaTeX + 原生 HTML + SVG），只截前几行供教研扫一眼有没有内容；
+ * 完整内容在「编辑」抽屉里看（表格列宽固定，全展开会把行撑得非常高）。
+ */
+function MarkdownPreviewCell({ text }: { text: string | null }) {
+  if (!text || !text.trim()) {
+    return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
+  }
+  return (
+    <div className="max-h-24 overflow-hidden" style={{ color: 'var(--text-primary)' }}>
+      <ReactMarkdown
+        remarkPlugins={markdownRemarkPluginsWithBreaks}
+        rehypePlugins={markdownRehypePlugins}
+        components={markdownComponents}
+      >
+        {preprocessMarkdown(text)}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 /**
@@ -71,7 +93,7 @@ export default function ResearchPaperDetailPage() {
           该试卷暂无题目
         </div>
       ) : (
-        <div data-testid="detail-table" className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div data-testid="detail-table" className="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50" style={{ color: 'var(--text-secondary)' }}>
               <tr>
@@ -80,6 +102,7 @@ export default function ResearchPaperDetailPage() {
                 <th className="text-left px-4 py-3 font-medium">题干</th>
                 <th className="text-left px-4 py-3 font-medium">答案</th>
                 <th className="text-left px-4 py-3 font-medium">解析</th>
+                <th className="text-left px-4 py-3 font-medium">思路</th>
                 <th className="text-left px-4 py-3 font-medium">来源</th>
                 <th className="text-right px-4 py-3 font-medium">操作</th>
               </tr>
@@ -91,7 +114,7 @@ export default function ResearchPaperDetailPage() {
                   <td className="px-4 py-3">{q.type}</td>
                   <td className="px-4 py-3 max-w-md" title={q.content}>
                     <ReactMarkdown
-                      remarkPlugins={markdownRemarkPlugins}
+                      remarkPlugins={markdownRemarkPluginsWithBreaks}
                       rehypePlugins={markdownRehypePlugins}
                       components={markdownComponents}
                     >
@@ -99,7 +122,13 @@ export default function ResearchPaperDetailPage() {
                     </ReactMarkdown>
                   </td>
                   <td className="px-4 py-3">{q.answer}</td>
-                  <td className="px-4 py-3">{q.explanation ? '有' : '无'}</td>
+                  {/* 显示正文而不是「有/无」：教研改完解析/思路要能在列表里立刻看到变化（PRD §7.14 的明细含这两列） */}
+                  <td className="px-4 py-3 align-top text-xs max-w-[16rem]">
+                    <MarkdownPreviewCell text={q.explanation} />
+                  </td>
+                  <td className="px-4 py-3 align-top text-xs max-w-[16rem]">
+                    <MarkdownPreviewCell text={q.approach} />
+                  </td>
                   <td className="px-4 py-3">
                     {q.source ? `${q.source}${q.sourceYear ? ` ${q.sourceYear}` : ''}` : '—'}
                   </td>

@@ -253,6 +253,17 @@ describe('ResearchQuestionEditDrawer 静态提示与预览', () => {
 
     expect(beginImageDrag).not.toHaveBeenCalled();
   });
+
+  it('预览与学生端同一套管线：软换行保留，LaTeX / 原生 HTML / SVG 都渲染', () => {
+    renderDrawer(q({
+      explanation: '第一行\n第二行 $x^2$ <svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" /></svg>',
+    }));
+    const preview = screen.getByTestId('preview-explanation');
+
+    expect(preview.querySelector('br')).not.toBeNull();      // remarkBreaks：单换行 = 换行
+    expect(preview.querySelector('.katex')).not.toBeNull();  // $x^2$
+    expect(preview.querySelector('svg')).not.toBeNull();     // 原生 SVG
+  });
 });
 
 describe('ResearchQuestionEditDrawer 五字段 token 隔离', () => {

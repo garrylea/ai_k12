@@ -4,7 +4,7 @@ import {
   MarkdownImg,
   markdownComponents,
   markdownRehypePlugins,
-  markdownRemarkPlugins,
+  markdownRemarkPluginsWithBreaks,
   preprocessMarkdown,
 } from '@/components/markdown';
 import { ConfirmDialog } from '@/components/base/ConfirmDialog';
@@ -128,6 +128,7 @@ function toggleAnswer(
 
 /** 统一 markdown 渲染：/uploads/ 由 markdown.tsx 的 resolveAsset 特判透传。
  *  上传失败占位（spec §6.1「标红失败图」）在预览中染成错误色。
+ *  插件与运行态一致（含 remarkBreaks）：学生看到的换行/公式/HTML/SVG 与这里预览相同。
  *  `dragToDraft`：题干预览里的图可拖进右侧草稿（Pointer 事件，鼠标/触屏都能拖，同题面图口径）。 */
 function MarkdownBlock({ text, dragToDraft = false }: { text: string; dragToDraft?: boolean }) {
   const decorated = text.replace(
@@ -136,7 +137,7 @@ function MarkdownBlock({ text, dragToDraft = false }: { text: string; dragToDraf
   );
   return (
     <ReactMarkdown
-      remarkPlugins={markdownRemarkPlugins}
+      remarkPlugins={markdownRemarkPluginsWithBreaks}
       rehypePlugins={markdownRehypePlugins}
       components={dragToDraft ? draggableMarkdownComponents : markdownComponents}
     >
