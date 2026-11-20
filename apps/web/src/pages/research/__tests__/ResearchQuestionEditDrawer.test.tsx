@@ -610,6 +610,17 @@ describe('ResearchQuestionEditDrawer 草稿白板', () => {
     expect(stub).toHaveAttribute('data-persist', 'false');
   });
 
+  it('展开草稿 → 抽屉加宽、出现可拖拽分割条；编辑字段仍在左栏', () => {
+    renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: '展开草稿' }));
+
+    const aside = screen.getByRole('dialog', { name: /编辑题目/ }) as HTMLElement;
+    expect(aside.className).toContain('w-[min(96vw,96rem)]');
+    expect(screen.getByRole('separator', { name: '调整草稿宽度' })).toBeInTheDocument();
+    // 左栏编辑字段仍可编辑（草稿与编辑并存，不是替换）
+    expect(field('题干')).toBeInTheDocument();
+  });
+
   it('再点「收起草稿」→ 白板卸载（关闭即清空）', () => {
     renderDrawer();
     fireEvent.click(screen.getByRole('button', { name: '展开草稿' }));

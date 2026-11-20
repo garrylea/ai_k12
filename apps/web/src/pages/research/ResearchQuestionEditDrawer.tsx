@@ -23,6 +23,11 @@ let lastWidthPx: number | null = null;
 /** 宽度上限：视口 92%（与原 class 的 92vw 一致）；下限保书写空间，窄屏时等于上限=禁调。 */
 const WIDTH_MAX_PX = () => window.innerWidth * 0.92;
 const WIDTH_MIN_PX = () => Math.min(360, WIDTH_MAX_PX());
+/** 草稿栏宽度：会话内记忆，刷新归默认；夹紧 [320, 70vw] 保证左栏可读。 */
+let lastDraftWidthPx: number | null = null;
+const DRAFT_W_DEFAULT = 480;
+const DRAFT_W_MIN = 320;
+const DRAFT_W_MAX = () => Math.max(DRAFT_W_MIN, window.innerWidth * 0.7);
 
 export interface ResearchQuestionEditDrawerProps {
   question: ResearchQuestionDetail; // 五字段原值，勿剥离
@@ -278,6 +283,44 @@ export default function ResearchQuestionEditDrawer({
   const [uploadCount, setUploadCount] = useState(0);
   // 草稿白板开合：复用现成的手写白板组件；persist=false，关抽屉即卸载清空。
   const [draftOpen, setDraftOpen] = useState(false);
+  const [draftWidthPx, setDraftWidthPx] = useState<number>(() =>
+    lastDraftWidthPx === null
+      ? DRAFT_W_DEFAULT
+      : Math.min(DRAFT_W_MAX(), Math.max(DRAFT_W_MIN, lastDraftWidthPx)),
+  );
+  const [draftDragging, setDraftDragging] = useState(false);
+  const draftColRef = useRef<HTMLDivElement>(null);
+  const draftWidthRef = useRef(draftWidthPx);
+  const draftResizeStartRef = useRef<{ startX: number; startPx: number } | null>(null);
+
+  const applyDraftWidth = useCallback((px: number) => {
+    const clamped = Math.min(DRAFT_W_MAX(), Math.max(DRAFT_W_MIN, px));
+    draftWidthRef.current = clamped;
+    setDraftWidthPx(clamped);
+  }, []);
+
+  const handleDraftResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const startPx =
+      draftColRef.current?.getBoundingClientRect().width || draftWidthRef.current || DRAFT_W_DEFAULT;
+    draftResizeStartRef.current = { startX: e.clientX, startPx };
+    setDraftDragging(true);
+  };
+
+  const handleDraftResizePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = draftResizeStartRef.current;
+    if (!start) return;
+    // 向左拖 clientX 变小 → 草稿变宽
+    applyDraftWidth(start.startPx + (start.startX - e.clientX));
+  };
+
+  const endDraftResize = () => {
+    if (!draftResizeStartRef.current) return; // pointerup / lostpointercapture 幂等收尾
+    draftResizeStartRef.current = null;
+    setDraftDragging(false);
+    lastDraftWidthPx = draftWidthRef.current;
+  };
 
   /** 选项卡片数据：从实时 JSON 派生，改 JSON 即时更新；非选择题/非法 JSON → null。 */
   const choiceOptions = parseChoiceOptions(question.type, drafts.options);
@@ -538,27 +581,33 @@ export default function ResearchQuestionEditDrawer({
       role="dialog"
       aria-label={`编辑题目 #${question.questionNo}`}
       data-status={status}
-      style={{ width: widthPx !== null ? `${widthPx}px` : undefined }}
-      className="fixed inset-y-0 right-0 z-50 w-[min(92vw,32rem)] bg-white shadow-2xl border-l border-gray-200"
+      style={{
+        width: !draftOpen && widthPx !== null ? `${widthPx}px` : undefined,
+      }}
+      className={`fixed inset-y-0 right-0 z-50 bg-white shadow-2xl border-l border-gray-200 ${
+        draftOpen ? 'w-[min(96vw,96rem)]' : 'w-[min(92vw,32rem)]'
+      }`}
     >
-      {/* 左缘拖拽条：10px 命中区 + z-10，避免内容区抢指针事件；跟手即时，无 width 过渡 */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="调整抽屉宽度"
-        draggable={false}
-        className={`absolute left-0 top-0 bottom-0 w-[10px] z-10 cursor-col-resize touch-none flex items-center justify-center group ${dragging ? 'select-none' : ''}`}
-        onPointerDown={handleResizePointerDown}
-        onPointerMove={handleResizePointerMove}
-        onPointerUp={endResize}
-        onPointerCancel={endResize}
-        onLostPointerCapture={endResize}
-      >
-        <span className="w-[2px] h-14 rounded-full bg-gray-200 group-hover:bg-gray-400 transition-colors" />
-      </div>
+      {/* 左缘拖拽条：10px 命中区 + z-10；草稿展开时让位给栏间分割条 */}
+      {!draftOpen && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整抽屉宽度"
+          draggable={false}
+          className={`absolute left-0 top-0 bottom-0 w-[10px] z-10 cursor-col-resize touch-none flex items-center justify-center group ${dragging ? 'select-none' : ''}`}
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
+          onLostPointerCapture={endResize}
+        >
+          <span className="w-[2px] h-14 rounded-full bg-gray-200 group-hover:bg-gray-400 transition-colors" />
+        </div>
+      )}
 
-      <div className={`h-full overflow-y-auto p-6 ${dragging ? 'select-none' : ''}`}>
-        <header className="flex items-center justify-between">
+      <div className="flex h-full flex-col">
+        <header className="flex shrink-0 items-center justify-between px-6 pt-6">
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
           {`编辑题目 #${question.questionNo}`}
         </h2>
@@ -610,21 +659,15 @@ export default function ResearchQuestionEditDrawer({
         </div>
       </header>
 
-      {/* 草稿白板：复用现成 DraftWhiteboard，persist=false → 关闭抽屉卸载即清空 */}
-      {draftOpen && (
-        <section
-          data-testid="research-draft-whiteboard"
-          className="mt-4 h-[26rem] flex flex-col rounded-xl border border-gray-200 overflow-hidden"
-        >
-          <DraftWhiteboard questionId={`research-${question.id}`} persist={false} />
-        </section>
-      )}
+      {/* 草稿展开：左栏编辑内容 + 中间分割条 + 右栏白板；两栏等高铺满抽屉 */}
+      <div className="flex min-h-0 flex-1">
+        {/* 左栏：原编辑内容（独立滚动） */}
+        <div className={`min-w-0 flex-1 overflow-y-auto px-6 pb-6 ${draftDragging ? 'select-none' : ''}`}>
+          <p className="static-notice mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            {NOTICE}
+          </p>
 
-      <p className="static-notice mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
-        {NOTICE}
-      </p>
-
-      {FIELD_KEYS.map((key) => (
+          {FIELD_KEYS.map((key) => (
         <Fragment key={key}>
           {key === 'options' && choiceOptions && (
             <ChoiceOptionCards
@@ -671,23 +714,55 @@ export default function ResearchQuestionEditDrawer({
         />
       </div>
 
-      <footer className="mt-6 flex justify-end gap-3">
-        <button
-          type="button"
-          onClick={requestCancel}
-          className="px-4 py-2 rounded-lg border border-gray-200 text-sm"
-        >
-          取消
-        </button>
-        <button
-          type="button"
-          disabled={saveDisabled}
-          onClick={() => void handleSave()}
-          className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white disabled:opacity-50"
-        >
-          保存
-        </button>
-      </footer>
+        <footer className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={requestCancel}
+            className="px-4 py-2 rounded-lg border border-gray-200 text-sm"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            disabled={saveDisabled}
+            onClick={() => void handleSave()}
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white disabled:opacity-50"
+          >
+            保存
+          </button>
+        </footer>
+        </div>{/* 左栏结束 */}
+
+        {/* 中间分割条：拖拽调右栏（草稿）宽度，10px 命中区 */}
+        {draftOpen && (
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整草稿宽度"
+              draggable={false}
+              className="w-[10px] shrink-0 cursor-col-resize touch-none flex items-center justify-center group"
+              onPointerDown={handleDraftResizePointerDown}
+              onPointerMove={handleDraftResizePointerMove}
+              onPointerUp={endDraftResize}
+              onPointerCancel={endDraftResize}
+              onLostPointerCapture={endDraftResize}
+            >
+              <span className="w-[3px] h-14 rounded-full bg-gray-300 group-hover:bg-[var(--brand-500)] transition-colors" />
+            </div>
+
+            {/* 右栏：现成手写白板，persist=false → 关闭即清空 */}
+            <div
+              ref={draftColRef}
+              data-testid="research-draft-whiteboard"
+              className="shrink-0 min-w-0 flex flex-col border-l border-gray-200"
+              style={{ width: `${draftWidthPx}px` }}
+            >
+              <DraftWhiteboard questionId={`research-${question.id}`} persist={false} />
+            </div>
+          </>
+        )}
+      </div>{/* 两栏行结束 */}
 
       <ConfirmDialog
         open={status === 'closing'}
@@ -695,7 +770,7 @@ export default function ResearchQuestionEditDrawer({
         onCancel={() => setStatus('editing')}
         onConfirm={() => void discard()}
       />
-      </div>
+      </div>{/* flex-col 外壳结束 */}
     </aside>
   );
 }
