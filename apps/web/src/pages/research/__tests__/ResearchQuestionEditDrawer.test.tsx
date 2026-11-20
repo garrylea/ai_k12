@@ -463,3 +463,55 @@ describe('ResearchQuestionEditDrawer 关闭按钮', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+// Task 2：左缘拖拽调宽。jsdom 无 PointerEvent 实现、getBoundingClientRect 恒 0，
+// 这两个桩只在本 describe 内生效（beforeEach 装、afterEach restore），不污染上面 27 个用例。
+describe('ResearchQuestionEditDrawer 拖拽调宽', () => {
+  const MOCK_RECT = {
+    width: 512, height: 800, x: 0, y: 0, top: 0, left: 0,
+    right: 512, bottom: 800, toJSON: () => ({}),
+  } as DOMRect;
+
+  beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(MOCK_RECT);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function dragSeparator(fromX: number, toX: number) {
+    const sep = screen.getByRole('separator', { name: '调整抽屉宽度' });
+    fireEvent.pointerDown(sep, { clientX: fromX, pointerId: 1, button: 0, pointerType: 'mouse' });
+    fireEvent.pointerMove(sep, { clientX: toX, pointerId: 1 });
+    fireEvent.pointerUp(sep, { clientX: toX, pointerId: 1 });
+  }
+
+  it('左缘有竖向拖拽条', () => {
+    renderDrawer();
+    const sep = screen.getByRole('separator', { name: '调整抽屉宽度' });
+    expect(sep).toHaveAttribute('aria-orientation', 'vertical');
+  });
+
+  it('向左拖变宽、向右拖变窄，并夹紧到 360..92vw', () => {
+    renderDrawer();
+    dragSeparator(500, 400); // 512 + (500-400) = 612
+    expect(screen.getByRole('dialog', { name: /编辑题目/ }).style.width).toBe('612px');
+    dragSeparator(500, 900); // 512 + (500-900) = -388 → 夹紧到下限 360
+    expect(screen.getByRole('dialog', { name: /编辑题目/ }).style.width).toBe('360px');
+  });
+
+  it('会话记忆：拖拽后卸载再挂载仍保留宽度', () => {
+    const first = renderDrawer();
+    dragSeparator(500, 420); // 512 + 80 = 592
+    expect(screen.getByRole('dialog', { name: /编辑题目/ }).style.width).toBe('592px');
+    first.unmount();
+    renderDrawer();
+    // 模块级 lastWidthPx 在单文件内共享，重挂载读回上次宽度
+    expect(screen.getByRole('dialog', { name: /编辑题目/ }).style.width).toBe('592px');
+  });
+});

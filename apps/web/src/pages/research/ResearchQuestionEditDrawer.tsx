@@ -17,6 +17,12 @@ import {
   type ResearchQuestionDetail,
 } from '@/services/api';
 
+/** 抽屉宽度会话记忆：模块级，本会话内跨开关 / 跨试卷保持，刷新归 null。 */
+let lastWidthPx: number | null = null;
+/** 宽度上限：视口 92%（与原 class 的 92vw 一致）；下限保书写空间，窄屏时等于上限=禁调。 */
+const WIDTH_MAX_PX = () => window.innerWidth * 0.92;
+const WIDTH_MIN_PX = () => Math.min(360, WIDTH_MAX_PX());
+
 export interface ResearchQuestionEditDrawerProps {
   question: ResearchQuestionDetail; // 五字段原值，勿剥离
   onClose: () => void;
@@ -194,6 +200,43 @@ export default function ResearchQuestionEditDrawer({
   const [confirmedSource, setConfirmedSource] = useState(false);
   const [note, setNote] = useState('');
   const [uploadCount, setUploadCount] = useState(0);
+
+  const [widthPx, setWidthPx] = useState<number | null>(() => lastWidthPx);
+  const [dragging, setDragging] = useState(false);
+  const drawerRef = useRef<HTMLElement>(null);
+  const widthPxRef = useRef(widthPx);
+  const resizeStartRef = useRef<{ startX: number; startPx: number } | null>(null);
+
+  const applyWidth = useCallback((px: number) => {
+    const clamped = Math.min(WIDTH_MAX_PX(), Math.max(WIDTH_MIN_PX(), px));
+    widthPxRef.current = clamped;
+    setWidthPx(clamped);
+  }, []);
+
+  const handleResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const startPx =
+      drawerRef.current?.getBoundingClientRect().width ||
+      widthPxRef.current ||
+      Math.min(512, WIDTH_MAX_PX());
+    resizeStartRef.current = { startX: e.clientX, startPx };
+    setDragging(true);
+  };
+
+  const handleResizePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = resizeStartRef.current;
+    if (!start) return;
+    // 向左拖 clientX 变小 → 变宽；向右拖变窄（右侧抽屉的直觉方向）
+    applyWidth(start.startPx + (start.startX - e.clientX));
+  };
+
+  const endResize = () => {
+    if (!resizeStartRef.current) return; // pointerup / lostpointercapture 各触发一次，幂等收尾
+    resizeStartRef.current = null;
+    setDragging(false);
+    lastWidthPx = widthPxRef.current; // 落定即写会话记忆
+  };
 
   const tokensRef = useRef<Map<FieldKey, Set<string>>>(
     new Map(FIELD_KEYS.map((key) => [key, new Set<string>()])),
@@ -408,12 +451,31 @@ export default function ResearchQuestionEditDrawer({
 
   return (
     <aside
+      ref={drawerRef}
       role="dialog"
       aria-label={`编辑题目 #${question.questionNo}`}
       data-status={status}
-      className="fixed inset-y-0 right-0 z-50 w-[min(92vw,32rem)] overflow-y-auto bg-white shadow-2xl border-l border-gray-200 p-6"
+      style={{ width: widthPx !== null ? `${widthPx}px` : undefined }}
+      className="fixed inset-y-0 right-0 z-50 w-[min(92vw,32rem)] bg-white shadow-2xl border-l border-gray-200"
     >
-      <header className="flex items-center justify-between">
+      {/* 左缘拖拽条：10px 命中区 + z-10，避免内容区抢指针事件；跟手即时，无 width 过渡 */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整抽屉宽度"
+        draggable={false}
+        className={`absolute left-0 top-0 bottom-0 w-[10px] z-10 cursor-col-resize touch-none flex items-center justify-center group ${dragging ? 'select-none' : ''}`}
+        onPointerDown={handleResizePointerDown}
+        onPointerMove={handleResizePointerMove}
+        onPointerUp={endResize}
+        onPointerCancel={endResize}
+        onLostPointerCapture={endResize}
+      >
+        <span className="w-[2px] h-14 rounded-full bg-gray-200 group-hover:bg-gray-400 transition-colors" />
+      </div>
+
+      <div className={`h-full overflow-y-auto p-6 ${dragging ? 'select-none' : ''}`}>
+        <header className="flex items-center justify-between">
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
           {`编辑题目 #${question.questionNo}`}
         </h2>
@@ -505,6 +567,7 @@ export default function ResearchQuestionEditDrawer({
         onCancel={() => setStatus('editing')}
         onConfirm={() => void discard()}
       />
+      </div>
     </aside>
   );
 }
