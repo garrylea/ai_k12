@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import {
   listResearchAudit,
@@ -50,9 +50,14 @@ export default function ResearchAuditPage() {
   const [page, setPage] = useState(1);
   const [data, setData] = useState<ResearchAuditListResult | null>(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  // 请求计数：筛选/翻页会让旧请求仍在途，只有最新一次的响应允许写入状态。
+  const requestRef = useRef(0);
 
   const load = useCallback(() => {
+    const requestId = ++requestRef.current;
     setError('');
+    setLoading(true);
     const params: Parameters<typeof listResearchAudit>[0] = { page, pageSize: PAGE_SIZE };
     if (applied.action) params.action = applied.action;
     if (applied.targetType) params.targetType = applied.targetType;
@@ -60,10 +65,16 @@ export default function ResearchAuditPage() {
     if (applied.from) params.from = applied.from;
     if (applied.to) params.to = applied.to;
     listResearchAudit(params)
-      .then((res) => setData(res))
+      .then((res) => {
+        if (requestId === requestRef.current) setData(res);
+      })
       .catch((err: unknown) => {
+        if (requestId !== requestRef.current) return;
         setData(null);
         setError(errMessage(err));
+      })
+      .finally(() => {
+        if (requestId === requestRef.current) setLoading(false);
       });
   }, [applied, page]);
 
@@ -161,9 +172,9 @@ export default function ResearchAuditPage() {
 
       {error ? (
         <div data-testid="audit-error" className="bg-white rounded-2xl border border-dashed border-gray-200 p-10 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
-          审计日志加载失败，请稍后重试
+          {error || '审计日志加载失败，请稍后重试'}
         </div>
-      ) : data === null ? (
+      ) : loading || data === null ? (
         <div data-testid="audit-loading" className="bg-white rounded-2xl border border-gray-200 p-5 space-y-3">
           <Skeleton width={180} height={16} />
           <Skeleton width="80%" height={14} />

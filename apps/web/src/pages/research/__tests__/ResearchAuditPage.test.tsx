@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ResearchAuditPage from '../ResearchAuditPage';
-import { listResearchAudit, type AuditItem } from '@/services/api';
+import { listResearchAudit, type AuditItem, type ResearchAuditListResult } from '@/services/api';
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
@@ -30,6 +30,16 @@ function item(over: Partial<AuditItem> = {}): AuditItem {
 
 function renderPage() {
   return render(<ResearchAuditPage />);
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 beforeEach(() => {
@@ -125,6 +135,67 @@ describe('ResearchAuditPage 筛选与分页', () => {
 
     listMock.mockRejectedValueOnce(new Error('服务异常'));
     renderPage();
-    expect(await screen.findByTestId('audit-error')).toBeInTheDocument();
+    expect(await screen.findByTestId('audit-error')).toHaveTextContent('服务异常');
+  });
+});
+
+describe('ResearchAuditPage 竞态与重新加载反馈', () => {
+  it('旧请求最后返回时不覆盖最新请求的表格数据', async () => {
+    const first = deferred<ResearchAuditListResult>();
+    const second = deferred<ResearchAuditListResult>();
+    listMock.mockReset()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    renderPage();
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByTestId('audit-filter-action'), { target: { value: 'image.delete' } });
+    fireEvent.click(screen.getByRole('button', { name: '查询' }));
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2));
+
+    // 新请求先到达
+    await act(async () => {
+      second.resolve({
+        items: [item({ id: 2, actorName: '最新操作人', note: '最新记录' })],
+        total: 1, page: 1, pageSize: 20,
+      });
+    });
+    expect(await screen.findByText('最新记录')).toBeInTheDocument();
+
+    // 旧请求后到达，必须被忽略
+    await act(async () => {
+      first.resolve({
+        items: [item({ id: 1, actorName: '过期操作人', note: '过期记录' })],
+        total: 1, page: 1, pageSize: 20,
+      });
+    });
+    expect(screen.queryByText('过期记录')).not.toBeInTheDocument();
+    expect(screen.getByText('最新记录')).toBeInTheDocument();
+  });
+
+  it('换筛选重新拉取期间展示骨架，不再停留在旧表格', async () => {
+    const pending = deferred<ResearchAuditListResult>();
+    listMock.mockReset()
+      .mockResolvedValueOnce({ items: [item({ id: 1, note: '旧记录' })], total: 1, page: 1, pageSize: 20 })
+      .mockReturnValueOnce(pending.promise);
+
+    renderPage();
+    expect(await screen.findByText('旧记录')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('audit-filter-action'), { target: { value: 'image.delete' } });
+    fireEvent.click(screen.getByRole('button', { name: '查询' }));
+
+    expect(await screen.findByTestId('audit-loading')).toBeInTheDocument();
+    expect(screen.queryByText('旧记录')).not.toBeInTheDocument();
+
+    await act(async () => {
+      pending.resolve({
+        items: [item({ id: 2, note: '新记录' })],
+        total: 1, page: 1, pageSize: 20,
+      });
+    });
+    expect(await screen.findByText('新记录')).toBeInTheDocument();
+    expect(screen.queryByTestId('audit-loading')).not.toBeInTheDocument();
   });
 });
