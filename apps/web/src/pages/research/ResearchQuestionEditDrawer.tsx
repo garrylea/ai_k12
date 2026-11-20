@@ -663,8 +663,9 @@ export default function ResearchQuestionEditDrawer({
 
       {/* 草稿展开：左栏编辑内容 + 中间分割条 + 右栏白板；两栏等高铺满抽屉 */}
       <div className="flex min-h-0 flex-1">
-        {/* 左栏：原编辑内容（独立滚动） */}
-        <div className={`min-w-0 flex-1 overflow-y-auto px-6 pb-6 ${draftDragging ? 'select-none' : ''}`}>
+        {/* 左栏：原编辑内容（独立滚动）+ 底部常驻操作栏 */}
+        <div className={`flex min-w-0 min-h-0 flex-1 flex-col ${draftDragging ? 'select-none' : ''}`}>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
           <p className="static-notice mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
             {NOTICE}
           </p>
@@ -716,23 +717,26 @@ export default function ResearchQuestionEditDrawer({
         />
       </div>
 
-        <footer className="mt-6 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={requestCancel}
-            className="px-4 py-2 rounded-lg border border-gray-200 text-sm"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            disabled={saveDisabled}
-            onClick={() => void handleSave()}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white disabled:opacity-50"
-          >
-            保存
-          </button>
-        </footer>
+          </div>{/* 滚动区结束 */}
+
+          {/* 常驻操作栏：与编辑栏同宽、固定在栏底，内容在其上方滚动；不与内容重叠 */}
+          <footer className="shrink-0 flex items-center justify-end gap-3 border-t border-gray-200 bg-white px-6 py-3 shadow-[0_-2px_8px_rgba(0,0,0,0.04)]">
+            <button
+              type="button"
+              onClick={requestCancel}
+              className="px-5 py-2 rounded-lg border border-gray-200 text-sm hover:bg-gray-50"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              disabled={saveDisabled}
+              onClick={() => void handleSave()}
+              className="px-5 py-2 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white disabled:opacity-50"
+            >
+              保存
+            </button>
+          </footer>
         </div>{/* 左栏结束 */}
 
         {/* 中间分割条：拖拽调右栏（草稿）宽度，10px 命中区 */}
