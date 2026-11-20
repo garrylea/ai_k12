@@ -95,7 +95,7 @@ describe('AdminAccountsPage 教研员 Tab', () => {
 
   it('新建教研员：填表提交后调用 createResearcher 并刷新', async () => {
     await openResearchersTab();
-    fireEvent.click(screen.getByRole('button', { name: '新建教研员' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建账号' }));
 
     fireEvent.change(screen.getByPlaceholderText('字母、数字、下划线，3-50 位'), {
       target: { value: 'teacher02' },
@@ -122,7 +122,7 @@ describe('AdminAccountsPage 教研员 Tab', () => {
   it('重名 409：错误 toast，弹窗不关闭且输入保留', async () => {
     createMock.mockRejectedValueOnce(new ApiError(1004, '用户名已存在', undefined, 409));
     await openResearchersTab();
-    fireEvent.click(screen.getByRole('button', { name: '新建教研员' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建账号' }));
 
     const usernameInput = screen.getByPlaceholderText('字母、数字、下划线，3-50 位');
     fireEvent.change(usernameInput, { target: { value: 'teacher02' } });
