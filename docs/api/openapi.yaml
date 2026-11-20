@@ -64,6 +64,8 @@ tags:
     description: PC App 学习管控（单次学习锁定 + 家长解除命令）
   - name: Freeform
     description: 做题入口（自由做题）：题图/文字识别切题 + 判题 SSE
+  - name: Research
+    description: 教研角色（researcher）：试卷管理迁移 + 题目五字段纠错 + 图片生命周期 + 内容审计；改答案不回填历史数据
 paths:
   # Auth
   /auth/register:
@@ -4407,6 +4409,10 @@ paths:
       tags: [Admin]
       summary: 试卷列表（分页，可筛选）
       operationId: listAdminPapers
+      deprecated: true
+      description: >-
+        已废弃（2026-11-19）：试卷管理已迁至教研角色。原文保留供旧客户端参考，不补重定向；
+        请用 GET /research/papers（需 researcher token）。
       parameters:
         - { name: subjectId, in: query, schema: { type: integer, minimum: 1 } }
         - { name: year, in: query, schema: { type: integer, minimum: 2000, maximum: 2100 } }
@@ -4431,6 +4437,10 @@ paths:
       tags: [Admin]
       summary: 删除试卷前的影响面预览
       operationId: previewAdminPaperDelete
+      deprecated: true
+      description: >-
+        已废弃（2026-11-19）：试卷管理已迁至教研角色。原文保留供旧客户端参考，不补重定向；
+        请用 GET /research/papers/{id}/delete-preview（需 researcher token）。
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
       responses:
@@ -4452,6 +4462,10 @@ paths:
       tags: [Admin]
       summary: 删除套卷（独占题 + 考试会话 + 作答，单事务）
       operationId: deleteAdminPaper
+      deprecated: true
+      description: >-
+        已废弃（2026-11-19）：试卷管理已迁至教研角色。原文保留供旧客户端参考，不补重定向；
+        请用 DELETE /research/papers/{id}（需 researcher token）。
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
       responses:
@@ -8299,6 +8313,250 @@ paths:
         '400': { description: 学科不支持（语文仅 C01/C02 知识点）/ 语文种子题不在 C01/C02 / 题目已下架 / 题目不属于该学科 / 题目没有知识点 / 知识点不存在 / 题量非法或不在可用档位 / questionId、sessionId 非整数（ParseIntPipe） }
         '404': { description: 记录或题目不属于当前学生（code=1002） }
 
+  # Research（教研角色与内容纠错，2026-11-19）
+  /research/papers:
+    get:
+      tags: [Research]
+      summary: 试卷列表（教研，迁移自 admin）
+      operationId: listResearchPapers
+      parameters:
+        - { name: subjectId, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: year, in: query, schema: { type: integer, minimum: 2000, maximum: 2100 } }
+        - { name: gradeBand, in: query, schema: { type: string, enum: [primary, junior, senior] } }
+        - { name: keyword, in: query, schema: { type: string, maxLength: 50 } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ResearchPaperListResult'
+        '400': { description: 入参校验失败（code=1001） }
+        '401': { description: 未登录 / token 失效（code=1003） }
+        '403': { description: 非 researcher（code=1005） }
+  /research/papers/{id}:
+    get:
+      tags: [Research]
+      summary: 试卷详情 + 题目五字段当前值（教研）
+      operationId: getResearchPaper
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ResearchPaperDetail'
+        '400': { description: id 非正整数（code=1001） }
+        '404': { description: 试卷不存在 }
+        '403': { description: 非 researcher（code=1005） }
+    delete:
+      tags: [Research]
+      summary: 删除套卷（教研，迁移自 admin，新增图片清理）
+      operationId: deleteResearchPaper
+      description: >-
+        单事务删除：只删独占题；被学生数据引用的题保留只解绑；该卷会话连同作答一并删。
+        事务内收集被物理删除题目五字段里的 /uploads/research/ URL，commit 后做引用检查再清理并写 image.delete 审计。不可恢复。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ResearchPaperDeleteResult'
+        '400': { description: id 非正整数（code=1001） }
+        '404': { description: 试卷不存在 }
+        '409': { description: 并发外键冲突，请刷新后重试（code=4201） }
+        '403': { description: 非 researcher（code=1005） }
+  /research/papers/{id}/delete-preview:
+    get:
+      tags: [Research]
+      summary: 删除试卷前的影响面预览（教研，只读）
+      operationId: previewResearchPaperDelete
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ResearchPaperDeletePreview'
+        '400': { description: id 非正整数（code=1001） }
+        '404': { description: 试卷不存在 }
+        '403': { description: 非 researcher（code=1005） }
+  /research/questions/{id}:
+    patch:
+      tags: [Research]
+      summary: 题目五字段纠错（教研核心）
+      operationId: updateResearchQuestion
+      description: >-
+        改 answer/content/options/explanation/approach 五字段，须 confirmedSource=true。
+        answer_verified 仅在本次改了 answer 时置 1；content_hash 不重算；改答案不回填历史判题/错题/积分/掌握度。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateQuestionBody'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UpdateQuestionResult'
+        '400': { description: 入参 / 无实际变更 / approach 相对路径图 / confirmedSource 非 true（code=1001） }
+        '404': { description: 题目不存在 }
+        '403': { description: 非 researcher（code=1005） }
+  /research/audit:
+    get:
+      tags: [Research]
+      summary: 内容审计日志（教研）
+      operationId: listResearchAudit
+      parameters:
+        - { name: actorId, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: action, in: query, schema: { type: string, enum: [paper.delete, question.update, image.delete] } }
+        - { name: targetType, in: query, schema: { type: string, enum: [paper, question, image] } }
+        - { name: targetId, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ResearchAuditListResult'
+        '400': { description: 入参 / 时间区间非法（code=1001） }
+        '403': { description: 非 researcher（code=1005） }
+  /research/images:
+    post:
+      tags: [Research]
+      summary: 上传教研图片（multipart）
+      operationId: uploadResearchImage
+      description: >-
+        multipart/form-data 字段名 file；fileSize ≤ 20MB；MIME 白名单 image/*
+        （非图 400/1001）。落 UPLOAD_DIR/research/<uuid><ext>，URL /uploads/research/<uuid><ext>，
+        DB 复用 uploaded_files（uploader_type=researcher、source=research），不触发 PDF 提取任务。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: 上传成功（Nest `@Post` 默认 201）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/UploadedResearchImage'
+        '400': { description: 非图片 / 缺文件 / 超限（code=1001） }
+        '403': { description: 非 researcher（code=1005） }
+    delete:
+      tags: [Research]
+      summary: 取消编辑时清理未引用教研图片
+      operationId: deleteResearchImages
+      description: 逐条做引用检查；只清 source=research 且无其它引用的图；每次清理写 image.delete 审计。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteResearchImagesBody'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DeleteResearchImagesResult'
+        '400': { description: urls 非字符串数组 / 非 /uploads/research/ 开头（code=1001） }
+        '403': { description: 非 researcher（code=1005） }
+  /research/images/gc:
+    post:
+      tags: [Research]
+      summary: 孤儿教研图片 GC 兜底
+      operationId: gcResearchImages
+      description: >-
+        扫 source=research 且 created_at 早于 olderThanHours 的 uploaded_files；无引用则删 DB 行 + 磁盘文件；
+        有 extract_tasks 关联跳过。运维手动触发或纳入定时维护，本期不做后台常驻进程。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResearchImagesGcBody'
+      responses:
+        '201':
+          description: 执行完成（Nest `@Post` 默认 201）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ResearchImagesGcResult'
+        '400': { description: olderThanHours 非 1–720 整数（code=1001） }
+        '403': { description: 非 researcher（code=1005） }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -8824,6 +9082,187 @@ components:
         retainedQuestions: { type: integer }
         deletedSessions: { type: integer }
         deletedAnswers: { type: integer }
+    ResearchPaperItem:
+      type: object
+      required: [id, subjectId, subjectName, title, sourceKey, questionCount, sessionCount, createdAt]
+      properties:
+        id: { type: integer }
+        subjectId: { type: integer }
+        subjectName: { type: string }
+        title: { type: string }
+        grade: { type: string, nullable: true }
+        gradeBand: { type: string, nullable: true }
+        semester: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        district: { type: string, nullable: true }
+        examType: { type: string, nullable: true }
+        sourceKey: { type: string }
+        questionCount: { type: integer }
+        sessionCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+    ResearchPaperListResult:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ResearchPaperItem' }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    ResearchQuestionOption:
+      type: object
+      required: [label, text]
+      properties:
+        label: { type: string }
+        text: { type: string }
+    ResearchQuestionDetail:
+      type: object
+      required: [id, questionNo, type]
+      properties:
+        id: { type: integer }
+        questionNo: { type: integer }
+        type: { type: string }
+        content: { type: string, nullable: true }
+        options:
+          type: array
+          items: { $ref: '#/components/schemas/ResearchQuestionOption' }
+        answer: { type: string, nullable: true }
+        explanation: { type: string, nullable: true }
+        approach: { type: string, nullable: true }
+        source: { type: string, nullable: true }
+        sourceYear: { type: integer, nullable: true }
+        answerVerified: { type: boolean }
+        isActive: { type: boolean }
+    ResearchPaperDetail:
+      type: object
+      required: [paper, questions]
+      properties:
+        paper:
+          type: object
+          additionalProperties: true
+        questions:
+          type: array
+          items: { $ref: '#/components/schemas/ResearchQuestionDetail' }
+    ResearchPaperDeletePreview:
+      type: object
+      required: [paperId, title, subjectName, questionCount, sharedCount, exclusiveCount, deletableCount, retainedCount, sessionCount, answerCount]
+      properties:
+        paperId: { type: integer }
+        title: { type: string }
+        subjectName: { type: string }
+        questionCount: { type: integer }
+        sharedCount: { type: integer }
+        exclusiveCount: { type: integer }
+        deletableCount: { type: integer }
+        retainedCount: { type: integer }
+        sessionCount: { type: integer }
+        answerCount: { type: integer }
+    ResearchPaperDeleteResult:
+      type: object
+      required: [paperId, deletedQuestions, retainedQuestions, deletedSessions, deletedAnswers, deletedImages]
+      properties:
+        paperId: { type: integer }
+        deletedQuestions: { type: integer }
+        retainedQuestions: { type: integer }
+        deletedSessions: { type: integer }
+        deletedAnswers: { type: integer }
+        deletedImages: { type: integer }
+    UpdateQuestionBody:
+      type: object
+      required: [confirmedSource]
+      properties:
+        answer: { type: string, minLength: 1, maxLength: 20000 }
+        content: { type: string, minLength: 1, maxLength: 20000 }
+        options:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/ResearchQuestionOption' }
+        explanation: { type: string, maxLength: 20000, description: 允许空串表示清空 }
+        approach:
+          type: string
+          maxLength: 20000
+          description: "禁止相对路径图片（须 /uploads/、http(s)://、data: 开头）"
+        confirmedSource: { type: boolean, enum: [true], description: "必须为 true，否则 400/1001" }
+        note: { type: string, maxLength: 255, description: 写入审计 }
+    UpdateQuestionResult:
+      type: object
+      required: [question, changedFields, deletedImages]
+      properties:
+        question:
+          type: object
+          description: 含 id、本次变更字段新值、answerVerified（本次改 answer 则 true，否则保持原值）
+          required: [id, answerVerified]
+          properties:
+            id: { type: integer }
+            answerVerified: { type: boolean }
+          additionalProperties: true
+        changedFields:
+          type: array
+          items: { type: string }
+        deletedImages: { type: integer }
+    ResearchAuditItem:
+      type: object
+      required: [id, actorId, actorRole, action, targetType, targetId, createdAt]
+      properties:
+        id: { type: integer }
+        actorId: { type: integer }
+        actorRole: { type: string }
+        actorName: { type: string, nullable: true }
+        action: { type: string, enum: [paper.delete, question.update, image.delete] }
+        targetType: { type: string, enum: [paper, question, image] }
+        targetId: { type: integer }
+        paperId: { type: integer, nullable: true }
+        beforeJson: { type: object, nullable: true, additionalProperties: true }
+        afterJson: { type: object, nullable: true, additionalProperties: true }
+        note: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    ResearchAuditListResult:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ResearchAuditItem' }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    UploadedResearchImage:
+      type: object
+      required: [fileId, url]
+      properties:
+        fileId: { type: string }
+        url: { type: string, description: /uploads/research/<uuid><ext> }
+    DeleteResearchImagesBody:
+      type: object
+      required: [urls]
+      properties:
+        urls:
+          type: array
+          description: 每条须以 /uploads/research/ 开头
+          items: { type: string }
+    DeleteResearchImagesResult:
+      type: object
+      required: [deleted, skipped]
+      properties:
+        deleted: { type: integer }
+        skipped: { type: integer }
+        reasons:
+          type: object
+          nullable: true
+          additionalProperties: { type: string }
+    ResearchImagesGcBody:
+      type: object
+      properties:
+        olderThanHours: { type: integer, minimum: 1, maximum: 720, default: 24 }
+    ResearchImagesGcResult:
+      type: object
+      required: [scanned, deleted, skipped, failed]
+      properties:
+        scanned: { type: integer }
+        deleted: { type: integer }
+        skipped: { type: integer }
+        failed: { type: integer }
     AdminModelCreateRequest:
       type: object
       properties:

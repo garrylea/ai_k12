@@ -2,6 +2,7 @@
 
 **日期**：2026-11-09
 **状态**：待实施
+> **状态更新（2026-11-19）**：试卷管理能力已迁至教研角色，见 `2026-11-19-教研角色与内容纠错-design.md`。本文正文保留原设计原文，不再代表当前实现。
 **关联**：API 文档 §4.17 Admin；`tools/db/schema.sql` 的 `exam_papers` / `paper_questions` / `questions` / `exam_sessions` / `exam_answers`
 
 ---

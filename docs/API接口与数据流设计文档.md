@@ -154,6 +154,7 @@
 | DeviceControl | `/api/student/learning-sessions`、`/api/student/device-commands`、`/api/parent/students/{studentId}/*` | PC App 学习管控：单次学习锁定（学生端取或建 / 结束 / 轮询兼心跳）与家长解除命令 | DeviceControl Service |
 | Dev | `/api/dev/handwriting` | 手写汉字识别率调研（dev-only：模型清单 + 图片转写；不落库、无埋点、限 admin） | ai-core（`modules/dev`） |
 | Freeform | `/api/freeform` | 做题入口：题图/文字识别切题 + 判题 SSE（freeform 题隔离，不发分/不写练习记录/不更新掌握度） | Freeform Service |
+| Research | `/api/research` | 教研（researcher）：试卷列表/明细/删卷、题目五字段纠错、图片上传/清理/GC、内容审计日志；改答案不回填历史数据 | Research Service（`modules/research`） |
 
 ---
 
@@ -481,9 +482,7 @@
 | GET | `/api/admin/billing/families?keyword=&page=&pageSize=` | 家庭订阅列表（批④）。keyword LIKE 家长手机号/昵称（通配符转义）；每行 `{parentId, phone, studentCount, status(实时推导), planCode, trialEndsAt, currentPeriodEnd}`；LEFT JOIN 保证无订阅家庭也在列 | MVP |
 | PUT | `/api/admin/billing/families/{parentId}/trial` | 设定试用截止（body `{trialEndsAt: ISO\|null}`，null=收回试用；缺键 400/1001）。无订阅行则 upsert；落 `subscription_adjustments(type='trial_set')` 审计 + logger。返回该家庭 StatusView | MVP |
 | POST | `/api/admin/billing/families/{parentId}/grant` | 赠送/扣减订阅天数（body `{days: int, reason?}`；0 → 400/1001）。事务：行锁读 → 正数期内从期末顺延/过期从 now；负数扣减，扣到 < now 置 `current_period_end=NULL`（过期态）→ `subscription_adjustments(type='grant_days')` + logger。无行家庭补偿插入（`source='admin'` 新枚举值）。返回该家庭 StatusView | MVP |
-| GET | `/api/admin/papers?subjectId=&year=&gradeBand=&keyword=&page=&pageSize=` | **试卷列表**（2026-11-09）。全部参数可选；`gradeBand` 枚举 `primary/junior/senior`，`page` 默认 1、`pageSize` 默认 20（1–100），`keyword` 按标题 LIKE（`%`/`_`/`\` 已转义）。返回 `{items: [{id, subjectId, subjectName, title, grade, gradeBand, semester, year, district, examType, sourceKey, questionCount, sessionCount, createdAt}], total, page, pageSize}`；`questionCount` 是 `paper_questions` 真实关联数（非 `exam_papers.question_count` 冗余列） | MVP |
-| GET | `/api/admin/papers/{id}/delete-preview` | **删除影响面预览**（只读，不加锁）：卷不存在 404/1002。返回 `{paperId, title, subjectName, questionCount, sharedCount, exclusiveCount, deletableCount, retainedCount, sessionCount, answerCount}`。`deletableCount` = 独占且未被 7 张 RESTRICT 表（main_error_books/aux_error_books/answers/exam_answers/variation_questions/special_answer_records/remediation_set_items）引用；`retainedCount` = 独占但被引用（删除时保留） | MVP |
-| DELETE | `/api/admin/papers/{id}` | **删除套卷**（2026-11-09，单事务）：删该卷 `exam_sessions`（级联 `exam_answers`）→ 删可删独占题（级联 `paper_questions`/`question_knowledge_points` 等）→ 删 `exam_papers`。共享题只解除关联；被学生数据引用的独占题保留成孤儿题。卷不存在 404/1002；并发外键冲突 409/4201。返回 `{paperId, deletedQuestions, retainedQuestions, deletedSessions, deletedAnswers}`。**不可恢复** | MVP |
+> **试卷管理已迁至教研（2026-11-19）**：原 `/api/admin/papers*` 三条端点（列表 / 删除预览 / 删除）已从 admin 移除，迁移为 `/api/research/papers*`，见 §4.31。admin 不再管理试卷；旧路径在 openapi.yaml 以 `deprecated: true` 保留原文，不补重定向。
 
 ### 4.18 Training — `/api/training`
 
@@ -899,6 +898,68 @@ SSE 事件（HTTP 恒为 **200**；`data: {json}\n\n`）：
 纯图片题（无可标注文本）建空答案题 + 错题本，`answerable=false`，不进练习池。
 
 **练习池（2026-11-14 解禁）**：`source='freeform'` 不再特殊隔离。错题列表返回 `answerable`（`q.answer <> ''`），前端据此决定是否可勾选；`POST /api/training/judge` 不再拒绝 freeform 题，空答案仍走 `unanswered` 守卫。挂上知识点后，按现有谓词进知识点专项；专项答错产生的 `targeted` 错题可进同类型；错题练习再次答错可触发变式（变式生成**仅数学**，非数学题直接跳过）。练习时按现有规则发分、更新知识点掌握度。家长端错题列表仍按 `TRACK_SOURCES` 归 `training` 档。
+
+---
+
+### 4.31 Research — `/api/research`（教研角色与内容纠错，2026-11-19）
+
+教研（researcher）内容纠错空间，由 admin 原「试卷管理」迁移并扩展而来。全部端点 `@Roles('researcher')` + `JwtAuthGuard, RolesGuard`：未登录 401/1003、越权 403/1005（admin / student / parent token 一律 403/1005）。**改答案不回填历史数据**：PATCH 只更新题库内容与 `answer_verified`，绝不触碰 `exam_answers / answers / special_answer_records` 的 `is_correct/score`、`main_error_books`、`points` 流水、知识点掌握度与旧解析缓存（用户裁决）。spec：`docs/superpowers/specs/2026-11-19-教研角色与内容纠错-design.md`。
+
+| 方法 | 路径 | 说明 | 阶段 |
+|---|---|---|---|
+| GET | `/api/research/papers` | 试卷列表（迁移） | MVP |
+| GET | `/api/research/papers/{id}` | 试卷详情 + 题目五字段当前值（新增） | MVP |
+| GET | `/api/research/papers/{id}/delete-preview` | 删除影响面预览（迁移，只读） | MVP |
+| DELETE | `/api/research/papers/{id}` | 删除套卷 + 图片清理（迁移） | MVP |
+| PATCH | `/api/research/questions/{id}` | 题目五字段纠错（新增，核心） | MVP |
+| GET | `/api/research/audit` | 内容审计日志（新增） | MVP |
+| POST | `/api/research/images` | 上传教研图片（新增，multipart） | MVP |
+| DELETE | `/api/research/images` | 取消编辑时清理未引用图片（新增） | MVP |
+| POST | `/api/research/images/gc` | 孤儿图片 GC 兜底（新增） | MVP |
+
+题目五字段 = `answer`（答案）/ `content`（题干）/ `options`（选项）/ `explanation`（解析）/ `approach`（思路）。详情/纠错接口只涉及这五个可编辑字段，不查、不返回任何其它历史或页面位置字段。
+
+**1. `GET /api/research/papers`（迁移）**
+
+Query（zod 校验，空串视为未填）：`subjectId?`（正整数）/ `year?` / `gradeBand?`（`primary|junior|senior`）/ `keyword?`（≤50，按标题 LIKE，`%`/`_`/`\` 已转义）/ `page=1` / `pageSize=20`（1–100）。`subjectId` 传了才加 `WHERE p.subject_id = ?`；计数用 `pool.execute`、分页用 `pool.query`（`LIMIT ?` 预编译坑）；按 `p.id DESC` 排序。返回 `{items: [{id,subjectId,subjectName,title,grade,gradeBand,semester,year,district,examType,sourceKey,questionCount,sessionCount,createdAt}], total, page, pageSize}`；`questionCount` 为 `paper_questions` 真实关联数。错误：1001（入参）、1003、1005。
+
+**2. `GET /api/research/papers/{id}`（新增）**
+
+路径参数 `id` 必须正整数 → 1001；卷不存在 → 404。查 `exam_papers JOIN subjects` 取试卷元信息；查 `paper_questions JOIN questions ORDER BY question_no`，取五字段原值 + `type/difficulty/full_score/source/source_year/answer_verified/is_active`。**与学生端相反，`answer/explanation/approach` 不剥离**——教研必须看到当前值。选项经 `parse-options.util.ts` 解析但保留可编辑结构（剥离 `isCorrect`）。返回 `{paper: {...}, questions: [{id, questionNo, type, content, options, answer, explanation, approach, source, sourceYear, answerVerified, isActive}]}`（题目单元只含以上字段）。错误：1001、1003、1005、404。
+
+**3. `GET /api/research/papers/{id}/delete-preview`（迁移）**
+
+逻辑/返回同原 admin 版（只读、不加锁）：卷不存在 404。返回 `{paperId, title, subjectName, questionCount, sharedCount, exclusiveCount, deletableCount, retainedCount, sessionCount, answerCount}`。`deletableCount` = 独占且未被 7 张 RESTRICT 表（main_error_books / aux_error_books / answers / exam_answers / variation_questions / special_answer_records / remediation_set_items）引用；`retainedCount` = 独占但被引用（删除时保留）。错误：1001、1003、1005、404。
+
+**4. `DELETE /api/research/papers/{id}`（迁移 + 图片清理）**
+
+删除事务沿用原 admin 版全部规则：只删独占题；被学生数据引用的题保留只解绑；该卷会话连同作答一并删。卷不存在 404；FK 冲突按现有逻辑转 409。**新增**：事务内收集「真正被物理删除的题目」五字段里的 `/uploads/research/` URL，commit 后按下方「图片清理铁律」做引用检查再清理（共享题保留，不动其图），每次清理写 `image.delete` 审计。返回 `{paperId, deletedQuestions, retainedQuestions, deletedSessions, deletedAnswers, deletedImages}`。错误：1001、1003、1005、404、409。**不可恢复**。
+
+**5. `PATCH /api/research/questions/{id}`（新增，核心）**
+
+Body（zod）：`answer?`（非空字符串，≤20000）/ `content?`（非空，≤20000）/ `options?`（`[{label:string,text:string}]`，长度 ≤10，透传前剥 `isCorrect`）/ `explanation?`（允许空串=清空，≤20000）/ `approach?`（允许空串，≤20000；出现 `![...](...)` 必须以 `/uploads/`、`http(s)://`、`data:` 开头，禁止相对路径图）/ `confirmedSource`（**必须为 true**，否则 1001）/ `note?`（≤255，写审计）。
+
+逐步逻辑：① 校验 body；字段全缺省或无实际变更 → 400/1001。② 事务内按 id 查 `questions`（不存在 → 404）。③ 记录 `before`（仅本次涉及的字段旧值）。④ `UPDATE questions SET <changed fields>, answer_verified=1 WHERE id=?`——**不更新 `content_hash`**，`updated_at` 由列级 `ON UPDATE` 自动维护；`answer_verified=1` **只在本次改了 `answer` 时置位**，只改解析/思路/题干/选项则保持原值（避免把管线导入未核验的题误标为已核验）。⑤ 计算图片差集：旧五字段 URL − 新五字段 URL = 待清理 research 图列表。⑥ 写 `content_audit_logs`：`action='question.update'`, `target_type='question'`, `target_id=id`, `paper_id`（由 `:id` 反查任一 `paper_questions`，无则 null）, `before_json/after_json`（只含变更字段）, `note`；审计失败 → 整个操作回滚。⑦ 提交事务，commit 后删磁盘文件。返回 `{question: {id, <changed fields 新值>, answerVerified: <本次改了 answer 则为 true，否则保持原值>}, changedFields: string[], deletedImages: number}`。
+
+边界：并发两人同改一题 → 后写覆盖先写（本期不做乐观锁，靠审计追溯）；图片差集只对 `source='research'` 的 URL 生效。**不回填**：不写学生作答/错题本/积分/掌握度。
+
+**6. `GET /api/research/audit`（新增）**
+
+Query：`actorId? / action? / targetType? / targetId? / from?(ISO) / to?(ISO) / page=1 / pageSize=20(1-100)`。按 `created_at DESC` 分页；时间区间用 `BETWEEN`，非法时间 → 1001。返回 `{items: [{id, actorId, actorRole, actorName, action, targetType, targetId, paperId, beforeJson, afterJson, note, createdAt}], total, page, pageSize}`。`action` 枚举 `paper.delete / question.update / image.delete`。错误：1001、1003、1005。
+
+**7. `POST /api/research/images`（新增，上传）**
+
+`multipart/form-data`，字段名 `file`；`FileInterceptor`：`fileSize ≤ 20MB`，MIME 白名单 `image/*`（非图 → 400/1001），缺文件 400/1001。落盘 `UPLOAD_DIR/research/<uuid><ext>`，URL `/uploads/research/<uuid><ext>`。DB 复用 `uploaded_files` 新增一行：`uploader_type='researcher'`、`uploader_id`=当前教研 id、`source='research'`；**不触发 PDF 提取任务**（`source='research'` 不在自动建任务条件里）。返回 `{fileId, url}`（**201**，Nest `@Post` 默认）。错误：1001、1003、1005。
+
+**8. `DELETE /api/research/images`（新增，取消编辑时清理）**
+
+Body：`{urls: string[]}`，每条须以 `/uploads/research/` 开头（否则 1001）。逐条做下方「图片清理铁律」引用检查；只清 `source='research'` 且无其它引用的图。返回 `{deleted: number, skipped: number, reasons?: Record<url,string>}`。错误：1001、1003、1005。
+
+**9. `POST /api/research/images/gc`（新增，兜底）**
+
+Body（可选）：`{olderThanHours?: number}`，缺省 24，范围 1–720，非法 → 1001。扫 `uploaded_files WHERE source='research' AND created_at < NOW() - INTERVAL ? HOUR`，逐条做引用检查；无引用则删 DB 行 + 磁盘文件；有 `extract_tasks` 关联的跳过。返回 `{scanned, deleted, skipped, failed}`（**201**，Nest 默认）。调用方式：运维手动触发或纳入现有定时维护，本期不做后台常驻进程。错误：1001、1003、1005。
+
+**图片清理铁律（端点 4/5/8/9 共用）**：① 只清 `source='research'` 且 URL 以 `/uploads/research/` 开头的图，**绝不动** auxiliary/freeform/题库静态图；② 删前全局扫描 `questions` 五列（`content/options/answer/explanation/approach`）确认无其它引用，并扫描 `exam_answers.answer_text` / `answers.answer_text` / `special_answer_records.answer_text`（学生作答可能引用教研图，保守跳过）；③ 被 `extract_tasks` 引用的 `uploaded_files` 行跳过（FK RESTRICT，硬删报错）；④ 磁盘文件删除在 DB commit **之后**，`fs.unlink` 失败只记日志不回滚（文件残留可接受，DB 一致性优先）；⑤ 每次清理写 `content_audit_logs`：`action='image.delete'`, `target_type='image'`, `target_id=fileId`。三层清理：保存差集（PATCH）/ 取消清理（DELETE images）/ GC 兜底（POST gc）。
 
 ---
 
@@ -2527,6 +2588,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.31 | 2026-11-19 | **教研角色与内容纠错**。新增 §4.31 Research 分组 9 端点（`/api/research/papers*` 列表/详情/删除预览/删卷、`PATCH questions`、`GET audit`、images 上传/DELETE/GC），全部 `@Roles('researcher')`；试卷管理从 §4.17 admin 迁出（旧 `/api/admin/papers*` 三行删除、注记迁移，openapi 旧路径保留 `deprecated: true`）。题目可改五字段（answer/content/options/explanation/approach），须勾 `confirmedSource`；`answer_verified` 仅改答案时置位、`content_hash` 不重算；**改答案不回填历史判题/错题/积分/掌握度**。图片复用 `uploaded_files`（`source='research'`），落 `UPLOAD_DIR/research/`，三层清理 + 全局引用检查 + `content_audit_logs` 审计。§2 分组总表加 Research 行。详见 spec `2026-11-19-教研角色与内容纠错-design.md`。 |
 | v4.30 | 2026-11-18 | **英语背单词错词池口径（用户裁决）**。① `POST /training/vocabulary/start` 勾 `onlyMyWrong` 时出词固定按 `student_word_progress.wrong_count` 降序（同错次按 `sort_order`、`id`），压过 `order`，`letter` 不生效（前端顺序区换成不可点的「错次从多到少」）。② `POST /training/vocabulary/judge` 新增可选 `fromWrongPool`：判 `correct` 时只清该学生该词 `wrong_count`（保留 `learned`/`last_seen_at`，不删行），普通背词（不带该标记）答对不清错次。③ 两个错次计数器自增 `LEAST(..., 2147483647)` 封顶，防有符号 INT 越界把判题打成 500。openapi.yaml 同步 `VocabularyJudgeRequest.fromWrongPool`。 |
 | v4.29 | 2026-11-10 | **做题错题重练（无新端点）**。① `GET /api/training/error-book` 条目新增 `fullScore`（`questions.full_score`，重练满分，null 前端按 10）；② 做题错题从错题本「重练」回 `/student/solve?redo=1`，提交复用 `POST /api/freeform/judge/stream` 带 `questionId` 重判同一条，满分清零、不满分保留；③ 重练请求的 `figureUrls` 只对 `questionId + source=freeform` 宽松（无权图跳过），首次提交仍严格 1001；④ 不发积分/不写 `practice_results`/不更新掌握度/不 bump level，普通错题练习池不变。openapi.yaml 同步 `TrainingErrorBookEntry.fullScore`。 |
 | v4.28 | 2026-11-09 | **做题入口三处修订**。① 录入分流：文字非空（含文字+配图）不走识题，直接进作答；`POST /api/freeform/recognize` 只在纯图片时调用。② 判题 `result` 事件新增 `correctAnswer`（模型 JSON 的 `question.answer`），前端在「作答」tab 的结果卡直接展示结论/我的答案/正确答案/完整报告，**不再自动切 AI tab**；只有【答疑】才进聊天。③ 答疑输出契约：Markdown + `$...$` + 内联 SVG + HTML，前端统一 `preprocessMarkdown` + rehype-raw + KaTeX。openapi.yaml 同步（judge result 示例）。 |

@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-11-19 教研角色与内容纠错（试卷/题目）：文档同步收尾
+
+新增独立 `researcher` 教研角色（与 admin 平级互斥），把试卷管理从 admin 迁到 `/api/research/papers*`，并扩展题目内容纠错能力。
+
+**改动要点**：
+- 角色：`admins` 加 `role ENUM('admin','researcher')`、`auth_sessions.role` 加 `researcher`（迁移 `2026-11-19_researcher_role.sql` 幂等，**本次只写脚本、未 apply**）；seed 增加 `RESEARCHER_INITIAL_*` 账号。JWT/RolesGuard/SessionRegistry 等角色联合类型全链路补齐。
+- 试卷管理迁移：原 `/api/admin/papers*` 列表/删除预览/删除三端点迁至 `/api/research/papers*`，admin 不再管试卷；openapi 旧路径保留 `deprecated: true`、不补重定向。
+- 五字段纠错：`PATCH /api/research/questions/:id` 只改 `answer/content/options/explanation/approach`，强制 `confirmedSource=true`；`answer_verified` 仅改答案时置 1、`content_hash` 不重算；**改答案不回填历史作答/错题/积分/掌握度**（用户裁决）。审计写 `content_audit_logs`。
+- 图片生命周期：复用 `uploaded_files`（`source='research'`、`uploader_type='researcher'`），落 `UPLOAD_DIR/research/`、URL `/uploads/research/`；三层清理（保存差集 / 取消 / GC）+ 全局引用检查 + `extract_tasks` 关联跳过 + commit 后删磁盘；三类审计动作 `paper.delete / question.update / image.delete`。
+- 审计事实修正：审计阶段发现 spec 原写在 `questions` 上查询一个页面位置列，但该列只在 `cards` 表、题库表并无此列，已从 SQL / DTO / 端点 / 前端全部移除，避免真实库运行时 500。
+- 文档：API 设计文档 §2 分组表 + §4.31（9 端点逐条）+ §4.17 迁移注记 + §9 v4.31；openapi.yaml 加 7 path key（9 operation）+ 对应 schema、admin papers 标废弃；PRD §7.14 加教研员角色与权限矩阵行、改答案不回填；旧 spec 顶部加迁移状态注记。
+
+**验证**：server / web 全量测试 + tsc + eslint 均绿（各任务内已逐项验证）。**未执行（人工步骤）**：DB 迁移 apply、`schema_reconcile.py` 对账、真起服务端 HTTP 冒烟——迁移按用户裁决只写脚本不 apply，故无库可连；对账脚本硬编码主仓路径，本 worktree 运行会读到主仓旧 schema 得假结果。
+
 ## 2026-11-19 content_hash 纳入材料指纹：修「同题干不同材料跨卷共用一道题」
 
 **问题**：`questions.id=5167`（题干「文段中的画线句存在问题，请你修改」）被 **9 份卷**共用（paper 17/19/24/40/45/49/50/667/668），但各卷材料完全不同（八中是「展板三：南渡新韵…」，海淀模拟二是「趣味创新挑战…纸桥承重赛…」）。后果：材料/答案只保留最后一次导入的那份，其余 8 份卷的学生看到错材料、错答案；用 `questions.source` 查卷也查不到（该行 `source` 是海淀那份）。
