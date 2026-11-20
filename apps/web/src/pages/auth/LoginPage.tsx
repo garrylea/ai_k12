@@ -42,7 +42,9 @@ export default function LoginPage() {
         remember,
       );
 
-      if (result.user.role === 'admin') {
+      if (result.user.role === 'researcher') {
+        navigate('/research');
+      } else if (result.user.role === 'admin') {
         navigate('/admin');
       } else if (result.user.role === 'parent') {
         // 家长落点按视口分流：<768px 走移动路由组 /m/parent，否则桌面家长台

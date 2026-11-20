@@ -40,6 +40,7 @@ import ExamResultPage from '@/pages/student/training/ExamResultPage';
 import StudentStayLayout from '@/components/layout/StudentStayLayout';
 import ParentLayout from '@/components/layout/ParentLayout';
 import AdminLayout from '@/components/layout/AdminLayout';
+import ResearchLayout from '@/components/layout/ResearchLayout';
 import MobileParentLayout from '@/components/layout/MobileParentLayout';
 import ParentViewportGate from './ParentViewportGate';
 import ParentStudentsPage from '@/pages/parent/ParentStudentsPage';
@@ -75,8 +76,10 @@ import AdminMessagesPage from '@/pages/admin/AdminMessagesPage';
 import AdminChatPage from '@/pages/admin/AdminChatPage';
 import AdminAlertsPage from '@/pages/admin/AdminAlertsPage';
 import AdminBillingPage from '@/pages/admin/AdminBillingPage';
-import AdminPapersPage from '@/pages/admin/AdminPapersPage';
 import AdminSecurityPage from '@/pages/admin/AdminSecurityPage';
+import ResearchPapersPage from '@/pages/research/ResearchPapersPage';
+import ResearchPaperDetailPage from '@/pages/research/ResearchPaperDetailPage';
+import ResearchAuditPage from '@/pages/research/ResearchAuditPage';
 import AnalyticsOverviewPage from '@/pages/admin/analytics/AnalyticsOverviewPage';
 import AnalyticsFunnelPage from '@/pages/admin/analytics/AnalyticsFunnelPage';
 import AnalyticsRetentionPage from '@/pages/admin/analytics/AnalyticsRetentionPage';
@@ -125,7 +128,6 @@ export const routes: RouteObject[] = [
       { path: 'messages', element: <AdminMessagesPage /> },
       { path: 'chat', element: <AdminChatPage /> },
       { path: 'alerts', element: <AdminAlertsPage /> },
-      { path: 'papers', element: <AdminPapersPage /> },
       { path: 'billing', element: <AdminBillingPage /> },
       { path: 'security', element: <AdminSecurityPage /> },
       // 埋点 Phase 2 运营面（Task 14 先通路由，页面 Task 15/16 填实）
@@ -137,6 +139,21 @@ export const routes: RouteObject[] = [
       { path: 'analytics/quality', element: <AnalyticsQualityPage /> },
       { path: 'analytics/llm-tokens', element: <AnalyticsLlmTokensPage /> },
       { path: 'analytics/events', element: <AnalyticsEventsPage /> },
+    ],
+  },
+  // 教研空间（2026-11-19）：内容纠错工作台，独立布局 + researcher 守卫。
+  {
+    path: '/research',
+    element: (
+      <RequireRole role="researcher">
+        <ResearchLayout />
+      </RequireRole>
+    ),
+    children: [
+      { path: '', element: <Navigate to="papers" replace /> },
+      { path: 'papers', element: <ResearchPapersPage /> },
+      { path: 'papers/:id', element: <ResearchPaperDetailPage /> },
+      { path: 'audit', element: <ResearchAuditPage /> },
     ],
   },
   // 入口选择页（独立全屏，登录后落地，主轨/辅轨分流）

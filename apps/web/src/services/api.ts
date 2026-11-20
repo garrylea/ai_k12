@@ -88,7 +88,7 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
 
 // --- Auth ---
 
-export type UserRole = 'admin' | 'parent' | 'student';
+export type UserRole = 'admin' | 'researcher' | 'parent' | 'student';
 
 export interface LoginResult {
   token: string;
@@ -1073,9 +1073,9 @@ export function purgeExpiredAlerts(): Promise<AdminAlertPurgeResult> {
   return fetchApi('/admin/alerts/expired', { method: 'DELETE' });
 }
 
-// --- Admin: papers（试卷管理，2026-11-09） ---
+// --- Research: 教研内容纠错（2026-11-19，仅 researcher 可访问） ---
 
-export interface AdminPaperItem {
+export interface ResearchPaperItem {
   id: number;
   subjectId: number;
   subjectName: string;
@@ -1092,14 +1092,14 @@ export interface AdminPaperItem {
   createdAt: string;
 }
 
-export interface AdminPaperListResult {
-  items: AdminPaperItem[];
+export interface ResearchPaperListResult {
+  items: ResearchPaperItem[];
   total: number;
   page: number;
   pageSize: number;
 }
 
-export interface AdminPaperDeletePreview {
+export interface ResearchPaperDeletePreview {
   paperId: number;
   title: string;
   subjectName: string;
@@ -1112,22 +1112,83 @@ export interface AdminPaperDeletePreview {
   answerCount: number;
 }
 
-export interface AdminPaperDeleteResult {
+export interface ResearchPaperDeleteResult {
   paperId: number;
   deletedQuestions: number;
   retainedQuestions: number;
   deletedSessions: number;
   deletedAnswers: number;
+  deletedImages: number;
 }
 
-export function listAdminPapers(params: {
+/** 教研可见的题目原值：五字段（answer/content/options/explanation/approach）按当前值下发。 */
+export interface ResearchQuestionDetail {
+  id: number;
+  questionNo: number;
+  type: string;
+  content: string;
+  options: Array<{ label: string; text: string }>;
+  answer: string;
+  explanation: string | null;
+  approach: string | null;
+  source: string | null;
+  sourceYear: number | null;
+  answerVerified: boolean;
+  isActive: boolean;
+}
+
+export interface ResearchPaperDetailResult {
+  paper: ResearchPaperItem;
+  questions: ResearchQuestionDetail[];
+}
+
+export interface ResearchQuestionUpdateResult {
+  question: { id: number; answerVerified: boolean } & Record<string, unknown>;
+  changedFields: string[];
+  deletedImages: number;
+}
+
+export interface ResearchImageCleanupResult {
+  deleted: number;
+  skipped: number;
+}
+
+export interface ResearchImageGcResult extends ResearchImageCleanupResult {
+  scanned: number;
+  failed: number;
+}
+
+/** 对齐 content_audit_logs 行的 DTO（before/after 由后端解析为对象或原字符串）。 */
+export interface AuditItem {
+  id: number;
+  actorId: number;
+  actorRole: string;
+  actorName: string | null;
+  action: string;
+  targetType: string;
+  targetId: number;
+  paperId: number | null;
+  beforeJson: unknown;
+  afterJson: unknown;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface ResearchAuditListResult {
+  items: AuditItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export function listResearchPapers(params: {
   subjectId?: number;
   year?: number;
   gradeBand?: string;
   keyword?: string;
   page: number;
   pageSize: number;
-}): Promise<AdminPaperListResult> {
+}): Promise<ResearchPaperListResult> {
   const qs = new URLSearchParams();
   if (params.subjectId !== undefined) qs.set('subjectId', String(params.subjectId));
   if (params.year !== undefined) qs.set('year', String(params.year));
@@ -1135,15 +1196,80 @@ export function listAdminPapers(params: {
   if (params.keyword) qs.set('keyword', params.keyword);
   qs.set('page', String(params.page));
   qs.set('pageSize', String(params.pageSize));
-  return fetchApi(`/admin/papers?${qs.toString()}`);
+  return fetchApi(`/research/papers?${qs.toString()}`);
 }
 
-export function getAdminPaperDeletePreview(id: number): Promise<AdminPaperDeletePreview> {
-  return fetchApi(`/admin/papers/${id}/delete-preview`);
+export function getResearchPaper(id: number): Promise<ResearchPaperDetailResult> {
+  return fetchApi(`/research/papers/${id}`);
 }
 
-export function deleteAdminPaper(id: number): Promise<AdminPaperDeleteResult> {
-  return fetchApi(`/admin/papers/${id}`, { method: 'DELETE' });
+export function getResearchPaperDeletePreview(id: number): Promise<ResearchPaperDeletePreview> {
+  return fetchApi(`/research/papers/${id}/delete-preview`);
+}
+
+export function deleteResearchPaper(id: number): Promise<ResearchPaperDeleteResult> {
+  return fetchApi(`/research/papers/${id}`, { method: 'DELETE' });
+}
+
+/** 题目五字段更正：confirmedSource 必须由调用方显式确认；无变更字段时后端返回 1001。 */
+export function updateResearchQuestion(id: number, body: {
+  answer?: string;
+  content?: string;
+  options?: Array<{ label: string; text: string }>;
+  explanation?: string;
+  approach?: string;
+  confirmedSource: true;
+  note?: string;
+}): Promise<ResearchQuestionUpdateResult> {
+  return fetchApi(`/research/questions/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** multipart 上传：fetchApi 写死 Content-Type: application/json 会冲掉 boundary，必须走裸 fetch。 */
+export async function uploadResearchImage(file: File, signal?: AbortSignal): Promise<{ fileId: number; url: string }> {
+  const token = getAuthToken();
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_BASE}/research/images`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    // NOTE: do NOT set Content-Type - browser sets multipart boundary
+    body: form,
+    signal,
+  });
+  const json: ApiResponse<{ fileId: number; url: string }> = await res.json();
+  if (json.code !== 0) throw new ApiError(json.code, json.message, json.retryable, res.status);
+  return json.data;
+}
+
+/** 取消编辑时按 URL 清理未被引用的教研图片。 */
+export function deleteResearchImages(urls: string[]): Promise<ResearchImageCleanupResult> {
+  return fetchApi('/research/images', { method: 'DELETE', body: JSON.stringify({ urls }) });
+}
+
+export function gcResearchImages(olderThanHours = 24): Promise<ResearchImageGcResult> {
+  return fetchApi('/research/images/gc', { method: 'POST', body: JSON.stringify({ olderThanHours }) });
+}
+
+export function listResearchAudit(params: {
+  actorId?: number;
+  action?: 'paper.delete' | 'question.update' | 'image.delete';
+  targetType?: 'paper' | 'question' | 'image';
+  targetId?: number;
+  from?: string;
+  to?: string;
+  page: number;
+  pageSize: number;
+}): Promise<ResearchAuditListResult> {
+  const qs = new URLSearchParams();
+  if (params.actorId !== undefined) qs.set('actorId', String(params.actorId));
+  if (params.action) qs.set('action', params.action);
+  if (params.targetType) qs.set('targetType', params.targetType);
+  if (params.targetId !== undefined) qs.set('targetId', String(params.targetId));
+  if (params.from) qs.set('from', params.from);
+  if (params.to) qs.set('to', params.to);
+  qs.set('page', String(params.page));
+  qs.set('pageSize', String(params.pageSize));
+  return fetchApi(`/research/audit?${qs.toString()}`);
 }
 
 // --- Parent: messages ---

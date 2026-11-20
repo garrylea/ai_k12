@@ -11,7 +11,7 @@ export default function RequireRole({
   role,
   children,
 }: {
-  role: 'admin' | 'parent' | 'student';
+  role: 'admin' | 'researcher' | 'parent' | 'student';
   children: ReactElement;
 }) {
   if (!isSessionValid()) {

@@ -18,12 +18,20 @@ import {
   getSubscriptionPlans,
   getSubscriptionStatus,
   heartbeatStudySession,
-  listAdminPapers,
+  deleteResearchImages,
+  deleteResearchPaper,
+  gcResearchImages,
+  getResearchPaper,
+  getResearchPaperDeletePreview,
+  listResearchAudit,
+  listResearchPapers,
   listBillingOrders,
   redeemParentPoints,
   saveParentPointRules,
   setRedemptionStatus,
   startStudySession,
+  updateResearchQuestion,
+  uploadResearchImage,
 } from './api';
 
 import { clearSessionRevoked, isSessionRevoked } from './authStorage';
@@ -359,39 +367,100 @@ describe('订阅/计费 API：路径与 body', () => {
   });
 });
 
-describe('管理端试卷列表：query 契约', () => {
-  it('仅给 page/pageSize 时，query 只有这两项（可选键缺席不生成空条目）', async () => {
+describe('教研 API：路径、方法与请求体', () => {
+  it('listResearchPapers：仅给 page/pageSize 时 query 只有这两项', async () => {
     const f = stubData({ items: [], total: 0, page: 2, pageSize: 20 });
 
-    await listAdminPapers({ page: 2, pageSize: 20 });
+    await listResearchPapers({ page: 2, pageSize: 20 });
 
-    expect(f.mock.calls[0][0]).toBe('/api/admin/papers?page=2&pageSize=20');
+    expect(f.mock.calls[0][0]).toBe('/api/research/papers?page=2&pageSize=20');
   });
 
-  it('可选参数按固定顺序拼接，未传的键不出现（也不出现 undefined/null）', async () => {
+  it('listResearchPapers：可选参数按固定顺序拼接，中文关键词走 URL 编码', async () => {
     const f = stubData({ items: [], total: 0, page: 1, pageSize: 10 });
 
-    await listAdminPapers({ subjectId: 3, year: 2025, gradeBand: 'junior', page: 1, pageSize: 10 });
+    await listResearchPapers({
+      subjectId: 3, year: 2025, gradeBand: 'junior', keyword: '二次 函数', page: 1, pageSize: 10,
+    });
 
     const url = f.mock.calls[0][0] as string;
     expect(url).toBe(
-      '/api/admin/papers?subjectId=3&year=2025&gradeBand=junior&page=1&pageSize=10',
+      '/api/research/papers?subjectId=3&year=2025&gradeBand=junior&keyword=%E4%BA%8C%E6%AC%A1+%E5%87%BD%E6%95%B0&page=1&pageSize=10',
     );
-    expect(url).not.toContain('keyword');
-    expect(url).not.toContain('undefined');
-    expect(url).not.toContain('null');
   });
 
-  it('中文关键词带空格走 URL 编码（不能裸拼进 query）', async () => {
-    const f = stubData({ items: [], total: 0, page: 1, pageSize: 10 });
+  it('试卷详情 / 删除预览 / 删除：路径与 HTTP 方法', async () => {
+    const f = stubData({});
 
-    await listAdminPapers({ keyword: '二次 函数', page: 1, pageSize: 10 });
+    await getResearchPaper(7);
+    await getResearchPaperDeletePreview(7);
+    await deleteResearchPaper(7);
 
-    const url = f.mock.calls[0][0] as string;
-    expect(url).toContain('keyword=%E4%BA%8C%E6%AC%A1+%E5%87%BD%E6%95%B0');
-    // 分页参数始终在（keyword 存在时也不例外）
-    expect(url).toContain('page=1');
-    expect(url).toContain('pageSize=10');
+    expect(f.mock.calls.map((c) => c[0])).toEqual([
+      '/api/research/papers/7',
+      '/api/research/papers/7/delete-preview',
+      '/api/research/papers/7',
+    ]);
+    expect(requestInit(f, 0).method).toBeUndefined();
+    expect(requestInit(f, 2).method).toBe('DELETE');
+  });
+
+  it('updateResearchQuestion → PATCH，body 带 confirmedSource', async () => {
+    const f = stubData({ question: { id: 3, answerVerified: true }, changedFields: ['answer'], deletedImages: 0 });
+
+    await updateResearchQuestion(3, { answer: '42', confirmedSource: true, note: '已核对' });
+
+    expect(f.mock.calls[0][0]).toBe('/api/research/questions/3');
+    expect(requestInit(f).method).toBe('PATCH');
+    expect(requestBody(f)).toEqual({ answer: '42', confirmedSource: true, note: '已核对' });
+  });
+
+  it('uploadResearchImage 走裸 fetch：multipart 不带 application/json Content-Type', async () => {
+    const f = stubData({ fileId: 1, url: '/uploads/research/x.png' });
+    const file = new File(['png'], 'x.png', { type: 'image/png' });
+
+    await uploadResearchImage(file);
+
+    expect(f.mock.calls[0][0]).toBe('/api/research/images');
+    const init = requestInit(f);
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({});
+    expect((init.body as FormData).get('file')).toBe(file);
+  });
+
+  it('deleteResearchImages / gcResearchImages：路径与请求体', async () => {
+    const f = stubData({ deleted: 1, skipped: 0, scanned: 2, failed: 0 });
+
+    await deleteResearchImages(['/uploads/research/x.png']);
+    await gcResearchImages(48);
+
+    expect(f.mock.calls[0][0]).toBe('/api/research/images');
+    expect(requestInit(f, 0).method).toBe('DELETE');
+    expect(requestBody(f, 0)).toEqual({ urls: ['/uploads/research/x.png'] });
+    expect(f.mock.calls[1][0]).toBe('/api/research/images/gc');
+    expect(requestInit(f, 1).method).toBe('POST');
+    expect(requestBody(f, 1)).toEqual({ olderThanHours: 48 });
+  });
+
+  it('gcResearchImages 默认 olderThanHours=24', async () => {
+    const f = stubData({ deleted: 0, skipped: 0, scanned: 0, failed: 0 });
+
+    await gcResearchImages();
+
+    expect(requestBody(f)).toEqual({ olderThanHours: 24 });
+  });
+
+  it('listResearchAudit：筛选条件与分页按固定顺序拼接', async () => {
+    const f = stubData({ items: [], total: 0, page: 1, pageSize: 20 });
+
+    await listResearchAudit({
+      actorId: 2, action: 'question.update', targetType: 'question', targetId: 3,
+      from: '2026-11-01T00:00:00.000Z', page: 1, pageSize: 20,
+    });
+
+    expect(f.mock.calls[0][0]).toBe(
+      '/api/research/audit?actorId=2&action=question.update&targetType=question&targetId=3&from=2026-11-01T00%3A00%3A00.000Z&page=1&pageSize=20',
+    );
   });
 });
 

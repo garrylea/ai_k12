@@ -100,10 +100,9 @@ describe('AdminNav 订阅裁决角标（store 联动）', () => {
 });
 
 describe('AdminNav 导航项', () => {
-  it('包含「试卷管理」入口且指向 /admin/papers', () => {
+  it('不再包含「试卷管理」入口（已迁至教研空间 /research/papers）', () => {
     listClaimsMock.mockRejectedValue(new Error('隔离'));
     renderNav();
-    const link = screen.getByRole('link', { name: '试卷管理' });
-    expect(link).toHaveAttribute('href', '/admin/papers');
+    expect(screen.queryByRole('link', { name: '试卷管理' })).not.toBeInTheDocument();
   });
 });
