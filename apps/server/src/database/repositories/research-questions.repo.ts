@@ -67,7 +67,8 @@ export class ResearchQuestionsRepository {
     }
     const sets = keys.map((k) => `${k} = ?`).join(', ');
     const params: Array<string | number | null> = keys.map((k) => fields[k] as string | number | null);
-    if (markVerified) params.push(1);
+    // answer_verified 在 SQL 里是字面量 `= 1`，不是占位符——绝不能往 params 里多塞一个 1，
+    // 否则参数整体前移，WHERE id = ? 会绑到错误的 id（曾导致「审计写了、题目没改」的静默丢更新）。
 
     const conn = await this.pool.getConnection();
     try {

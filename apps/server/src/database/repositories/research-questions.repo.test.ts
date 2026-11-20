@@ -57,7 +57,7 @@ describe('ResearchQuestionsRepository.findById / findPaperIdByQuestion', () => {
 });
 
 describe('ResearchQuestionsRepository.updateWithAudit', () => {
-  it('改 answer：UPDATE 带 answer_verified=1，参数顺序 [字段..., 1, id]', async () => {
+  it('改 answer：UPDATE 带 answer_verified=1（字面量），参数顺序 [字段..., id]', async () => {
     const conn = mkConn();
     const audit = mockAudit();
     const repo = mkRepo({ getConnection: vi.fn().mockResolvedValue(conn) }, audit);
@@ -66,7 +66,8 @@ describe('ResearchQuestionsRepository.updateWithAudit', () => {
 
     const updateCall = conn.execute.mock.calls[0] as [string, unknown[]];
     expect(updateCall[0]).toBe('UPDATE questions SET answer = ?, answer_verified = 1 WHERE id = ?');
-    expect(updateCall[1]).toEqual(['C', 1, 9]);
+    // answer_verified=1 是 SQL 字面量，参数里只有字段值 + id（多塞 1 会让 id 绑错，静默丢更新）
+    expect(updateCall[1]).toEqual(['C', 9]);
     expect(conn.commit).toHaveBeenCalledTimes(1);
     expect(conn.rollback).not.toHaveBeenCalled();
     expect(conn.release).toHaveBeenCalledTimes(1);
