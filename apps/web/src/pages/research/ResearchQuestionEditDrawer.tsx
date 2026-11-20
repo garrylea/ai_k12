@@ -278,7 +278,8 @@ export default function ResearchQuestionEditDrawer({
   const initialRef = useRef<Drafts>(initialDrafts(question));
   const questionIdRef = useRef(question.id);
   const [status, setStatus] = useState<Status>('editing');
-  const [confirmedSource, setConfirmedSource] = useState(false);
+  // 「已对照原卷」默认勾选：教研员改题前通常已核对原卷，免去每次手动勾选。
+  const [confirmedSource, setConfirmedSource] = useState(true);
   const [note, setNote] = useState('');
   const [uploadCount, setUploadCount] = useState(0);
   // 草稿白板开合：复用现成的手写白板组件；persist=false，关抽屉即卸载清空。
@@ -419,7 +420,7 @@ export default function ResearchQuestionEditDrawer({
     initialRef.current = fresh;
     draftsRef.current = fresh;
     setDrafts(fresh);
-    setConfirmedSource(false);
+    setConfirmedSource(true);
     setNote('');
     setUploadCount(0);
     setStatus('editing');

@@ -67,7 +67,13 @@ function renderDrawer(question = q(), onClose = vi.fn(), onSaved = vi.fn()) {
 
 const field = (label: string) => screen.getByLabelText(label) as HTMLTextAreaElement;
 const saveButton = () => screen.getByRole('button', { name: '保存' });
+/** 确保「已对照原卷」处于勾选态（默认已勾选；若被取消则点回勾选）。 */
 const checkSource = () => screen.getByLabelText('已对照原卷') as HTMLInputElement;
+/** 把「已对照原卷」点到勾选态（默认已勾选则无需操作）。 */
+const ensureChecked = () => {
+  const box = checkSource();
+  if (!box.checked) fireEvent.click(box);
+};
 
 /** 在指定字段的上传控件塞入文件（五个字段各自独立）。 */
 function uploadInto(label: string, files: File[]) {
@@ -106,20 +112,23 @@ afterEach(() => {
 });
 
 describe('ResearchQuestionEditDrawer 保存禁用四个条件', () => {
-  it('未勾「已对照原卷」时保存禁用（brief 示例）', async () => {
+  it('默认已勾选「已对照原卷」；显式取消勾选则保存禁用', async () => {
     const user = userEvent.setup();
     renderDrawer();
 
-    expect(saveButton()).toBeDisabled();
+    // 默认已勾选：有变更即可保存
+    expect(checkSource().checked).toBe(true);
     await user.type(field('标准答案'), 'C');
-    expect(saveButton()).toBeDisabled(); // 仍未勾选
+    expect(saveButton()).toBeEnabled();
+    // 显式取消勾选 → 禁用
+    await user.click(checkSource());
+    expect(saveButton()).toBeDisabled();
     await user.click(checkSource());
     expect(saveButton()).toBeEnabled();
   });
-
   it('条件一：无任何字段变更，即便勾了「已对照原卷」仍禁用', () => {
     renderDrawer();
-    fireEvent.click(checkSource());
+    ensureChecked();
     expect(saveButton()).toBeDisabled();
   });
 
@@ -127,7 +136,7 @@ describe('ResearchQuestionEditDrawer 保存禁用四个条件', () => {
     let finishUpload!: (value: { fileId: number; url: string }) => void;
     uploadMock.mockImplementation(() => new Promise((resolve) => { finishUpload = resolve; }));
     renderDrawer();
-    fireEvent.click(checkSource());
+    ensureChecked();
     fireEvent.change(field('标准答案'), { target: { value: 'A' } });
     expect(saveButton()).toBeEnabled();
 
@@ -145,7 +154,7 @@ describe('ResearchQuestionEditDrawer 保存禁用四个条件', () => {
     const { onSaved } = renderDrawer();
     fireEvent.change(field('标准答案'), { target: { value: 'A' } });
     fireEvent.change(screen.getByPlaceholderText('备注（写审计）'), { target: { value: '对照原卷' } });
-    fireEvent.click(checkSource());
+    ensureChecked();
 
     fireEvent.click(saveButton());
     await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
@@ -169,7 +178,7 @@ describe('ResearchQuestionEditDrawer 状态机', () => {
     updateMock.mockRejectedValueOnce(new Error('服务异常'));
     const { onSaved } = renderDrawer();
     fireEvent.change(field('标准答案'), { target: { value: 'A' } });
-    fireEvent.click(checkSource());
+    ensureChecked();
 
     fireEvent.click(saveButton());
     await waitFor(() => expect(toastMock).toHaveBeenCalledWith('error', '服务异常'));
@@ -184,7 +193,7 @@ describe('ResearchQuestionEditDrawer 状态机', () => {
   it('选项 JSON 非法 → 停在可编辑态并提示，不调 PATCH', () => {
     renderDrawer();
     fireEvent.change(field('选项'), { target: { value: 'not json' } });
-    fireEvent.click(checkSource());
+    ensureChecked();
     fireEvent.click(saveButton());
     expect(toastMock).toHaveBeenCalledWith('error', expect.stringContaining('选项'));
     expect(updateMock).not.toHaveBeenCalled();
@@ -348,7 +357,7 @@ describe('ResearchQuestionEditDrawer review 回归', () => {
     expect(field('选项').value).toBe(''); // null 渲染为空，不是字面 "null"
 
     fireEvent.change(field('标准答案'), { target: { value: 'B' } });
-    fireEvent.click(checkSource());
+    ensureChecked();
     fireEvent.click(saveButton());
 
     await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
@@ -363,7 +372,7 @@ describe('ResearchQuestionEditDrawer review 回归', () => {
   it('原有选项的题把选项清空 → PATCH 显式 options:null（保持无选项题语义）', async () => {
     renderDrawer(q());
     fireEvent.change(field('选项'), { target: { value: '' } });
-    fireEvent.click(checkSource());
+    ensureChecked();
     fireEvent.click(saveButton());
 
     await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
@@ -373,7 +382,7 @@ describe('ResearchQuestionEditDrawer review 回归', () => {
   it('无选项题补上合法选项 → PATCH 带解析后的数组', async () => {
     renderDrawer(q({ options: null }));
     fireEvent.change(field('选项'), { target: { value: '[{"label":"A","text":"甲"}]' } });
-    fireEvent.click(checkSource());
+    ensureChecked();
     fireEvent.click(saveButton());
 
     await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
