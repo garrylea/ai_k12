@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
   markdownComponents,
@@ -70,6 +70,48 @@ function initialDrafts(q: ResearchQuestionDetail): Drafts {
   };
 }
 
+/** 选项卡片仅在这三种题型 + 合法非空 options 时渲染；与判题侧选择题类型一致。 */
+const CHOICE_TYPES: ReadonlySet<string> = new Set(['choice', 'multi_choice', 'true_false']);
+
+interface ChoiceOption {
+  label: string;
+  text: string;
+}
+
+/** 从实时选项 JSON 派生卡片数据；JSON 正在编辑或不合法时返回 null，不报错。 */
+function parseChoiceOptions(type: string, optionsJson: string): ChoiceOption[] | null {
+  if (!CHOICE_TYPES.has(type)) return null;
+  if (!optionsJson.trim()) return null;
+  try {
+    const parsed: unknown = JSON.parse(optionsJson);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    if (
+      !parsed.every(
+        (o) => o !== null && typeof o === 'object' &&
+          typeof (o as { label?: unknown }).label === 'string' &&
+          typeof (o as { text?: unknown }).text === 'string',
+      )
+    ) return null;
+    return parsed as ChoiceOption[];
+  } catch {
+    return null;
+  }
+}
+
+/** 点选写 answer：单选/判断再点同一项取消；多选按 options 出现顺序拼接。 */
+function toggleAnswer(
+  current: string,
+  label: string,
+  multi: boolean,
+  options: ChoiceOption[],
+): string {
+  if (!multi) return current === label ? '' : label;
+  const picked = new Set(current.split(''));
+  if (picked.has(label)) picked.delete(label);
+  else picked.add(label);
+  return options.map((o) => o.label).filter((l) => picked.has(l)).join('');
+}
+
 /** 统一 markdown 渲染：/uploads/ 由 markdown.tsx 的 resolveAsset 特判透传。
  *  上传失败占位（spec §6.1「标红失败图」）在预览中染成错误色。 */
 function MarkdownBlock({ text }: { text: string }) {
@@ -85,6 +127,39 @@ function MarkdownBlock({ text }: { text: string }) {
     >
       {preprocessMarkdown(decorated)}
     </ReactMarkdown>
+  );
+}
+
+interface ChoiceOptionCardsProps {
+  options: ChoiceOption[];
+  answer: string;
+  multi: boolean;
+  disabled: boolean;
+  onSelect: (answer: string) => void;
+}
+
+/** 选项卡片：点选即写标准答案（label 字符串），只改 answer，不动 options。 */
+function ChoiceOptionCards({ options, answer, multi, disabled, onSelect }: ChoiceOptionCardsProps) {
+  return (
+    <div data-testid="choice-options" className="mt-2 flex flex-col gap-2">
+      {options.map((opt) => {
+        const selected = multi ? answer.split('').includes(opt.label) : answer === opt.label;
+        return (
+          <button
+            key={opt.label}
+            type="button"
+            disabled={disabled}
+            aria-pressed={selected}
+            aria-label={`将${opt.label}设为正确答案`}
+            onClick={() => onSelect(toggleAnswer(answer, opt.label, multi, options))}
+            className={`w-full flex items-start gap-2 rounded-lg border p-2 text-left text-sm transition-colors ${selected ? 'border-[var(--brand-500)] bg-orange-50' : 'border-gray-200 hover:bg-gray-50'}`}
+          >
+            <span className="shrink-0 font-semibold" style={{ color: 'var(--text-primary)' }}>{opt.label}</span>
+            <span className="min-w-0"><MarkdownBlock text={opt.text} /></span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -200,6 +275,9 @@ export default function ResearchQuestionEditDrawer({
   const [confirmedSource, setConfirmedSource] = useState(false);
   const [note, setNote] = useState('');
   const [uploadCount, setUploadCount] = useState(0);
+
+  /** 选项卡片数据：从实时 JSON 派生，改 JSON 即时更新；非选择题/非法 JSON → null。 */
+  const choiceOptions = parseChoiceOptions(question.type, drafts.options);
 
   const [widthPx, setWidthPx] = useState<number | null>(() =>
     lastWidthPx === null ? null : Math.min(WIDTH_MAX_PX(), Math.max(WIDTH_MIN_PX(), lastWidthPx)),
@@ -509,15 +587,25 @@ export default function ResearchQuestionEditDrawer({
       </p>
 
       {FIELD_KEYS.map((key) => (
-        <EditField
-          key={key}
-          fieldKey={key}
-          value={drafts[key]}
-          markdown={MARKDOWN_FIELDS.has(key)}
-          busy={busy}
-          onChange={(v) => setField(key, v)}
-          onFiles={(files) => handleFiles(key, files)}
-        />
+        <Fragment key={key}>
+          {key === 'options' && choiceOptions && (
+            <ChoiceOptionCards
+              options={choiceOptions}
+              answer={drafts.answer}
+              multi={question.type === 'multi_choice'}
+              disabled={busy}
+              onSelect={(next) => setField('answer', next)}
+            />
+          )}
+          <EditField
+            fieldKey={key}
+            value={drafts[key]}
+            markdown={MARKDOWN_FIELDS.has(key)}
+            busy={busy}
+            onChange={(v) => setField(key, v)}
+            onFiles={(files) => handleFiles(key, files)}
+          />
+        </Fragment>
       ))}
 
       <div className="mt-4">

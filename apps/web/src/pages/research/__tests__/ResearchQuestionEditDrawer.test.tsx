@@ -525,3 +525,68 @@ describe('ResearchQuestionEditDrawer 拖拽调宽', () => {
     expect(screen.getByRole('dialog', { name: /编辑题目/ }).style.width).toBe('592px');
   });
 });
+
+describe('ResearchQuestionEditDrawer 选项卡片点选', () => {
+  it('选择题渲染选项卡片，正文走 markdown', () => {
+    renderDrawer(q({ options: [
+      { label: 'A', text: '**甲**选项' },
+      { label: 'B', text: '乙选项' },
+    ] }));
+    const cards = screen.getByTestId('choice-options');
+    expect(within(cards).getByRole('button', { name: '将A设为正确答案' })).toBeInTheDocument();
+    expect(within(cards).getByRole('button', { name: '将B设为正确答案' })).toBeInTheDocument();
+    expect(within(cards).getByText('甲').tagName).toBe('STRONG');
+  });
+
+  it('点 A → 标准答案为 A，A 卡片 aria-pressed=true', () => {
+    renderDrawer(q({ answer: '' }));
+    fireEvent.click(screen.getByRole('button', { name: '将A设为正确答案' }));
+    expect(field('标准答案').value).toBe('A');
+    expect(screen.getByRole('button', { name: '将A设为正确答案' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('再点 A → 取消选中，答案清空', () => {
+    renderDrawer(q({ answer: '' }));
+    const a = screen.getByRole('button', { name: '将A设为正确答案' });
+    fireEvent.click(a);
+    fireEvent.click(a);
+    expect(field('标准答案').value).toBe('');
+    expect(a).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('多选题点 A、C → AC；再点 A → C', () => {
+    renderDrawer(q({
+      type: 'multi_choice',
+      options: [
+        { label: 'A', text: '甲' }, { label: 'B', text: '乙' }, { label: 'C', text: '丙' },
+      ],
+      answer: '',
+    }));
+    fireEvent.click(screen.getByRole('button', { name: '将A设为正确答案' }));
+    fireEvent.click(screen.getByRole('button', { name: '将C设为正确答案' }));
+    expect(field('标准答案').value).toBe('AC');
+    fireEvent.click(screen.getByRole('button', { name: '将A设为正确答案' }));
+    expect(field('标准答案').value).toBe('C');
+  });
+
+  it('改选项 JSON → 卡片即时新增 D', () => {
+    renderDrawer();
+    fireEvent.change(field('选项'), {
+      target: { value: JSON.stringify([
+        { label: 'A', text: '甲' }, { label: 'B', text: '乙' }, { label: 'D', text: '丁' },
+      ]) },
+    });
+    expect(screen.getByRole('button', { name: '将D设为正确答案' })).toBeInTheDocument();
+  });
+
+  it('非选项题（fill_blank + options=null）→ 无卡片', () => {
+    renderDrawer(q({ type: 'fill_blank', options: null }));
+    expect(screen.queryByTestId('choice-options')).not.toBeInTheDocument();
+  });
+
+  it('选项 JSON 非法 → 无卡片且不抛错', () => {
+    renderDrawer();
+    fireEvent.change(field('选项'), { target: { value: '{ 不是合法 JSON' } });
+    expect(screen.queryByTestId('choice-options')).not.toBeInTheDocument();
+  });
+});
