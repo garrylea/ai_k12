@@ -299,6 +299,7 @@ describe('ResearchPapersRepository.deletePaperCascade', () => {
 
 const U1 = '/uploads/research/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.png';
 const U2 = '/uploads/research/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg';
+const U3 = '/uploads/research/cccccccc-dddd-eeee-ffff-000000000000'; // extension-less
 
 describe('ResearchPapersRepository.findResearchImageUrlsByPaper', () => {
   it('只取「真正被物理删的独占题」五字段里的 research 图 URL，并去重', async () => {
@@ -310,14 +311,14 @@ describe('ResearchPapersRepository.findResearchImageUrlsByPaper', () => {
         content: `看这里 ${U1} 还有 ${U1}`,
         options: JSON.stringify([{ label: 'A', text: U2 }]),
         answer: null,
-        explanation: '题库静态图 questions/x.png 不算',
+        explanation: `题库静态图 questions/x.png 不算，extension-less ${U3} 算`,
         approach: `https://example.com/x.png ${U1}`,
       }], []]);
     const repo = mkRepo(pool);
 
     const urls = await repo.findResearchImageUrlsByPaper(42);
 
-    expect(urls).toEqual([U1, U2]);
+    expect(urls).toEqual([U1, U2, U3]);
     // 第三跳只查可删题（1、3），blocked 的题 2 不进来。
     const [sql, params] = pool.execute.mock.calls[2] as [string, unknown[]];
     expect(sql).toContain('FROM questions WHERE id IN');

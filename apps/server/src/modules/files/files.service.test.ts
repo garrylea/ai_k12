@@ -7,7 +7,7 @@ vi.mock('node:fs/promises', () => ({
 }));
 
 import * as fs from 'node:fs/promises';
-import { FilesService } from './files.service.js';
+import { FilesService, getUploadDir } from './files.service.js';
 
 function makeFile(mimetype: string, originalname: string) {
   return {
@@ -27,6 +27,12 @@ function setup() {
 
 beforeEach(() => {
   process.env.UPLOAD_DIR = '/tmp/ai-k12-upload-test';
+});
+
+describe('getUploadDir — 上传目录单一配置源', () => {
+  it('读取运行时 UPLOAD_DIR（与 FilesService/ResearchImagesService 共用）', () => {
+    expect(getUploadDir()).toBe('/tmp/ai-k12-upload-test');
+  });
 });
 
 describe('FilesService.upload — PDF extraction auto-start', () => {

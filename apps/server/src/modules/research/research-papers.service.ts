@@ -1,4 +1,4 @@
-import { BadRequestException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   ResearchPapersRepository,
   type AdminPaperListRow,
@@ -141,6 +141,8 @@ function isForeignKeyConflict(err: unknown): boolean {
  */
 @Injectable()
 export class ResearchPapersService {
+  private readonly logger = new Logger(ResearchPapersService.name);
+
   constructor(
     private readonly repo: ResearchPapersRepository,
     private readonly images: ResearchImagesService,
@@ -195,15 +197,21 @@ export class ResearchPapersService {
     if (!outcome) {
       throw new NotFoundException(`试卷不存在：${id}`);
     }
-    // 事务已 commit，图片清理失败只影响孤儿磁盘文件，不回滚删卷。
-    const cleanup = await this.images.cleanupUnreferenced(imageUrls, actor);
+    // 事务已 commit：图片清理的任何失败只记日志，绝不让「已删成功的卷」对客户端报错。
+    let deletedImages = 0;
+    try {
+      const cleanup = await this.images.cleanupUnreferenced(imageUrls, actor);
+      deletedImages = cleanup.deleted;
+    } catch (err) {
+      this.logger.warn(`删卷后图片清理失败（卷已删除）：${String(err)}`);
+    }
     return {
       paperId: id,
       deletedQuestions: outcome.deletedQuestions,
       retainedQuestions: outcome.retainedQuestions,
       deletedSessions: outcome.deletedSessions,
       deletedAnswers: outcome.deletedAnswers,
-      deletedImages: cleanup.deleted,
+      deletedImages,
     };
   }
 

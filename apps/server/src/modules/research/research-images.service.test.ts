@@ -126,13 +126,48 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
     expect(res).toEqual({ deleted: 1, skipped: 0 });
   });
 
-  it('审计写入失败被吞掉，不抛到调用方（按单条 skip 计）', async () => {
-    const { service, audit } = setup();
+  it('审计写入失败只记日志：DB 已删仍算 deleted，不误记为 skipped', async () => {
+    const { service, audit, filesRepo } = setup();
     audit.append.mockRejectedValueOnce(new Error('audit down'));
 
     const res = await service.cleanupUnreferenced([URL_A], ACTOR);
 
+    expect(filesRepo.delete).toHaveBeenCalledWith(5);
+    expect(res).toEqual({ deleted: 1, skipped: 0 });
+  });
+
+  it('引用扫描查询失败 → 吞掉并记 skipped，不抛到 post-commit 调用方', async () => {
+    const { service, pool, filesRepo } = setup();
+    pool.execute.mockRejectedValueOnce(new Error('db down'));
+
+    const res = await service.cleanupUnreferenced([URL_A], ACTOR);
+
     expect(res).toEqual({ deleted: 0, skipped: 1 });
+    expect(filesRepo.delete).not.toHaveBeenCalled();
+  });
+
+  it('整批预校验：含非法 URL 时 400 且在任何删除前拒绝（valid+invalid 不产生副作用）', async () => {
+    const { service, filesRepo } = setup();
+    const invalid = '/uploads/auxiliary/b.png';
+
+    await expect(service.cleanupUnreferenced([URL_A, invalid], ACTOR))
+      .rejects.toMatchObject({ status: 400 });
+    expect(filesRepo.findByUrl).not.toHaveBeenCalled();
+    expect(filesRepo.delete).not.toHaveBeenCalled();
+  });
+
+  it('无扩展名的 research URL（extension-less 上传）也可清理', async () => {
+    const { service, filesRepo } = setup();
+    const noExt = '/uploads/research/cccccccc-dddd-eeee-ffff-000000000000';
+    filesRepo.findByUrl.mockResolvedValue(row({ id: 6, url: noExt }));
+
+    const res = await service.cleanupUnreferenced([noExt], ACTOR);
+
+    expect(filesRepo.delete).toHaveBeenCalledWith(6);
+    expect(fs.unlink).toHaveBeenCalledWith(
+      '/tmp/ai-k12-research-images-test/research/cccccccc-dddd-eeee-ffff-000000000000',
+    );
+    expect(res.deleted).toBe(1);
   });
 
   it('重复 URL 去重：只查库/删一次', async () => {

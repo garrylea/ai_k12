@@ -156,6 +156,17 @@ describe('ResearchPapersService.remove', () => {
     expect(out.deletedImages).toBe(0);
   });
 
+  it('commit 后 cleanup 抛错也吞掉：删卷结果照常返回，deletedImages=0', async () => {
+    const images = mkImages({
+      cleanupUnreferenced: vi.fn().mockRejectedValue(new Error('db down')),
+    });
+    const { svc } = mkSvc(mkRepo(), images);
+
+    const out = await svc.remove(446, ACTOR);
+
+    expect(out).toMatchObject({ paperId: 446, deletedQuestions: 14, deletedImages: 0 });
+  });
+
   it('操作者身份（sub/role/name）原样传给仓储审计写入', async () => {
     const { svc, repo } = mkSvc();
     await svc.remove(446, ACTOR);

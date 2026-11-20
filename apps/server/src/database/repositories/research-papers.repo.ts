@@ -206,7 +206,7 @@ export class ResearchPapersRepository {
       `SELECT content, options, answer, explanation, approach FROM questions WHERE id IN (${ph})`,
       deletable,
     );
-    const re = /\/uploads\/research\/[0-9a-f-]+\.[a-zA-Z0-9]+/g;
+    const re = /\/uploads\/research\/[0-9a-f-]+(?:\.[a-zA-Z0-9]+)?/g;
     return [...new Set(rows.flatMap((r) =>
       ['content', 'options', 'answer', 'explanation', 'approach']
         .flatMap((k) => String(r[k] ?? '').match(re) ?? []))),

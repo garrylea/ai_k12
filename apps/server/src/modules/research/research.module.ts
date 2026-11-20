@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ResearchPapersRepository } from '../../database/repositories/research-papers.repo.js';
+import { UploadedFilesRepository } from '../../database/repositories/uploaded-files.repo.js';
 import { ResearchQuestionsRepository } from '../../database/repositories/research-questions.repo.js';
 import { ContentAuditRepository } from '../../database/repositories/content-audit.repo.js';
 import { ResearchPapersController } from './research-papers.controller.js';
@@ -25,6 +26,7 @@ import { FilesModule } from '../files/files.module.js';
   providers: [
     ResearchPapersRepository,
     ResearchQuestionsRepository,
+    UploadedFilesRepository, // ResearchImagesService 的构造依赖：FilesModule 只导出 FilesService
     ContentAuditRepository,
     ResearchPapersService,
     ResearchQuestionsService,

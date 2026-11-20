@@ -11,9 +11,14 @@ export interface UploadedFileResult {
   taskId?: number;  // PDF extraction task ID (only for PDF uploads)
 }
 
+/** 上传目录的唯一配置源；每次调用时读取，保留「测试运行时设 env」的语义。 */
+export function getUploadDir(): string {
+  return process.env.UPLOAD_DIR ?? './uploads';
+}
+
 @Injectable()
 export class FilesService {
-  private readonly storageDir = process.env.UPLOAD_DIR ?? './uploads';
+  private readonly storageDir = getUploadDir();
 
   constructor(
     private readonly filesRepo: UploadedFilesRepository,
