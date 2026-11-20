@@ -617,6 +617,8 @@ describe('ResearchQuestionEditDrawer 草稿白板', () => {
     const aside = screen.getByRole('dialog', { name: /编辑题目/ }) as HTMLElement;
     expect(aside.className).toContain('w-[min(96vw,96rem)]');
     expect(screen.getByRole('separator', { name: '调整草稿宽度' })).toBeInTheDocument();
+    // 草稿栏默认占约 2/3 总宽
+    expect(screen.getByTestId('research-draft-whiteboard').style.width).toBe(`${200 / 3}%`);
     // 左栏编辑字段仍可编辑（草稿与编辑并存，不是替换）
     expect(field('题干')).toBeInTheDocument();
   });

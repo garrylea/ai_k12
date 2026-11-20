@@ -23,11 +23,11 @@ let lastWidthPx: number | null = null;
 /** 宽度上限：视口 92%（与原 class 的 92vw 一致）；下限保书写空间，窄屏时等于上限=禁调。 */
 const WIDTH_MAX_PX = () => window.innerWidth * 0.92;
 const WIDTH_MIN_PX = () => Math.min(360, WIDTH_MAX_PX());
-/** 草稿栏宽度：会话内记忆，刷新归默认；夹紧 [320, 70vw] 保证左栏可读。 */
-let lastDraftWidthPx: number | null = null;
-const DRAFT_W_DEFAULT = 480;
-const DRAFT_W_MIN = 320;
-const DRAFT_W_MAX = () => Math.max(DRAFT_W_MIN, window.innerWidth * 0.7);
+/** 草稿栏宽度（占两栏行的 %）：默认 2/3；会话内记忆，刷新归默认；夹紧 [40, 80] 保左栏可读。 */
+let lastDraftWidthPct: number | null = null;
+const DRAFT_W_DEFAULT_PCT = 200 / 3; // 66.67%，草稿占约 2/3
+const DRAFT_W_MIN_PCT = 40;
+const DRAFT_W_MAX_PCT = 80;
 
 export interface ResearchQuestionEditDrawerProps {
   question: ResearchQuestionDetail; // 五字段原值，勿剥离
@@ -283,43 +283,44 @@ export default function ResearchQuestionEditDrawer({
   const [uploadCount, setUploadCount] = useState(0);
   // 草稿白板开合：复用现成的手写白板组件；persist=false，关抽屉即卸载清空。
   const [draftOpen, setDraftOpen] = useState(false);
-  const [draftWidthPx, setDraftWidthPx] = useState<number>(() =>
-    lastDraftWidthPx === null
-      ? DRAFT_W_DEFAULT
-      : Math.min(DRAFT_W_MAX(), Math.max(DRAFT_W_MIN, lastDraftWidthPx)),
+  const [draftWidthPct, setDraftWidthPct] = useState<number>(() =>
+    lastDraftWidthPct === null
+      ? DRAFT_W_DEFAULT_PCT
+      : Math.min(DRAFT_W_MAX_PCT, Math.max(DRAFT_W_MIN_PCT, lastDraftWidthPct)),
   );
   const [draftDragging, setDraftDragging] = useState(false);
   const draftColRef = useRef<HTMLDivElement>(null);
-  const draftWidthRef = useRef(draftWidthPx);
-  const draftResizeStartRef = useRef<{ startX: number; startPx: number } | null>(null);
+  const draftWidthRef = useRef(draftWidthPct);
+  const draftResizeStartRef = useRef<{ startX: number; startPct: number; baseW: number } | null>(null);
 
-  const applyDraftWidth = useCallback((px: number) => {
-    const clamped = Math.min(DRAFT_W_MAX(), Math.max(DRAFT_W_MIN, px));
+  const applyDraftWidth = useCallback((pct: number) => {
+    const clamped = Math.min(DRAFT_W_MAX_PCT, Math.max(DRAFT_W_MIN_PCT, pct));
     draftWidthRef.current = clamped;
-    setDraftWidthPx(clamped);
+    setDraftWidthPct(clamped);
   }, []);
 
   const handleDraftResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    const startPx =
-      draftColRef.current?.getBoundingClientRect().width || draftWidthRef.current || DRAFT_W_DEFAULT;
-    draftResizeStartRef.current = { startX: e.clientX, startPx };
+    // 基准 = 两栏行的宽（width: N% 的参照），与 CSS 百分比同口径
+    const row = draftColRef.current?.parentElement;
+    const baseW = row?.getBoundingClientRect().width ?? 0;
+    draftResizeStartRef.current = { startX: e.clientX, startPct: draftWidthRef.current, baseW };
     setDraftDragging(true);
   };
 
   const handleDraftResizePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const start = draftResizeStartRef.current;
-    if (!start) return;
-    // 向左拖 clientX 变小 → 草稿变宽
-    applyDraftWidth(start.startPx + (start.startX - e.clientX));
+    if (!start || start.baseW <= 0) return;
+    // 向左拖 clientX 变小 → 草稿变宽（百分比增量）
+    applyDraftWidth(start.startPct + ((start.startX - e.clientX) / start.baseW) * 100);
   };
 
   const endDraftResize = () => {
     if (!draftResizeStartRef.current) return; // pointerup / lostpointercapture 幂等收尾
     draftResizeStartRef.current = null;
     setDraftDragging(false);
-    lastDraftWidthPx = draftWidthRef.current;
+    lastDraftWidthPct = draftWidthRef.current;
   };
 
   /** 选项卡片数据：从实时 JSON 派生，改 JSON 即时更新；非选择题/非法 JSON → null。 */
@@ -756,7 +757,7 @@ export default function ResearchQuestionEditDrawer({
               ref={draftColRef}
               data-testid="research-draft-whiteboard"
               className="shrink-0 min-w-0 flex flex-col border-l border-gray-200"
-              style={{ width: `${draftWidthPx}px` }}
+              style={{ width: `${draftWidthPct}%` }}
             >
               <DraftWhiteboard questionId={`research-${question.id}`} persist={false} />
             </div>
