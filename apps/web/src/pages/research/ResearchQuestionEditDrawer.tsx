@@ -84,7 +84,7 @@ function parseChoiceOptions(type: string, optionsJson: string): ChoiceOption[] |
   if (!optionsJson.trim()) return null;
   try {
     const parsed: unknown = JSON.parse(optionsJson);
-    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 10) return null;
     if (
       !parsed.every(
         (o) => o !== null && typeof o === 'object' &&
@@ -142,11 +142,11 @@ interface ChoiceOptionCardsProps {
 function ChoiceOptionCards({ options, answer, multi, disabled, onSelect }: ChoiceOptionCardsProps) {
   return (
     <div data-testid="choice-options" className="mt-2 flex flex-col gap-2">
-      {options.map((opt) => {
+      {options.map((opt, i) => {
         const selected = multi ? answer.split('').includes(opt.label) : answer === opt.label;
         return (
           <button
-            key={opt.label}
+            key={`${opt.label}-${i}`}
             type="button"
             disabled={disabled}
             aria-pressed={selected}
