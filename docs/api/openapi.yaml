@@ -9420,13 +9420,16 @@ components:
 
     AdminStaffListResult:
       type: object
-      required: [items]
+      required: [items, total]
       properties:
         items:
           type: array
           maxItems: 50
           items:
             $ref: '#/components/schemas/AdminStaffItem'
+        total:
+          type: integer
+          description: 过滤后的总数；items 受 LIMIT 50 截断，total 可能更大
 
     AdminStaffCreateRequest:
       type: object

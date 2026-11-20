@@ -64,18 +64,41 @@ export class AdminsRepository {
   }
 
   /**
+   * 管理台重置教研员密码：SQL 角色守卫，管理台路径专用。
+   * `updatePassword` 仍留给 admin 自助改密（不限定角色），两者别混用。
+   */
+  async updateResearcherPassword(id: number, passwordHash: string): Promise<void> {
+    await this.pool.execute(
+      `UPDATE admins SET password_hash = ?, updated_at = CURRENT_TIMESTAMP(3)
+       WHERE id = ? AND role = 'researcher' AND deleted_at IS NULL`,
+      [passwordHash, id],
+    );
+  }
+
+  /**
    * 管理台教研员列表（2026-11-19）：角色硬过滤，**永不出 admin 行**。
    * 空 search 命中全部；按 id DESC，与家长/学生列表同序。
+   * `total` 是过滤后的总数（列表本身 `LIMIT 50`），前端据此提示「最多显示 50 条」。
    */
-  async listResearchers(q: string): Promise<Researcher[]> {
+  async listResearchers(q: string): Promise<{ items: Researcher[]; total: number }> {
     const like = `%${q}%`;
-    const [rows] = await this.pool.execute<ResearcherRow[]>(
-      `SELECT id, username, name, is_active, created_at FROM admins
-       WHERE role = 'researcher' AND deleted_at IS NULL AND (username LIKE ? OR name LIKE ?)
-       ORDER BY id DESC LIMIT 50`,
-      [like, like],
-    );
-    return rows.map((r) => this.mapResearcher(r));
+    const [[rows], [countRows]] = await Promise.all([
+      this.pool.execute<ResearcherRow[]>(
+        `SELECT id, username, name, is_active, created_at FROM admins
+         WHERE role = 'researcher' AND deleted_at IS NULL AND (username LIKE ? OR name LIKE ?)
+         ORDER BY id DESC LIMIT 50`,
+        [like, like],
+      ),
+      this.pool.execute<(RowDataPacket & { total: number })[]>(
+        `SELECT COUNT(*) AS total FROM admins
+         WHERE role = 'researcher' AND deleted_at IS NULL AND (username LIKE ? OR name LIKE ?)`,
+        [like, like],
+      ),
+    ]);
+    return {
+      items: rows.map((r) => this.mapResearcher(r)),
+      total: Number(countRows[0]?.total ?? 0),
+    };
   }
 
   /** 新建教研员：角色由 SQL 写死 `researcher`，调用方无从指定 admin。 */

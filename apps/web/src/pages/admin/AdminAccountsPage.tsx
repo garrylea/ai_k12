@@ -34,6 +34,7 @@ export default function AdminAccountsPage() {
   const [parents, setParents] = useState<AdminParentItem[]>([]);
   const [students, setStudents] = useState<AdminStudentItem[]>([]);
   const [researchers, setResearchers] = useState<AdminResearcherItem[]>([]);
+  const [researcherTotal, setResearcherTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [banTarget, setBanTarget] = useState<AdminParentItem | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -62,8 +63,11 @@ export default function AdminAccountsPage() {
             const list = await searchStudents(q);
             if (!cancelled) setStudents(list);
           } else {
-            const { items } = await listResearchers(q);
-            if (!cancelled) setResearchers(items);
+            const { items, total } = await listResearchers(q);
+            if (!cancelled) {
+              setResearchers(items);
+              setResearcherTotal(total);
+            }
           }
         } catch (err: unknown) {
           if (!cancelled) toast('error', err instanceof Error ? err.message : '加载失败');
@@ -344,8 +348,14 @@ export default function AdminAccountsPage() {
         </div>
       ) : (
         /* 教研员列表 */
-        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
+        <div className="space-y-3">
+          {researcherTotal > 50 && (
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {`共 ${researcherTotal} 个账号，最多显示 50 条，请用搜索缩小范围。`}
+            </p>
+          )}
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-[var(--text-secondary)] border-b border-gray-100">
@@ -393,6 +403,7 @@ export default function AdminAccountsPage() {
                 {researchers.length === 0 && emptyRow(5)}
               </tbody>
             </table>
+          </div>
           </div>
         </div>
       )}

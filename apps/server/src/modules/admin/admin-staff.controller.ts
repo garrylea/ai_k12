@@ -1,11 +1,9 @@
 import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
-import { AdminStaffService } from './admin-staff.service.js';
+import { AdminStaffService, USERNAME_RE } from './admin-staff.service.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
-
-const USERNAME_RE = /^[a-zA-Z0-9_]{3,50}$/;
 
 /**
  * `.strict()`：body 带任何未声明字段（尤其 `role`）都算入参错误 → 400/1001，

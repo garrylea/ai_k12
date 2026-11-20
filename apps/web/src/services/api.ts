@@ -997,7 +997,7 @@ export function setStudentStatusAdmin(id: number, isActive: boolean): Promise<nu
 
 // --- Admin: 教研员账号（仅 researcher，无创建 admin 的入口） ---
 export interface AdminResearcherItem { id: number; username: string; name: string | null; isActive: boolean; createdAt: string; }
-export function listResearchers(search: string): Promise<{ items: AdminResearcherItem[] }> {
+export function listResearchers(search: string): Promise<{ items: AdminResearcherItem[]; total: number }> {
   return fetchApi(`/admin/staff?search=${encodeURIComponent(search)}`);
 }
 export function createResearcher(req: { username: string; name?: string; password: string }): Promise<{ id: number; username: string; name: string | null; isActive: boolean }> {

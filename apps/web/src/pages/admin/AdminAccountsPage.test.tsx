@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AdminAccountsPage from './AdminAccountsPage';
 import {
+  ApiError,
   createResearcher,
   listResearchers,
   resetResearcherPassword,
@@ -64,7 +65,7 @@ async function openResearchersTab() {
 beforeEach(() => {
   vi.clearAllMocks();
   parentsMock.mockResolvedValue([]);
-  listMock.mockResolvedValue({ items: [researcherOf()] });
+  listMock.mockResolvedValue({ items: [researcherOf()], total: 1 });
   createMock.mockResolvedValue({ id: 8, username: 'teacher02', name: null, isActive: true });
   statusMock.mockResolvedValue(null);
   resetMock.mockResolvedValue(null);
@@ -81,6 +82,15 @@ describe('AdminAccountsPage 教研员 Tab', () => {
     expect(screen.getByText('教研甲')).toBeTruthy();
     expect(screen.getByText('正常')).toBeTruthy();
     expect(screen.getByText('2026/11/19')).toBeTruthy();
+    // 未超过 50 条不出现截断提示
+    expect(screen.queryByText(/最多显示 50 条/)).toBeNull();
+  });
+
+  it('total > 50 时提示「最多显示 50 条」', async () => {
+    listMock.mockResolvedValue({ items: [researcherOf()], total: 60 });
+    await openResearchersTab();
+
+    expect(await screen.findByText('共 60 个账号，最多显示 50 条，请用搜索缩小范围。')).toBeTruthy();
   });
 
   it('新建教研员：填表提交后调用 createResearcher 并刷新', async () => {
@@ -109,6 +119,21 @@ describe('AdminAccountsPage 教研员 Tab', () => {
     await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2), { timeout: 2000 });
   });
 
+  it('重名 409：错误 toast，弹窗不关闭且输入保留', async () => {
+    createMock.mockRejectedValueOnce(new ApiError(1004, '用户名已存在', undefined, 409));
+    await openResearchersTab();
+    fireEvent.click(screen.getByRole('button', { name: '新建教研员' }));
+
+    const usernameInput = screen.getByPlaceholderText('字母、数字、下划线，3-50 位');
+    fireEvent.change(usernameInput, { target: { value: 'teacher02' } });
+    fireEvent.change(screen.getByPlaceholderText('6-72 位'), { target: { value: 'pass1234' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建' }));
+
+    await waitFor(() => expect(toastMock).toHaveBeenCalledWith('error', '用户名已存在'));
+    expect(usernameInput).toHaveValue('teacher02');
+    expect(screen.getByRole('button', { name: '创建' })).toBeTruthy();
+  });
+
   it('停用需确认，确认后调用 status=false（提示立即下线）', async () => {
     await openResearchersTab();
     fireEvent.click(await screen.findByRole('button', { name: '停用' }));
@@ -120,7 +145,7 @@ describe('AdminAccountsPage 教研员 Tab', () => {
   });
 
   it('启用直接调用 status=true（无确认弹窗）', async () => {
-    listMock.mockResolvedValue({ items: [researcherOf({ isActive: false })] });
+    listMock.mockResolvedValue({ items: [researcherOf({ isActive: false })], total: 1 });
     await openResearchersTab();
 
     fireEvent.click(await screen.findByRole('button', { name: '启用' }));

@@ -8,6 +8,7 @@ import { AdminsRepository } from './admins.repo.js';
 function mkPool(result: any = { insertId: 9 }) {
   return {
     execute: vi.fn().mockImplementation((sql: string) => {
+      if (/COUNT\(\*\)/i.test(sql)) return Promise.resolve([[{ total: 60 }], []]);
       if (/SELECT/i.test(sql)) {
         return Promise.resolve([[{ id: 5, username: 'r1', name: '教研甲', is_active: 1, created_at: new Date('2026-11-19T00:00:00Z') }], []]);
       }
@@ -17,18 +18,26 @@ function mkPool(result: any = { insertId: 9 }) {
 }
 
 describe('AdminsRepository 教研员', () => {
-  it('listResearchers 角色硬过滤 + 模糊搜索 + id DESC', async () => {
+  it('listResearchers 角色硬过滤 + 模糊搜索 + id DESC，total 走 COUNT', async () => {
     const pool = mkPool();
     const repo = new AdminsRepository(pool as any);
 
-    const list = await repo.listResearchers('jia');
+    const out = await repo.listResearchers('jia');
 
-    const [sql, params] = pool.execute.mock.calls[0];
-    expect(sql).toContain("role = 'researcher'");
-    expect(sql).toContain('deleted_at IS NULL');
-    expect(sql).toContain('ORDER BY id DESC LIMIT 50');
-    expect(params).toEqual(['%jia%', '%jia%']);
-    expect(list).toEqual([
+    expect(pool.execute).toHaveBeenCalledTimes(2);
+    const [listSql, listParams] = pool.execute.mock.calls[0];
+    expect(listSql).toContain("role = 'researcher'");
+    expect(listSql).toContain('deleted_at IS NULL');
+    expect(listSql).toContain('ORDER BY id DESC LIMIT 50');
+    expect(listParams).toEqual(['%jia%', '%jia%']);
+
+    const [countSql, countParams] = pool.execute.mock.calls[1];
+    expect(countSql).toContain('COUNT(*) AS total');
+    expect(countSql).toContain("role = 'researcher'");
+    expect(countParams).toEqual(['%jia%', '%jia%']);
+
+    expect(out.total).toBe(60);
+    expect(out.items).toEqual([
       { id: 5, username: 'r1', name: '教研甲', isActive: true, createdAt: new Date('2026-11-19T00:00:00Z') },
     ]);
   });
@@ -54,5 +63,20 @@ describe('AdminsRepository 教研员', () => {
     expect(sql).toMatch(/UPDATE admins/i);
     expect(sql).toContain("role = 'researcher'");
     expect(params).toEqual([0, 7]);
+  });
+
+  it('updateResearcherPassword 带 role 守卫；updatePassword（自助改密）保持不限角色', async () => {
+    const pool = mkPool();
+    const repo = new AdminsRepository(pool as any);
+
+    await repo.updateResearcherPassword(7, 'h');
+    const [staffSql, staffParams] = pool.execute.mock.calls[0];
+    expect(staffSql).toMatch(/UPDATE admins/i);
+    expect(staffSql).toContain("role = 'researcher'");
+    expect(staffParams).toEqual(['h', 7]);
+
+    await repo.updatePassword(7, 'h');
+    const [selfSql] = pool.execute.mock.calls[1];
+    expect(selfSql).not.toContain("role = 'researcher'");
   });
 });
