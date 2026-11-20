@@ -669,10 +669,11 @@ describe('草稿白板：手写笔光标', () => {
     expect(canvas.style.cursor).toBe('crosshair');
   });
 
-  it('橡皮 / 选中仍用系统光标', () => {
+  it('橡皮用圆圈光标（圈出擦除范围），选中仍用系统光标', () => {
     const { container, canvas } = setup();
     pickTool(container, '橡皮');
-    expect(canvas.style.cursor).toBe('cell');
+    expect(canvas.style.cursor).toContain('data:image/svg+xml');
+    expect(canvas.style.cursor).not.toBe('cell');
     pickTool(container, '选中');
     expect(canvas.style.cursor).toBe('default');
   });

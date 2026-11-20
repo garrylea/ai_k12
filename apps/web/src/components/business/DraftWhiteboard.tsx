@@ -33,10 +33,19 @@ const PEN_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
   + '</svg>',
 )}") 3 21, crosshair`;
 
-/** 各工具的画布光标（手写笔用笔形光标，其余绘制工具仍需十字准星对齐落点） */
+/** 橡皮光标：空心圆圈（用光标形状提示「擦到哪儿」），白色打底保证深色/浅色画板上都看得见；
+ *  热点在圆心，与笔形光标一样带 crosshair 兜底 */
+const ERASER_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">'
+  + '<circle cx="14" cy="14" r="10" fill="none" stroke="#ffffff" stroke-width="4"/>'
+  + '<circle cx="14" cy="14" r="10" fill="none" stroke="#1f2937" stroke-width="1.6"/>'
+  + '</svg>',
+)}") 14 14, crosshair`;
+
+/** 各工具的画布光标（手写笔用笔形光标，橡皮用圆圈圈出擦除范围，其余绘制工具用十字准星对齐落点） */
 function cursorForTool(t: Tool): string {
   if (t === 'select') return 'default';
-  if (t === 'eraser') return 'cell';
+  if (t === 'eraser') return ERASER_CURSOR;
   if (t === 'pen') return PEN_CURSOR;
   return 'crosshair';
 }
