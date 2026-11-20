@@ -11,6 +11,8 @@ import { CommonModule } from '../../common/common.module.js';
 import { SafetyAlertsModule } from '../safety/safety-alerts.module.js';
 import { MineruModule } from '../freeform/mineru.module.js';
 import { AdminController } from './admin.controller.js';
+import { AdminStaffController } from './admin-staff.controller.js';
+import { AdminStaffService } from './admin-staff.service.js';
 import { AdminModelsService } from './admin-models.service.js';
 import { AdminAccountsService } from './admin-accounts.service.js';
 import { AdminMessagesService } from './admin-messages.service.js';
@@ -24,7 +26,7 @@ import { AdminAlertsService } from './admin-alerts.service.js';
   // `SafetyAlertsModule` 只 import 不重复 provide：它的注释明确警告重复 provide
   // `SafetyAlertsRepository` 会分裂实例、破坏预警去重语义。这里只要它导出的仓储。
   imports: [CommonModule, SafetyAlertsModule, MineruModule],
-  controllers: [AdminController],
+  controllers: [AdminController, AdminStaffController],
   providers: [
     LlmModelsRepository,
     LlmRoutesRepository,
@@ -35,6 +37,7 @@ import { AdminAlertsService } from './admin-alerts.service.js';
     { provide: ModelConfigRegistry, useFactory: () => getModelConfigRegistry() ?? new ModelConfigRegistry() },
     { provide: ModelClient, useFactory: () => new ModelClient() },
     AdminModelsService,
+    AdminStaffService,
     AdminAccountsService,
     AdminMessagesService,
     AdminNotificationsService,

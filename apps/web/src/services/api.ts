@@ -995,6 +995,21 @@ export function setStudentStatusAdmin(id: number, isActive: boolean): Promise<nu
   return fetchApi(`/admin/students/${id}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
 }
 
+// --- Admin: 教研员账号（仅 researcher，无创建 admin 的入口） ---
+export interface AdminResearcherItem { id: number; username: string; name: string | null; isActive: boolean; createdAt: string; }
+export function listResearchers(search: string): Promise<{ items: AdminResearcherItem[] }> {
+  return fetchApi(`/admin/staff?search=${encodeURIComponent(search)}`);
+}
+export function createResearcher(req: { username: string; name?: string; password: string }): Promise<{ id: number; username: string; name: string | null; isActive: boolean }> {
+  return fetchApi('/admin/staff', { method: 'POST', body: JSON.stringify(req) });
+}
+export function setResearcherStatus(id: number, isActive: boolean): Promise<null> {
+  return fetchApi(`/admin/staff/${id}/status`, { method: 'PATCH', body: JSON.stringify({ isActive }) });
+}
+export function resetResearcherPassword(id: number, password: string): Promise<null> {
+  return fetchApi(`/admin/staff/${id}/password`, { method: 'PATCH', body: JSON.stringify({ password }) });
+}
+
 // --- Admin: messages ---
 export function sendAdminMessage(req: { type: string; title: string; content: string; parentId?: number }): Promise<null> {
   return fetchApi('/admin/messages', { method: 'POST', body: JSON.stringify(req) });

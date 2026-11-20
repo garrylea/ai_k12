@@ -4752,6 +4752,92 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommonResponse'
+  /admin/staff:
+    get:
+      tags: [Admin]
+      summary: 教研员列表（仅 role=researcher，搜索用户名/姓名）
+      operationId: listResearchers
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema: { type: string, maxLength: 50 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminStaffListResult'
+    post:
+      tags: [Admin]
+      summary: 新建教研员（角色固定 researcher；body 带 role → 400/1001）
+      operationId: createResearcher
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminStaffCreateRequest'
+      responses:
+        '201':
+          description: Created（用户名重复 → 409/1004）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminStaffItem'
+  /admin/staff/{id}/status:
+    patch:
+      tags: [Admin]
+      summary: 启用/停用教研员（停用即时踢下线，旧 token 1013）
+      operationId: setResearcherStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isActive: { type: boolean }
+              required: [isActive]
+      responses:
+        '200':
+          description: OK（目标非 researcher → 404/1002）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
+  /admin/staff/{id}/password:
+    patch:
+      tags: [Admin]
+      summary: 重置教研员密码（6-72 位）
+      operationId: resetResearcherPassword
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password: { type: string, minLength: 6, maxLength: 72 }
+              required: [password]
+      responses:
+        '200':
+          description: OK（目标非 researcher → 404/1002）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommonResponse'
   /admin/messages:
     get:
       tags: [Admin]
@@ -9320,6 +9406,37 @@ components:
         content: { type: string }
         parentId: { type: integer, description: 缺省=全员广播 }
       required: [type, title, content]
+
+    # 教研员账号（2026-11-19）：只存在于 admins 表 role='researcher' 的行，不含 passwordHash
+    AdminStaffItem:
+      type: object
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        name: { type: [string, 'null'] }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time, description: '列表返回；创建响应不含' }
+      required: [id, username, name, isActive]
+
+    AdminStaffListResult:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/AdminStaffItem'
+
+    AdminStaffCreateRequest:
+      type: object
+      additionalProperties: false
+      description: '角色固定 researcher；带 role 等未声明字段 → 400/1001'
+      properties:
+        username: { type: string, pattern: '^[a-zA-Z0-9_]{3,50}$' }
+        name: { type: string, maxLength: 50 }
+        password: { type: string, minLength: 6, maxLength: 72 }
+      required: [username, password]
 
     # 预警数据保留期（阈值固定 30 天常量，接口不带参数）
     AdminExpiredAlertPreview:

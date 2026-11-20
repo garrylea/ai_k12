@@ -1,15 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Input, ConfirmDialog, toast } from '@/components/base';
+import { Input, ConfirmDialog, Modal, toast } from '@/components/base';
 import {
   searchParents,
   searchStudents,
   setParentStatus,
   setStudentStatusAdmin,
+  listResearchers,
+  createResearcher,
+  setResearcherStatus,
+  resetResearcherPassword,
   type AdminParentItem,
   type AdminStudentItem,
+  type AdminResearcherItem,
 } from '@/services/api';
 
-type Tab = 'parents' | 'students';
+type Tab = 'parents' | 'students' | 'researchers';
+
+const emptyResearcherForm = { username: '', name: '', password: '' };
 
 /** 打码手机号：前 3 位 + **** + 后 4 位。 */
 const maskPhone = (phone: string) =>
@@ -26,9 +33,19 @@ export default function AdminAccountsPage() {
   const [search, setSearch] = useState('');
   const [parents, setParents] = useState<AdminParentItem[]>([]);
   const [students, setStudents] = useState<AdminStudentItem[]>([]);
+  const [researchers, setResearchers] = useState<AdminResearcherItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [banTarget, setBanTarget] = useState<AdminParentItem | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+
+  // 教研员：新建 / 停用确认 / 重置密码
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState(emptyResearcherForm);
+  const [creating, setCreating] = useState(false);
+  const [disableTarget, setDisableTarget] = useState<AdminResearcherItem | null>(null);
+  const [resetTarget, setResetTarget] = useState<AdminResearcherItem | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [resetting, setResetting] = useState(false);
 
   // debounce 300ms 拉取当前 Tab 列表；依赖变化/卸载时清理定时器并忽略迟到响应。
   useEffect(() => {
@@ -41,9 +58,12 @@ export default function AdminAccountsPage() {
           if (activeTab === 'parents') {
             const list = await searchParents(q);
             if (!cancelled) setParents(list);
-          } else {
+          } else if (activeTab === 'students') {
             const list = await searchStudents(q);
             if (!cancelled) setStudents(list);
+          } else {
+            const { items } = await listResearchers(q);
+            if (!cancelled) setResearchers(items);
           }
         } catch (err: unknown) {
           if (!cancelled) toast('error', err instanceof Error ? err.message : '加载失败');
@@ -93,6 +113,64 @@ export default function AdminAccountsPage() {
     }
   };
 
+  const handleCreateResearcher = async () => {
+    if (!createForm.username.trim() || !createForm.password) return;
+    setCreating(true);
+    try {
+      await createResearcher({
+        username: createForm.username.trim(),
+        name: createForm.name.trim() || undefined,
+        password: createForm.password,
+      });
+      toast('success', '已新建教研员');
+      setCreateOpen(false);
+      setCreateForm(emptyResearcherForm);
+      reload();
+    } catch (err: unknown) {
+      toast('error', err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleEnableResearcher = async (r: AdminResearcherItem) => {
+    try {
+      await setResearcherStatus(r.id, true);
+      toast('success', `已启用 ${r.username}`);
+      reload();
+    } catch (err: unknown) {
+      toast('error', err instanceof Error ? err.message : '操作失败');
+    }
+  };
+
+  const handleDisableResearcher = async () => {
+    if (!disableTarget) return;
+    const r = disableTarget;
+    setDisableTarget(null);
+    try {
+      await setResearcherStatus(r.id, false);
+      toast('success', `已停用 ${r.username}，该账号已立即下线`);
+      reload();
+    } catch (err: unknown) {
+      toast('error', err instanceof Error ? err.message : '操作失败');
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetTarget || !newPassword) return;
+    setResetting(true);
+    try {
+      await resetResearcherPassword(resetTarget.id, newPassword);
+      toast('success', `已重置 ${resetTarget.username} 的密码`);
+      setResetTarget(null);
+      setNewPassword('');
+    } catch (err: unknown) {
+      toast('error', err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const statusBadge = (isActive: boolean) => (
     <span
       className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded"
@@ -121,7 +199,7 @@ export default function AdminAccountsPage() {
           账号管理
         </h1>
         <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-          搜索并管理家长与学生账号，可封禁/解封账号控制登录权限。
+          搜索并管理家长、学生与教研员账号，可停用/启用账号控制登录权限。
         </p>
       </div>
 
@@ -142,13 +220,31 @@ export default function AdminAccountsPage() {
           >
             学生
           </button>
+          <button
+            type="button"
+            className={`${tabBase} ${activeTab === 'researchers' ? tabActive : tabInactive}`}
+            onClick={() => setActiveTab('researchers')}
+          >
+            教研员
+          </button>
         </div>
-        <div className="w-full max-w-xs">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={activeTab === 'parents' ? '搜索手机号 / 姓名' : '搜索用户名 / 姓名'}
-          />
+        <div className="flex items-center gap-3">
+          {activeTab === 'researchers' && (
+            <button
+              type="button"
+              className="px-4 h-10 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white hover:opacity-90 transition-opacity"
+              onClick={() => setCreateOpen(true)}
+            >
+              新建教研员
+            </button>
+          )}
+          <div className="w-full max-w-xs">
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={activeTab === 'parents' ? '搜索手机号 / 姓名' : '搜索用户名 / 姓名'}
+            />
+          </div>
         </div>
       </div>
 
@@ -199,7 +295,7 @@ export default function AdminAccountsPage() {
             </table>
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'students' ? (
         /* 学生列表 */
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
@@ -246,6 +342,59 @@ export default function AdminAccountsPage() {
             </table>
           </div>
         </div>
+      ) : (
+        /* 教研员列表 */
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-[var(--text-secondary)] border-b border-gray-100">
+                  <th className="px-5 py-3 font-semibold">用户名</th>
+                  <th className="px-5 py-3 font-semibold">姓名</th>
+                  <th className="px-5 py-3 font-semibold">状态</th>
+                  <th className="px-5 py-3 font-semibold">创建时间</th>
+                  <th className="px-5 py-3 font-semibold text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {researchers.map((r) => (
+                  <tr key={r.id} className="border-b border-gray-50 last:border-0">
+                    <td className="px-5 py-3" style={{ color: 'var(--text-primary)' }}>{r.username}</td>
+                    <td className="px-5 py-3">{r.name ?? '-'}</td>
+                    <td className="px-5 py-3">{statusBadge(r.isActive)}</td>
+                    <td className="px-5 py-3">{new Date(r.createdAt).toLocaleDateString('zh-CN')}</td>
+                    <td className="px-5 py-3">
+                      <div className="flex justify-end gap-3 text-xs font-semibold whitespace-nowrap">
+                        {r.isActive ? (
+                          <button
+                            className="text-[var(--error)] hover:underline"
+                            onClick={() => setDisableTarget(r)}
+                          >
+                            停用
+                          </button>
+                        ) : (
+                          <button
+                            className="text-[var(--brand-500)] hover:underline"
+                            onClick={() => handleEnableResearcher(r)}
+                          >
+                            启用
+                          </button>
+                        )}
+                        <button
+                          className="text-[var(--brand-500)] hover:underline"
+                          onClick={() => setResetTarget(r)}
+                        >
+                          重置密码
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {researchers.length === 0 && emptyRow(5)}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* 封禁家长确认（连带停用其名下学生） */}
@@ -260,6 +409,108 @@ export default function AdminAccountsPage() {
         onConfirm={handleBanParent}
         onCancel={() => setBanTarget(null)}
       />
+
+      {/* 停用教研员确认（旧 token 立即失效） */}
+      <ConfirmDialog
+        open={disableTarget !== null}
+        title="提示："
+        message={
+          disableTarget
+            ? `停用后 ${disableTarget.username} 立即下线。确认停用？`
+            : ''
+        }
+        onConfirm={handleDisableResearcher}
+        onCancel={() => setDisableTarget(null)}
+      />
+
+      {/* 新建教研员 */}
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="新建教研员">
+        <div className="space-y-4">
+          <Input
+            label="用户名"
+            value={createForm.username}
+            onChange={(e) => setCreateForm({ ...createForm, username: e.target.value })}
+            placeholder="字母、数字、下划线，3-50 位"
+            maxLength={50}
+          />
+          <Input
+            label="姓名"
+            value={createForm.name}
+            onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+            placeholder="选填，最长 50 字"
+            maxLength={50}
+          />
+          <Input
+            label="初始密码"
+            type="password"
+            value={createForm.password}
+            onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+            placeholder="6-72 位"
+            maxLength={72}
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setCreateOpen(false)}
+              className="px-4 py-2 rounded-lg text-sm border border-gray-200 text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] transition-colors"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={handleCreateResearcher}
+              disabled={creating || !createForm.username.trim() || !createForm.password}
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              创建
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 重置教研员密码 */}
+      <Modal
+        open={resetTarget !== null}
+        onClose={() => {
+          setResetTarget(null);
+          setNewPassword('');
+        }}
+        title="重置密码"
+      >
+        <div className="space-y-4">
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            {resetTarget !== null ? `账号 ${resetTarget.username}` : ''}
+          </p>
+          <Input
+            label="新密码"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="6-72 位"
+            maxLength={72}
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setResetTarget(null);
+                setNewPassword('');
+              }}
+              className="px-4 py-2 rounded-lg text-sm border border-gray-200 text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] transition-colors"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={handleResetPassword}
+              disabled={resetting || !newPassword}
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

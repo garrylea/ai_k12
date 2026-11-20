@@ -442,7 +442,7 @@
 
 ### 4.17 Admin — `/api/admin`
 
-管理员中枢，全部端点 `@Roles('admin')`（家长/学生 token 调用返回 403/1005）。**约定**：封家长=连带封其名下所有学生（`BanRegistry` 进程内即时生效，重启从 DB `is_active=0` 重建）；家长/学生列表 `passwordHash` 已脱敏；模型 `apiKey` AES-256-GCM 加密落库，接口只返回打码值。
+管理员中枢，全部端点 `@Roles('admin')`（家长/学生/教研员 token 调用返回 403/1005）。**约定**：封家长=连带封其名下所有学生（`BanRegistry` 进程内即时生效，重启从 DB `is_active=0` 重建）；家长/学生列表 `passwordHash` 已脱敏；模型 `apiKey` AES-256-GCM 加密落库，接口只返回打码值。**教研员账号**（2026-11-19）只经 `/api/admin/staff*` 管理，四处端点全部硬过滤 `role='researcher'`（admin 行一律 404/1002），**不提供创建 admin、角色变更、删除**；admin 账号仍仅 seed 引导。
 
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
@@ -464,6 +464,10 @@
 | PATCH | `/api/admin/parents/{id}/status` | 封禁/解封家长（`{isActive}`；封=连带其名下所有学生即时被拒） | MVP |
 | GET | `/api/admin/students?search=` | 学生列表（搜索用户名，`passwordHash` 已脱敏） | MVP |
 | PATCH | `/api/admin/students/{id}/status` | 封禁/解封单个学生（`{isActive}`） | MVP |
+| GET | `/api/admin/staff?search=` | **教研员列表**（2026-11-19）。`search` ≤50 字（去空格）模糊匹配用户名/姓名；只列 `role='researcher' AND deleted_at IS NULL`，按 id DESC，最多 50 条。返回 `{items: [{id, username, name, isActive, createdAt}]}` | MVP |
+| POST | `/api/admin/staff` | **新建教研员**（201）。body `{username, name?, password}`：`username` `/^[a-zA-Z0-9_]{3,50}$/`、`password` 6–72 位、`name` ≤50。**角色由服务端固定 `researcher`**；body 出现 `role` 等未声明字段 → 400/1001（`.strict()`）。用户名已存在（含 admin 行）→ 409/1004。bcrypt 落库。返回 `{id, username, name, isActive}` | MVP |
+| PATCH | `/api/admin/staff/{id}/status` | **启用/停用教研员**。body `{isActive}`。目标必须 `role='researcher'`（admin 行 / 不存在 → 404/1002）。停用：置 `is_active=0` 并 `bumpAndReturnSeq('researcher', id)` + `SessionRegistry.bump` —— **旧 token 立即失效（1013）**；启用：置 `is_active=1`（不 bump）。返回 `null` | MVP |
+| PATCH | `/api/admin/staff/{id}/password` | **重置教研员密码**。body `{password}` 6–72 位；目标必须 researcher（否则 404/1002）；bcrypt 写 `password_hash`。返回 `null` | MVP |
 | GET | `/api/admin/messages` | 已发消息列表（含触达数/已读数） | MVP |
 | POST | `/api/admin/messages` | 发送消息（`{type: promo/learning/system, title, content, parentId?}`；`parentId` 缺省=全员广播） | MVP |
 | DELETE | `/api/admin/messages/{id}` | 撤回消息（连同已读记录一并删除） | MVP |
@@ -2588,6 +2592,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.32 | 2026-11-20 | **教研员账号管理（admin 端）**。§4.17 新增 4 端点：`GET/POST /api/admin/staff`、`PATCH /api/admin/staff/{id}/status`、`PATCH /api/admin/staff/{id}/password`。**只管理 `admins.role='researcher'` 的行**（admin 行一律 404/1002），不提供创建 admin、角色变更、删除；创建角色由服务端固定 researcher，body 带 `role` → 400/1001（`.strict()`）。停用除 `is_active=0` 外还 `bumpAndReturnSeq('researcher', id)` + `SessionRegistry.bump`，**旧 token 立即 1013**。openapi 同步 4 path + 3 schema。PRD §7.14「创建与变更路径」「管理职责·账号管理」同步。 |
 | v4.31 | 2026-11-19 | **教研角色与内容纠错**。新增 §4.31 Research 分组 9 端点（`/api/research/papers*` 列表/详情/删除预览/删卷、`PATCH questions`、`GET audit`、images 上传/DELETE/GC），全部 `@Roles('researcher')`；试卷管理从 §4.17 admin 迁出（旧 `/api/admin/papers*` 三行删除、注记迁移，openapi 旧路径保留 `deprecated: true`）。题目可改五字段（answer/content/options/explanation/approach），须勾 `confirmedSource`；`answer_verified` 仅改答案时置位、`content_hash` 不重算；**改答案不回填历史判题/错题/积分/掌握度**。图片复用 `uploaded_files`（`source='research'`），落 `UPLOAD_DIR/research/`，三层清理 + 全局引用检查 + `content_audit_logs` 审计。§2 分组总表加 Research 行。详见 spec `2026-11-19-教研角色与内容纠错-design.md`。 |
 | v4.30 | 2026-11-18 | **英语背单词错词池口径（用户裁决）**。① `POST /training/vocabulary/start` 勾 `onlyMyWrong` 时出词固定按 `student_word_progress.wrong_count` 降序（同错次按 `sort_order`、`id`），压过 `order`，`letter` 不生效（前端顺序区换成不可点的「错次从多到少」）。② `POST /training/vocabulary/judge` 新增可选 `fromWrongPool`：判 `correct` 时只清该学生该词 `wrong_count`（保留 `learned`/`last_seen_at`，不删行），普通背词（不带该标记）答对不清错次。③ 两个错次计数器自增 `LEAST(..., 2147483647)` 封顶，防有符号 INT 越界把判题打成 500。openapi.yaml 同步 `VocabularyJudgeRequest.fromWrongPool`。 |
 | v4.29 | 2026-11-10 | **做题错题重练（无新端点）**。① `GET /api/training/error-book` 条目新增 `fullScore`（`questions.full_score`，重练满分，null 前端按 10）；② 做题错题从错题本「重练」回 `/student/solve?redo=1`，提交复用 `POST /api/freeform/judge/stream` 带 `questionId` 重判同一条，满分清零、不满分保留；③ 重练请求的 `figureUrls` 只对 `questionId + source=freeform` 宽松（无权图跳过），首次提交仍严格 1001；④ 不发积分/不写 `practice_results`/不更新掌握度/不 bump level，普通错题练习池不变。openapi.yaml 同步 `TrainingErrorBookEntry.fullScore`。 |
