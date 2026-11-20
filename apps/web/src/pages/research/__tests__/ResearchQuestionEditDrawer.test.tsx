@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ResearchQuestionEditDrawer from '../ResearchQuestionEditDrawer';
+import { beginImageDrag } from '@/components/business/draft-image-drag';
 import {
   deleteResearchImages,
   updateResearchQuestion,
@@ -29,6 +30,11 @@ vi.mock('@/utils/image-compress', async (importOriginal) => {
   return { ...actual, compressImageFile: vi.fn(async (f: File) => f) };
 });
 vi.mock('@/components/base/Toast', () => ({ toast: vi.fn() }));
+// 题干预览图 → 草稿的拖拽模块：只验「起拖有没有发生」，不真的造幽灵图/挂 window 监听
+vi.mock('@/components/business/draft-image-drag', () => ({
+  beginImageDrag: vi.fn(),
+  wasJustDragged: vi.fn(() => false),
+}));
 // 白板依赖 canvas / ResizeObserver，jsdom 下用桩替代：只验证抽屉的展开/收起与 props 接线。
 vi.mock('@/components/business/DraftWhiteboard', () => ({
   DraftWhiteboard: ({ questionId, persist }: { questionId: string; persist?: boolean }) => (
@@ -104,6 +110,7 @@ beforeEach(() => {
   });
   deleteMock.mockReset().mockResolvedValue({ deleted: 0, skipped: 0 });
   toastMock.mockClear();
+  vi.mocked(beginImageDrag).mockClear();
 });
 
 // globals:false → @testing-library/react 不自动 cleanup，多用例必须自己清，否则 DOM 泄漏串命中。
@@ -223,6 +230,28 @@ describe('ResearchQuestionEditDrawer 静态提示与预览', () => {
     renderDrawer(q({ explanation: '读图 ![示意](/uploads/research/old.png) 后作答' }));
     const img = within(screen.getByTestId('preview-explanation')).getByRole('img');
     expect(img).toHaveAttribute('src', '/uploads/research/old.png');
+  });
+
+  it('题干预览里的图能拖进右侧草稿（超阈值交给草稿拖拽模块）', () => {
+    renderDrawer(q({ content: '看图 ![图](/uploads/research/stem.png) 作答' }));
+    const img = within(screen.getByTestId('preview-content')).getByRole('img');
+
+    fireEvent.pointerDown(img, { pointerId: 1, pointerType: 'mouse', isPrimary: true, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(img, { pointerId: 1, pointerType: 'mouse', clientX: 40, clientY: 10 });
+
+    expect(beginImageDrag).toHaveBeenCalledWith({
+      src: '/uploads/research/stem.png', pointerId: 1, clientX: 40, clientY: 10,
+    });
+  });
+
+  it('解析里的图不参与拖拽（只有题干图可拖进草稿）', () => {
+    renderDrawer(q({ explanation: '读图 ![示意](/uploads/research/a.png) 后作答' }));
+    const img = within(screen.getByTestId('preview-explanation')).getByRole('img');
+
+    fireEvent.pointerDown(img, { pointerId: 1, pointerType: 'mouse', isPrimary: true, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(img, { pointerId: 1, pointerType: 'mouse', clientX: 40, clientY: 10 });
+
+    expect(beginImageDrag).not.toHaveBeenCalled();
   });
 });
 

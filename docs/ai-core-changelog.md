@@ -8,6 +8,16 @@
 
 ---
 
+## 2026-11-20 教研改题抽屉：题干图可拖进草稿（原拖过去不显示）
+
+**问题**：教研改题抽屉右侧草稿拖不进题干预览里的图片——拖完没有任何笔迹/贴图出现（学生端数学专项同操作正常）。
+
+**根因**：抽屉的 MarkdownBlock 用的是通用 `markdownComponents`，图片没有 `dragToDraft`，起拖走的是浏览器原生 HTML5 拖拽（只带 URL）；草稿落点只认指针拖拽（`beginImageDrag` 注册的 DropTarget）与本地文件，不认原生图片 URL → 松手即无事发生。训练轨/自由作答页的题面图走 `draggableQuestionMarkdownComponents` 才正常。
+
+**改动**：抽屉内新增 `draggableMarkdownComponents`（仅把 img 换成 `MarkdownImg dragToDraft`），`MarkdownBlock` 加 `dragToDraft` 开关；**只给题干预览开**（答案/解析/思路与选项卡片保持不拖，PRD §7.12 口径）。补两条回归：题干图起拖、解析图不起拖。
+
+---
+
 ## 2026-11-20 草稿白板新增属性条：墨色 / 线型 / 线宽
 
 工具条下方新增一条属性条，学生可在落笔前选择：四色墨色（黑/红/绿/蓝，小方块直选）、线型（实线/虚线）、线宽滑杆（1–8px，默认 2px，右侧显示当前值）。

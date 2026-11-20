@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
+  MarkdownImg,
   markdownComponents,
   markdownRehypePlugins,
   markdownRemarkPlugins,
@@ -65,6 +66,13 @@ const failedToken = (n: number) => `［图${n} 上传失败］`;
 /** 失败标记由本组件生成，预览里补一层标红 span；rehype-raw 会把内联 HTML 渲染成真实元素。 */
 const FAILED_TOKEN_RE = /［图\d+ 上传失败］/g;
 
+/** 可拖进草稿的 markdown 组件：仅把 img 换成开启 dragToDraft 的 MarkdownImg。
+ *  与训练轨题面图一致（pointer 事件；iPad 上原生 HTML5 拖拽不生效）。 */
+const draggableMarkdownComponents = {
+  ...markdownComponents,
+  img: (props: { src?: string; alt?: string }) => <MarkdownImg {...props} dragToDraft />,
+};
+
 function initialDrafts(q: ResearchQuestionDetail): Drafts {
   return {
     content: q.content,
@@ -119,8 +127,9 @@ function toggleAnswer(
 }
 
 /** 统一 markdown 渲染：/uploads/ 由 markdown.tsx 的 resolveAsset 特判透传。
- *  上传失败占位（spec §6.1「标红失败图」）在预览中染成错误色。 */
-function MarkdownBlock({ text }: { text: string }) {
+ *  上传失败占位（spec §6.1「标红失败图」）在预览中染成错误色。
+ *  `dragToDraft`：题干预览里的图可拖进右侧草稿（Pointer 事件，鼠标/触屏都能拖，同题面图口径）。 */
+function MarkdownBlock({ text, dragToDraft = false }: { text: string; dragToDraft?: boolean }) {
   const decorated = text.replace(
     FAILED_TOKEN_RE,
     (marker) => `<span class="research-upload-failure" style="color:var(--error)">${marker}</span>`,
@@ -129,7 +138,7 @@ function MarkdownBlock({ text }: { text: string }) {
     <ReactMarkdown
       remarkPlugins={markdownRemarkPlugins}
       rehypePlugins={markdownRehypePlugins}
-      components={markdownComponents}
+      components={dragToDraft ? draggableMarkdownComponents : markdownComponents}
     >
       {preprocessMarkdown(decorated)}
     </ReactMarkdown>
@@ -259,7 +268,8 @@ function EditField({ fieldKey, value, markdown, busy, onChange, onFiles }: EditF
       />
       {markdown && (
         <div data-testid={`preview-${fieldKey}`} className="mt-1 rounded-lg border border-gray-100 p-2 text-sm">
-          <MarkdownBlock text={value} />
+          {/* 只有题干图可拖进草稿（PRD §7.12：答案/解析/思路里的图不提供拖入，避免误拖） */}
+          <MarkdownBlock text={value} dragToDraft={fieldKey === 'content'} />
         </div>
       )}
     </div>
