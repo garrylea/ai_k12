@@ -1,75 +1,465 @@
-import type { ResearchQuestionDetail } from '@/services/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import {
+  markdownComponents,
+  markdownRehypePlugins,
+  markdownRemarkPlugins,
+  preprocessMarkdown,
+} from '@/components/markdown';
+import { ConfirmDialog } from '@/components/base/ConfirmDialog';
+import { toast } from '@/components/base/Toast';
+import { ensureJpeg } from '@/utils/image-convert';
+import { compressImageFile, MAX_IMAGE_BYTES } from '@/utils/image-compress';
+import {
+  deleteResearchImages,
+  updateResearchQuestion,
+  uploadResearchImage,
+  type ResearchQuestionDetail,
+} from '@/services/api';
 
-/**
- * Task 10 占位实现 —— 只固定 props 契约与挂载点，不要在此写真正的编辑逻辑。
- *
- * Task 10 请用同路径、同名 default export 替换为真实的五字段编辑抽屉：
- *   <ResearchQuestionEditDrawer question={q} onClose={() => ...} onSaved={() => ...} />
- * - question：Task 9 详情页传入的完整题目对象，含五字段原值
- *   （content / options / answer / explanation / approach），勿在详情页剥离。
- * - onClose：关闭抽屉。
- * - onSaved：保存成功后由详情页关闭抽屉并重新拉取详情。
- */
 export interface ResearchQuestionEditDrawerProps {
-  question: ResearchQuestionDetail;
+  question: ResearchQuestionDetail; // 五字段原值，勿剥离
   onClose: () => void;
   onSaved: () => void;
 }
 
-const FIVE_FIELDS: ReadonlyArray<[string, (q: ResearchQuestionDetail) => string]> = [
-  ['题干', (q) => q.content],
-  ['选项', (q) => q.options.map((o) => `${o.label}. ${o.text}`).join('；') || '—'],
-  ['答案', (q) => q.answer],
-  ['解析', (q) => q.explanation ?? '—'],
-  ['思路', (q) => q.approach ?? '—'],
-];
+type FieldKey = 'content' | 'options' | 'answer' | 'explanation' | 'approach';
+const FIELD_KEYS: readonly FieldKey[] = ['content', 'options', 'answer', 'explanation', 'approach'];
+type Drafts = Record<FieldKey, string>;
+
+/**
+ * 状态机：closed/loading 在父组件（详情页加载数据后才挂载本抽屉），本组件从 editing 起步。
+ * editing →(传图) uploading →(全部完成) editing
+ * editing →(保存) validating →(校验过) saving →(成功) saved / (失败) error
+ * editing →(取消且 dirty/有会话图) closing →(确认) 清理并 closed
+ */
+type Status = 'editing' | 'uploading' | 'validating' | 'saving' | 'saved' | 'error' | 'closing';
+
+const FIELD_LABEL: Record<FieldKey, string> = {
+  content: '题干',
+  options: '选项',
+  answer: '标准答案',
+  explanation: '解析',
+  approach: '思路',
+};
+const MARKDOWN_FIELDS: ReadonlySet<FieldKey> = new Set<FieldKey>([
+  'content', 'answer', 'explanation', 'approach',
+]);
+
+const NOTICE = '本次修正仅影响之后的判题，不会修改已有作答记录、错题本、积分与掌握度。';
+const failedToken = (n: number) => `［图${n} 上传失败］`;
+
+function initialDrafts(q: ResearchQuestionDetail): Drafts {
+  return {
+    content: q.content,
+    options: JSON.stringify(q.options, null, 2),
+    answer: q.answer,
+    explanation: q.explanation ?? '',
+    approach: q.approach ?? '',
+  };
+}
+
+/** 统一 markdown 渲染：/uploads/ 由 markdown.tsx 的 resolveAsset 特判透传。 */
+function MarkdownBlock({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={markdownRemarkPlugins}
+      rehypePlugins={markdownRehypePlugins}
+      components={markdownComponents}
+    >
+      {preprocessMarkdown(text)}
+    </ReactMarkdown>
+  );
+}
+
+interface EditFieldProps {
+  fieldKey: FieldKey;
+  value: string;
+  markdown: boolean;
+  busy: boolean;
+  onChange: (v: string) => void;
+  onFiles: (files: File[]) => void;
+}
+
+/** 每个字段一个实例：上传控件、token 桶、draft 写入都由 fieldKey 路由，互不串字段。 */
+function EditField({ fieldKey, value, markdown, busy, onChange, onFiles }: EditFieldProps) {
+  const label = FIELD_LABEL[fieldKey];
+  const id = `research-field-${fieldKey}`;
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div data-field={fieldKey} className="mt-4">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <label htmlFor={id} className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
+          {label}
+        </label>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          aria-label={`上传图片到${label}`}
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            e.target.value = ''; // 同一文件可重复选
+            if (files.length > 0) onFiles(files);
+          }}
+        />
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => fileRef.current?.click()}
+          className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          上传图片
+        </button>
+      </div>
+      <textarea
+        id={id}
+        aria-label={label}
+        value={value}
+        disabled={busy}
+        onChange={(e) => onChange(e.target.value)}
+        onPaste={(e) => {
+          const files: File[] = [];
+          // 事件对象在 await 后失效：同步读完 clipboardData 再交给上传流程
+          for (const item of Array.from(e.clipboardData?.items ?? [])) {
+            if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+            const file = item.getAsFile();
+            if (file) files.push(file);
+          }
+          if (files.length === 0) return; // 纯文本走浏览器原生粘贴
+          e.preventDefault();
+          onFiles(files);
+        }}
+        onDrop={(e) => {
+          const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
+          if (files.length === 0) {
+            if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault();
+            return;
+          }
+          e.preventDefault();
+          onFiles(files);
+        }}
+        onDragOver={(e) => {
+          if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault();
+        }}
+        placeholder={fieldKey === 'options' ? '按 [{"label":"A","text":"选项内容"}] 格式填写' : `编辑${label}`}
+        className="w-full min-h-[5rem] p-2 rounded-lg border border-gray-200 bg-transparent text-sm resize-y outline-none"
+        style={{ color: 'var(--text-primary)' }}
+      />
+      {markdown && (
+        <div data-testid={`preview-${fieldKey}`} className="mt-1 rounded-lg border border-gray-100 p-2 text-sm">
+          <MarkdownBlock text={value} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ResearchQuestionEditDrawer({
   question,
   onClose,
   onSaved,
 }: ResearchQuestionEditDrawerProps) {
+  const [drafts, setDrafts] = useState<Drafts>(() => initialDrafts(question));
+  // 与 LatexEditor 的 valueRef 同口径：异步上传 await 期间也能拿到最新文本，
+  // 避免旧快照覆盖老师在占位之后继续敲的内容。
+  const draftsRef = useRef(drafts);
+  const initialRef = useRef<Drafts>(initialDrafts(question));
+  const questionIdRef = useRef(question.id);
+  const [status, setStatus] = useState<Status>('editing');
+  const [confirmedSource, setConfirmedSource] = useState(false);
+  const [note, setNote] = useState('');
+  const [uploadCount, setUploadCount] = useState(0);
+
+  const tokensRef = useRef<Map<FieldKey, Set<string>>>(
+    new Map(FIELD_KEYS.map((key) => [key, new Set<string>()])),
+  );
+  const abortRef = useRef<Map<string, AbortController>>(new Map());
+  const sessionUrlsRef = useRef<Set<string>>(new Set());
+  const seqRef = useRef(0);
+
+  const setField = useCallback((key: FieldKey, value: string) => {
+    draftsRef.current = { ...draftsRef.current, [key]: value };
+    setDrafts(draftsRef.current);
+  }, []);
+
+  /** 精确替换「指定字段」的占位串；找不到（老师已删掉占位）就丢弃结果，绝不追加。 */
+  const replaceToken = useCallback((key: FieldKey, token: string, replacement: string) => {
+    const cur = draftsRef.current[key];
+    const idx = cur.indexOf(token);
+    if (idx < 0) return;
+    setField(key, cur.slice(0, idx) + replacement + cur.slice(idx + token.length));
+  }, [setField]);
+
+  /** 切题/关闭时按「发起时归属」失效在途上传：abort + 清占位。 */
+  const abortAllUploads = useCallback(() => {
+    const tokensByField = Array.from(tokensRef.current.entries());
+    for (const ctrl of abortRef.current.values()) ctrl.abort();
+    abortRef.current.clear();
+    setDrafts((prev) => {
+      const next = { ...prev };
+      for (const [key, tokens] of tokensByField) {
+        if (tokens.size === 0) continue;
+        let text = next[key];
+        for (const token of tokens) text = text.split(token).join('');
+        next[key] = text;
+      }
+      draftsRef.current = next;
+      return next;
+    });
+    for (const tokens of tokensRef.current.values()) tokens.clear();
+  }, []);
+
+  // 父组件可能在抽屉开着时换成另一题：重置全部草稿并让旧上传按归属失效。
+  useEffect(() => {
+    if (question.id === questionIdRef.current) return;
+    questionIdRef.current = question.id;
+    abortAllUploads();
+    const fresh = initialDrafts(question);
+    initialRef.current = fresh;
+    draftsRef.current = fresh;
+    setDrafts(fresh);
+    setConfirmedSource(false);
+    setNote('');
+    setUploadCount(0);
+    setStatus('editing');
+    sessionUrlsRef.current.clear();
+  }, [question, abortAllUploads]);
+
+  useEffect(() => () => abortAllUploads(), [abortAllUploads]);
+
+  useEffect(() => {
+    if (uploadCount > 0 && (status === 'editing' || status === 'error')) {
+      setStatus('uploading');
+    } else if (uploadCount === 0 && status === 'uploading') {
+      setStatus('editing');
+    }
+  }, [uploadCount, status]);
+
+  const handleFiles = useCallback((key: FieldKey, files: File[]) => {
+    const accepted: File[] = [];
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      if (file.size > MAX_IMAGE_BYTES) {
+        toast('error', '图片过大（最大 5MB）');
+        continue;
+      }
+      accepted.push(file);
+    }
+    if (accepted.length === 0) return;
+
+    const current = draftsRef.current[key];
+    const imageCount = (current.match(/!\[[^\]]*\]\([^)]*\)/g) ?? []).length;
+    // 软上限：超过 6 张只提示，仍照常上传（与 LatexEditor 一致）。
+    if (imageCount + accepted.length > 6) toast('error', '图片较多，建议精简');
+
+    const planned = accepted.map(() => {
+      const n = ++seqRef.current;
+      return { token: `__UPLOAD_${key}_${n}__`, n };
+    });
+    const bucket = tokensRef.current.get(key) as Set<string>;
+    planned.forEach(({ token }) => bucket.add(token));
+    const sep = current && !current.endsWith('\n') ? '\n' : '';
+    setField(key, current + sep + planned.map(({ token }) => token).join('\n'));
+    setUploadCount((count) => count + accepted.length);
+
+    void (async () => {
+      for (let i = 0; i < accepted.length; i += 1) {
+        const { token, n } = planned[i];
+        const ctrl = new AbortController();
+        abortRef.current.set(token, ctrl);
+        try {
+          const jpeg = await ensureJpeg(accepted[i]);
+          if (ctrl.signal.aborted) throw new Error('aborted');
+          const compressed = await compressImageFile(jpeg);
+          if (ctrl.signal.aborted) throw new Error('aborted');
+          const { url } = await uploadResearchImage(compressed, ctrl.signal);
+          sessionUrlsRef.current.add(url);
+          replaceToken(key, token, `![图${n}](${url})`);
+        } catch {
+          if (ctrl.signal.aborted) {
+            replaceToken(key, token, '');
+          } else {
+            replaceToken(key, token, failedToken(n));
+            toast('error', '图片上传失败，请重试');
+          }
+        } finally {
+          abortRef.current.delete(token);
+          bucket.delete(token);
+          setUploadCount((count) => count - 1);
+        }
+      }
+    })();
+  }, [replaceToken, setField]);
+
+  const dirty = FIELD_KEYS.some((key) => drafts[key] !== initialRef.current[key]);
+  const busy = status === 'validating' || status === 'saving' || status === 'saved';
+  // 四个禁用条件（任一即禁）：无字段变更 / 未对照原卷 / 上传在 flight / saving 中。
+  const saveDisabled =
+    !dirty || !confirmedSource || uploadCount > 0 ||
+    busy || status === 'closing';
+
+  const handleSave = async () => {
+    if (saveDisabled) return;
+    setStatus('validating');
+
+    let options: Array<{ label: string; text: string }>;
+    try {
+      const parsed = JSON.parse(drafts.options) as unknown;
+      if (
+        !Array.isArray(parsed) || parsed.length === 0 || parsed.length > 10 ||
+        !parsed.every((o) => o !== null && typeof o === 'object' &&
+          typeof (o as { label?: unknown }).label === 'string' &&
+          typeof (o as { text?: unknown }).text === 'string')
+      ) {
+        throw new Error('bad options');
+      }
+      options = (parsed as Array<{ label: string; text: string }>).map((o) => ({ label: o.label, text: o.text }));
+    } catch {
+      toast('error', '选项格式有误，请按 JSON 数组填写');
+      setStatus('editing');
+      return;
+    }
+    if (!drafts.content.trim() || !drafts.answer.trim()) {
+      toast('error', '题干与标准答案不能为空');
+      setStatus('editing');
+      return;
+    }
+
+    const initial = initialRef.current;
+    const body: Parameters<typeof updateResearchQuestion>[1] = { confirmedSource: true };
+    if (drafts.content !== initial.content) body.content = drafts.content;
+    if (drafts.options !== initial.options) body.options = options;
+    if (drafts.answer !== initial.answer) body.answer = drafts.answer;
+    if (drafts.explanation !== initial.explanation) body.explanation = drafts.explanation;
+    if (drafts.approach !== initial.approach) body.approach = drafts.approach;
+    const trimmedNote = note.trim();
+    if (trimmedNote) body.note = trimmedNote;
+
+    setStatus('saving');
+    try {
+      await updateResearchQuestion(question.id, body);
+      // 已入库的图被服务端引用，取消清理不再负责它们
+      sessionUrlsRef.current.clear();
+      setStatus('saved');
+      onSaved();
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : '操作失败');
+      setStatus('error');
+    }
+  };
+
+  const requestCancel = () => {
+    if (!dirty && uploadCount === 0 && sessionUrlsRef.current.size === 0) {
+      onClose();
+      return;
+    }
+    setStatus('closing');
+  };
+
+  const discard = async () => {
+    abortAllUploads();
+    const urls = Array.from(sessionUrlsRef.current);
+    sessionUrlsRef.current.clear();
+    if (urls.length > 0) {
+      try {
+        await deleteResearchImages(urls);
+      } catch {
+        // 清理失败不阻断关闭；服务端 gc 是兜底
+      }
+    }
+    onClose();
+  };
+
   return (
     <aside
       role="dialog"
       aria-label={`编辑题目 #${question.questionNo}`}
+      data-status={status}
       className="fixed inset-y-0 right-0 z-50 w-[min(92vw,32rem)] overflow-y-auto bg-white shadow-2xl border-l border-gray-200 p-6"
     >
-      <div className="flex items-center justify-between">
+      <header className="flex items-center justify-between">
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
           {`编辑题目 #${question.questionNo}`}
         </h2>
         <button
           type="button"
-          onClick={onClose}
+          onClick={requestCancel}
           className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm"
         >
           关闭抽屉
         </button>
-      </div>
+      </header>
 
-      <p className="mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
-        Task 10 占位：真实五字段编辑抽屉（含多图上传）将替换本组件；以下为本次可编辑的五字段当前值。
+      <p className="static-notice mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
+        {NOTICE}
       </p>
 
-      <dl className="mt-4 space-y-3 text-sm">
-        {FIVE_FIELDS.map(([label, read]) => (
-          <div key={label} className="border-b border-gray-100 pb-2">
-            <dt className="font-semibold" style={{ color: 'var(--text-secondary)' }}>{label}</dt>
-            <dd className="mt-1 break-words whitespace-pre-line" style={{ color: 'var(--text-primary)' }}>
-              {read(question)}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      {FIELD_KEYS.map((key) => (
+        <EditField
+          key={key}
+          fieldKey={key}
+          value={drafts[key]}
+          markdown={MARKDOWN_FIELDS.has(key)}
+          busy={busy}
+          onChange={(v) => setField(key, v)}
+          onFiles={(files) => handleFiles(key, files)}
+        />
+      ))}
 
-      <button
-        type="button"
-        onClick={onSaved}
-        className="mt-6 px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white"
-      >
-        保存完成（占位）
-      </button>
+      <div className="mt-4">
+        <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
+          <input
+            type="checkbox"
+            checked={confirmedSource}
+            onChange={(e) => setConfirmedSource(e.target.checked)}
+          />
+          已对照原卷
+        </label>
+      </div>
+
+      <div className="mt-4">
+        <label htmlFor="research-note" className="mb-1 block text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
+          备注
+        </label>
+        <textarea
+          id="research-note"
+          placeholder="备注（写审计）"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="w-full min-h-[3rem] p-2 rounded-lg border border-gray-200 bg-transparent text-sm resize-y outline-none"
+          style={{ color: 'var(--text-primary)' }}
+        />
+      </div>
+
+      <footer className="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          onClick={requestCancel}
+          className="px-4 py-2 rounded-lg border border-gray-200 text-sm"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          disabled={saveDisabled}
+          onClick={() => void handleSave()}
+          className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white disabled:opacity-50"
+        >
+          保存
+        </button>
+      </footer>
+
+      <ConfirmDialog
+        open={status === 'closing'}
+        message="丢弃未保存的修改？"
+        onCancel={() => setStatus('editing')}
+        onConfirm={() => void discard()}
+      />
     </aside>
   );
 }
