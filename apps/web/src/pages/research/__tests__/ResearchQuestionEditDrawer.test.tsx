@@ -29,6 +29,12 @@ vi.mock('@/utils/image-compress', async (importOriginal) => {
   return { ...actual, compressImageFile: vi.fn(async (f: File) => f) };
 });
 vi.mock('@/components/base/Toast', () => ({ toast: vi.fn() }));
+// 白板依赖 canvas / ResizeObserver，jsdom 下用桩替代：只验证抽屉的展开/收起与 props 接线。
+vi.mock('@/components/business/DraftWhiteboard', () => ({
+  DraftWhiteboard: ({ questionId, persist }: { questionId: string; persist?: boolean }) => (
+    <div data-testid="whiteboard-stub" data-question-id={questionId} data-persist={String(persist)} />
+  ),
+}));
 
 const updateMock = vi.mocked(updateResearchQuestion);
 const uploadMock = vi.mocked(uploadResearchImage);
@@ -588,5 +594,28 @@ describe('ResearchQuestionEditDrawer 选项卡片点选', () => {
     renderDrawer();
     fireEvent.change(field('选项'), { target: { value: '{ 不是合法 JSON' } });
     expect(screen.queryByTestId('choice-options')).not.toBeInTheDocument();
+  });
+});
+
+describe('ResearchQuestionEditDrawer 草稿白板', () => {
+  it('默认不显示白板；点标题栏「展开草稿」后出现，且按题 ID 隔离、persist=false', () => {
+    renderDrawer(q({ id: 42 }));
+    expect(screen.queryByTestId('research-draft-whiteboard')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '展开草稿' }));
+
+    const stub = screen.getByTestId('whiteboard-stub');
+    expect(stub).toBeInTheDocument();
+    expect(stub).toHaveAttribute('data-question-id', 'research-42');
+    expect(stub).toHaveAttribute('data-persist', 'false');
+  });
+
+  it('再点「收起草稿」→ 白板卸载（关闭即清空）', () => {
+    renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: '展开草稿' }));
+    expect(screen.getByTestId('whiteboard-stub')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '收起草稿' }));
+    expect(screen.queryByTestId('research-draft-whiteboard')).not.toBeInTheDocument();
   });
 });

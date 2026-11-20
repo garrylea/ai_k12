@@ -8,6 +8,7 @@ import {
 } from '@/components/markdown';
 import { ConfirmDialog } from '@/components/base/ConfirmDialog';
 import { toast } from '@/components/base/Toast';
+import { DraftWhiteboard } from '@/components/business/DraftWhiteboard';
 import { ensureJpeg } from '@/utils/image-convert';
 import { compressImageFile, MAX_IMAGE_BYTES } from '@/utils/image-compress';
 import {
@@ -275,6 +276,8 @@ export default function ResearchQuestionEditDrawer({
   const [confirmedSource, setConfirmedSource] = useState(false);
   const [note, setNote] = useState('');
   const [uploadCount, setUploadCount] = useState(0);
+  // 草稿白板开合：复用现成的手写白板组件；persist=false，关抽屉即卸载清空。
+  const [draftOpen, setDraftOpen] = useState(false);
 
   /** 选项卡片数据：从实时 JSON 派生，改 JSON 即时更新；非选择题/非法 JSON → null。 */
   const choiceOptions = parseChoiceOptions(question.type, drafts.options);
@@ -559,6 +562,30 @@ export default function ResearchQuestionEditDrawer({
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
           {`编辑题目 #${question.questionNo}`}
         </h2>
+        <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setDraftOpen((v) => !v)}
+          title={draftOpen ? '收起草稿' : '展开草稿'}
+          aria-label={draftOpen ? '收起草稿' : '展开草稿'}
+          aria-pressed={draftOpen}
+          className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:bg-gray-100 transition-colors"
+        >
+          {/* 线性 SVG：笔 + 纸，草稿入口语义 */}
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="w-5 h-5"
+            aria-hidden="true"
+          >
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+          </svg>
+        </button>
         <button
           type="button"
           onClick={requestCancel}
@@ -580,7 +607,18 @@ export default function ResearchQuestionEditDrawer({
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
+        </div>
       </header>
+
+      {/* 草稿白板：复用现成 DraftWhiteboard，persist=false → 关闭抽屉卸载即清空 */}
+      {draftOpen && (
+        <section
+          data-testid="research-draft-whiteboard"
+          className="mt-4 h-[26rem] flex flex-col rounded-xl border border-gray-200 overflow-hidden"
+        >
+          <DraftWhiteboard questionId={`research-${question.id}`} persist={false} />
+        </section>
+      )}
 
       <p className="static-notice mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
         {NOTICE}
