@@ -115,9 +115,28 @@ describe('ResearchPaperDetailPage 加载与表格', () => {
     expect(within(row).getByText('B')).toBeInTheDocument();
     expect(within(row).getByText('有')).toBeInTheDocument();
     expect(within(row).getByText('汇文中学 2026')).toBeInTheDocument();
-    // 题干截断：表格里只有摘要，完整原文不直接铺在表格中
-    expect(within(row).getByText(/题干正文/)).toBeInTheDocument();
-    expect(screen.queryByText(question().content)).not.toBeInTheDocument();
+    // 题干走完整富文本渲染，不再截断成摘要
+    expect(within(row).getByText(question().content)).toBeInTheDocument();
+  });
+
+  it('题干用 markdown + latex + html + svg 富文本渲染，不显示原始标记', async () => {
+    const rich = [
+      '**加粗题干**',
+      '行内公式 $x^2$',
+      '<table><tr><td>原生单元格</td></tr></table>',
+      '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" /></svg>',
+    ].join('\n\n');
+    detailMock.mockResolvedValueOnce(detail({ questions: [question({ content: rich })] }));
+
+    renderDetail();
+    const table = await screen.findByTestId('detail-table');
+    const row = within(table).getAllByRole('row')[1] as HTMLTableRowElement;
+    const stemCell = row.cells[2]; // 题号 / 题型 / 题干
+
+    expect(stemCell.querySelector('strong')?.textContent).toBe('加粗题干');
+    expect(stemCell.querySelector('.katex')).not.toBeNull();
+    expect(stemCell.querySelector('table')?.textContent).toContain('原生单元格');
+    expect(stemCell.querySelector('svg')).not.toBeNull();
   });
 
   it('解析为空 → 解析列显示「无」', async () => {

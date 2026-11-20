@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom';
 import RequireRole from '../RequireRole';
@@ -99,6 +99,12 @@ describe('routeTable 教研路由组', () => {
     renderAt('/research');
     expect(screen.getByRole('link', { name: '试卷管理' })).toHaveAttribute('href', '/research/papers');
     expect(screen.getByRole('link', { name: '审计日志' })).toHaveAttribute('href', '/research/audit');
+    // 侧栏底部与管理员一致：头像 + 用户 + 退出图标
+    const nav = screen.getByRole('complementary');
+    expect(within(nav).getAllByText('研').length).toBeGreaterThanOrEqual(2);
+    expect(within(nav).getByText('教研员')).toBeInTheDocument();
+    expect(within(nav).getAllByText('教研空间').length).toBeGreaterThanOrEqual(2);
+    expect(within(nav).getByRole('button', { name: '退出登录' })).toBeInTheDocument();
   });
 
   it.each(['/research/papers', '/research/papers/7', '/research/audit'])(

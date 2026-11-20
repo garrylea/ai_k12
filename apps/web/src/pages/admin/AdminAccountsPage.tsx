@@ -236,7 +236,7 @@ export default function AdminAccountsPage() {
           {activeTab === 'researchers' && (
             <button
               type="button"
-              className="px-4 h-10 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white hover:opacity-90 transition-opacity"
+              className="shrink-0 whitespace-nowrap px-4 h-10 rounded-lg text-sm font-semibold bg-[var(--brand-500)] text-white hover:opacity-90 transition-opacity"
               onClick={() => setCreateOpen(true)}
             >
               创建账号

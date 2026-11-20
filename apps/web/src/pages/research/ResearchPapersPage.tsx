@@ -116,9 +116,6 @@ export default function ResearchPapersPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--text-primary)' }}>试卷管理</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-          查看试卷内容并更正题目，或删除导错的套卷。只删该卷独占的题；共享题仅解除关联；删除不可恢复。
-        </p>
       </div>
 
       <form
@@ -219,9 +216,21 @@ export default function ResearchPapersPage() {
                   <td className="px-4 py-3">
                     <Link
                       to={`/research/papers/${paper.id}`}
-                      className="underline underline-offset-2 hover:opacity-80"
+                      className="group inline-flex items-center gap-1.5 rounded-md -mx-2 px-2 py-1 font-medium text-[var(--brand-600)] transition-colors hover:bg-[var(--brand-100)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500)]"
                     >
-                      {paper.title}
+                      <span className="truncate">{paper.title}</span>
+                      <svg
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="w-3.5 h-3.5 shrink-0 -translate-x-1 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100"
+                        aria-hidden="true"
+                      >
+                        <path d="M4 10h11M11 6l4 4-4 4" />
+                      </svg>
                     </Link>
                   </td>
                   <td className="px-4 py-3">{paper.subjectName}</td>

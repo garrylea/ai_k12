@@ -25,9 +25,13 @@ export function ResearchNav() {
       <div className="p-3">
         <div className="flex items-center justify-between p-2.5 rounded-xl bg-blue-50/60 border border-blue-100">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span className="hidden lg:inline text-sm text-slate-600">退出</span>
+            <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center text-white font-bold shrink-0">研</div>
+            <div className="min-w-0 hidden lg:block">
+              <div className="text-sm font-medium text-slate-900 truncate">教研员</div>
+              <div className="text-xs text-slate-500">教研空间</div>
+            </div>
           </div>
-          <LogoutButton label="退出" className="!p-2 border-blue-100 hover:bg-blue-100/60" />
+          <LogoutButton className="!p-2 border-blue-100 hover:bg-blue-100/60" />
         </div>
       </div>
     </aside>

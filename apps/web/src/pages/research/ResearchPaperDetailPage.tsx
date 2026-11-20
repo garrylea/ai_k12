@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import {
+  markdownComponents,
+  markdownRehypePlugins,
+  markdownRemarkPlugins,
+  preprocessMarkdown,
+} from '@/components/markdown';
 import {
   getResearchPaper,
   type ResearchPaperDetailResult,
@@ -7,12 +14,6 @@ import {
 } from '@/services/api';
 import { Skeleton } from '@/components/base';
 import ResearchQuestionEditDrawer from './ResearchQuestionEditDrawer';
-
-const CONTENT_MAX = 60;
-
-function truncate(text: string): string {
-  return text.length > CONTENT_MAX ? `${text.slice(0, CONTENT_MAX)}…` : text;
-}
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : '操作失败';
@@ -88,7 +89,15 @@ export default function ResearchPaperDetailPage() {
                 <tr key={q.id} className="border-t border-gray-100">
                   <td className="px-4 py-3">{q.questionNo}</td>
                   <td className="px-4 py-3">{q.type}</td>
-                  <td className="px-4 py-3 max-w-md" title={q.content}>{truncate(q.content)}</td>
+                  <td className="px-4 py-3 max-w-md" title={q.content}>
+                    <ReactMarkdown
+                      remarkPlugins={markdownRemarkPlugins}
+                      rehypePlugins={markdownRehypePlugins}
+                      components={markdownComponents}
+                    >
+                      {preprocessMarkdown(q.content)}
+                    </ReactMarkdown>
+                  </td>
                   <td className="px-4 py-3">{q.answer}</td>
                   <td className="px-4 py-3">{q.explanation ? '有' : '无'}</td>
                   <td className="px-4 py-3">

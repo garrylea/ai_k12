@@ -146,7 +146,28 @@ describe('ResearchPapersPage 筛选与四态', () => {
     expect(within(table).getByText('初三')).toBeInTheDocument();
     expect(within(table).getByText('20')).toBeInTheDocument();
     expect(within(table).getByText('9')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '真题卷 A' })).toHaveAttribute('href', '/research/papers/7');
+    const titleLink = screen.getByRole('link', { name: '真题卷 A' });
+    expect(titleLink).toHaveAttribute('href', '/research/papers/7');
+    // 可点击态靠品牌色 + hover 底色 + 箭头，不再用下划线
+    expect(titleLink.className).not.toContain('underline');
+    expect(titleLink.className).toContain('text-[var(--brand-600)]');
+    expect(titleLink.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
+  });
+
+  it('标题下方不显示与操作无关的副标题（AGENTS.md §页面只显示有用内容）', async () => {
+    listMock.mockResolvedValueOnce({
+      items: [paper()],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+
+    renderPage();
+    await screen.findByTestId('papers-table');
+
+    expect(screen.getByRole('heading', { name: '试卷管理' })).toBeInTheDocument();
+    expect(screen.queryByText(/只删该卷独占的题/)).toBeNull();
+    expect(screen.queryByText(/查看试卷内容并更正题目/)).toBeNull();
   });
 
   it('提交筛选 → 回到第 1 页并把学科/年份/关键词传给 API', async () => {
