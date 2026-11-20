@@ -677,3 +677,80 @@ describe('草稿白板：手写笔光标', () => {
     expect(canvas.style.cursor).toBe('default');
   });
 });
+
+describe('草稿白板：属性条（墨色 / 线型 / 线宽）', () => {
+  /** 属性条按钮按 aria-label 取（颜色与线型都是 aria-pressed 的单选组） */
+  const pickAttr = (container: Element, label: string) => {
+    fireEvent.click(container.querySelector(`button[aria-label="${label}"]`)!);
+  };
+  const setWidth = (container: Element, value: string) => {
+    fireEvent.change(container.querySelector('input[aria-label="线宽"]')!, { target: { value } });
+  };
+
+  it('默认黑色实线 2px：笔迹不写死颜色，跟随主题墨色', () => {
+    const { canvas } = setup();
+    penLine(canvas, 100);
+    const s = getDraft('q1')[0];
+    expect(s.size).toBe(2);
+    expect(s.color).toBeUndefined();
+    expect(s.dash).toBeUndefined();
+  });
+
+  it('选红色 + 虚线 + 线宽 6 后，新笔迹带颜色/虚线/线宽', () => {
+    const { container, canvas } = setup();
+    pickAttr(container, '红色');
+    pickAttr(container, '虚线');
+    setWidth(container, '6');
+    penLine(canvas, 100);
+
+    const s = getDraft('q1')[0];
+    expect(s.color).toBe('#dc2626');
+    expect(s.dash).toBe(true);
+    expect(s.size).toBe(6);
+  });
+
+  it('属性只影响之后画的笔迹，已画的保持原样', () => {
+    const { container, canvas } = setup();
+    penLine(canvas, 100); // 黑实线
+    pickAttr(container, '蓝色');
+    pickAttr(container, '虚线');
+    setWidth(container, '5');
+    penLine(canvas, 160); // 蓝虚线
+
+    const [first, second] = getDraft('q1');
+    expect(first.color).toBeUndefined();
+    expect(first.dash).toBeUndefined();
+    expect(first.size).toBe(2);
+    expect(second.color).toBe('#2563eb');
+    expect(second.dash).toBe(true);
+    expect(second.size).toBe(5);
+  });
+
+  it('图形工具也按当前属性落笔（矩形）', () => {
+    const { container, canvas } = setup();
+    pickAttr(container, '绿色');
+    pickAttr(container, '虚线');
+    setWidth(container, '4');
+    rectShape(container, canvas);
+
+    const s = getDraft('q1')[0];
+    expect(s.color).toBe('#16a34a');
+    expect(s.dash).toBe(true);
+    expect(s.size).toBe(4);
+  });
+
+  it('切回「黑色 / 实线」：新笔迹恢复主题墨色与实线', () => {
+    const { container, canvas } = setup();
+    pickAttr(container, '红色');
+    pickAttr(container, '虚线');
+    penLine(canvas, 100);
+
+    pickAttr(container, '黑色');
+    pickAttr(container, '实线');
+    penLine(canvas, 160);
+
+    const second = getDraft('q1')[1];
+    expect(second.color).toBeUndefined();
+    expect(second.dash).toBeUndefined();
+  });
+});

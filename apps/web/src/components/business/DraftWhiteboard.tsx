@@ -41,8 +41,44 @@ function cursorForTool(t: Tool): string {
   return 'crosshair';
 }
 
-/** 笔迹线宽（CSS px）：恒定线宽细线（钢笔感），无 thinning 粗细起伏 */
+/** 笔迹线宽（CSS px）：恒定线宽细线（钢笔感），属性条未调前的默认值 */
 const INK_WIDTH = 2;
+
+/** 属性条线宽滑杆范围（CSS px） */
+const LINE_WIDTH_MIN = 1;
+const LINE_WIDTH_MAX = 8;
+const LINE_WIDTH_STEP = 0.5;
+
+/** 属性条墨色。`value = null` = 不写死颜色、跟随主题墨色（日间深 / 夜间浅，永远看得见）；
+ *  其余为固定色，日夜主题下都保持原色（判题快照是白底，也照原色导出）。 */
+const INK_COLORS: ReadonlyArray<{ key: string; label: string; value: string | null; swatch: string }> = [
+  { key: 'black', label: '黑色', value: null, swatch: '#111827' },
+  { key: 'red', label: '红色', value: '#dc2626', swatch: '#dc2626' },
+  { key: 'green', label: '绿色', value: '#16a34a', swatch: '#16a34a' },
+  { key: 'blue', label: '蓝色', value: '#2563eb', swatch: '#2563eb' },
+];
+
+/** 绘笔属性（颜色 / 线宽 / 线型）：属性条写入、手势与重绘读取，只影响之后新画的笔迹 */
+interface InkStyle {
+  color: string | null;
+  width: number;
+  dashed: boolean;
+}
+
+const DEFAULT_INK_STYLE: InkStyle = { color: null, width: INK_WIDTH, dashed: false };
+
+/** 按当前属性造一条笔迹：黑色/实线是「缺省」——不写字段，渲染时随主题墨色与实线走 */
+function makeStroke(
+  points: DraftPoint[],
+  style: InkStyle,
+  opts?: { center?: DraftPoint; size?: number },
+): Stroke {
+  const stroke: Stroke = { points, size: opts?.size ?? style.width };
+  if (style.color) stroke.color = style.color;
+  if (style.dashed) stroke.dash = true;
+  if (opts?.center) stroke.center = opts.center;
+  return stroke;
+}
 
 /** 圆心标记点半径（CSS px）：与圆规参考层的圆心锚点同尺寸，保持「画的圆心」和「预览的圆心」观感一致 */
 const CENTER_DOT_R = 3;
@@ -284,6 +320,20 @@ const LineIcon = () => (
   </svg>
 );
 
+/** 属性条：实线（细横线） */
+const SolidLineIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <line x1="4" y1="12" x2="20" y2="12" />
+  </svg>
+);
+
+/** 属性条：虚线 */
+const DashedLineIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <line x1="4" y1="12" x2="20" y2="12" strokeDasharray="4 3" />
+  </svg>
+);
+
 /** 矩形工具 */
 const RectIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -441,6 +491,7 @@ function drawCompassOverlay(
   c: CompassState,
   handleAngle: number,
   ink: string,
+  style: InkStyle,
 ): void {
   if (c.phase === 'idle') return;
   const guide = (getComputedStyle(canvas).getPropertyValue('--text-tertiary') || '#999').trim();
@@ -466,7 +517,8 @@ function drawCompassOverlay(
   ctx.arc(h.x, h.y, 4.5, 0, Math.PI * 2);
   ctx.fill();
   if (c.phase === 'drawing' && Math.abs(c.sweep) > 1e-9) {
-    drawStroke(ctx, { points: sampleArc(c, c.a0, c.sweep), size: INK_WIDTH });
+    // 实时预览与提交同属性（颜色/线宽/线型），所见即所得
+    drawStroke(ctx, makeStroke(sampleArc(c, c.a0, c.sweep), { ...style, color: style.color ?? ink }));
   }
   if (c.phase === 'placing' || c.phase === 'resizing') {
     ctx.fillStyle = guide;
@@ -586,18 +638,17 @@ function drawTriangleOverlay(
   canvas: HTMLCanvasElement,
   t: TriangleState,
   ink: string,
+  style: InkStyle,
 ): void {
   if (t.phase === 'idle') return;
   const guide = (getComputedStyle(canvas).getPropertyValue('--text-tertiary') || '#999').trim();
+  const preview = { ...style, color: style.color ?? ink };
   ctx.save();
   ctx.fillStyle = ink;
   if (t.phase === 'placing') {
     if (t.verts.length >= 2) {
       // 已定边：实线（与最终观感一致）
-      drawStroke(ctx, {
-        points: t.verts.map((v) => ({ ...v, pressure: 0.5 })),
-        size: INK_WIDTH,
-      });
+      drawStroke(ctx, makeStroke(t.verts.map((v) => ({ ...v, pressure: 0.5 })), preview));
     }
     const last = t.verts[t.verts.length - 1];
     if (t.cursor) {
@@ -613,7 +664,7 @@ function drawTriangleOverlay(
     }
   } else {
     // adjust：整三角形实线预览（提交同款采样）
-    drawStroke(ctx, { points: sampleClosedPolygon(t.verts), size: INK_WIDTH });
+    drawStroke(ctx, makeStroke(sampleClosedPolygon(t.verts), preview));
   }
   for (const v of t.verts) {
     ctx.beginPath();
@@ -637,6 +688,11 @@ export function DraftWhiteboard({
 }) {
   const [tool, setTool] = useState<Tool>('pen');
   const toolRef = useRef<Tool>('pen'); // redraw（dep-free）读工具态判断是否画圆规参考层
+  // 属性条（墨色 / 线宽 / 线型）：state 供控制条渲染，ref 供 dep-free 的 redraw 与指针手势读取
+  const [inkColor, setInkColor] = useState<string | null>(DEFAULT_INK_STYLE.color);
+  const [lineWidth, setLineWidth] = useState<number>(DEFAULT_INK_STYLE.width);
+  const [lineDashed, setLineDashed] = useState<boolean>(DEFAULT_INK_STYLE.dashed);
+  const styleRef = useRef<InkStyle>(DEFAULT_INK_STYLE);
   const strokesRef = useRef<Stroke[]>([]);
   const drawingRef = useRef(false);
   /** 本次橡皮手势是否真的擦掉过笔画（一次划过擦多条只记一步历史） */
@@ -714,11 +770,12 @@ export function DraftWhiteboard({
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const ink = (getComputedStyle(canvas).getPropertyValue('--text-primary') || '#333').trim();
+    const style = styleRef.current;
     ctx.strokeStyle = ink;
     ctx.fillStyle = ink;
     drawStrokes(ctx, strokesRef.current);
     if (toolRef.current === 'compass') {
-      drawCompassOverlay(ctx, canvas, compassRef.current, compassHandleAngleRef.current, ink);
+      drawCompassOverlay(ctx, canvas, compassRef.current, compassHandleAngleRef.current, ink, style);
     }
     if (toolRef.current === 'select') {
       const g = selectGestureRef.current;
@@ -749,11 +806,11 @@ export function DraftWhiteboard({
       const g = shapeGestureRef.current;
       if (g && g.moved) {
         const out = shapeCommitPoints(g.kind, g);
-        drawStroke(ctx, { points: out.points, size: INK_WIDTH, center: out.center });
+        drawStroke(ctx, makeStroke(out.points, { ...style, color: style.color ?? ink }, { center: out.center }));
       }
     }
     if (toolRef.current === 'triangle') {
-      drawTriangleOverlay(ctx, canvas, triangleRef.current, ink);
+      drawTriangleOverlay(ctx, canvas, triangleRef.current, ink, style);
     }
   }, []);
 
@@ -842,7 +899,8 @@ export function DraftWhiteboard({
   // 图形工具产出（弧/整圆/直线，后续矩形/椭圆/三角形同）提交：与手写笔迹同管道（渲染/橡皮/持久化）
   // center 仅正圆传入（圆规整圆 / Shift 正圆），其余图形不传
   const commitShapeStroke = useCallback((points: DraftPoint[], center?: DraftPoint) => {
-    const stroke: Stroke = center ? { points, size: INK_WIDTH, center } : { points, size: INK_WIDTH };
+    // 颜色/线宽/线型跟着属性条落进笔迹本身（之后改属性不影响已画的）
+    const stroke = makeStroke(points, styleRef.current, { center });
     // 追加必须换新数组：原地 push 会连历史快照里的同一个数组一起改，撤销就「没反应」了
     strokesRef.current = [...strokesRef.current, stroke];
     if (persist) setDraft(questionId, strokesRef.current);
@@ -1491,6 +1549,13 @@ export function DraftWhiteboard({
     redraw();
   }, [tool, redraw]);
 
+  // 属性条（颜色/线宽/线型）变化：同步 dep-free 的 redraw 与手势读取的 ref，并重绘一次
+  // （进行中的图形/圆规预览按新属性重画；已落笔的笔迹各自带属性，不受影响）
+  useEffect(() => {
+    styleRef.current = { color: inkColor, width: lineWidth, dashed: lineDashed };
+    redraw();
+  }, [inkColor, lineWidth, lineDashed, redraw]);
+
   const pointFromEvent = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     return {
@@ -1587,16 +1652,17 @@ export function DraftWhiteboard({
     }
     if (tool === 'dot') {
       // 点：按下即落一个点（单点笔迹，size = 直径，渲染半径 size/2）。
+      // 直径固定 DOT_SIZE（线宽滑杆只调线，不调「点」的大小）；颜色/线型照属性条走。
       // 复用 drawingRef → 两指平移会撤销这个还没抬手落定的点（与手写笔点按同策略）。
       drawingRef.current = true;
-      strokesRef.current = [...strokesRef.current, { points: [p], size: DOT_SIZE }];
+      strokesRef.current = [...strokesRef.current, makeStroke([p], styleRef.current, { size: DOT_SIZE })];
       if (persist) setDraft(questionId, strokesRef.current);
       redraw();
       return;
     }
     drawingRef.current = true;
     // 追加必须换新数组（写时复制）：原地 push 会连历史快照里的同一个数组一起改，撤销就「没反应」了
-    strokesRef.current = [...strokesRef.current, { points: [p], size: INK_WIDTH }];
+    strokesRef.current = [...strokesRef.current, makeStroke([p], styleRef.current)];
     redraw(); // 落笔即渲染：单点（点按）立即成点、连续笔画无"起笔延迟"
   };
 
@@ -1802,6 +1868,15 @@ export function DraftWhiteboard({
     </button>
   );
 
+  /** 属性条小按钮（颜色 / 线型共用）：选中态品牌色描边 + 淡底，未选中低调。
+   *  尺寸比工具条 38px 略小（属性是次要控件），但仍是能稳稳点中的热区 */
+  const attrBtnClass = (active: boolean) =>
+    `w-8 h-8 rounded-lg border flex items-center justify-center transition-colors ${
+      active
+        ? 'border-[var(--brand-500)] bg-[var(--brand-100)] text-[var(--brand-500)]'
+        : 'border-[var(--bg-subtle)] bg-[var(--learn-card-bg)] text-[var(--text-tertiary)] hover:bg-[var(--bg-subtle)]'
+    }`;
+
   return (
     <div
       className="h-full flex flex-col"
@@ -1850,6 +1925,67 @@ export function DraftWhiteboard({
         >
           <TrashIcon />
         </button>
+      </div>
+      {/* 属性条：墨色（黑/红/绿/蓝）+ 线型（实线/虚线）+ 线宽滑杆。
+          只作用于之后新画的笔迹，已画的不改；橡皮/选中/贴图与它无关（没有禁用态，避免多一种状态）。
+          flex-wrap：25% 窄宽度下折行，不把画布挤出去。 */}
+      <div className="shrink-0 flex flex-wrap items-center gap-x-2.5 gap-y-2 px-3 py-1.5 border-b border-[var(--bg-subtle)]">
+        <div className="flex items-center gap-1" role="group" aria-label="笔迹颜色">
+          {INK_COLORS.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => setInkColor(c.value)}
+              title={c.label}
+              aria-label={c.label}
+              aria-pressed={inkColor === c.value}
+              className={attrBtnClass(inkColor === c.value)}
+            >
+              <span
+                className="w-3.5 h-3.5 rounded-[2px]"
+                style={{ backgroundColor: c.swatch, boxShadow: 'inset 0 0 0 1px rgba(127,127,127,0.45)' }}
+              />
+            </button>
+          ))}
+        </div>
+        <span className="w-px h-4 bg-[var(--bg-subtle)]" aria-hidden="true" />
+        <div className="flex items-center gap-1" role="group" aria-label="线型">
+          <button
+            type="button"
+            onClick={() => setLineDashed(false)}
+            title="实线"
+            aria-label="实线"
+            aria-pressed={!lineDashed}
+            className={attrBtnClass(!lineDashed)}
+          >
+            <SolidLineIcon />
+          </button>
+          <button
+            type="button"
+            onClick={() => setLineDashed(true)}
+            title="虚线"
+            aria-label="虚线"
+            aria-pressed={lineDashed}
+            className={attrBtnClass(lineDashed)}
+          >
+            <DashedLineIcon />
+          </button>
+        </div>
+        <span className="w-px h-4 bg-[var(--bg-subtle)]" aria-hidden="true" />
+        <label className="flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">
+          <span className="shrink-0">线宽</span>
+          <input
+            type="range"
+            min={LINE_WIDTH_MIN}
+            max={LINE_WIDTH_MAX}
+            step={LINE_WIDTH_STEP}
+            value={lineWidth}
+            onChange={(e) => setLineWidth(Number(e.target.value))}
+            aria-label="线宽"
+            className="w-20 accent-[var(--brand-500)]"
+          />
+          <span className="w-6 shrink-0 text-right tabular-nums">{lineWidth}</span>
+        </label>
       </div>
       {/* 画布区：相对定位容器——圆规/三角形的状态提示与操作以浮条压在其顶部。
           浮条不占布局高度，所以切工具、切换状态时画布尺寸不变，草稿区不会跳动。 */}

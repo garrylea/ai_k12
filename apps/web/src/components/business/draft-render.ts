@@ -10,6 +10,12 @@ const CENTER_DOT_R = 3;
  *  否则 fillStyle 仍是铺底用的 '#fff'，单点笔迹与圆心点会被「白底画白点」吞掉（stroke 不受影响）。 */
 const INK = '#000';
 
+/** 虚线节拍（CSS px）：随线宽放大，细线也看得出断续；[实, 虚] 交替 */
+function dashPattern(size: number): number[] {
+  const unit = Math.max(2, size);
+  return [unit * 3, unit * 2];
+}
+
 /**
  * 单条笔画平滑渲染（取代 perfect-freehand 填充轮廓画法）：
  * - 统一细线宽 + 圆头圆角（lineCap/lineJoin round），细且均匀；
@@ -25,6 +31,12 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void 
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.lineWidth = stroke.size;
+  // 固定墨色只在笔迹自己有时覆盖（缺省跟随调用方设的主题墨色）；虚线节拍随线宽缩放
+  if (stroke.color) {
+    ctx.strokeStyle = stroke.color;
+    ctx.fillStyle = stroke.color;
+  }
+  ctx.setLineDash(stroke.dash ? dashPattern(stroke.size) : []);
   if (pts.length === 1) {
     // 单点（点一下）：画实心圆点
     ctx.beginPath();
@@ -50,7 +62,19 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void 
 }
 
 export function drawStrokes(ctx: CanvasRenderingContext2D, strokes: Stroke[]): void {
-  for (const s of strokes) drawStroke(ctx, s);
+  // 逐条取色：彩色笔迹会把 ctx 的描边/填充色改掉，下一条「跟随主题」的笔迹必须换回来，
+  // 否则「先画一笔红色、再画一笔黑色」的黑色会跟着变红。
+  const baseStroke = ctx.strokeStyle;
+  const baseFill = ctx.fillStyle;
+  for (const s of strokes) {
+    ctx.strokeStyle = s.color ?? baseStroke;
+    ctx.fillStyle = s.color ?? baseFill;
+    drawStroke(ctx, s);
+  }
+  ctx.strokeStyle = baseStroke;
+  ctx.fillStyle = baseFill;
+  // 虚线同样不外溢：上层图形/圆规预览自己会按需设 dash
+  ctx.setLineDash([]);
 }
 
 /** 把图片解码成可 drawImage 的 Image 元素；失败（坏图/跨域拿不到）解析为 null，由调用方跳过 */

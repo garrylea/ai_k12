@@ -15,11 +15,16 @@ interface CtxRecord {
   /** 每次 fill() 时的 fillStyle —— 用于钉住「填充用的不是铺底白色」 */
   fillStylesAtFill: string[];
   lineWidths: number[];
+  /** 每次 setLineDash 的节拍（空数组 = 实线） */
+  dashes: number[][];
+  /** 每次 stroke() 时的 strokeStyle —— 用于钉住「彩色笔迹不污染下一条」 */
+  strokeStylesAtStroke: string[];
 }
 
 function makeCtx(): { ctx: CanvasRenderingContext2D; rec: CtxRecord } {
-  const rec: CtxRecord = { ops: [], calls: [], fills: [], fillStylesAtFill: [], lineWidths: [] };
+  const rec: CtxRecord = { ops: [], calls: [], fills: [], fillStylesAtFill: [], lineWidths: [], dashes: [], strokeStylesAtStroke: [] };
   let fillStyle = '#000';
+  let strokeStyle = '';
   const push = (op: string) => (...args: unknown[]) => {
     rec.ops.push(op);
     rec.calls.push({ op, args });
@@ -30,7 +35,11 @@ function makeCtx(): { ctx: CanvasRenderingContext2D; rec: CtxRecord } {
     moveTo: push('move'),
     quadraticCurveTo: push('quad'),
     lineTo: push('line'),
-    stroke: push('stroke'),
+    stroke: (...args: unknown[]) => {
+      rec.ops.push('stroke');
+      rec.calls.push({ op: 'stroke', args });
+      rec.strokeStylesAtStroke.push(strokeStyle);
+    },
     fill: (...args: unknown[]) => {
       rec.ops.push('fill');
       rec.calls.push({ op: 'fill', args });
@@ -39,13 +48,15 @@ function makeCtx(): { ctx: CanvasRenderingContext2D; rec: CtxRecord } {
     fillRect: push('fillRect'),
     drawImage: push('drawImage'),
     scale: push('scale'),
+    setLineDash: (segs: number[]) => { rec.dashes.push([...(segs ?? [])]); },
     lineCap: 'butt',
     lineJoin: 'miter',
     set lineWidth(v: number) { rec.lineWidths.push(v); },
     get lineWidth() { return rec.lineWidths[rec.lineWidths.length - 1] ?? 1; },
     set fillStyle(v: string) { fillStyle = v; rec.fills.push(v); },
     get fillStyle() { return fillStyle; },
-    strokeStyle: '',
+    set strokeStyle(v: string) { strokeStyle = v; },
+    get strokeStyle() { return strokeStyle; },
   } as unknown as CanvasRenderingContext2D;
   return { ctx, rec };
 }
@@ -98,6 +109,28 @@ describe('drawStrokes', () => {
     const { ctx, rec } = makeCtx();
     drawStrokes(ctx, []);
     expect(rec.ops).toEqual([]);
+  });
+
+  it('彩色笔迹用自己的颜色描线，下一条默认笔迹回到底色（不串色）', () => {
+    const { ctx, rec } = makeCtx();
+    ctx.strokeStyle = '#333'; // 白板按主题设的墨色
+    const line = (y: number) => ({
+      points: [{ x: 0, y, pressure: 1 }, { x: 10, y, pressure: 1 }],
+      size: 2,
+    });
+    drawStrokes(ctx, [{ ...line(0), color: '#dc2626' }, line(10)]);
+    expect(rec.strokeStylesAtStroke).toEqual(['#dc2626', '#333']);
+  });
+
+  it('虚线按线宽算节拍；实线笔迹与画完后都回到实线（不把虚线带给上层预览）', () => {
+    const { ctx, rec } = makeCtx();
+    const line = (y: number) => ({
+      points: [{ x: 0, y, pressure: 1 }, { x: 10, y, pressure: 1 }],
+      size: 2,
+    });
+    drawStrokes(ctx, [{ ...line(0), dash: true }, line(10)]);
+    // 第一条虚线节拍 = [size×3, size×2]；第二条实线清空；画完再复位一次
+    expect(rec.dashes).toEqual([[6, 4], [], []]);
   });
 });
 

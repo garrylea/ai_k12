@@ -11,8 +11,12 @@ export interface DraftPoint {
 
 export interface Stroke {
   points: DraftPoint[];
-  /** 基准笔画宽（CSS px），压感 0.5x~1.5x 映射 */
+  /** 笔迹线宽（CSS px），绘时由属性条写入；旧笔迹无此字段以外的情况，均按自身 size 渲染 */
   size: number;
+  /** 固定墨色（#rrggbb）。缺省 = 跟随主题墨色（日间深、夜间浅）；属性条选「黑」即缺省 */
+  color?: string;
+  /** 虚线笔迹。缺省 = 实线 */
+  dash?: boolean;
   /** 圆心标记（仅正圆：圆规整圆 / Shift 正圆）：轮廓之上补一个实心圆点，随笔迹一起平移/擦除。
    *  不参与橡皮与选中的命中判定（命中仍是「整条擦除」语义）。 */
   center?: DraftPoint;
