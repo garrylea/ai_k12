@@ -436,3 +436,30 @@ describe('ResearchQuestionEditDrawer review 回归', () => {
     expect(mark).toHaveStyle({ color: 'var(--error)' });
   });
 });
+
+// Task 1：右上角关闭按钮从文字改为 X 图标（仍走 requestCancel 的 dirty 确认）。
+// 复用本文件既有的 renderDrawer / mocks / afterEach，不另起一套，避免 mock 冲突。
+describe('ResearchQuestionEditDrawer 关闭按钮', () => {
+  it('右上角是带 aria-label 的 X 图标按钮，不是文字按钮', () => {
+    renderDrawer();
+    const btn = screen.getByRole('button', { name: '关闭抽屉' });
+    expect(btn.querySelector('svg')).not.toBeNull();
+    expect(btn.textContent).toBe('');
+  });
+
+  it('干净态点 X → 关闭', () => {
+    const { onClose } = renderDrawer();
+    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('dirty 态点 X → 弹丢弃确认框，不直接关闭', () => {
+    const { onClose } = renderDrawer();
+    fireEvent.change(screen.getByRole('textbox', { name: '题干' }), {
+      target: { value: '改过的题干' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
+    expect(screen.getByText('丢弃未保存的修改？')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

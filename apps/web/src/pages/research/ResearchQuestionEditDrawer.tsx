@@ -420,9 +420,23 @@ export default function ResearchQuestionEditDrawer({
         <button
           type="button"
           onClick={requestCancel}
-          className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm"
+          title="关闭抽屉"
+          aria-label="关闭抽屉"
+          className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:bg-gray-100 transition-colors"
         >
-          关闭抽屉
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="w-5 h-5"
+            aria-hidden="true"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
         </button>
       </header>
 
