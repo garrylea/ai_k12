@@ -201,7 +201,9 @@ export default function ResearchQuestionEditDrawer({
   const [note, setNote] = useState('');
   const [uploadCount, setUploadCount] = useState(0);
 
-  const [widthPx, setWidthPx] = useState<number | null>(() => lastWidthPx);
+  const [widthPx, setWidthPx] = useState<number | null>(() =>
+    lastWidthPx === null ? null : Math.min(WIDTH_MAX_PX(), Math.max(WIDTH_MIN_PX(), lastWidthPx)),
+  );
   const [dragging, setDragging] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
   const widthPxRef = useRef(widthPx);

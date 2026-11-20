@@ -472,7 +472,12 @@ describe('ResearchQuestionEditDrawer 拖拽调宽', () => {
     right: 512, bottom: 800, toJSON: () => ({}),
   } as DOMRect;
 
+  // defineProperty 装的桩 restoreAllMocks() 不会撤销；存原始 descriptor 手动还原，
+  // 避免泄漏到本 describe 之后追加的用例（原属性若继承自原型则删掉自身属性还原继承）。
+  let originalSetPointerCapture: PropertyDescriptor | undefined;
+
   beforeEach(() => {
+    originalSetPointerCapture = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'setPointerCapture');
     Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', {
       configurable: true,
       value: vi.fn(),
@@ -482,6 +487,11 @@ describe('ResearchQuestionEditDrawer 拖拽调宽', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    if (originalSetPointerCapture) {
+      Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', originalSetPointerCapture);
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, 'setPointerCapture');
+    }
   });
 
   function dragSeparator(fromX: number, toX: number) {
