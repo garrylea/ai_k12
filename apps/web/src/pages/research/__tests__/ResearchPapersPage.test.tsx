@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import ResearchPapersPage from '../ResearchPapersPage';
 import {
   ApiError,
@@ -51,6 +52,15 @@ function paper(over: Partial<ResearchPaperItem> = {}): ResearchPaperItem {
   };
 }
 
+/** 标题列用 <Link>，需要 Router 上下文；用 MemoryRouter 包住避免整页跳转。 */
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <ResearchPapersPage />
+    </MemoryRouter>,
+  );
+}
+
 function preview(over: Partial<ResearchPaperDeletePreview> = {}): ResearchPaperDeletePreview {
   return {
     paperId: 1,
@@ -89,7 +99,7 @@ describe('ResearchPapersPage 筛选与四态', () => {
   it('默认全部学科、首屏 page=1/pageSize=20，且不附加学科筛选', async () => {
     listMock.mockResolvedValueOnce({ items: [], total: 0, page: 1, pageSize: 20 });
 
-    render(<ResearchPapersPage />);
+    renderPage();
 
     expect(await screen.findByTestId('papers-empty')).toBeInTheDocument();
     expect(screen.getByText('全部学科')).toBeInTheDocument();
@@ -102,7 +112,7 @@ describe('ResearchPapersPage 筛选与四态', () => {
   it('加载中 → Skeleton，不出错误卡/空态', () => {
     listMock.mockReturnValueOnce(new Promise(() => {}));
 
-    render(<ResearchPapersPage />);
+    renderPage();
 
     expect(screen.getByTestId('papers-loading')).toBeInTheDocument();
     expect(screen.queryByTestId('papers-error')).not.toBeInTheDocument();
@@ -112,7 +122,7 @@ describe('ResearchPapersPage 筛选与四态', () => {
   it('失败 → 错误卡 + toast("error")', async () => {
     listMock.mockRejectedValueOnce(new ApiError(5000, '服务异常'));
 
-    render(<ResearchPapersPage />);
+    renderPage();
 
     expect(await screen.findByTestId('papers-error')).toBeInTheDocument();
     expect(toastMock).toHaveBeenCalledWith('error', '服务异常');
@@ -127,7 +137,7 @@ describe('ResearchPapersPage 筛选与四态', () => {
       pageSize: 20,
     });
 
-    render(<ResearchPapersPage />);
+    renderPage();
 
     const table = await screen.findByTestId('papers-table');
     expect(within(table).getByText('真题卷 A')).toBeInTheDocument();
@@ -140,7 +150,7 @@ describe('ResearchPapersPage 筛选与四态', () => {
   });
 
   it('提交筛选 → 回到第 1 页并把学科/年份/关键词传给 API', async () => {
-    render(<ResearchPapersPage />);
+    renderPage();
     await screen.findByTestId('papers-table');
 
     fireEvent.change(screen.getByTestId('papers-filter-subject'), { target: { value: '2' } });
@@ -158,7 +168,7 @@ describe('ResearchPapersPage 删卷确认流程', () => {
   it('点删除 → 先拉预览并显示真实影响面数字，确认前不发删除', async () => {
     previewMock.mockResolvedValueOnce(preview({ questionCount: 3, sessionCount: 1, answerCount: 2 }));
 
-    render(<ResearchPapersPage />);
+    renderPage();
     await screen.findByTestId('papers-table');
     fireEvent.click(screen.getByTestId('paper-delete-1'));
 
@@ -171,7 +181,7 @@ describe('ResearchPapersPage 删卷确认流程', () => {
   });
 
   it('确认 → 调 DELETE + toast("success") + 关框 + 重新拉列表', async () => {
-    render(<ResearchPapersPage />);
+    renderPage();
     await screen.findByTestId('papers-table');
     const loadsBefore = listMock.mock.calls.length;
 
@@ -187,7 +197,7 @@ describe('ResearchPapersPage 删卷确认流程', () => {
   });
 
   it('取消 → 关框且不发删除请求', async () => {
-    render(<ResearchPapersPage />);
+    renderPage();
     await screen.findByTestId('papers-table');
 
     fireEvent.click(screen.getByTestId('paper-delete-1'));
@@ -201,7 +211,7 @@ describe('ResearchPapersPage 删卷确认流程', () => {
   it('删除失败 → toast("error")，确认框不关，可重试', async () => {
     deleteMock.mockRejectedValueOnce(new ApiError(5000, '数据库异常'));
 
-    render(<ResearchPapersPage />);
+    renderPage();
     await screen.findByTestId('papers-table');
 
     fireEvent.click(screen.getByTestId('paper-delete-1'));
@@ -219,7 +229,7 @@ describe('ResearchPapersPage 删卷确认流程', () => {
   it('连点确认 → 只发一个 DELETE（deletingRef 防连点）', async () => {
     deleteMock.mockReturnValueOnce(new Promise(() => {}));
 
-    render(<ResearchPapersPage />);
+    renderPage();
     await screen.findByTestId('papers-table');
 
     fireEvent.click(screen.getByTestId('paper-delete-1'));

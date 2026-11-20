@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
   deleteResearchPaper,
   getResearchPaperDeletePreview,
@@ -216,12 +217,12 @@ export default function ResearchPapersPage() {
               {data.items.map((paper) => (
                 <tr key={paper.id} className="border-t border-gray-100">
                   <td className="px-4 py-3">
-                    <a
-                      href={`/research/papers/${paper.id}`}
+                    <Link
+                      to={`/research/papers/${paper.id}`}
                       className="underline underline-offset-2 hover:opacity-80"
                     >
                       {paper.title}
-                    </a>
+                    </Link>
                   </td>
                   <td className="px-4 py-3">{paper.subjectName}</td>
                   <td className="px-4 py-3">{paper.year ?? '—'}</td>

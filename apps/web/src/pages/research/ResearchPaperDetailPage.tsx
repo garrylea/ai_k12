@@ -51,14 +51,9 @@ export default function ResearchPaperDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--text-primary)' }}>
-          {data ? data.paper.title : '试卷题目明细'}
-        </h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-          查看题目原值并更正；点击「编辑」打开五字段编辑抽屉。
-        </p>
-      </div>
+      <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--text-primary)' }}>
+        {data ? data.paper.title : '试卷题目明细'}
+      </h1>
 
       {error ? (
         <div data-testid="detail-error" className="bg-white rounded-2xl border border-dashed border-gray-200 p-10 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
