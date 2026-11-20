@@ -11,11 +11,14 @@ import { ResearchImagesService } from './research-images.service.js';
 export const UpdateQuestionSchema = z.object({
   answer: z.string().min(1).max(20000).optional(),
   content: z.string().min(1).max(20000).optional(),
-  options: z.array(z.object({ label: z.string(), text: z.string() })).max(10)
-    .optional().transform((arr) => arr?.map(({ label, text }) => ({ label, text }))),
+  // 未传 = 保持原值；显式 null = 清空选项（无选项题）。两端都收，避免把 null 选项重写成假数组。
+  options: z.union([
+    z.array(z.object({ label: z.string(), text: z.string() })).max(10),
+    z.null(),
+  ]).optional().transform((arr) => arr === null ? null : arr?.map(({ label, text }) => ({ label, text }))),
   explanation: z.string().max(20000).optional(),
   approach: z.string().max(20000).optional()
-    .refine((s) => !/!\[[^\]]*\]\((?!\/uploads\/|https?:\/\/|data:)[^)]+\)/.test(s ?? ''),
+    .refine((s) => !/!\[[^\]]*\]\((?!\/uploads\/|https?:\/\/|data:)[^)]+\)/i.test(s ?? ''),
       { message: 'approach 不允许相对路径图片' }),
   confirmedSource: z.literal(true),
   note: z.string().max(255).optional(),
@@ -36,12 +39,23 @@ export function parseBody<S extends z.ZodTypeAny>(schema: S, raw: unknown): z.ou
 }
 
 const FIVE_FIELDS = ['answer', 'content', 'options', 'explanation', 'approach'] as const;
-/** 只认教研上传的绝对 URL（spec §8.3/§8.5）。 */
-const RESEARCH_URL_RE = /!\[[^\]]*\]\((\/uploads\/[^)\s]+)\)/g;
+/** 只认教研上传的绝对 URL（spec §8.3/§8.5）：非 research 的 /uploads/ 图不在清理权限内。 */
+const RESEARCH_URL_RE = /!\[[^\]]*\]\((\/uploads\/research\/[^)\s]+)\)/g;
 
 function collectUrls(value: string | null | undefined): string[] {
   if (typeof value !== 'string') return [];
   return Array.from(value.matchAll(RESEARCH_URL_RE), (m) => m[1]);
+}
+
+/** DB 里 options 是 JSON 字符串或 NULL；审计快照记解析后的数组/null，和 afterJson 同形状。 */
+function parseStoredOptions(raw: string | null | undefined): unknown {
+  if (raw == null || raw === '') return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface UpdateQuestionResult {
@@ -74,7 +88,8 @@ export class ResearchQuestionsService {
     }
 
     // 1. 仅保留与旧值不同的字段；options 序列化后比较（DB 里是 JSON 字符串，剥 isCorrect）。
-    const changed: Record<string, string> = {};
+    //    null 落库为 SQL NULL 而不是字符串 "null"；未传时整个字段不进 changed。
+    const changed: Record<string, string | null> = {};
     for (const k of ['answer', 'content', 'explanation', 'approach'] as const) {
       const next = dto[k];
       if (next !== undefined && next !== (old[k] ?? undefined)) {
@@ -82,8 +97,8 @@ export class ResearchQuestionsService {
       }
     }
     if (dto.options !== undefined) {
-      const serialized = JSON.stringify(dto.options);
-      if (serialized !== (old.options ?? undefined)) {
+      const serialized = dto.options === null ? null : JSON.stringify(dto.options);
+      if (serialized !== old.options) {
         changed.options = serialized;
       }
     }
@@ -101,7 +116,9 @@ export class ResearchQuestionsService {
     const beforeJson: Record<string, unknown> = {};
     const afterJson: Record<string, unknown> = {};
     for (const k of changedFields) {
-      beforeJson[k] = old[k as (typeof FIVE_FIELDS)[number]] ?? null;
+      beforeJson[k] = k === 'options'
+        ? parseStoredOptions(old.options)
+        : (old[k as (typeof FIVE_FIELDS)[number]] ?? null);
       afterJson[k] = k === 'options' ? dto.options : changed[k];
     }
     const markVerified = Object.prototype.hasOwnProperty.call(changed, 'answer');

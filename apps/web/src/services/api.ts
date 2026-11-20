@@ -37,19 +37,11 @@ export class ApiError extends Error {
   }
 }
 
-async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = getAuthToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options?.headers as Record<string, string>),
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  const json: ApiResponse<T> = await res.json();
-
+/**
+ * 响应信封判定：fetchApi 与 multipart 裸 fetch 共用（uploadResearchImage 必须走裸 fetch
+ * 保 boundary，但不能因此漏掉 2001/1013 的全局跳转与 res.ok 检查）。
+ */
+async function handleApiResponse<T>(res: Response, json: ApiResponse<T>): Promise<T> {
   if (json.code !== 0) {
     if (json.code === 1013) {
       // 单点登录互踢（2026-10-10）：该账号已在别处重新登录。清本地登录态并回登录页，
@@ -82,8 +74,27 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
       (json as ApiResponse<T> & { claimStatus?: OrderClaimStatus | null }).claimStatus,
     );
   }
-
+  // 网关/代理可能回非 2xx 却带 code=0 的残缺信封；不能当成功（裸 fetch 路径同样受此保护）。
+  // 用 === false 而非 !res.ok：测试桩常省略 ok 字段，真实 Response 必为 boolean。
+  if (res.ok === false) {
+    throw new ApiError(res.status, `请求失败（HTTP ${res.status}）`, res.status >= 500, res.status);
+  }
   return json.data;
+}
+
+async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options?.headers as Record<string, string>),
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const json: ApiResponse<T> = await res.json();
+  return handleApiResponse(res, json);
 }
 
 // --- Auth ---
@@ -1127,7 +1138,8 @@ export interface ResearchQuestionDetail {
   questionNo: number;
   type: string;
   content: string;
-  options: Array<{ label: string; text: string }>;
+  /** 无选项/坏 JSON 为 null（后端 parseOptions 口径）；填空/简答/证明题常为 null。 */
+  options: Array<{ label: string; text: string }> | null;
   answer: string;
   explanation: string | null;
   approach: string | null;
@@ -1215,7 +1227,8 @@ export function deleteResearchPaper(id: number): Promise<ResearchPaperDeleteResu
 export function updateResearchQuestion(id: number, body: {
   answer?: string;
   content?: string;
-  options?: Array<{ label: string; text: string }>;
+  /** 不传 = 保持原值；显式 null = 清空选项（无选项题保持 null 不被重写）。 */
+  options?: Array<{ label: string; text: string }> | null;
   explanation?: string;
   approach?: string;
   confirmedSource: true;
@@ -1237,8 +1250,7 @@ export async function uploadResearchImage(file: File, signal?: AbortSignal): Pro
     signal,
   });
   const json: ApiResponse<{ fileId: number; url: string }> = await res.json();
-  if (json.code !== 0) throw new ApiError(json.code, json.message, json.retryable, res.status);
-  return json.data;
+  return handleApiResponse(res, json);
 }
 
 /** 取消编辑时按 URL 清理未被引用的教研图片。 */

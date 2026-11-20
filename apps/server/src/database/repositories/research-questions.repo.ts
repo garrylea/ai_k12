@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { ContentAuditRepository, type AuditEntry } from './content-audit.repo.js';
 
@@ -26,6 +26,8 @@ type Queryable = { execute(sql: string, values?: unknown): Promise<unknown> };
  */
 @Injectable()
 export class ResearchQuestionsRepository {
+  private readonly logger = new Logger(ResearchQuestionsRepository.name);
+
   constructor(
     @Inject('DATABASE_POOL') private readonly pool: Pool,
     private readonly audit: ContentAuditRepository,
@@ -77,7 +79,12 @@ export class ResearchQuestionsRepository {
       await this.audit.appendOnConnection(conn as Queryable, audit);
       await conn.commit();
     } catch (err) {
-      await conn.rollback();
+      // rollback 失败绝不能盖掉原始错误（否则调用方只看到 rollback 异常）。
+      try {
+        await conn.rollback();
+      } catch (rollbackErr) {
+        this.logger.warn(`rollback 失败（原错误仍抛出）：${String(rollbackErr)}`);
+      }
       throw err;
     } finally {
       conn.release();

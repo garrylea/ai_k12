@@ -114,7 +114,8 @@ describe('ResearchAuditPage 筛选与分页', () => {
         targetType: 'paper',
         actorId: 7,
         from: '2026-11-01',
-        to: '2026-11-19',
+        // 日期选择器的 to 补到当天最后一毫秒，否则漏掉结束日全天。
+        to: new Date('2026-11-19T23:59:59.999').toISOString(),
         page: 1,
         pageSize: 20,
       });

@@ -937,9 +937,9 @@ Query（zod 校验，空串视为未填）：`subjectId?`（正整数）/ `year?
 
 **5. `PATCH /api/research/questions/{id}`（新增，核心）**
 
-Body（zod）：`answer?`（非空字符串，≤20000）/ `content?`（非空，≤20000）/ `options?`（`[{label:string,text:string}]`，长度 ≤10，透传前剥 `isCorrect`）/ `explanation?`（允许空串=清空，≤20000）/ `approach?`（允许空串，≤20000；出现 `![...](...)` 必须以 `/uploads/`、`http(s)://`、`data:` 开头，禁止相对路径图）/ `confirmedSource`（**必须为 true**，否则 1001）/ `note?`（≤255，写审计）。
+Body（zod）：`answer?`（非空字符串，≤20000）/ `content?`（非空，≤20000）/ `options?`（`[{label:string,text:string}]`，长度 ≤10，透传前剥 `isCorrect`；**可为 null = 显式清空选项**，填空/简答/证明等无选项题保持 null 不被重写；未传 = 保持原值）/ `explanation?`（允许空串=清空，≤20000）/ `approach?`（允许空串，≤20000；出现 `![...](...)` 必须以 `/uploads/`、`http(s)://`、`data:` 开头，禁止相对路径图）/ `confirmedSource`（**必须为 true**，否则 1001）/ `note?`（≤255，写审计）。
 
-逐步逻辑：① 校验 body；字段全缺省或无实际变更 → 400/1001。② 事务内按 id 查 `questions`（不存在 → 404）。③ 记录 `before`（仅本次涉及的字段旧值）。④ `UPDATE questions SET <changed fields>, answer_verified=1 WHERE id=?`——**不更新 `content_hash`**，`updated_at` 由列级 `ON UPDATE` 自动维护；`answer_verified=1` **只在本次改了 `answer` 时置位**，只改解析/思路/题干/选项则保持原值（避免把管线导入未核验的题误标为已核验）。⑤ 计算图片差集：旧五字段 URL − 新五字段 URL = 待清理 research 图列表。⑥ 写 `content_audit_logs`：`action='question.update'`, `target_type='question'`, `target_id=id`, `paper_id`（由 `:id` 反查任一 `paper_questions`，无则 null）, `before_json/after_json`（只含变更字段）, `note`；审计失败 → 整个操作回滚。⑦ 提交事务，commit 后删磁盘文件。返回 `{question: {id, <changed fields 新值>, answerVerified: <本次改了 answer 则为 true，否则保持原值>}, changedFields: string[], deletedImages: number}`。
+逐步逻辑：① 校验 body；字段全缺省或无实际变更 → 400/1001。② 事务内按 id 查 `questions`（不存在 → 404）。③ 记录 `before`（仅本次涉及的字段旧值；`options` 快照记 parse 后的数组/null，与 after 同形状）。④ `UPDATE questions SET <changed fields>, answer_verified=1 WHERE id=?`——`options` 显式传 null 时写 SQL NULL（不是字符串 `"null"`）；**不更新 `content_hash`**，`updated_at` 由列级 `ON UPDATE` 自动维护；`answer_verified=1` **只在本次改了 `answer` 时置位**，只改解析/思路/题干/选项则保持原值（避免把管线导入未核验的题误标为已核验）。⑤ 计算图片差集：旧五字段 URL − 新五字段 URL = 待清理 research 图列表。⑥ 写 `content_audit_logs`：`action='question.update'`, `target_type='question'`, `target_id=id`, `paper_id`（由 `:id` 反查任一 `paper_questions`，无则 null）, `before_json/after_json`（只含变更字段）, `note`；审计失败 → 整个操作回滚。⑦ 提交事务，commit 后删磁盘文件。返回 `{question: {id, <changed fields 新值>, answerVerified: <本次改了 answer 则为 true，否则保持原值>}, changedFields: string[], deletedImages: number}`。
 
 边界：并发两人同改一题 → 后写覆盖先写（本期不做乐观锁，靠审计追溯）；图片差集只对 `source='research'` 的 URL 生效。**不回填**：不写学生作答/错题本/积分/掌握度。
 
@@ -959,7 +959,7 @@ Body：`{urls: string[]}`，每条须以 `/uploads/research/` 开头（否则 10
 
 Body（可选）：`{olderThanHours?: number}`，缺省 24，范围 1–720，非法 → 1001。扫 `uploaded_files WHERE source='research' AND created_at < NOW() - INTERVAL ? HOUR`，逐条做引用检查；无引用则删 DB 行 + 磁盘文件；有 `extract_tasks` 关联的跳过。返回 `{scanned, deleted, skipped, failed}`（**201**，Nest 默认）。调用方式：运维手动触发或纳入现有定时维护，本期不做后台常驻进程。错误：1001、1003、1005。
 
-**图片清理铁律（端点 4/5/8/9 共用）**：① 只清 `source='research'` 且 URL 以 `/uploads/research/` 开头的图，**绝不动** auxiliary/freeform/题库静态图；② 删前全局扫描 `questions` 五列（`content/options/answer/explanation/approach`）确认无其它引用，并扫描 `exam_answers.answer_text` / `answers.answer_text` / `special_answer_records.answer_text`（学生作答可能引用教研图，保守跳过）；③ 被 `extract_tasks` 引用的 `uploaded_files` 行跳过（FK RESTRICT，硬删报错）；④ 磁盘文件删除在 DB commit **之后**，`fs.unlink` 失败只记日志不回滚（文件残留可接受，DB 一致性优先）；⑤ 每次清理写 `content_audit_logs`：`action='image.delete'`, `target_type='image'`, `target_id=fileId`。三层清理：保存差集（PATCH）/ 取消清理（DELETE images）/ GC 兜底（POST gc）。
+**图片清理铁律（端点 4/5/8/9 共用）**：① 只清 `source='research'` 且 URL 以 `/uploads/research/` 开头的图，**绝不动** auxiliary/freeform/题库静态图；② 删前全局扫描 `questions` 五列（`content/options/answer/explanation/approach`）确认无其它引用，并扫描 `exam_answers.answer_text` / `answers.answer_text` / `special_answer_records.answer_text`（学生作答可能引用教研图，保守跳过）；③ 被 `extract_tasks` 引用的 `uploaded_files` 行跳过（FK RESTRICT，硬删报错）；④ 磁盘文件删除在 DB commit **之后**，`fs.unlink` 失败只记日志不回滚（文件残留可接受，DB 一致性优先）；⑤ `DELETE FROM uploaded_files` 与 `content_audit_logs` 的 `image.delete` 审计必须在**同一连接同一事务**写（spec §9.2）：审计插入失败整条回滚——DB 行不删、磁盘不碰；审计字段 `action='image.delete'`, `target_type='image'`, `target_id=fileId`。三层清理：保存差集（PATCH）/ 取消清理（DELETE images）/ GC 兜底（POST gc）。
 
 ---
 

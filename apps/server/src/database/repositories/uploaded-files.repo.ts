@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import type { UploadedFileRow } from './types.js';
 
 @Injectable()
@@ -50,5 +50,10 @@ export class UploadedFilesRepository {
 
   async delete(id: number): Promise<void> {
     await this.pool.execute('DELETE FROM uploaded_files WHERE id = ?', [id]);
+  }
+
+  /** 在调用方给定的连接上删行：与 image.delete 审计同事务（spec §9.2）。 */
+  async deleteOnConnection(conn: PoolConnection, id: number): Promise<void> {
+    await conn.execute('DELETE FROM uploaded_files WHERE id = ?', [id]);
   }
 }

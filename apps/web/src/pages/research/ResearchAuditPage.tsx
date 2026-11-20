@@ -63,7 +63,8 @@ export default function ResearchAuditPage() {
     if (applied.targetType) params.targetType = applied.targetType;
     if (applied.actorId) params.actorId = Number(applied.actorId);
     if (applied.from) params.from = applied.from;
-    if (applied.to) params.to = applied.to;
+    // 日期选择器的 to 是当天 00:00，直接传会漏掉结束日全天；补到当天最后一毫秒。
+    if (applied.to) params.to = new Date(`${applied.to}T23:59:59.999`).toISOString();
     listResearchAudit(params)
       .then((res) => {
         if (requestId === requestRef.current) setData(res);

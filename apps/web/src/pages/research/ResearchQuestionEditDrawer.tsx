@@ -56,7 +56,8 @@ const FAILED_TOKEN_RE = /［图\d+ 上传失败］/g;
 function initialDrafts(q: ResearchQuestionDetail): Drafts {
   return {
     content: q.content,
-    options: JSON.stringify(q.options, null, 2),
+    // 无选项题（填空/简答/证明）后端 parse 出 null：留空而不是写出 "null" 字面量。
+    options: q.options === null ? '' : JSON.stringify(q.options, null, 2),
     answer: q.answer,
     explanation: q.explanation ?? '',
     approach: q.approach ?? '',
@@ -165,7 +166,7 @@ function EditField({ fieldKey, value, markdown, busy, onChange, onFiles }: EditF
         onDragOver={(e) => {
           if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault();
         }}
-        placeholder={fieldKey === 'options' ? '按 [{"label":"A","text":"选项内容"}] 格式填写' : `编辑${label}`}
+        placeholder={fieldKey === 'options' ? '按 [{"label":"A","text":"选项内容"}] 格式填写；无选项题留空' : `编辑${label}`}
         className="w-full min-h-[5rem] p-2 rounded-lg border border-gray-200 bg-transparent text-sm resize-y outline-none"
         style={{ color: 'var(--text-primary)' }}
       />
@@ -332,22 +333,26 @@ export default function ResearchQuestionEditDrawer({
     if (saveDisabled) return;
     setStatus('validating');
 
-    let options: Array<{ label: string; text: string }>;
-    try {
-      const parsed = JSON.parse(drafts.options) as unknown;
-      if (
-        !Array.isArray(parsed) || parsed.length === 0 || parsed.length > 10 ||
-        !parsed.every((o) => o !== null && typeof o === 'object' &&
-          typeof (o as { label?: unknown }).label === 'string' &&
-          typeof (o as { text?: unknown }).text === 'string')
-      ) {
-        throw new Error('bad options');
+    // 空串 / 字面 null = 无选项题：选项保持 null，绝不捏造假选项把题改成选择题。
+    const rawOptions = drafts.options.trim();
+    let options: Array<{ label: string; text: string }> | null = null;
+    if (rawOptions !== '' && rawOptions !== 'null') {
+      try {
+        const parsed = JSON.parse(rawOptions) as unknown;
+        if (
+          !Array.isArray(parsed) || parsed.length === 0 || parsed.length > 10 ||
+          !parsed.every((o) => o !== null && typeof o === 'object' &&
+            typeof (o as { label?: unknown }).label === 'string' &&
+            typeof (o as { text?: unknown }).text === 'string')
+        ) {
+          throw new Error('bad options');
+        }
+        options = (parsed as Array<{ label: string; text: string }>).map((o) => ({ label: o.label, text: o.text }));
+      } catch {
+        toast('error', '选项格式有误，请按 JSON 数组填写');
+        setStatus('editing');
+        return;
       }
-      options = (parsed as Array<{ label: string; text: string }>).map((o) => ({ label: o.label, text: o.text }));
-    } catch {
-      toast('error', '选项格式有误，请按 JSON 数组填写');
-      setStatus('editing');
-      return;
     }
     if (!drafts.content.trim() || !drafts.answer.trim()) {
       toast('error', '题干与标准答案不能为空');
@@ -358,6 +363,7 @@ export default function ResearchQuestionEditDrawer({
     const initial = initialRef.current;
     const body: Parameters<typeof updateResearchQuestion>[1] = { confirmedSource: true };
     if (drafts.content !== initial.content) body.content = drafts.content;
+    // 选项未改就完全不带该 key：null 选项永不被后端重写成 "null" 或假数组。
     if (drafts.options !== initial.options) body.options = options;
     if (drafts.answer !== initial.answer) body.answer = drafts.answer;
     if (drafts.explanation !== initial.explanation) body.explanation = drafts.explanation;

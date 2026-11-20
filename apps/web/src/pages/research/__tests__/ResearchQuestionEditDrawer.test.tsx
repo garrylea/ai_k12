@@ -337,6 +337,45 @@ describe('ResearchQuestionEditDrawer 图片校验与软上限', () => {
 });
 
 describe('ResearchQuestionEditDrawer review 回归', () => {
+  it('无选项题(options=null)只改 answer：保存成功且 PATCH 完全不带 options（不捏造假选项）', async () => {
+    const { onSaved } = renderDrawer(q({ options: null, answer: '无答案' }));
+    expect(field('选项').value).toBe(''); // null 渲染为空，不是字面 "null"
+
+    fireEvent.change(field('标准答案'), { target: { value: 'B' } });
+    fireEvent.click(checkSource());
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
+    const [id, body] = updateMock.mock.calls[0] as [number, Record<string, unknown>];
+    expect(id).toBe(42);
+    expect(body).toEqual({ answer: 'B', confirmedSource: true });
+    expect(Object.prototype.hasOwnProperty.call(body, 'options')).toBe(false);
+    expect(toastMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+  });
+
+  it('原有选项的题把选项清空 → PATCH 显式 options:null（保持无选项题语义）', async () => {
+    renderDrawer(q());
+    fireEvent.change(field('选项'), { target: { value: '' } });
+    fireEvent.click(checkSource());
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
+    expect(updateMock).toHaveBeenCalledWith(42, { options: null, confirmedSource: true });
+  });
+
+  it('无选项题补上合法选项 → PATCH 带解析后的数组', async () => {
+    renderDrawer(q({ options: null }));
+    fireEvent.change(field('选项'), { target: { value: '[{"label":"A","text":"甲"}]' } });
+    fireEvent.click(checkSource());
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
+    expect(updateMock).toHaveBeenCalledWith(42, {
+      options: [{ label: 'A', text: '甲' }], confirmedSource: true,
+    });
+  });
+
   it('切题后再编辑：新题其它字段不被旧题草稿覆盖（draftsRef 不得在 updater 里回写）', async () => {
     let finishUpload!: (value: { fileId: number; url: string }) => void;
     uploadMock.mockImplementation(() => new Promise((resolve) => { finishUpload = resolve; }));

@@ -52,6 +52,7 @@ afterEach(() => {
 function stubFetch(status: number, body: unknown) {
   const fn = vi.fn().mockResolvedValue({
     status,
+    ok: status >= 200 && status < 300,
     json: async () => body,
   });
   vi.stubGlobal('fetch', fn);
@@ -97,6 +98,12 @@ describe('fetchApi 错误形状', () => {
       code: 2004,
       claimStatus: 'pending_review',
     });
+  });
+
+  it('非 2xx 但业务 code=0 的残缺信封 → ApiError，不当成功（裸 fetch 路径共用同一判定）', async () => {
+    stubFetch(502, { code: 0, message: 'ok', data: { balance: 120 } });
+
+    await expect(getMyPoints()).rejects.toMatchObject({ status: 502, retryable: true });
   });
 
   it('成功响应不抛错，正常返回 data', async () => {
@@ -485,6 +492,22 @@ describe('2001 全局拦截（订阅失效硬门禁）', () => {
 
     await vi.waitFor(() => expect(assign).toHaveBeenCalledWith('/student/locked'));
     // 给微/宏任务留出窗口，确认确实挂起而不是悄悄 settle
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(outcome).toBe('pending');
+  });
+
+  it('uploadResearchImage（裸 multipart fetch）同样受 2001 拦截：跳转且不抛 ApiError', async () => {
+    const assign = stubLocationAssign();
+    stubFetch(403, { code: 2001, message: '订阅已失效', data: null });
+    const file = new File(['png'], 'x.png', { type: 'image/png' });
+
+    let outcome: 'resolved' | 'rejected' | 'pending' = 'pending';
+    void uploadResearchImage(file).then(
+      () => { outcome = 'resolved'; },
+      () => { outcome = 'rejected'; },
+    );
+
+    await vi.waitFor(() => expect(assign).toHaveBeenCalledWith('/student/locked'));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(outcome).toBe('pending');
   });

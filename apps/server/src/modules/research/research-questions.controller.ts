@@ -1,9 +1,7 @@
 import {
   Body, Controller, Param, ParseIntPipe, Patch, UseGuards,
 } from '@nestjs/common';
-import {
-  parseBody, ResearchQuestionsService, UpdateQuestionSchema,
-} from './research-questions.service.js';
+import { ResearchQuestionsService } from './research-questions.service.js';
 import { JwtAuthGuard, type JwtUser } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { Roles } from '../../common/decorators/roles.js';
@@ -18,6 +16,7 @@ export class ResearchQuestionsController {
 
   @Patch(':id')
   update(@Param('id', ParseIntPipe) id: number, @Body() body: unknown, @CurrentUser() u: JwtUser) {
-    return this.service.update(id, parseBody(UpdateQuestionSchema, body), u);
+    // 边界只解析一次：校验归 service.update 内的 parseBody，控制器透传原始 body。
+    return this.service.update(id, body, u);
   }
 }

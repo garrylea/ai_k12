@@ -9126,7 +9126,9 @@ components:
         content: { type: string, nullable: true }
         options:
           type: array
+          nullable: true
           items: { $ref: '#/components/schemas/ResearchQuestionOption' }
+          description: 选择题选项；填空/简答/证明等无选项题为 null
         answer: { type: string, nullable: true }
         explanation: { type: string, nullable: true }
         approach: { type: string, nullable: true }
@@ -9176,8 +9178,10 @@ components:
         content: { type: string, minLength: 1, maxLength: 20000 }
         options:
           type: array
+          nullable: true
           maxItems: 10
           items: { $ref: '#/components/schemas/ResearchQuestionOption' }
+          description: 不传 = 保持原值；显式 null = 清空选项（无选项题不被重写）
         explanation: { type: string, maxLength: 20000, description: 允许空串表示清空 }
         approach:
           type: string

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { ContentAuditRepository, type AuditActor } from './content-audit.repo.js';
 
@@ -116,6 +116,8 @@ async function findBlockedIds(db: Queryable, ids: number[], paperId: number): Pr
  */
 @Injectable()
 export class ResearchPapersRepository {
+  private readonly logger = new Logger(ResearchPapersRepository.name);
+
   constructor(
     @Inject('DATABASE_POOL') private readonly pool: Pool,
     private readonly audit: ContentAuditRepository,
@@ -319,7 +321,12 @@ export class ResearchPapersRepository {
         deletedAnswers,
       };
     } catch (err) {
-      await conn.rollback();
+      // rollback 失败绝不能盖掉原始错误（否则调用方只看到 rollback 异常）。
+      try {
+        await conn.rollback();
+      } catch (rollbackErr) {
+        this.logger.warn(`rollback 失败（原错误仍抛出）：${String(rollbackErr)}`);
+      }
       throw err;
     } finally {
       conn.release();

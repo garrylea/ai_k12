@@ -16,14 +16,29 @@ function row(over: Record<string, unknown> = {}) {
 
 /** 空壳期用 any 构造，避免 RED 阶段 tsc 因构造参数/缺失 gc 方法报错。 */
 function setup() {
-  const pool = { execute: vi.fn().mockResolvedValue([[{ cnt: 0 }], []]) };
+  // 删行 + 审计同事务：getConnection 给出单条连接，DELETE/审计都走它。
+  const conn = {
+    beginTransaction: vi.fn().mockResolvedValue(undefined),
+    execute: vi.fn().mockResolvedValue(undefined),
+    commit: vi.fn().mockResolvedValue(undefined),
+    rollback: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn(),
+  };
+  const pool = {
+    execute: vi.fn().mockResolvedValue([[{ cnt: 0 }], []]),
+    getConnection: vi.fn().mockResolvedValue(conn),
+  };
   const filesRepo = {
     findByUrl: vi.fn().mockResolvedValue(row()),
     delete: vi.fn().mockResolvedValue(undefined),
+    deleteOnConnection: vi.fn().mockResolvedValue(undefined),
   };
-  const audit = { append: vi.fn().mockResolvedValue(undefined) };
+  const audit = {
+    append: vi.fn().mockResolvedValue(undefined),
+    appendOnConnection: vi.fn().mockResolvedValue(undefined),
+  };
   const service = new (ResearchImagesService as any)(pool, filesRepo, audit);
-  return { service, pool, filesRepo, audit };
+  return { service, pool, conn, filesRepo, audit };
 }
 
 beforeEach(() => {
@@ -40,7 +55,7 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
     const res = await service.cleanupUnreferenced([URL_A], ACTOR);
 
     expect(res).toEqual({ deleted: 0, skipped: 1 });
-    expect(filesRepo.delete).not.toHaveBeenCalled();
+    expect(filesRepo.deleteOnConnection).not.toHaveBeenCalled();
     expect(fs.unlink).not.toHaveBeenCalled();
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('FROM questions');
@@ -50,8 +65,8 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
     expect(params).toEqual([`%${URL_A}%`, `%${URL_A}%`, `%${URL_A}%`, `%${URL_A}%`, `%${URL_A}%`]);
   });
 
-  it('铁律 1+4+5：完全无引用 → 删 DB 行、commit 后删磁盘、写 image.delete 审计', async () => {
-    const { service, pool, filesRepo, audit } = setup();
+  it('铁律 1+4：完全无引用 → 同事务删 DB 行 + 写 image.delete 审计，commit 后删磁盘', async () => {
+    const { service, pool, conn, filesRepo, audit } = setup();
     pool.execute
       .mockResolvedValueOnce([[{ cnt: 0 }]]) // questions
       .mockResolvedValueOnce([[{ cnt: 0 }]]) // 学生作答三表
@@ -59,12 +74,15 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
 
     const res = await service.cleanupUnreferenced([URL_A], ACTOR);
 
-    expect(filesRepo.delete).toHaveBeenCalledWith(5);
-    expect(fs.unlink).toHaveBeenCalledWith('/tmp/ai-k12-research-images-test/research/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.png');
-    expect(audit.append).toHaveBeenCalledWith({
+    // 删行与审计必须落在同一条连接上（spec §9.2）。
+    expect(filesRepo.deleteOnConnection).toHaveBeenCalledWith(conn, 5);
+    expect(audit.appendOnConnection).toHaveBeenCalledWith(conn, {
       actorId: 7, actorRole: 'researcher', actorName: '教研员',
       action: 'image.delete', targetType: 'image', targetId: 5,
     });
+    expect(conn.beginTransaction).toHaveBeenCalledTimes(1);
+    expect(conn.commit).toHaveBeenCalledTimes(1);
+    expect(fs.unlink).toHaveBeenCalledWith('/tmp/ai-k12-research-images-test/research/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.png');
     expect(res).toEqual({ deleted: 1, skipped: 0 });
   });
 
@@ -77,7 +95,7 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
     const res = await service.cleanupUnreferenced([URL_A], ACTOR);
 
     expect(res).toEqual({ deleted: 0, skipped: 1 });
-    expect(filesRepo.delete).not.toHaveBeenCalled();
+    expect(filesRepo.deleteOnConnection).not.toHaveBeenCalled();
     const [sql, params] = pool.execute.mock.calls[1] as [string, unknown[]];
     for (const table of ['exam_answers', 'answers', 'special_answer_records']) {
       expect(sql).toContain(`FROM ${table}`);
@@ -95,7 +113,7 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
     const res = await service.cleanupUnreferenced([URL_A], ACTOR);
 
     expect(res).toEqual({ deleted: 0, skipped: 1 });
-    expect(filesRepo.delete).not.toHaveBeenCalled();
+    expect(filesRepo.deleteOnConnection).not.toHaveBeenCalled();
     const [sql, params] = pool.execute.mock.calls[2] as [string, unknown[]];
     expect(sql).toContain('FROM extract_tasks');
     expect(sql).toContain('file_id = ?');
@@ -107,13 +125,13 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
     missing.filesRepo.findByUrl.mockResolvedValue(null);
     expect(await missing.service.cleanupUnreferenced([URL_A], ACTOR))
       .toEqual({ deleted: 0, skipped: 1 });
-    expect(missing.filesRepo.delete).not.toHaveBeenCalled();
+    expect(missing.filesRepo.deleteOnConnection).not.toHaveBeenCalled();
 
     const foreign = setup();
     foreign.filesRepo.findByUrl.mockResolvedValue(row({ source: 'auxiliary' }));
     expect(await foreign.service.cleanupUnreferenced([URL_A], ACTOR))
       .toEqual({ deleted: 0, skipped: 1 });
-    expect(foreign.filesRepo.delete).not.toHaveBeenCalled();
+    expect(foreign.filesRepo.deleteOnConnection).not.toHaveBeenCalled();
     expect(foreign.pool.execute).not.toHaveBeenCalled();
   });
 
@@ -126,14 +144,29 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
     expect(res).toEqual({ deleted: 1, skipped: 0 });
   });
 
-  it('审计写入失败只记日志：DB 已删仍算 deleted，不误记为 skipped', async () => {
-    const { service, audit, filesRepo } = setup();
-    audit.append.mockRejectedValueOnce(new Error('audit down'));
+  it('审计插入失败 → 整条 rollback：DB 行不删、磁盘不碰、记 skipped（spec §9.2）', async () => {
+    const { service, conn, audit, filesRepo } = setup();
+    audit.appendOnConnection.mockRejectedValueOnce(new Error('audit down'));
 
     const res = await service.cleanupUnreferenced([URL_A], ACTOR);
 
-    expect(filesRepo.delete).toHaveBeenCalledWith(5);
-    expect(res).toEqual({ deleted: 1, skipped: 0 });
+    expect(filesRepo.deleteOnConnection).toHaveBeenCalledWith(conn, 5);
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(fs.unlink).not.toHaveBeenCalled();
+    expect(res).toEqual({ deleted: 0, skipped: 1 });
+  });
+
+  it('rollback 自身失败也不吞掉原错误：整条仍记 skipped，不删磁盘', async () => {
+    const { service, conn, audit } = setup();
+    audit.appendOnConnection.mockRejectedValueOnce(new Error('audit down'));
+    conn.rollback.mockRejectedValueOnce(new Error('rollback down'));
+
+    const res = await service.cleanupUnreferenced([URL_A], ACTOR);
+
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(fs.unlink).not.toHaveBeenCalled();
+    expect(res).toEqual({ deleted: 0, skipped: 1 });
   });
 
   it('引用扫描查询失败 → 吞掉并记 skipped，不抛到 post-commit 调用方', async () => {
@@ -143,7 +176,7 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
     const res = await service.cleanupUnreferenced([URL_A], ACTOR);
 
     expect(res).toEqual({ deleted: 0, skipped: 1 });
-    expect(filesRepo.delete).not.toHaveBeenCalled();
+    expect(filesRepo.deleteOnConnection).not.toHaveBeenCalled();
   });
 
   it('整批预校验：含非法 URL 时 400 且在任何删除前拒绝（valid+invalid 不产生副作用）', async () => {
@@ -153,17 +186,17 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
     await expect(service.cleanupUnreferenced([URL_A, invalid], ACTOR))
       .rejects.toMatchObject({ status: 400 });
     expect(filesRepo.findByUrl).not.toHaveBeenCalled();
-    expect(filesRepo.delete).not.toHaveBeenCalled();
+    expect(filesRepo.deleteOnConnection).not.toHaveBeenCalled();
   });
 
   it('无扩展名的 research URL（extension-less 上传）也可清理', async () => {
-    const { service, filesRepo } = setup();
+    const { service, conn, filesRepo } = setup();
     const noExt = '/uploads/research/cccccccc-dddd-eeee-ffff-000000000000';
     filesRepo.findByUrl.mockResolvedValue(row({ id: 6, url: noExt }));
 
     const res = await service.cleanupUnreferenced([noExt], ACTOR);
 
-    expect(filesRepo.delete).toHaveBeenCalledWith(6);
+    expect(filesRepo.deleteOnConnection).toHaveBeenCalledWith(conn, 6);
     expect(fs.unlink).toHaveBeenCalledWith(
       '/tmp/ai-k12-research-images-test/research/cccccccc-dddd-eeee-ffff-000000000000',
     );
@@ -176,7 +209,7 @@ describe('ResearchImagesService.cleanupUnreferenced — 清理铁律', () => {
     const res = await service.cleanupUnreferenced([URL_A, URL_A], ACTOR);
 
     expect(filesRepo.findByUrl).toHaveBeenCalledTimes(1);
-    expect(filesRepo.delete).toHaveBeenCalledTimes(1);
+    expect(filesRepo.deleteOnConnection).toHaveBeenCalledTimes(1);
     expect(res.deleted).toBe(1);
   });
 

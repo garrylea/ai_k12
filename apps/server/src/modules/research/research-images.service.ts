@@ -6,6 +6,9 @@ import { getUploadDir } from '../files/files.service.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
+/** 只用到 execute 的最小执行器接口（PoolConnection 满足；与 audit.appendOnConnection 同口径）。 */
+type Queryable = { execute(sql: string, values?: unknown): Promise<unknown> };
+
 /**
  * 教研图片 URL：只认 /uploads/research/<uuid><ext>（spec §8.1/§8.5 铁律 1）。
  * 扩展名可选：extension-less 上传也要能清理；`[0-9a-f-]+` 不含点，路径穿越仍被拒。
@@ -26,11 +29,11 @@ export interface ResearchImageGcResult extends ResearchImageCleanupResult {
  * 教研图片清理服务（spec §8.4/§8.5）。
  *
  * 铁律：只清 source='research' 且路径合法的图；删前全局扫描引用（questions 五列 +
- * 学生作答三表 + extract_tasks）；DB 行先删，磁盘文件后删且失败只记日志；每次清理写审计。
- * actor 由调用方逐次传入，不存 service 字段，避免并发串号。
+ * 学生作答三表 + extract_tasks）；DB 行删除与 image.delete 审计在同一事务同一连接上，
+ * commit 成功后才删磁盘文件（失败只记日志）。actor 由调用方逐次传入，不存 service 字段，避免并发串号。
  *
- * 失败隔离：整批 URL 预校验（非法直接 400，无任何删除）；单条的扫描/删除错误吞掉并记
- * skipped，绝不抛到删卷等 post-commit 调用方；审计失败只记日志，不影响已完成的删除计数。
+ * 失败隔离：整批 URL 预校验（非法直接 400，无任何删除）；单条的扫描/删行/审计错误吞掉并记
+ * skipped，绝不抛到删卷等 post-commit 调用方；审计插入失败整条回滚——DB 行不删、磁盘不碰（spec §9.2）。
  */
 @Injectable()
 export class ResearchImagesService {
@@ -42,6 +45,38 @@ export class ResearchImagesService {
     private readonly files: UploadedFilesRepository,
     private readonly audit: ContentAuditRepository,
   ) {}
+
+  /**
+   * 铁律 4（spec §9.2）：DB 删行 + image.delete 审计必须在同一连接同一事务。
+   * 任一失败 → rollback → 整条不删（磁盘绝不碰）；返回 false 由调用方记 skipped。
+   */
+  private async deleteRowWithAudit(id: number, actor: AuditActor): Promise<boolean> {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await this.files.deleteOnConnection(conn, id);
+      await this.audit.appendOnConnection(conn as Queryable, {
+        actorId: actor.sub,
+        actorRole: actor.role,
+        actorName: actor.name ?? null,
+        action: 'image.delete',
+        targetType: 'image',
+        targetId: id,
+      });
+      await conn.commit();
+      return true;
+    } catch (e) {
+      try {
+        await conn.rollback();
+      } catch (rollbackErr) {
+        this.logger.warn(`image.delete rollback 失败 id=${id}: ${String(rollbackErr)}`);
+      }
+      this.logger.warn(`image.delete 事务失败 id=${id}: ${String(e)}`);
+      return false;
+    } finally {
+      conn.release();
+    }
+  }
 
   async cleanupUnreferenced(
     urls: string[],
@@ -58,7 +93,6 @@ export class ResearchImagesService {
     let deleted = 0;
     let skipped = 0;
     for (const url of unique) {
-      let deletedRow: { id: number } | null = null;
       try {
         // findByUrl 是 unscoped 的（Task 3 deferred-minor）：来源校验必须由调用方做。
         const row = await this.files.findByUrl(url);
@@ -89,35 +123,23 @@ export class ResearchImagesService {
           continue;
         }
 
-        // 铁律 4：DB 行先删，commit 后删磁盘；失败只记日志。
-        await this.files.delete(row.id);
+        // 铁律 4：DB 删行 + 审计同事务；失败整条回滚，DB 行不删、磁盘不碰。
+        if (!(await this.deleteRowWithAudit(row.id, actor))) {
+          skipped++;
+          continue;
+        }
+
+        // commit 后才删磁盘（失败只记日志，不回滚 DB）。
         const abs = path.resolve(this.uploadDir, url.replace(/^\/uploads\//, ''));
         if (!abs.startsWith(path.resolve(this.uploadDir) + path.sep)) {
           this.logger.warn(`非法图片路径，跳过删文件：${url}`);
         } else {
           await fs.unlink(abs).catch((e) => this.logger.warn(`删图失败 ${url}: ${e}`));
         }
-        deletedRow = row;
+        deleted++;
       } catch (e) {
         this.logger.warn(`清理失败 ${url}: ${e}`);
         skipped++;
-      }
-
-      // 铁律 5：审计独立包裹——DB 已删，审计失败只记日志，不回滚也不误记为 skipped。
-      if (deletedRow) {
-        deleted++;
-        try {
-          await this.audit.append({
-            actorId: actor.sub,
-            actorRole: actor.role,
-            actorName: actor.name ?? null,
-            action: 'image.delete',
-            targetType: 'image',
-            targetId: deletedRow.id,
-          });
-        } catch (e) {
-          this.logger.warn(`审计写入失败 ${url}（图已删除）: ${e}`);
-        }
       }
     }
     return { deleted, skipped };

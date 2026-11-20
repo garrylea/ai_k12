@@ -121,6 +121,63 @@ describe('ResearchQuestionsService.update', () => {
       { options: '[{"label":"A","text":"甲"}]' }, false, expect.anything());
   });
 
+  it('options=null 的无选项题只改 answer：options 不进变更集、不进审计，也不触发清理', async () => {
+    const repo = mkRepo({
+      findById: vi.fn().mockResolvedValue(fullRow({ options: null, answer: '旧答案' })),
+    });
+    const images = mkImages();
+    const { svc } = mkSvc(repo, images);
+
+    await svc.update(9, { answer: '新答案', confirmedSource: true }, USER);
+
+    const [, changed, , audit] = repo.updateWithAudit.mock.calls[0] as [number, Record<string, unknown>, boolean, any];
+    expect(changed).not.toHaveProperty('options');
+    expect(audit.beforeJson).not.toHaveProperty('options');
+    expect(audit.afterJson).not.toHaveProperty('options');
+    // 无 research 图可清：既不会把 null 当 URL，也不会误清理别的图。
+    expect(images.cleanupUnreferenced).toHaveBeenCalledWith([], USER);
+  });
+
+  it('显式 options:null 清空选项 → changed.options=null（SQL NULL，不是字符串 "null"）', async () => {
+    const { svc, repo } = mkSvc();
+    await svc.update(9, { options: null, confirmedSource: true }, USER);
+    expect(repo.updateWithAudit).toHaveBeenCalledWith(9, { options: null }, false, expect.anything());
+  });
+
+  it('options 审计快照：before 解析 DB JSON 字符串，after 为数组（不双重编码）', async () => {
+    const { svc, repo } = mkSvc(mkRepo({
+      findById: vi.fn().mockResolvedValue(fullRow({ options: '[{"label":"A","text":"甲"}]' })),
+    }));
+    await svc.update(9, { options: [{ label: 'B', text: '乙' }], confirmedSource: true }, USER);
+    const audit = repo.updateWithAudit.mock.calls[0][3];
+    expect(audit.beforeJson.options).toEqual([{ label: 'A', text: '甲' }]);
+    expect(audit.afterJson.options).toEqual([{ label: 'B', text: '乙' }]);
+  });
+
+  it('图片差集只收 /uploads/research/：移除辅助 URL 不进清理批次', async () => {
+    const images = mkImages();
+    const repo = mkRepo({
+      findById: vi.fn().mockResolvedValue(fullRow({
+        content: '旧 ![a](/uploads/auxiliary/x.png) ![b](/uploads/research/r.png) 题',
+      })),
+    });
+    const { svc } = mkSvc(repo, images);
+
+    await svc.update(9, { content: '新题', confirmedSource: true }, USER);
+
+    expect(images.cleanupUnreferenced).toHaveBeenCalledWith(['/uploads/research/r.png'], USER);
+  });
+
+  it('approach 图片协议大小写不敏感：HTTPS:// 放行、相对路径仍拒', async () => {
+    const { svc } = mkSvc();
+    await expect(svc.update(9,
+      { approach: '![图](HTTPS://x.test/a.png)', confirmedSource: true }, USER))
+      .resolves.toBeDefined();
+    await expect(svc.update(9,
+      { approach: '![图](IMAGES/a.png)', confirmedSource: true }, USER))
+      .rejects.toMatchObject({ status: 400 });
+  });
+
   it('options 无实际变化 → 400/1001（旧值是同一 JSON）', async () => {
     const { svc } = mkSvc();
     await expect(svc.update(9, {
@@ -211,6 +268,11 @@ describe('UpdateQuestionSchema (parseBody)', () => {
     expect(() => parseBody(UpdateQuestionSchema, {
       approach: '![x](/uploads/research/a.png)', confirmedSource: true,
     })).not.toThrow();
+  });
+
+  it('options 显式 null 合法；未传仍为 undefined', () => {
+    expect(parseBody(UpdateQuestionSchema, { options: null, confirmedSource: true }).options).toBeNull();
+    expect(parseBody(UpdateQuestionSchema, { confirmedSource: true }).options).toBeUndefined();
   });
 
   it('options 超过 10 项被拒', () => {
