@@ -997,8 +997,10 @@ def _copyable_question_text(issue: dict) -> str:
 
 def _ask_material_scope(c) -> str | None:
     """材料修正归属：题内素材粘正文，共享文章只需指认 URL（正文已在 md 文档里）。"""
+    # 回车=材料完全不动：正文和 URL 都不再问（2026-11-21 用户裁决：
+    # 「不改材料」就该整段跳过，别再拿同卷 URL 清单二次打扰）。
     c.prompt("材料需要修正吗？1 题内素材（粘正文，只挂本题）/ "
-             "2 共享文章（指认 URL，同节共用）/ 回车=正文不改（接着仍会问 URL 归属）› ")
+             "2 共享文章（指认 URL，同节共用）/ 回车=不改材料 › ")
     raw = (_read_line() or "").strip().lower()
     if raw == "1":
         return "inline"
@@ -1335,9 +1337,6 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                     c.ok(f"题内素材已录入 {len(material)} 字（只挂本题）")
                 else:
                     scope = None
-            elif sys.stdin.isatty():
-                # 没选范围也要给一次机会：题号丢了，切题器判不出本题有没有共享文章。
-                material_url = _ask_material_url(c, issue)
             hint = ("答案（1文本/2图片/3文件/4剪贴板/5多图+答案；直接输入或回车留空；"
                     "e 改题面 / r 重录 / s 放弃本题）› ")
             c.prompt(f"第 {target} 题{hint}" if multi else hint)

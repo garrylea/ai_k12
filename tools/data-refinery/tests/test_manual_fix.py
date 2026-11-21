@@ -1428,6 +1428,32 @@ def test_material_scope_prompt(monkeypatch):
         assert manual_fix._ask_material_scope(_QuietConsole()) == want
 
 
+class _TtyStdin(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def test_enter_at_material_scope_skips_url_prompt(tmp_path, monkeypatch):
+    """材料提示处回车 = 材料完全不动，不再弹同卷 URL 清单。
+
+    2026-11-21 用户实测：录完题干后回车表示不改材料，工具仍列出 9 个
+    materials URL 追问归属；若那里再回车，答案会被 URL 那一步吃掉。
+    """
+    path = _prep_n(tmp_path, monkeypatch)
+    issue = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    monkeypatch.setattr("sys.stdin", _TtyStdin(
+        "1\n题干正文\nEOF\n1\n"   # 输入方式 / 正文 / 确认
+        "\n"                     # 材料归属：回车=不改材料
+        "答案甲\n"                # 多问一次 URL 的话，这行会被它吞掉
+    ))
+
+    recs = manual_fix._ask(issue, tmp_path)
+
+    assert len(recs) == 1
+    assert recs[0]["answer"] == "答案甲"
+    assert "material_url" not in recs[0]
+
+
 def test_copyable_text_includes_current_inline_material(tmp_path, monkeypatch):
     monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
     rel = tmp_path / "output" / "extracted" / "语文" / "模拟二"
