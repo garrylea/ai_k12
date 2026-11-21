@@ -515,6 +515,30 @@ def test_rewrite_hash_for_row_uses_material_url():
            "material_url": "materials/chinese/aaa/content.md"}
     h = rewrite_hash_for_row(row)
     assert len(h) == 64
+
+
+def test_write_material_doc_strips_page_marker_before_instruction(tmp_path):
+    """页码在小节指令之前时，指令也必须被删；否则同 doc_key 会写出两份不同正文。"""
+    assets = tmp_path / "assets"
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    body = (
+        "第 1 页 共 8 页\n"
+        "## (三)阅读下面《醉翁亭记》，完成 12-14题。(共 7分)\n\n"
+        "## 醉翁亭记\n\n环滁皆山也。"
+    )
+    key_with_marker, _ = write_material_doc(
+        body, resolver=lambda ref: None, store=_Store(assets), assets_dir=assets,
+    )
+    key_without_marker, _ = write_material_doc(
+        strip_section_instruction("## 醉翁亭记\n\n环滁皆山也。"),
+        resolver=lambda ref: None, store=_Store(assets), assets_dir=assets,
+    )
+    assert key_with_marker == key_without_marker
+    md = (assets / f"materials/chinese/{key_with_marker}/content.md").read_text(encoding="utf-8")
+    assert "第 1 页" not in md
+    assert "完成 12-14题" not in md
+    assert md.startswith("## 醉翁亭记")
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -607,7 +631,9 @@ def write_material_doc(
     """写 `materials/{subject}/{doc_key}/content.md`，返回 (doc_key, material_url)。"""
     from page_markers import strip_page_markers
 
-    clean, _ = strip_page_markers(strip_section_instruction(body))
+    # 先洗页码，再删小节指令：页码可能在小节指令之前，反了就删不掉指令。
+    cleaned, _ = strip_page_markers(body)
+    clean = strip_section_instruction(cleaned)
     hashes = image_hashes_for(clean, resolver)
     key = doc_key(clean, hashes)
     prefix = f"materials/{subject_code}/{key}"
