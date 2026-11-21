@@ -1778,6 +1778,18 @@ describe('useMaterialDoc', () => {
     render(<Probe url="materials/chinese/missing/content.md" />);
     await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('error:'));
   });
+
+  it('clears the previous doc when the url changes', async () => {
+    const pending = new Promise(() => {});
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: async () => '## A' })
+      .mockImplementationOnce(() => pending);
+    vi.stubGlobal('fetch', fetchMock);
+    const { rerender } = render(<Probe url="materials/chinese/u1/content.md" />);
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready:## A'));
+    rerender(<Probe url="materials/chinese/u2/content.md" />);
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('loading:'));
+  });
 });
 ```
 
@@ -1845,6 +1857,9 @@ export function useMaterialDoc(url: string | null | undefined): MaterialDocState
     const cached = getCachedMaterialDoc(url);
     if (cached !== null) { setText(cached); setStatus('ready'); return; }
     let alive = true;
+    // 先清上一篇文章：QuestionRunner 换题是 prop 变化、不重挂载，
+    // 不清就会在 B 题下显示 A 题的文章（派生状态必须带 key 归属）。
+    setText(null);
     setStatus('loading');
     preloadMaterialDoc(url)
       .then((t) => { if (alive) { setText(t); setStatus('ready'); } })
@@ -1892,15 +1907,16 @@ export function MaterialBlock({
   url, text, variant = 'answer', draggable = false, testId, className = '',
 }: MaterialBlockProps) {
   const { text: doc, status, retry } = useMaterialDoc(url);
+  const docFailed = status === 'error' && !doc;
   const body = [doc, text].filter((s): s is string => Boolean(s && s.trim())).join('\n\n');
   const components = draggable ? draggableQuestionMarkdownComponents : markdownComponents;
   if (!body) {
-    if (status === 'loading') return <div data-testid={testId} className="text-xs text-[var(--text-tertiary)]">材料加载中…</div>;
-    if (status === 'error') return (
+    if (docFailed) return (
       <button type="button" data-testid={testId} onClick={retry} className="text-xs text-[var(--brand-500)] underline">
         材料加载失败，点击重试
       </button>
     );
+    if (status === 'loading') return <div data-testid={testId} className="text-xs text-[var(--text-tertiary)]">材料加载中…</div>;
     return null;
   }
   return (
@@ -1916,6 +1932,11 @@ export function MaterialBlock({
       >
         {preprocessMaterialMarkdown(body)}
       </ReactMarkdown>
+      {docFailed && (
+        <button type="button" onClick={retry} className="mt-1 text-xs text-[var(--brand-500)] underline">
+          材料加载失败，点击重试
+        </button>
+      )}
     </div>
   );
 }
@@ -1950,12 +1971,22 @@ describe('MaterialBlock', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => '## 醉翁亭记' }));
     render(<MaterialBlock url="materials/chinese/a/content.md" text="注：①罪废" testId="m" />);
     await waitFor(() => expect(screen.getByTestId('m').textContent).toContain('醉翁亭记'));
-    expect(screen.getByTestId('m').textContent).toContain('注：①罪废');
+    const text = screen.getByTestId('m').textContent ?? '';
+    expect(text.indexOf('醉翁亭记')).toBeLessThan(text.indexOf('注：①罪废'));
   });
 
   it('renders only text when url is absent', () => {
     render(<MaterialBlock text="题中素材" testId="m" />);
     expect(screen.getByTestId('m').textContent).toContain('题中素材');
+  });
+
+  it('shows retry alongside in-question text when the doc fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+    render(<MaterialBlock url="materials/chinese/missing2/content.md" text="注：①罪废" testId="m" />);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '材料加载失败，点击重试' })).toBeTruthy(),
+    );
+    expect(screen.getByTestId('m').textContent).toContain('注：①罪废');
   });
 });
 ```
