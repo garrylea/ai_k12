@@ -201,7 +201,7 @@ def doc_key(body: str, image_hashes: list[str]) -> str:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd tools/data-refinery && python3 -m pytest tests/test_chinese_material_doc.py -q`
-Expected: `8 passed`.
+Expected: `9 passed`.
 
 - [ ] **Step 5: Commit**
 

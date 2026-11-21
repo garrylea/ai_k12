@@ -89,7 +89,7 @@ output/assets/materials/chinese/{doc_key}/
 ```
 
 - `doc_key = sha256(normalize(doc_body) + "\n" + "\n".join(sorted(image_sha256)))[:12]`
-- `normalize`：去掉 `<u>` / `<span class="cn-emphasis-dot">` / `<sub>` 等标注标签（保留标签内文字）、统一空白、去掉图片 URL 前缀。这样**只改标注不会换 URL / 换题目身份**。
+- `normalize`：去掉 `<u>` / `<span class="cn-emphasis-dot">` 标签（保留标签内文字）；`<sub>…</sub>` 是「加点」点号标记，**连内容一起去掉**（否则 `．．` 会让同一篇文章分不到一组）；统一空白、去掉图片 URL 前缀。这样**只改标注不会换 URL / 换题目身份**。
 - **图片内容哈希一并入 key**：文字相同但配图不同的两篇文章不能共用 key（否则后写的会覆盖先写的）。`image_sha256` 取文档引用图片的 sha256，按排序后拼接。
 - **正文去掉卷面小节指令**：`## (三)阅读下面《醉翁亭记》，完成 12-14题（共7分）` 含卷面题号/分值，不属于文章，写 md 前删掉；正文从文章标题（`## 醉翁亭记`）或第一段开始。否则同一篇文章换一张卷 `doc_key` 就变，跨卷去重失效。识别式：`^#{1,6}\s*.*(阅读|阅读下面|阅读下文).{0,20}完成.{0,10}[题0-9]`。
 - `material_url = materials/chinese/{doc_key}/content.md`（相对路径，前端 `resolveAsset` 补 `/assets/`）。
