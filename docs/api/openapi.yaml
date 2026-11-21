@@ -8727,7 +8727,11 @@ components:
         materialText:
           type: string
           nullable: true
-          description: 阅读材料（语文/英语）或物化题内材料；无材料为 null（2026-11-02）
+          description: 题中素材（题号之内、这道题自带）；无素材为 null
+        materialUrl:
+          type: string
+          nullable: true
+          description: 文章 Markdown 相对地址；materialText 只放题中素材
         questionAnswer:
           type: string
           nullable: true
@@ -8785,6 +8789,10 @@ components:
           nullable: true
           items: { type: object }
         materialText: { type: string, nullable: true }
+        materialUrl:
+          type: string
+          nullable: true
+          description: 文章 Markdown 相对地址；materialText 只放题中素材
       required: [questionId, text, type]
 
     StarMapData:
@@ -11845,7 +11853,11 @@ components:
         materialText:
           type: string
           nullable: true
-          description: 同节共享材料（语文阅读/文段题，Markdown+图片）；数学题通常 null
+          description: 题中素材（题号之内、这道题自带）；文章题为 null
+        materialUrl:
+          type: string
+          nullable: true
+          description: 文章 Markdown 相对地址；materialText 只放题中素材
         source:
           type: string
           nullable: true
@@ -12964,7 +12976,11 @@ components:
         materialText:
           type: string
           nullable: true
-          description: 同节共享材料（语文阅读/文段题，Markdown+图片）；数学卷为 null
+          description: 题中素材（题号之内、这道题自带）；文章题为 null
+        materialUrl:
+          type: string
+          nullable: true
+          description: 文章 Markdown 相对地址；materialText 只放题中素材
       required: [questionId, questionNo, text, type, options, materialText]
 
     ExamPaperDetail:
@@ -13135,7 +13151,11 @@ components:
         materialText:
           type: string
           nullable: true
-          description: 同节共享材料（语文阅读/文段题，Markdown+图片）；数学卷为 null
+          description: 题中素材（题号之内、这道题自带）；文章题为 null
+        materialUrl:
+          type: string
+          nullable: true
+          description: 文章 Markdown 相对地址；materialText 只放题中素材
         answerText:
           type: string
           nullable: true
