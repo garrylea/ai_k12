@@ -252,3 +252,37 @@ class TestPublishPageMarkers:
         pub = out / "published" / "数学" / "试卷" / "试卷.jsonl"
         got = json.loads(pub.read_text(encoding="utf-8").strip())
         assert "请阅读第 2 页的问题 1" in got["content"]
+
+
+def test_chinese_publish_writes_material_doc_and_clears_text(tmp_path):
+    out = tmp_path / "out"
+    ext = out / "extracted" / "语文" / "试卷"
+    ext.mkdir(parents=True)
+    article = "## 醉翁亭记\n\n环滁皆山也。其西南诸峰，林壑尤美。"
+    rows = [
+        {"subject_id": "chinese", "type": "choice", "difficulty": 2,
+         "content": "下列加点字意思都相同的一项是", "answer": "A", "material_text": article},
+        {"subject_id": "chinese", "type": "choice", "difficulty": 2,
+         "content": "下列翻译正确的是", "answer": "B", "material_text": article},
+    ]
+    (ext / "试卷.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8",
+    )
+    (out / "md" / "语文" / "试卷").mkdir(parents=True)
+
+    with patch("publish_cli.RefineryConfig") as mock_config:
+        mock_config.from_env.return_value = MagicMock(output_dir=out)
+        main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+    published = [
+        json.loads(l) for l in
+        (out / "published" / "语文" / "试卷" / "试卷.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert published[0]["material_url"] == published[1]["material_url"]
+    assert published[0]["material_url"].startswith("materials/chinese/")
+    assert published[0]["material_text"] is None
+    assert published[1]["material_text"] is None
+    md = out / "assets" / published[0]["material_url"]
+    assert md.exists()
+    assert "## 醉翁亭记" in md.read_text(encoding="utf-8")

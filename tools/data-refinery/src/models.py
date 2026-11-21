@@ -18,6 +18,7 @@ class ExamQuestion(BaseModel):
     explanation: str | None = None
     material_text: str | None = None
     material_url: str | None = None
+    material_method: str | None = None  # rule|llm|manual；题中素材抽取方式
     grade_band: str | None = None
     source: str | None = None
     source_year: int | None = None

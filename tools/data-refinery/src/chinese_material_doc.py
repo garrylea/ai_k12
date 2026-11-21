@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Callable
@@ -137,3 +138,65 @@ def rewrite_hash_for_row(row: dict) -> str:
         row.get("content"), opts,
         row.get("material_text"), row.get("material_url"),
     )
+
+
+from subject_strategies.chinese_inline_material import (  # noqa: E402
+    needs_llm,
+    split_inline_material,
+)
+
+
+def _resolver_for(md_images_dir: Path):
+    from image_rewrite import _resolve_src
+
+    return lambda ref: _resolve_src(ref, md_images_dir)
+
+
+def externalize_chinese_materials(
+    items,
+    *,
+    md_images_dir: Path,
+    assets_dir: Path,
+    store,
+    subject_code: str = "chinese",
+) -> None:
+    """publish 阶段：文章 → md + material_url；题中素材 → material_text。"""
+    groups: dict[str, list] = {}
+    for item in items:
+        text = item.material_text or ""
+        if not text.strip() or is_heading_only(text):
+            continue
+        groups.setdefault(normalize_for_group(text), []).append(item)
+
+    resolver = _resolver_for(Path(md_images_dir))
+    for members in groups.values():
+        canonical = choose_canonical([m.material_text or "" for m in members])
+        key, url = write_material_doc(
+            canonical, resolver=resolver, store=store,
+            assets_dir=Path(assets_dir), subject_code=subject_code,
+        )
+        for m in members:
+            m.material_url = url
+            m.material_text = None
+            m.material_method = None
+
+    # 纯标题的分组：文章不存在，material_text 清掉
+    for item in items:
+        if item.material_text and is_heading_only(item.material_text):
+            item.material_text = None
+
+    # 题中素材（必须在文章分组之后，否则会覆盖 material_text）
+    review: list[dict] = []
+    for item in items:
+        material, rest = split_inline_material(item.content)
+        if material:
+            item.content = rest
+            item.material_text = material
+            item.material_method = "rule"
+        elif needs_llm(item.content):
+            review.append({"group_order": item.group_order, "content": item.content})
+    if review:
+        review_path = Path(assets_dir).parent / "material_inline_review.jsonl"
+        with review_path.open("a", encoding="utf-8") as f:
+            for rec in review:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")

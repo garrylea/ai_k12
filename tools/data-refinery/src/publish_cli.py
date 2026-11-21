@@ -16,6 +16,7 @@ from pathlib import Path
 
 from asset_store import LocalAssetStore
 from checkpoint import RefineryCheckpoint
+from chinese_material_doc import externalize_chinese_materials
 from config import RefineryConfig
 from image_rewrite import rewrite_item
 from material_kind import SCOPE_KIND, kind_of_jsonl
@@ -27,7 +28,8 @@ from subject_codes import subject_code_for_path as _subject_code_for
 # 发布口径版本：改写范围/规则变化时 +1。旧版本的产物会被**自动重发**，
 # 不需要用户记住 `--force`（2026-10-31 用户指出：能记一个命令就不该让人记两个）。
 # 2 = 起于 2026-10-31：answer 字段里的图片也一并物化改写。
-PUBLISH_VERSION = 2
+# 3 = 起于 2026-11-20：语文共享文章外置为 materials/chinese/{doc_key}/content.md。
+PUBLISH_VERSION = 3
 
 # 试卷题干/材料/答案/解析里可能残留的页码标记（extract 已洗，这里兜底）
 _QUESTION_TEXT_FIELDS = ("content", "material_text", "answer", "explanation")
@@ -216,17 +218,29 @@ def main(argv=None):
                 if line.strip()
             ]
 
-            out_items = []
-            for idx, raw in enumerate(raw_items, start=1):
-                if kind == "questions":
-                    item = ExamQuestion(**raw)
+            if kind == "questions":
+                items = [ExamQuestion(**raw) for raw in raw_items]
+                if subject_code == "chinese":
+                    externalize_chinese_materials(
+                        items,
+                        md_images_dir=md_images_dir,
+                        assets_dir=assets_dir,
+                        store=store,
+                        subject_code=subject_code,
+                    )
+                out_items = []
+                for idx, item in enumerate(items, start=1):
                     asset_prefix = f"questions/{subject_code}/{source_key}/{idx}"
                     _strip_page_markers_from_question(item, rel)
-                else:
+                    rewrite_item(item, kind, md_images_dir, store, asset_prefix)
+                    out_items.append(item.model_dump(mode="json"))
+            else:
+                out_items = []
+                for idx, raw in enumerate(raw_items, start=1):
                     item = TextbookCard(**raw)
                     asset_prefix = f"textbooks/{subject_code}/{source_key}/{item.sort_order}"
-                rewrite_item(item, kind, md_images_dir, store, asset_prefix)
-                out_items.append(item.model_dump(mode="json"))
+                    rewrite_item(item, kind, md_images_dir, store, asset_prefix)
+                    out_items.append(item.model_dump(mode="json"))
 
             out_file = published_dir / rel
             out_file.parent.mkdir(parents=True, exist_ok=True)
