@@ -8,6 +8,20 @@
 
 ---
 
+## 2026-11-21 语文材料外置存量回填：727 行 + 注释切分 bug + 文章纯度护栏
+
+**回填**（spec 2026-11-20 的存量部分）：`tools/db/material_doc_backfill.py --apply` 更新 **727 行**（1 个 hash 冲突按设计保留旧 hash），写 300 份 `materials/chinese/*/content.md`；二次 dry-run = 0 行。回滚 SQL 在 `tools/db/backups/20261121_material_doc_rollback.sql`。回填后语文 908 题：`material_url` 702、`material_text` 34、两者都有 2（文章+题中素材）、`material_method='rule'` 2。
+
+**修复（注释切分，海淀 5677 实测）**：旧 `_cut_after_note` 只把「①词：释义」当条目，遇到 `③[弄儿]逗小孩。`（方括号、无冒号）会停在 ② 的句号上，半截注释变成题干。改为「递增圈号序列的最后一个 + 其后第一个句号」，且切点后仍是注释续写（`这句是说`、`“孤”，也指…`）时不切；整段是注时也不切。7613 由 review 转为成功切分。
+
+**新增文章纯度护栏**（`chinese_material_doc.material_group_reason`）：行首顿号题号 / 连续 A–D 选项块 / 答题脚手架 / 材料中间再起小节 / 无标题且不足 40 汉字的碎片 → **不外置**，保留 `material_text` 原样并写 `output/material_group_skipped.jsonl`。本次挡下 **18 组 / 32 行**（option_block 9、no_article 4、cross_section 2、scaffold 2、punct_stem 1）。原因：外置后 `apply_fixes` / `fix_page_markers_cli` / `emphasis_cli` 都跳过 `material_url` 行，错材料将无法再修。publish 与回填共用该规则，且被挡行不再跑题中素材切分（避免覆盖原文却无 URL）。
+
+**待处理（已记录，不在本次范围）**：① `（一）（二）（三）阅读…完成…题` 小节标题不重置材料域 → 5175/5461/5475 三卷 8 题 material 带上一篇诗文（需切题器补 `_start_scope()` + 重抽）；② 全库 110 条 `content_hash` 是旧口径，`migrate_content_hash.py` 遇跨卷同题会整体中止。
+
+**验证**：新增 4 类用例；refinery 全量 `2061 passed / 10 skipped`。
+
+---
+
 ## 2026-11-20 教研试卷明细：解析/思路显示正文（原只显示「有/无」）
 
 **不是读错字段**：抽屉保存走 `explanation` / `approach`，审计日志可查（q7519 于 19:08 写 approach、19:09 写 explanation，`before_json` 为 null）；详情接口 `findPaperDetail` 也把这两列原样下发。问题是**列表页只渲染 `q.explanation ? '有' : '无'`**，且没有「思路」列——改已有解析时列表毫无变化，补思路则完全看不见，看起来像字段没更新。

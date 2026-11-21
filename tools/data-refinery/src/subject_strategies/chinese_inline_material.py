@@ -17,8 +17,16 @@ LEAD_RE = re.compile(
     r"(?:材料|语段|文字|短文|诗句|文章)"
 )
 NOTE_RE = re.compile(r"(?m)^\s*注\s*[:：]")
-# 只认「①词条：释义」形态，避免把题干里的「“ ①”」「“ ② ”」占位符当成注条目。
-NOTE_ITEM_RE = re.compile(r"[①-⑳][^①-⑳\s]{0,12}[：:]")
+# 注条目只认「圈号」，不认「圈号+冒号」：真实稿件里既有
+# 「①罪废：因获罪被罢官」，也有「③[弄儿]逗小孩。」（方括号、无冒号）。
+# 取最后一个圈号 → 其后第一个句号，才能落到注块末尾；逐条匹配会停在中间。
+_CIRCLED_RE = re.compile(r"[①-⑳]")
+_CIRCLED_ORDER = {ch: i for i, ch in enumerate("①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳")}
+# 切点之后仍像注条目的续写 → 说明这个句号不是注块结束，宁可不切。
+_NOTE_CONTINUATION_RE = re.compile(
+    r'^\s*(?:[①-⑳]|[“"].{0,20}?[”"]\s*[，,]?\s*(?:也指|指|即|意思是)|'
+    r"这句是说|意思是|形容|比喻)"
+)
 LINK_MARK_RE = re.compile(r"【链接材料】|材料\s*[:：]")
 QUESTION_LEAD_RE = re.compile(r"^(?:结合|根据|请|谈谈|说说|分析|概括|说明|简要)")
 MIN_CONTENT_LEN = 80
@@ -30,18 +38,42 @@ def _norm(s: str) -> str:
 
 
 def _cut_after_note(content: str) -> int | None:
-    """注块切点：最后一个 ①–⑳ 条目之后的第一个「」。"""
+    """注块切点：最后一个圈号条目之后的第一个「。」；后面不像题目就不切。
+
+    2026-11-21 改：旧实现只把「①词：释义」当条目，遇到 `③[弄儿]逗小孩。`
+    这种方括号体例（无冒号）会漏，最后一条被当成 ②，切点落在 ② 释义中间的
+    句号上，半截注释变题干（海淀 5677 实测）。改为「最后一个圈号 + 其后第一个
+    句号」，再检查切点后的文字是否仍在续写注释（`这句是说`、`“孤”，也指…`）；
+    是则返回 None，整段不切 —— 宁可让题干带材料，也不产出错位题干。
+    """
     m = NOTE_RE.search(content)
     if not m:
         return None
     tail = content[m.end():]
-    items = list(NOTE_ITEM_RE.finditer(tail))
-    if not items:
+    # 只取「首尾相接的递增圈号序列」：注块用 ①→⑥，其后题干里的「①」占位
+    # 会重新从 ① 开始，不能算进注条目（14 题「唯有“ ①”…在于 ③」实测）。
+    marks = []
+    expected = None
+    for mm in _CIRCLED_RE.finditer(tail):
+        idx = _CIRCLED_ORDER.get(mm.group(0))
+        if idx is None:
+            continue
+        if expected is None or idx == expected:
+            marks.append(mm)
+            expected = idx + 1
+        else:
+            break
+    if not marks:
         return None
-    end = tail.find("。", items[-1].end())
+    end = tail.find("。", marks[-1].end())
     if end < 0:
+        # 最后一条没有句号：到本段末尾；rest 为空时调用方会放弃切分
+        nl = tail.find("\n", marks[-1].end())
+        return m.end() + (nl if nl >= 0 else len(tail))
+    cut = m.end() + end + 1
+    if _NOTE_CONTINUATION_RE.match(content[cut:]):
         return None
-    return m.end() + end + 1
+    return cut
 
 
 def _split_by_note(content: str) -> tuple[str, str] | None:

@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 
@@ -45,9 +46,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools" / "data-refinery" / "src"))
 
 from chinese_material_doc import (  # noqa: E402
+    append_skipped_report,
     build_groups,
     choose_canonical,
     is_heading_only,
+    material_group_reason,
     rewrite_hash_for_row,
     write_material_doc,
 )
@@ -108,14 +111,32 @@ def eligible_for_article(rows: list[dict]) -> list[dict]:
     return [r for r in rows if r.get("material_method") != "rule"]
 
 
-def build_plans(rows: list[dict], *, apply: bool) -> tuple[list[list], list[dict]]:
-    """纯计划构建（可测试）。apply=False 时只算 key/url，不写文件。"""
+def build_plans(rows: list[dict], *, apply: bool,
+                skipped_out: list[dict] | None = None) -> tuple[list[list], list[dict]]:
+    """纯计划构建（可测试）。apply=False 时只算 key/url，不写文件。
+
+    ``skipped_out`` 非 None 时，把「不像文章」的组写进去（保留 material_text
+    原样、不改库），供 main() 落 ``material_group_skipped.jsonl``。
+    """
     group_rows = eligible_for_article(rows)
     groups = build_groups(group_rows)
     plans: list[list] = []  # [qid, material_url, material_text, content, material_method, new_hash]
+    skipped_ids: set[int] = set()
     for members in groups.values():
         canonical = choose_canonical([m.get("material_text") or "" for m in members])
         if is_heading_only(canonical):
+            continue
+        reason = material_group_reason(canonical)
+        if reason:
+            skipped_ids.update(m["id"] for m in members)
+            if skipped_out is not None:
+                skipped_out.append({
+                    "paper_id": members[0].get("paper_id"),
+                    "source": members[0].get("source"),
+                    "ids": [m["id"] for m in members],
+                    "reason": reason,
+                    "excerpt": canonical[:200],
+                })
             continue
         key, url = write_material_doc(
             canonical, resolver=_resolver, store=_Store(), assets_dir=ASSETS,
@@ -129,6 +150,9 @@ def build_plans(rows: list[dict], *, apply: bool) -> tuple[list[list], list[dict
     for row in rows:
         if row.get("material_method") == "rule":
             continue  # 已处理：保证第二次运行幂等
+        if row["id"] in skipped_ids:
+            # 材料不像文章、要原样保留；再切题中素材会覆盖它且没留 URL（数据丢失）
+            continue
         mt = row.get("material_text") or ""
         if mt.strip() and is_heading_only(mt) and row["id"] not in by_id:
             # 与 publish 同口径：纯标题旧材料清掉，不建文档；但仍要继续抽题中素材
@@ -219,12 +243,16 @@ def main(argv=None) -> int:
         if ns.limit:
             rows = rows[: ns.limit]
 
-        plans, review = build_plans(rows, apply=ns.apply)
+        skipped: list[dict] = []
+        plans, review = build_plans(rows, apply=ns.apply, skipped_out=skipped)
+        reasons = dict(Counter(s["reason"] for s in skipped))
         if not ns.apply:
-            print(f"[dry-run] {len(plans)} rows would change; {len(review)} need review")
+            print(f"[dry-run] {len(plans)} rows would change; {len(review)} need review; "
+                  f"{len(skipped)} groups kept as material_text {reasons}")
             return 0
         if not plans:
-            print("[apply] 0 rows; nothing to do")
+            print(f"[apply] 0 rows; nothing to do"
+                  f"{f'（{len(skipped)} 组不像文章，保持原样）' if skipped else ''}")
             return 0
 
         backup = BACKUP_DIR / f"{date.today():%Y%m%d}_material_doc_rollback.sql"
@@ -241,7 +269,10 @@ def main(argv=None) -> int:
             with review_path.open("a", encoding="utf-8") as f:
                 for rec in review:
                     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        print(f"[apply] {len(plans)} rows updated ({failed} hash conflicts); rollback: {backup}")
+        append_skipped_report(
+            Path(ASSETS).parent / "material_group_skipped.jsonl", skipped)
+        print(f"[apply] {len(plans)} rows updated ({failed} hash conflicts); "
+              f"{len(skipped)} groups kept as material_text {reasons}; rollback: {backup}")
         return 0
     finally:
         conn.close()

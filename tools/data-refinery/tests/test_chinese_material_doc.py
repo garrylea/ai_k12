@@ -6,6 +6,7 @@ from chinese_material_doc import (
     choose_canonical,
     doc_key,
     is_heading_only,
+    material_group_reason,
     normalize_for_group,
     rewrite_hash_for_row,
     strip_section_instruction,
@@ -60,6 +61,35 @@ def test_doc_key_stable_when_only_annotation_changes():
 def test_doc_key_changes_when_image_changes():
     body = "同一段文字"
     assert doc_key(body, ["a"]) != doc_key(body, ["b"])
+
+
+def test_material_group_reason_accepts_article():
+    assert material_group_reason("## 醉翁亭记\n\n环滁皆山也。其西南诸峰，林壑尤美。") is None
+
+
+def test_material_group_reason_detects_lost_question():
+    # 顿号题号不被 is_main_stem 认，整道题会沉进上一节的「材料」
+    assert material_group_reason("## (一)默写\n7、拔剑四顾心茫然。") == "punct_stem"
+
+
+def test_material_group_reason_detects_option_block():
+    assert material_group_reason("材料\nA. 甲\nB. 乙\nC. 丙\nD. 丁") == "option_block"
+
+
+def test_material_group_reason_detects_answer_scaffold():
+    assert material_group_reason("# 红楼\n示例：我选 A 隶书，因为古朴。") == "scaffold"
+
+
+def test_material_group_reason_detects_cross_section():
+    body = (
+        "这是上一节的文章正文，用来测试跨小节积累，至少要有二十个汉字。\n"
+        "## (三)阅读《岳阳楼记》，完成12-14题。\n庆历四年春，滕子京谪守巴陵郡。"
+    )
+    assert material_group_reason(body) == "cross_section"
+
+
+def test_material_group_reason_detects_label_fragment():
+    assert material_group_reason("【乙】\n![](a.jpg)\n【丙】") == "no_article"
 
 
 class _Store:

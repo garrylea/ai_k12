@@ -72,3 +72,34 @@ def test_link_material_marker_splits():
     assert "【链接材料】" in material
     assert rest.startswith("结合材料")
     assert _norm(material + rest) == _norm(content)
+
+
+# 海淀 5677 实测：注释是「③[弄儿]逗小孩。」这种方括号、无冒号体例；
+# 旧实现只认「①词：释义」，把切点落在上一条释义的句号上，半截注释变题干。
+Q_BRACKET_NOTE_TAIL = (
+    "后世认为李白的《行路难》虽然受到鲍照《拟行路难》的影响，但是诗人的情感不尽相同。"
+    "请结合诗歌具体内容，简要分析两首诗情感的异同。(3 分)\n"
+    "拟行路难(其六) 鲍照①\n"
+    "对案不能食，拔剑击柱长叹息。\n"
+    "丈夫生世会几时？安能蹀躞②垂羽翼！\n"
+    "自古圣贤尽贫贱，何况我辈孤且直①!\n"
+    "注：①[鲍照](约414-466)南朝宋文学家，出身寒门庶族。"
+    "②[蹀躞](diéxiè)：小步行走的样子。这句是说：怎么能裹足不前，垂翼不飞？"
+    "③[弄儿]逗小孩。④[孤且直]孤高并且耿直。"
+)
+
+
+def test_bracket_style_note_at_end_does_not_split():
+    """注块是最后一段、后面没有设问 → 整段不动，绝不能切出「注释题干」。"""
+    material, rest = split_inline_material(Q_BRACKET_NOTE_TAIL)
+    assert material is None
+    assert rest == Q_BRACKET_NOTE_TAIL
+
+
+def test_bracket_style_note_with_stem_after_splits():
+    content = Q_BRACKET_NOTE_TAIL + "\n请结合注释，分析诗人的情感。(3分)"
+    material, rest = split_inline_material(content)
+    assert material is not None
+    assert material.endswith("④[孤且直]孤高并且耿直。")
+    assert rest.startswith("请结合注释")
+    assert _norm(material + rest) == _norm(content)

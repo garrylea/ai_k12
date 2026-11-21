@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -80,6 +81,93 @@ def choose_canonical(variants: list[str]) -> str:
     if not variants:
         raise ValueError("variants is empty")
     return max(variants, key=lambda t: (annotation_score(t), len(t)))
+
+
+# ── 外置前的「文章纯度」检查（2026-11-21）────────────────────────────────
+#
+# 全量回填 dry-run 实测 19 组 / 35 行 material_text 根本不是文章：丢掉的原题、
+# 题目选项、答题脚手架、标签碎片、跨小节串起来的两篇文章。一旦外置成
+# material_url，apply_fixes / fix_page_markers_cli / emphasis_cli 都会跳过该行
+# （Task 12 的护栏），错误材料就再也修不到 —— 所以宁可留在 material_text。
+
+_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_OPTION_LINE_RE = re.compile(r"(?m)^\s*[A-DＡ-Ｄ]\s*[.．、]\s*\S")
+_PUNCT_STEM_RE = re.compile(r"(?m)^\s*\d{1,3}\s*、\s*\S")
+_ANSWER_SCAFFOLD_RE = re.compile(r"(?m)^\s*(?:示例\s*[:：]|我选|答\s*[:：]|修改\s*[:：])")
+_SECTION_HEADING_RE = re.compile(
+    r"(?m)^#{0,6}\s*[（(]?[一二三四五六七八九十]+[）)]?[^\n]{0,50}"
+    r"(?:阅读|阅读下面|阅读下文)[^\n]{0,50}完成[^\n]{0,20}题"
+)
+
+
+def _cjk_len(text: str) -> int:
+    return len(_CJK_RE.findall(text or ""))
+
+
+def _has_option_block(text: str) -> bool:
+    """是否含连续 A→B→C→D 选项行（语文材料里出现选项 = 不是文章）。"""
+    run = 0
+    for m in _OPTION_LINE_RE.finditer(text or ""):
+        label = m.group(0).strip()[0]
+        want = "ABCD"[run] if run < 4 else None
+        if want and label == want:
+            run += 1
+            if run == 4:
+                return True
+        else:
+            run = 1 if label == "A" else 0
+    return False
+
+
+def _has_cross_section(text: str) -> bool:
+    """材料中间又出现「（X）阅读…完成…题」→ 上一节和下一节的文章串了。"""
+    for m in _SECTION_HEADING_RE.finditer(text or ""):
+        # 小节标题前已有上一节正文才算；只有一个大题标题（约 8 字）不算。
+        if _cjk_len((text or "")[: m.start()]) >= 20:
+            return True
+    return False
+
+
+def material_group_reason(text: str) -> str | None:
+    """该组材料是否「不像一篇文章」；返回原因码，None = 可以外置。
+
+    原因码（对应 2026-11-21 回填 dry-run 的真实反例）：
+
+    - ``punct_stem``   行首顿号题号（如「7、拔剑四顾…」）→ 这是丢掉的原题；
+    - ``option_block`` 连续 A–D 选项行 → 这是题目选项，不是文章；
+    - ``scaffold``     行首「示例：/我选/答：/修改：」→ 答题脚手架混进材料；
+    - ``cross_section``材料中间又起一节「（X）阅读…完成…题」→ 两篇文章串了；
+    - ``no_article``   无标题、正文不足 40 汉字且没有完整段落 → 标签/图注碎片。
+
+    命中时调用方应保留 ``material_text`` 原样、不写文档，并把该组记入
+    ``material_group_skipped.jsonl`` 供人工核对。
+    """
+    body = text or ""
+    if _PUNCT_STEM_RE.search(body):
+        return "punct_stem"
+    if _has_option_block(body):
+        return "option_block"
+    if _ANSWER_SCAFFOLD_RE.search(body):
+        return "scaffold"
+    if _has_cross_section(body):
+        return "cross_section"
+    paragraphs = [p for p in re.split(r"\n\s*\n|\n", body) if p.strip()]
+    has_title = bool(re.search(r"(?m)^\s*#{1,6}\s", body))
+    if not has_title and _cjk_len(body) < 40 and not any(_cjk_len(p) >= 40 for p in paragraphs):
+        return "no_article"
+    return None
+
+
+def append_skipped_report(path: Path, records: list[dict]) -> None:
+    """把「不外置」的组追加到清单；只追加不截断（publish 与回填共用）。"""
+    if not records:
+        return
+    stamp = datetime.now().isoformat(timespec="seconds")
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        for rec in records:
+            f.write(json.dumps({"run_at": stamp, **rec}, ensure_ascii=False) + "\n")
 
 
 def doc_key(body: str, image_hashes: list[str]) -> str:
@@ -165,7 +253,11 @@ def externalize_chinese_materials(
     store,
     subject_code: str = "chinese",
 ) -> None:
-    """publish 阶段：文章 → md + material_url；题中素材 → material_text。"""
+    """publish 阶段：文章 → md + material_url；题中素材 → material_text。
+
+    不像文章的组（见 ``material_group_reason``）不外置，原 material_text 保留，
+    并追加到 ``output/material_group_skipped.jsonl``。
+    """
     groups: dict[str, list] = {}
     for item in items:
         text = item.material_text or ""
@@ -174,8 +266,21 @@ def externalize_chinese_materials(
         groups.setdefault(normalize_for_group(text), []).append(item)
 
     resolver = _resolver_for(Path(md_images_dir))
+    skipped_items: set[int] = set()
+    skipped: list[dict] = []
     for members in groups.values():
         canonical = choose_canonical([m.material_text or "" for m in members])
+        reason = material_group_reason(canonical)
+        if reason:
+            # 不像文章：保留 material_text 原样，不写文档、不设 URL。
+            skipped_items.update(id(m) for m in members)
+            skipped.append({
+                "source": members[0].source,
+                "group_orders": [m.group_order for m in members],
+                "reason": reason,
+                "excerpt": canonical[:200],
+            })
+            continue
         key, url = write_material_doc(
             canonical, resolver=resolver, store=store,
             assets_dir=Path(assets_dir), subject_code=subject_code,
@@ -184,6 +289,7 @@ def externalize_chinese_materials(
             m.material_url = url
             m.material_text = None
             m.material_method = None
+    append_skipped_report(Path(assets_dir).parent / "material_group_skipped.jsonl", skipped)
 
     # 纯标题的分组：文章不存在，material_text 清掉
     for item in items:
@@ -193,6 +299,10 @@ def externalize_chinese_materials(
     # 题中素材（必须在文章分组之后，否则会覆盖 material_text）
     review: list[dict] = []
     for item in items:
+        if id(item) in skipped_items:
+            # 被判定「不像文章」的行里，material_text 就是这段可疑文本；
+            # 再切题中素材会把它覆盖掉、又没留 URL（数据丢失）。
+            continue
         material, rest = split_inline_material(item.content)
         if material:
             item.content = rest

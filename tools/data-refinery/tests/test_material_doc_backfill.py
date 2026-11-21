@@ -79,6 +79,18 @@ def test_build_plans_is_idempotent_and_clears_heading_only():
     assert plans2 == []
 
 
+def test_build_plans_keeps_non_article_group_as_material_text():
+    """选项块/丢题等「不像文章」的材料不外置：不生成计划，只进 skip 清单。"""
+    rows = [{"id": 1, "paper_id": 9, "source": "卷", "content": "题",
+             "options": None, "material_text": "A. 甲\nB. 乙\nC. 丙\nD. 丁",
+             "material_url": None, "material_method": None, "content_hash": "h"}]
+    skipped: list[dict] = []
+    plans, review = build_plans(rows, apply=False, skipped_out=skipped)
+    assert plans == [] and review == []
+    assert skipped[0]["reason"] == "option_block"
+    assert skipped[0]["ids"] == [1]
+
+
 def test_rollback_sql_has_preamble_and_escapes():
     rows = [{"id": 1, "content": "a'b", "material_text": None, "material_url": None,
              "material_method": None, "content_hash": "h"}]

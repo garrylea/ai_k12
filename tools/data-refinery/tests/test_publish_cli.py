@@ -286,3 +286,34 @@ def test_chinese_publish_writes_material_doc_and_clears_text(tmp_path):
     md = out / "assets" / published[0]["material_url"]
     assert md.exists()
     assert "## 醉翁亭记" in md.read_text(encoding="utf-8")
+
+
+def test_chinese_publish_keeps_non_article_material(tmp_path):
+    """材料其实是选项块 → 不外置、不改 material_text，并落 skip 清单。"""
+    out = tmp_path / "out"
+    ext = out / "extracted" / "语文" / "试卷"
+    ext.mkdir(parents=True)
+    material = "A. 甲\nB. 乙\nC. 丙\nD. 丁"
+    rows = [
+        {"subject_id": "chinese", "type": "choice", "difficulty": 2,
+         "content": "下列加点字意思都相同的一项是", "answer": "A",
+         "material_text": material},
+    ]
+    (ext / "试卷.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8",
+    )
+    (out / "md" / "语文" / "试卷").mkdir(parents=True)
+
+    with patch("publish_cli.RefineryConfig") as mock_config:
+        mock_config.from_env.return_value = MagicMock(output_dir=out)
+        main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+    got = json.loads(
+        (out / "published" / "语文" / "试卷" / "试卷.jsonl").read_text(encoding="utf-8").strip()
+    )
+    assert got["material_url"] is None
+    assert got["material_text"] == material
+    report = out / "material_group_skipped.jsonl"
+    assert report.exists()
+    assert "option_block" in report.read_text(encoding="utf-8")
