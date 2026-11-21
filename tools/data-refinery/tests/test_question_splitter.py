@@ -957,6 +957,62 @@ def test_part_header_starts_new_material_scope():
     assert "第三部分" in q4.material_text and "行之有效" in q4.material_text
 
 
+def test_section_heading_starts_new_material_scope():
+    """`## （三）阅读《岳阳楼记》，完成12-14题` 是新小节，不能把上一篇诗文带进来。
+
+    昌平二中 2025 实测：13-14 题的材料里同时有《月夜忆舍弟》和《岳阳楼记》，
+    原因是旧逻辑只认「第X部分」「一、」，小节标题不重置材料域。
+    """
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "## 二、古诗文阅读（共15分）\n\n"
+        "## （二）阅读《月夜忆舍弟》，完成10-11题。（共5分）\n\n"
+        "## 月夜忆舍弟\n杜甫\n戍鼓断人行，边秋一雁声。\n\n"
+        "10. 下列对诗歌理解不正确的一项是(2分)\n"
+        "A. 甲\nB. 乙\nC. 丙\nD. 丁\n\n"
+        "11. 请赏析颈联。(3分)\n\n"
+        "## （三）阅读《岳阳楼记》，完成12-14题。（共7分）\n\n"
+        "## 岳阳楼记\n范仲淹\n庆历四年春，滕子京谪守巴陵郡。越明年，政通人和，百废具兴。\n\n"
+        "12. 下列加点词解释有误的一项是(2分)\n"
+        "A. 甲\nB. 乙\nC. 丙\nD. 丁\n\n"
+        "13. 翻译画线句。(2分)\n"
+    )
+    questions = split_page(text, _Path("x.md"), strategy=get_strategy("chinese"))
+    q = {x.group_order: x for x in questions}
+
+    assert "月夜忆舍弟" in q[10].material_text
+    assert "月夜忆舍弟" not in q[12].material_text
+    assert "岳阳楼记" in q[12].material_text
+    assert "月夜忆舍弟" not in q[13].material_text
+
+
+def test_bare_subheadings_stay_inside_material():
+    """文言文小节里的 `## （一）` / `## （二）` 是文章内部子篇，不是新小节。
+
+    海淀模拟二 2025 题13-15：愚公移山（子篇一）+ 郭守敬（子篇二）同属
+    「（三）阅读两篇文言文」；把裸子篇当边界会把前一篇丢掉。
+    """
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "## （三）阅读两篇文言文节选，完成13-15题。（共8分）\n"
+        "## （一）\n太行、王屋二山，方七百里，高万仞。\n"
+        "## （二）\n郭守敬字若思，顺德邢台人。\n"
+        "13. 下列加点词解释有误的一项是(2分)\n"
+        "A. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+    )
+    questions = split_page(text, _Path("x.md"), strategy=get_strategy("chinese"))
+    q = {x.group_order: x for x in questions}
+
+    assert "太行" in q[13].material_text
+    assert "郭守敬" in q[13].material_text
+
+
 def test_incomplete_option_label_run_is_not_split():
     """OCR 丢了 B 的点号（A. ① B ② C. ③ D. ④）时不能拿 C/D 当选项：
     否则 C/D 被重编号成 A/B，A/B 的内容并进题干，学生看到错位选项。"""

@@ -16,9 +16,21 @@
 
 **新增文章纯度护栏**（`chinese_material_doc.material_group_reason`）：行首顿号题号 / 连续 A–D 选项块 / 答题脚手架 / 材料中间再起小节 / 无标题且不足 40 汉字的碎片 → **不外置**，保留 `material_text` 原样并写 `output/material_group_skipped.jsonl`。本次挡下 **18 组 / 32 行**（option_block 9、no_article 4、cross_section 2、scaffold 2、punct_stem 1）。原因：外置后 `apply_fixes` / `fix_page_markers_cli` / `emphasis_cli` 都跳过 `material_url` 行，错材料将无法再修。publish 与回填共用该规则，且被挡行不再跑题中素材切分（避免覆盖原文却无 URL）。
 
-**待处理（已记录，不在本次范围）**：① `（一）（二）（三）阅读…完成…题` 小节标题不重置材料域 → 5175/5461/5475 三卷 8 题 material 带上一篇诗文（需切题器补 `_start_scope()` + 重抽）；② 全库 110 条 `content_hash` 是旧口径，`migrate_content_hash.py` 遇跨卷同题会整体中止。
+**后续（① 已在下一节修复）**：① `（一）（二）（三）阅读…完成…题` 小节标题不重置材料域 → 5175/5461/5475 三卷 8 题 material 带上一篇诗文（切题器补 `_start_scope()` + 定向修复，见下条）；② 全库 110 条 `content_hash` 是旧口径，`migrate_content_hash.py` 遇跨卷同题会整体中止。
 
 **验证**：新增 4 类用例；refinery 全量 `2061 passed / 10 skipped`。
+
+## 2026-11-21 语文切题：小节标题重置材料域（修 P0 跨小节串材料）
+
+**问题**：`（一）（二）（三）阅读…完成…题` 不重置材料域，上一节的诗文会累加到下一节。实测 5175/5461/5475 三卷 8 题的材料里同时有两篇不相关的文章（《行香子》+ 文言文、《礁石》+ 故宫、《月夜忆舍弟》+《岳阳楼记》）。
+
+**改动**：`question_splitter` 新增 `is_section_header()`，在部分标题之后、大题标题之前识别小节标题并 `_start_scope()`；**裸 `## （一）` / `## （二）` 不算**（文言文/多材料小节的子篇，海淀模拟二题13-15 靠这个保住愚公移山+郭守敬两篇）。判据是括号后带「分/题」或学科小节词（阅读/默写/文言文…），或引导句 ≥12 字。
+
+**存量修复**：全量语文切题对比 **31 卷 225 处 material 变化、0 处 content/题数变化**；只对 8 行 P0 数据做「旧材料 = 泄漏前缀 + 新材料」的严格后缀校验后更新（备份 `tools/db/backups/20261121_p0_material_fix.sql`），再重跑回填外置。三卷的 doc 已确认不含上一篇诗文。
+
+**顺带**：`strip_section_instruction` 扩到「（X）…（共N分）」和「（X）文言文阅读/古诗阅读」这类小节标题，文章 md 不再以卷面小节标题开头。
+
+**验证**：新增 2 条切题用例；refinery 全量 `2064 passed / 10 skipped`。
 
 ---
 

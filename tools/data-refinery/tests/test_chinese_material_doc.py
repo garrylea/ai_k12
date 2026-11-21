@@ -26,6 +26,12 @@ def test_strip_section_instruction_keeps_article_heading():
     assert strip_section_instruction(text) == text
 
 
+def test_strip_section_instruction_drops_topic_header_with_score():
+    assert strip_section_instruction(
+        "## (三)文言文阅读(共7分)\n## 岳阳楼记\n正文") == "## 岳阳楼记\n正文"
+    assert strip_section_instruction("（一）（共 5 分）\n正文") == "正文"
+
+
 def test_heading_only_true_for_mo_xie_heading():
     assert is_heading_only("## (一)默写。(共4分)") is True
 

@@ -107,6 +107,30 @@ def is_group_header(line: str) -> tuple[bool, str | None]:
     return False, None
 
 
+# 语文小节标题：`## （三）阅读《岳阳楼记》，完成 12-14 题` / `（二）古诗阅读（共4分）`。
+# 它和「第X部分」「一、」一样是**材料边界**：不重置 scope 会把上一篇诗文带进下一篇
+# （2026-11-21 实测 5175/5461/5475：材料里同时有前一首诗和下一篇文言文）。
+# 不能把所有「（X）」都当边界：文言文/多材料小节里的子篇用**裸** `## （一）` / `## （二）`
+# （paper 17 愚公移山/郭守敬），那是文章内部结构，重置会把前一篇丢掉。
+# 判据：括号后要有内容，且带「分/题」或学科小节词（阅读/默写/文言文…）；足够长的
+# 引导句（≥12 字，如「（三）通过官网学生进行了…」）也算。
+_CN_SECTION_HEAD_RE = re.compile(
+    r"^(?:#{0,6}\s*)?[（(][一二三四五六七八九十]+[）)]\s*(.*)$"
+)
+_SECTION_TOPIC_RE = re.compile(
+    r"阅读|默写|古诗|文言文|现代文|名著|综合性学习|积累|写作|作文|说明文|议论文|小说|分|题"
+)
+
+
+def is_section_header(line: str) -> bool:
+    """行首是否为语文小节标题（`（三）阅读…` / `## （二）古诗阅读…`）。"""
+    m = _CN_SECTION_HEAD_RE.match(line.strip())
+    if not m:
+        return False
+    tail = re.sub(r"\s+", "", m.group(1))
+    return bool(_SECTION_TOPIC_RE.search(tail)) or len(tail) >= 12
+
+
 def is_part_header(line: str) -> tuple[bool, str | None]:
     """行首是否为卷内部分标题（如 '## 第二部分 非选择题'）。
 
@@ -978,6 +1002,18 @@ def split_page(text: str, md_path: Path,
             if policy.attach and part_kind is None:
                 _start_scope()
                 scope_pending.append(line)
+            continue
+
+        # 语文小节标题（`## （三）阅读《岳阳楼记》，完成 12-14 题`）：新小节 = 新材料域。
+        # 旧逻辑只认「第X部分」「一、」，导致上一篇的诗文一直累加到下一篇
+        # （2026-11-21 实测 5175/5461/5475 三卷 8 题）。标题本身仍进 pending，
+        # 写文章时由 strip_section_instruction 去掉卷面题号/分值。
+        if policy.attach and not in_answer_section and is_section_header(line):
+            if current is not None:
+                questions.append(current)
+                current = None
+            _start_scope()
+            scope_pending.append(line)
             continue
 
         ok, gid = is_group_header(line)
