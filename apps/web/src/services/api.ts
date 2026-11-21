@@ -1526,6 +1526,8 @@ export interface TargetedPracticeQuestion {
   options: unknown[] | null;
   /** 同节共享材料（语文阅读/文段题）；数学题通常 null */
   materialText: string | null;
+  /** 文章文档（Markdown）地址；无文章为 null */
+  materialUrl: string | null;
   /** 题目来源（questions.source）；旧交接体可能没有 → 可选 */
   source?: string | null;
   /** 该题在原试卷中的题号（paper_questions.question_no）；旧交接体/无卷关联可能没有 → 可选 */
@@ -2298,6 +2300,8 @@ export interface ExamQuestion {
   options: ExamQuestionOptions;
   /** 同节共享材料（语文阅读/文段题）；数学卷为 null */
   materialText: string | null;
+  /** 文章文档（Markdown）地址；无文章为 null */
+  materialUrl: string | null;
 }
 
 /** 试卷详情：题目元数据 + 推荐时长（不含 answer/explanation，防答案泄露）。 */
@@ -2353,6 +2357,8 @@ export interface ExamResultItem {
   options: ExamQuestionOptions;
   /** 同节共享材料（语文阅读/文段题）；数学卷为 null */
   materialText: string | null;
+  /** 文章文档（Markdown）地址；无文章为 null */
+  materialUrl: string | null;
   answerText: string | null;
   /** null = 主观题待自评 */
   isCorrect: number | null;
@@ -4036,6 +4042,8 @@ export interface PracticeHistoryQuestion {
   questionContent: string | null;
   /** 材料（语文/英语阅读材料、物化题内材料）；无材料为 null。 */
   materialText: string | null;
+  /** 文章文档（Markdown）地址；无文章为 null */
+  materialUrl: string | null;
   questionAnswer: string | null;
   questionAnalysis: string | null;
   /** 题目来源（questions.source）：专项记录页展示，便于溯源。 */

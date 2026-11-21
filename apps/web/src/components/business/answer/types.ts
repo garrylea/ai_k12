@@ -12,6 +12,8 @@ export interface RunnerQuestion {
   options?: Array<{ label: string; text: string }>;
   /** 同节共享材料（语文阅读/文段题，Markdown+图片）；数学题通常缺省 */
   material?: string | null;
+  /** 文章文档（Markdown）地址；由前端按 URL 取文 */
+  materialUrl?: string | null;
   /** 题目来源（专项练习传 questions.source）；有值时作答页/自评页展示，便于溯源 */
   source?: string | null;
   /** 该题在原试卷中的题号（paper_questions.question_no）；与来源同行展示 */

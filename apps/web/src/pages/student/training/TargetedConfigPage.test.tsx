@@ -89,6 +89,7 @@ const STARTED_QUESTION: TargetedPracticeQuestion = {
   type: 'choice',
   options: ['A. 1', 'B. 2'],
   materialText: null,
+  materialUrl: null,
 };
 
 /** 别的任务排在前面：按 taskCode 挑，而不是拿 tasks[0]。 */

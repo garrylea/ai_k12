@@ -57,6 +57,7 @@ const QUESTION: TargetedPracticeQuestion = {
   type: 'choice',
   options: ['A. 1', 'B. 2'],
   materialText: null,
+  materialUrl: null,
 };
 
 const JUDGED: JudgeResult = {

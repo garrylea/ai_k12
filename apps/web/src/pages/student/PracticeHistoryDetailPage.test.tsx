@@ -70,7 +70,7 @@ const SPECIAL_SESSION = {
 /** 未作答 + 可重做/可同类型（数学卷）。 */
 const UNANSWERED_QUESTION = {
   questionId: 100, questionOrder: 1, answerText: null, isCorrect: null, score: null,
-  method: 'unanswered', analysis: null, judgedAt: null, materialText: null,
+  method: 'unanswered', analysis: null, judgedAt: null, materialText: null, materialUrl: null,
   questionContent: '题干', questionAnswer: 'A', questionAnalysis: null,
   refType: 'question', refId: null, sentenceIndex: null,
   passageTitle: null, passageSentence: null,
@@ -156,6 +156,7 @@ describe('PracticeHistoryDetailPage', () => {
           questionId: 100, questionOrder: 1, answerText: 'B', isCorrect: false, score: 0,
           method: 'exact', analysis: '解析一', judgedAt: null,
           materialText: '阅读下面的材料，完成第1-3题。',
+          materialUrl: null,
           questionContent: '第1题题面', questionAnswer: 'C', questionAnalysis: null,
           refType: 'question', refId: null, sentenceIndex: null,
           passageTitle: null, passageSentence: null,
@@ -165,6 +166,7 @@ describe('PracticeHistoryDetailPage', () => {
           questionId: 101, questionOrder: 2, answerText: 'A', isCorrect: true, score: 1,
           method: 'exact', analysis: null, judgedAt: null,
           materialText: null,
+          materialUrl: null,
           questionContent: '第2题题面', questionAnswer: 'A', questionAnalysis: '题库解析二',
           refType: 'question', refId: null, sentenceIndex: null,
           passageTitle: null, passageSentence: null,
@@ -196,7 +198,7 @@ describe('PracticeHistoryDetailPage', () => {
       session: EXAM_SESSION,
       questions: [{
         questionId: 100, questionOrder: 1, answerText: '\\frac{1}{5}', isCorrect: true, score: 1,
-        method: 'exact', analysis: null, judgedAt: null, materialText: null,
+        method: 'exact', analysis: null, judgedAt: null, materialText: null, materialUrl: null,
         questionContent: '题面', questionAnswer: '$\\dfrac15$', questionAnalysis: null,
         refType: 'question', refId: null, sentenceIndex: null,
         passageTitle: null, passageSentence: null,
@@ -217,7 +219,7 @@ describe('PracticeHistoryDetailPage', () => {
       session: EXAM_SESSION,
       questions: [{
         questionId: 100, questionOrder: 1, answerText: 'B', isCorrect: false, score: 0,
-        method: 'exact', analysis: '第一行解析\n第二行解析', judgedAt: null, materialText: null,
+        method: 'exact', analysis: '第一行解析\n第二行解析', judgedAt: null, materialText: null, materialUrl: null,
         questionContent: '题面', questionAnswer: '∵AB∥CD，\n∴∠1=∠2。', questionAnalysis: null,
         refType: 'question', refId: null, sentenceIndex: null,
         passageTitle: null, passageSentence: null,
@@ -259,6 +261,7 @@ describe('PracticeHistoryDetailPage', () => {
           answerText: '{"author":"李白","dynasty":"唐","body":"床前明月光"}',
           isCorrect: false, score: 0, method: 'exact', analysis: null, judgedAt: null,
           materialText: null,
+          materialUrl: null,
           questionContent: null, questionAnswer: null, questionAnalysis: null,
           refType: 'passage', refId: 42, sentenceIndex: 0,
           passageTitle: '静夜思', passageSentence: '床前明月光，疑是地上霜。',
@@ -283,6 +286,7 @@ describe('PracticeHistoryDetailPage', () => {
           answerText: '{"terms":[{"term":"疑","answer":"好像"}],"meaning":"写思乡","emotion":"思乡"}',
           isCorrect: true, score: null, method: 'ai', analysis: null, judgedAt: null,
           materialText: null,
+          materialUrl: null,
           questionContent: null,
           questionAnswer: '**重点字词**\n\n- 疑：好像\n\n**深层含义**\n\n写游子思乡。\n\n**作者情感**\n\n思乡',
           questionAnalysis: null,
@@ -307,6 +311,7 @@ describe('PracticeHistoryDetailPage', () => {
         questionId: 100, questionOrder: 1, answerText: 'B', isCorrect: null, score: null,
         method: 'failed', analysis: null, judgedAt: null,
         materialText: null,
+        materialUrl: null,
         questionContent: '题面', questionAnswer: 'C', questionAnalysis: null,
         refType: 'question', refId: null, sentenceIndex: null,
         passageTitle: null, passageSentence: null,
@@ -344,7 +349,7 @@ describe('PracticeHistoryDetailPage', () => {
       session: EXAM_SESSION,
       questions: [{
         questionId: 100, questionOrder: 1, answerText: 'B', isCorrect: false, score: 0,
-        method: 'exact', analysis: null, judgedAt: null, materialText: null,
+        method: 'exact', analysis: null, judgedAt: null, materialText: null, materialUrl: null,
         questionContent: '第1题题面', questionAnswer: 'A', questionAnalysis: null,
         refType: 'question', refId: null, sentenceIndex: null,
         passageTitle: null, passageSentence: null,
@@ -372,7 +377,7 @@ describe('PracticeHistoryDetailPage', () => {
 
   it('点题量：按该题量请求同类型练习 + 写 similar 交接体 + 带 returnTo 跳转', async () => {
     mockMathDetailWithRules();
-    const questions = [{ questionId: 200, text: '同类题', type: 'choice', options: ['A', 'B'], materialText: null }];
+    const questions = [{ questionId: 200, text: '同类题', type: 'choice', options: ['A', 'B'], materialText: null, materialUrl: null }];
     startSimilarMock.mockResolvedValue({ questions, sessionId: 77, title: '同类练习：一次函数 · 3 题' });
     const user = userEvent.setup();
     renderAt('exam', '1');
@@ -409,7 +414,7 @@ describe('PracticeHistoryDetailPage', () => {
 
   it('点「重做」：请求重做 + 写 redo 交接体（sessionId=null）+ 跳转', async () => {
     mockMathDetailWithRules();
-    const questions = [{ questionId: 100, text: '题干', type: 'choice', options: null, materialText: null }];
+    const questions = [{ questionId: 100, text: '题干', type: 'choice', options: null, materialText: null, materialUrl: null }];
     redoMock.mockResolvedValue({ questions, title: '重做：期中卷 · 第 1 题' });
     const user = userEvent.setup();
     renderAt('exam', '1');
@@ -450,7 +455,7 @@ describe('PracticeHistoryDetailPage', () => {
       questions: [{ ...UNANSWERED_QUESTION }],
     });
     getPointRulesMock.mockResolvedValue(CN_RULES);
-    const questions = [{ questionId: 7001, text: '文言题', type: 'choice', options: ['A', 'B'], materialText: null }];
+    const questions = [{ questionId: 7001, text: '文言题', type: 'choice', options: ['A', 'B'], materialText: null, materialUrl: null }];
     startSimilarMock.mockResolvedValue({ questions, sessionId: 88, title: '同类练习：文言实词与虚词 · 3 题' });
     const user = userEvent.setup();
     renderAt('exam', '1');

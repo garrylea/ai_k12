@@ -41,7 +41,7 @@ const SESSION: ExamSessionInfo = {
   sessionId: 77,
   status: 'in_progress',
   remainingSeconds: 600,
-  questions: [{ questionId: 101, questionNo: 1, text: '1 + 1 = ?', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null }],
+  questions: [{ questionId: 101, questionNo: 1, text: '1 + 1 = ?', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null, materialUrl: null }],
 };
 
 /** RunExitGuard 用 useBlocker —— 必须是 data router；结果页与列表页给占位元素。 */
@@ -124,7 +124,7 @@ describe('ExamRunPage 交卷发分交接', () => {
     // 模拟题1/题2 被 needs_review 过滤，只剩题3（顺序第 1 位）
     const gapSession: ExamSessionInfo = {
       ...SESSION,
-      questions: [{ questionId: 103, questionNo: 3, text: '题三', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null }],
+      questions: [{ questionId: 103, questionNo: 3, text: '题三', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null, materialUrl: null }],
     };
     sessionMock.mockResolvedValue(gapSession);
     sessionStorage.setItem('exam:session', JSON.stringify(gapSession));

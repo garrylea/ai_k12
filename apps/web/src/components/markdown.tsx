@@ -730,6 +730,17 @@ export const markdownComponents = {
 };
 
 /**
+ * 作答页材料/题面图的 components：与 QuestionRunner 同口径——img 走 MarkdownImg 的
+ * 分桶高度，并启用 dragToDraft 允许图片拖进草稿。MaterialBlock 的 draggable 用它。
+ */
+export const draggableQuestionMarkdownComponents = {
+  ...markdownComponents,
+  img: (props: { src?: string; alt?: string }) => (
+    <MarkdownImg {...props} bucketHeight dragToDraft className="block mx-auto my-4 max-w-full object-contain rounded-lg" />
+  ),
+};
+
+/**
  * 作答/结果页的大图样式：与题面小图（默认 `h-[50px]`）区分。
  * 物理电路图、化学装置图按题面规格会被压成一条细线，必须用这套。
  * 40vh 上限是为了让"文字 + 图 + 文字"能在同一屏里读，点开还能放大（zoomable）。
