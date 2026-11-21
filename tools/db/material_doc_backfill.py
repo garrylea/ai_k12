@@ -26,6 +26,8 @@
 - **备份**：`--apply` 前把受影响行的原值**追加**到当日回滚文件（带 `-- run <时间戳>` 段头），
   同日多次运行互不覆盖；没有计划时不碰回滚文件。
 - **逐行容错**：`content_hash` 唯一键冲突时保留旧 hash，其余四列照常写入，避免半回填。
+- **review 清单只追加**：`output/material_inline_review.jsonl` 与 publish 共用，`--apply` 追加、
+  不截断；无待复核行时不碰该文件。
 """
 
 from __future__ import annotations
@@ -129,10 +131,9 @@ def build_plans(rows: list[dict], *, apply: bool) -> tuple[list[list], list[dict
             continue  # 已处理：保证第二次运行幂等
         mt = row.get("material_text") or ""
         if mt.strip() and is_heading_only(mt) and row["id"] not in by_id:
-            # 与 publish 同口径：纯标题旧材料清掉，不建文档
+            # 与 publish 同口径：纯标题旧材料清掉，不建文档；但仍要继续抽题中素材
             plans.append([row["id"], row.get("material_url"), None, None, None])
             by_id[row["id"]] = plans[-1]
-            continue
         material, rest = split_inline_material(row.get("content") or "")
         if material:
             plan = by_id.get(row["id"])
@@ -164,6 +165,46 @@ def build_plans(rows: list[dict], *, apply: bool) -> tuple[list[list], list[dict
     return plans, review
 
 
+def rollback_sql(plans: list[list], rows: list[dict]) -> str:
+    """生成一段可回滚 SQL（append 到当天文件，不覆盖之前 run）。"""
+    by_id = {r["id"]: r for r in rows}
+    lines = [
+        "SET NAMES utf8mb4;",
+        f"-- run {datetime.now():%Y-%m-%dT%H:%M:%S} ({len(plans)} rows)",
+    ]
+    for qid, *_ in plans:
+        r = by_id[qid]
+        lines.append(
+            "UPDATE questions SET "
+            f"content={_sql_literal(r.get('content'))}, "
+            f"material_text={_sql_literal(r.get('material_text'))}, "
+            f"material_url={_sql_literal(r.get('material_url'))}, "
+            f"material_method={_sql_literal(r.get('material_method'))}, "
+            f"content_hash={_sql_literal(r.get('content_hash'))} WHERE id={qid};"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def apply_plan(cur, plan: list) -> bool:
+    """执行一条计划；content_hash 冲突时保留旧 hash，其余列仍写入。返回是否冲突。"""
+    qid, url, mtext, content, method, new_hash = plan
+    try:
+        cur.execute(
+            "UPDATE questions SET material_url=%s, material_text=%s, "
+            "content=COALESCE(%s, content), material_method=%s, content_hash=%s "
+            "WHERE id=%s",
+            (url, mtext, content, method, new_hash, qid),
+        )
+        return False
+    except pymysql.err.IntegrityError:
+        cur.execute(
+            "UPDATE questions SET material_url=%s, material_text=%s, "
+            "content=COALESCE(%s, content), material_method=%s WHERE id=%s",
+            (url, mtext, content, method, qid),
+        )
+        return True
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--paper", type=int)
@@ -189,44 +230,17 @@ def main(argv=None) -> int:
         backup = BACKUP_DIR / f"{date.today():%Y%m%d}_material_doc_rollback.sql"
         backup.parent.mkdir(parents=True, exist_ok=True)
         with backup.open("a", encoding="utf-8") as f:
-            f.write(f"\n-- run {datetime.now():%Y-%m-%dT%H:%M:%S} ({len(plans)} rows)\n")
-            f.write("SET NAMES utf8mb4;\n")
-            for qid, *_ in plans:
-                r = next(r for r in rows if r["id"] == qid)
-                f.write(
-                    "UPDATE questions SET "
-                    f"content={_sql_literal(r.get('content'))}, "
-                    f"material_text={_sql_literal(r.get('material_text'))}, "
-                    f"material_url={_sql_literal(r.get('material_url'))}, "
-                    f"material_method={_sql_literal(r.get('material_method'))}, "
-                    f"content_hash={_sql_literal(r.get('content_hash'))} WHERE id={qid};\n"
-                )
+            f.write(rollback_sql(plans, rows))
 
-        failed = 0
-        for qid, url, mtext, content, method, new_hash in plans:
-            try:
-                cur.execute(
-                    "UPDATE questions SET material_url=%s, material_text=%s, "
-                    "content=COALESCE(%s, content), material_method=%s, content_hash=%s "
-                    "WHERE id=%s",
-                    (url, mtext, content, method, new_hash, qid),
-                )
-            except pymysql.err.IntegrityError:
-                # 冲突时保留旧 hash，但其余列必须写入，避免半回填
-                cur.execute(
-                    "UPDATE questions SET material_url=%s, material_text=%s, "
-                    "content=COALESCE(%s, content), material_method=%s WHERE id=%s",
-                    (url, mtext, content, method, qid),
-                )
-                print(f"[WARN] id={qid} content_hash 冲突，保留旧 hash，其余列已更新", flush=True)
-                failed += 1
+        failed = sum(1 for plan in plans if apply_plan(cur, plan))
         conn.commit()
 
-        review_path = Path(ASSETS).parent / "material_inline_review.jsonl"
-        review_path.write_text(
-            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in review),
-            encoding="utf-8",
-        )
+        # 只追加，不清空：publish 也往同一文件写，截断会抹掉它的清单
+        if review:
+            review_path = Path(ASSETS).parent / "material_inline_review.jsonl"
+            with review_path.open("a", encoding="utf-8") as f:
+                for rec in review:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         print(f"[apply] {len(plans)} rows updated ({failed} hash conflicts); rollback: {backup}")
         return 0
     finally:
