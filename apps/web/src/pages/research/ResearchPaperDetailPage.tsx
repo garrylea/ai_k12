@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import {
@@ -19,24 +20,158 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : '操作失败';
 }
 
+/** 与题干 / 编辑抽屉 / 学生端同一套富文本管线（Markdown + LaTeX + 原生 HTML + SVG）。 */
+function MarkdownBody({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={markdownRemarkPluginsWithBreaks}
+      rehypePlugins={markdownRehypePlugins}
+      components={markdownComponents}
+    >
+      {preprocessMarkdown(text)}
+    </ReactMarkdown>
+  );
+}
+
 /**
- * 表格里的解析 / 思路单元格：与编辑抽屉、学生端同一套 markdown 管线
- * （Markdown + LaTeX + 原生 HTML + SVG），只截前几行供教研扫一眼有没有内容；
- * 完整内容在「编辑」抽屉里看（表格列宽固定，全展开会把行撑得非常高）。
+ * 表格里的解析 / 思路单元格：只露出前几行供教研扫一眼有没有内容，
+ * 被裁掉时末尾补「……」；悬停用浮层展示完整富文本（表格列宽固定，全展开会把行撑得非常高）。
  */
-function MarkdownPreviewCell({ text }: { text: string | null }) {
+function MarkdownPreviewCell({ text, label }: { text: string | null; label: string }) {
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const closeTimer = useRef<number | null>(null);
+  const [clipped, setClipped] = useState(false);
+  const [anchor, setAnchor] = useState<{ left: number; top: number; bottom: number } | null>(null);
+
+  const measure = useCallback(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    // jsdom 里两者都是 0，判定为未截断（不影响现有渲染断言）
+    setClipped(el.scrollHeight > el.clientHeight + 1);
+  }, []);
+
+  useLayoutEffect(measure, [measure, text]);
+
+  // 图片 / KaTeX 是异步撑高的，高度变化后要重新判定是否还有内容被裁掉
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [measure, text]);
+
+  const cancelHide = useCallback(() => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+
+  const scheduleHide = useCallback(() => {
+    cancelHide();
+    closeTimer.current = window.setTimeout(() => {
+      setAnchor(null);
+      closeTimer.current = null;
+    }, 120);
+  }, [cancelHide]);
+
+  useEffect(() => cancelHide, [cancelHide]);
+
+  // 表格横向滚动 / 窗口变化时浮层会跟丢，直接收起；浮层内部滚动不算（要能滚着读长解析）
+  useEffect(() => {
+    if (!anchor) return;
+    const hide = (event: Event) => {
+      if (panelRef.current?.contains(event.target as Node)) return;
+      setAnchor(null);
+    };
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+    return () => {
+      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('resize', hide);
+    };
+  }, [anchor]);
+
   if (!text || !text.trim()) {
     return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
   }
-  return (
-    <div className="max-h-24 overflow-hidden" style={{ color: 'var(--text-primary)' }}>
-      <ReactMarkdown
-        remarkPlugins={markdownRemarkPluginsWithBreaks}
-        rehypePlugins={markdownRehypePlugins}
-        components={markdownComponents}
+  const body = text;
+
+  const handleEnter = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!clipped) return;
+    cancelHide();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setAnchor({ left: rect.left, top: rect.top, bottom: rect.bottom });
+  };
+
+  const panel = (() => {
+    if (!anchor) return null;
+    const width = Math.min(440, window.innerWidth - 24);
+    const left = Math.max(8, Math.min(anchor.left, window.innerWidth - width - 8));
+    const below = window.innerHeight - anchor.bottom - 14;
+    const above = anchor.top - 14;
+    const placeBelow = below >= 200 || below >= above;
+    const maxHeight = Math.max(160, Math.min(window.innerHeight * 0.6, placeBelow ? below : above));
+    return createPortal(
+      <div
+        ref={panelRef}
+        role="tooltip"
+        data-testid="markdown-hover-preview"
+        onMouseEnter={cancelHide}
+        onMouseLeave={scheduleHide}
+        className="overflow-auto rounded-xl border border-gray-200 bg-white p-3 text-xs shadow-xl"
+        style={{
+          position: 'fixed',
+          left,
+          width,
+          maxHeight,
+          zIndex: 60,
+          ...(placeBelow
+            ? { top: anchor.bottom + 6 }
+            : { bottom: window.innerHeight - anchor.top + 6 }),
+        }}
       >
-        {preprocessMarkdown(text)}
-      </ReactMarkdown>
+        <div className="mb-1 text-[11px] font-medium" style={{ color: 'var(--text-tertiary)' }}>
+          {label}
+        </div>
+        <MarkdownBody text={body} />
+      </div>,
+      document.body,
+    );
+  })();
+
+  return (
+    <div
+      className="relative"
+      data-testid="markdown-preview-cell"
+      onMouseEnter={handleEnter}
+      onMouseLeave={scheduleHide}
+    >
+      <div
+        ref={bodyRef}
+        data-testid="markdown-preview-body"
+        className="max-h-24 overflow-hidden"
+        style={{ color: 'var(--text-primary)' }}
+      >
+        <div ref={contentRef}>
+          <MarkdownBody text={body} />
+        </div>
+      </div>
+      {clipped && (
+        <span
+          className="pointer-events-none absolute bottom-0 right-0 select-none pl-2"
+          style={{
+            color: 'var(--text-secondary)',
+            background: 'linear-gradient(to right, rgba(255,255,255,0), #fff 40%)',
+          }}
+        >
+          ……
+        </span>
+      )}
+      {panel}
     </div>
   );
 }
@@ -104,7 +239,7 @@ export default function ResearchPaperDetailPage() {
                 <th className="text-left px-4 py-3 font-medium">解析</th>
                 <th className="text-left px-4 py-3 font-medium">思路</th>
                 <th className="text-left px-4 py-3 font-medium">来源</th>
-                <th className="text-right px-4 py-3 font-medium">操作</th>
+                <th className="text-right px-4 py-3 font-medium whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody style={{ color: 'var(--text-primary)' }}>
@@ -121,23 +256,34 @@ export default function ResearchPaperDetailPage() {
                       {preprocessMarkdown(q.content)}
                     </ReactMarkdown>
                   </td>
-                  <td className="px-4 py-3">{q.answer}</td>
+                  {/* 答案只露前 10 个字，列宽就不再被长解析文本撑开；完整值放 title */}
+                  <td className="px-4 py-3 align-top">
+                    <div className="max-w-[10rem] truncate" title={q.answer}>
+                      {q.answer.length > 10 ? `${q.answer.slice(0, 10)}…` : q.answer}
+                    </div>
+                  </td>
                   {/* 显示正文而不是「有/无」：教研改完解析/思路要能在列表里立刻看到变化（PRD §7.14 的明细含这两列） */}
                   <td className="px-4 py-3 align-top text-xs max-w-[16rem]">
-                    <MarkdownPreviewCell text={q.explanation} />
+                    <MarkdownPreviewCell text={q.explanation} label="解析" />
                   </td>
                   <td className="px-4 py-3 align-top text-xs max-w-[16rem]">
-                    <MarkdownPreviewCell text={q.approach} />
+                    <MarkdownPreviewCell text={q.approach} label="思路" />
                   </td>
                   <td className="px-4 py-3">
-                    {q.source ? `${q.source}${q.sourceYear ? ` ${q.sourceYear}` : ''}` : '—'}
+                    <div
+                      className="max-w-[9rem] truncate"
+                      title={q.source ? `${q.source}${q.sourceYear ? ` ${q.sourceYear}` : ''}` : ''}
+                    >
+                      {q.source ? `${q.source}${q.sourceYear ? ` ${q.sourceYear}` : ''}` : '—'}
+                    </div>
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  {/* whitespace-nowrap + 最小宽度：列被挤压时「编辑」不再竖排折行，也留得下 4 个字的按钮 */}
+                  <td className="px-4 py-3 text-right whitespace-nowrap min-w-[6.5rem]">
                     <button
                       type="button"
                       data-testid={`question-edit-${q.id}`}
                       onClick={() => setEditingQuestion(q)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--brand-500)] text-white hover:opacity-90"
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-[var(--brand-500)] text-white hover:opacity-90"
                     >
                       编辑
                     </button>

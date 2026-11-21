@@ -141,6 +141,86 @@ describe('ResearchPaperDetailPage 加载与表格', () => {
     expect(stemCell.querySelector('svg')).not.toBeNull();
   });
 
+  it('答案只露前 10 个字，完整值放进 title', async () => {
+    const answer = '第一第二第三第四第五第六';
+    detailMock.mockResolvedValueOnce(detail({ questions: [question({ answer })] }));
+
+    renderDetail();
+    const table = await screen.findByTestId('detail-table');
+    const row = within(table).getAllByRole('row')[1] as HTMLTableRowElement;
+    const answerCell = row.cells[3]; // 题号 / 题型 / 题干 / 答案
+
+    expect(answerCell.textContent).toBe('第一第二第三第四第五…');
+    expect(answerCell.querySelector('[title]')).toHaveAttribute('title', answer);
+  });
+
+  it('来源列收窄，完整来源放进 title', async () => {
+    detailMock.mockResolvedValueOnce(detail({ questions: [question({ source: '北京市海淀区教师进修学校', sourceYear: 2026 })] }));
+
+    renderDetail();
+    const table = await screen.findByTestId('detail-table');
+    const row = within(table).getAllByRole('row')[1] as HTMLTableRowElement;
+    const sourceCell = row.cells[6]; // 题号 / 题型 / 题干 / 答案 / 解析 / 思路 / 来源
+
+    expect(sourceCell.querySelector('[title]')).toHaveAttribute('title', '北京市海淀区教师进修学校 2026');
+    expect(sourceCell.querySelector('[title]')?.className).toContain('truncate');
+  });
+
+  it('解析被裁掉时末尾补「……」，悬停浮层展示完整富文本', async () => {
+    const explanation = '第一段解析正文\n\n**加粗结论** $x=2$';
+    detailMock.mockResolvedValueOnce(detail({ questions: [question({ explanation })] }));
+
+    // jsdom 不做布局：手动把「内容高 > 可视高」造出来
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(400);
+    const clientSpy = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(96);
+    try {
+      renderDetail();
+      const table = await screen.findByTestId('detail-table');
+      const row = within(table).getAllByRole('row')[1] as HTMLTableRowElement;
+      const cell = row.cells[4]; // 解析
+
+      expect(cell).toHaveTextContent('……');
+      expect(screen.queryByTestId('markdown-hover-preview')).not.toBeInTheDocument();
+
+      fireEvent.mouseOver(within(cell).getByTestId('markdown-preview-cell'));
+
+      const preview = await screen.findByTestId('markdown-hover-preview');
+      expect(preview).toHaveTextContent('第一段解析正文');
+      expect(preview.querySelector('strong')?.textContent).toBe('加粗结论');
+      expect(preview.querySelector('.katex')).not.toBeNull();
+    } finally {
+      scrollSpy.mockRestore();
+      clientSpy.mockRestore();
+    }
+  });
+
+  it('浮层内部滚动不收起，表格滚动才收起', async () => {
+    detailMock.mockResolvedValueOnce(detail({ questions: [question({ explanation: '很长的解析正文' })] }));
+
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(400);
+    const clientSpy = vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(96);
+    try {
+      renderDetail();
+      const table = await screen.findByTestId('detail-table');
+      const row = within(table).getAllByRole('row')[1] as HTMLTableRowElement;
+      const cell = row.cells[4];
+
+      fireEvent.mouseOver(within(cell).getByTestId('markdown-preview-cell'));
+      const preview = await screen.findByTestId('markdown-hover-preview');
+
+      // 浮层自己可滚（长解析），滚它不能把浮层关掉
+      fireEvent.scroll(preview);
+      expect(screen.getByTestId('markdown-hover-preview')).toBeInTheDocument();
+
+      // 表格横向滚动时浮层会跟丢，收起
+      fireEvent.scroll(within(cell).getByTestId('markdown-preview-body'));
+      expect(screen.queryByTestId('markdown-hover-preview')).not.toBeInTheDocument();
+    } finally {
+      scrollSpy.mockRestore();
+      clientSpy.mockRestore();
+    }
+  });
+
   it('解析/思路为空 → 对应列显示「—」', async () => {
     detailMock.mockResolvedValueOnce(detail({
       questions: [question({ id: 10, explanation: null, approach: null })],
