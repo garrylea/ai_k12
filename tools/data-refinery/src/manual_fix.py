@@ -216,6 +216,21 @@ def split_questions(text: str, strategy) -> list[tuple[int | None, str]]:
     return out or [(None, text.strip())]
 
 
+def split_material_and_options(strategy, body: str) -> tuple[str | None, str, list[dict] | None]:
+    """人工录入的一段正文 → (题中材料, 题干, 选项)。
+
+    **语文/英语没有 `split_material`**（它们走跨题 material_policy），
+    必须 getattr 判空，否则手工补题在语文卷上直接 AttributeError
+    （2026-11-21 海淀模拟二题6 实测：'ChineseStrategy' object has no attribute
+    'split_material'）。与 `question_extract._split_inline_material` 同一口径。
+    """
+    splitter = getattr(strategy, "split_material", None)
+    material, rest = splitter(body) if callable(splitter) else (None, body)
+    opts_source = rest if material else body
+    stem, options = strategy.split_options(opts_source)
+    return material, stem, options
+
+
 def _image_to_markdown(image: Path, paper_md_dir: Path) -> str:
     """调 MinerU 把图片转成 Markdown，并把产出的图片拷贝进该卷的 images/。"""
     from convert import MineruRunner
@@ -1159,10 +1174,8 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 break
             # 粘贴的可能是「材料 + 题干 + 小问 + 选项 + 图片」一整段：
             # 先按物化策略拆材料（split_material 只在「行首 (1) + (2) 连续」时切，
-            # 普通选择题不受影响），再对剩下的题干/小问拆选项。
-            material, rest = strategy.split_material(body)
-            opts_source = rest if material else body
-            stem, options = strategy.split_options(opts_source)
+            # 普通选择题不受影响；语文/英语没有该钩子，跳过），再对剩下的题干/小问拆选项。
+            material, stem, options = split_material_and_options(strategy, body)
             if not stem.strip() and options and body.strip():
                 # 选项字母写在内容下方（图在上、名称居中、字母在下）时，切分器会把
                 # 题干那一段当成 A 的内容 → 题干空串。直接拒收：写进去就是一道空题

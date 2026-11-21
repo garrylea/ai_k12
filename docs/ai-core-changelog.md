@@ -8,6 +8,16 @@
 
 ---
 
+## 2026-11-21 手工补题在语文卷崩溃：ChineseStrategy 没有 split_material
+
+**现象**：用户修海淀模拟二题6（选项缺失），录完 A–D 并确认后，第 8/9 步报 `[ERROR] 阶段失败：'ChineseStrategy' object has no attribute 'split_material'`，本题录入未落盘。
+
+**根因**：`manual_fix._ask_one` 直接调 `strategy.split_material(body)`。该钩子只有物理/化学/道法实现；语文/英语走跨题 `material_policy`，没有这个方法。`question_extract._split_inline_material` 早在 2026-11-02 就用 `getattr(strategy, "split_material", None)` 判空，手工补题这条路径漏了——此前人工补题只在物化卷上跑过。
+
+**修复**：抽出 `manual_fix.split_material_and_options(strategy, body)`，`getattr` 判空；语文/英语跳过题中材料拆分，直接 `split_options`。补 `ChineseStrategy` 回归用例（`tests/test_manual_fix.py`）。录入在崩溃前不写盘，修复后重跑同一命令、重录该题即可。
+
+---
+
 ## 2026-11-21 语文材料外置存量回填：727 行 + 注释切分 bug + 文章纯度护栏
 
 **回填**（spec 2026-11-20 的存量部分）：`tools/db/material_doc_backfill.py --apply` 更新 **727 行**（1 个 hash 冲突按设计保留旧 hash），写 300 份 `materials/chinese/*/content.md`；二次 dry-run = 0 行。回滚 SQL 在 `tools/db/backups/20261121_material_doc_rollback.sql`。回填后语文 908 题：`material_url` 702、`material_text` 34、两者都有 2（文章+题中素材）、`material_method='rule'` 2。

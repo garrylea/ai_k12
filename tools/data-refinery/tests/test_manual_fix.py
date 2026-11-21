@@ -1332,3 +1332,20 @@ def test_answer_clear_returns_empty_not_skip(tmp_path, monkeypatch):
     ))
     ans = manual_fix._collect_content(paper, label="答案")
     assert ans == "", "答案留空应返回空串，调用方据此照常记录本题"
+
+
+def test_material_split_skips_chinese_without_hook():
+    """语文没有 split_material；手工补题不能直接调，否则 AttributeError。
+
+    2026-11-21 海淀模拟二题6 实测：录完选项后崩在
+    `'ChineseStrategy' object has no attribute 'split_material'`。
+    """
+    from subject_strategies import get_strategy
+
+    material, stem, options = manual_fix.split_material_and_options(
+        get_strategy("chinese"),
+        "下列选项恰当的一项是(2分)\nA. 甲\nB. 乙\nC. 丙\nD. 丁",
+    )
+    assert material is None
+    assert stem.startswith("下列选项")
+    assert [o["label"] for o in options] == ["A", "B", "C", "D"]
