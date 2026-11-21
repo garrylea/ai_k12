@@ -24,4 +24,16 @@ describe('useMaterialDoc', () => {
     render(<Probe url="materials/chinese/missing/content.md" />);
     await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('error:'));
   });
+
+  it('clears the previous doc when the url changes', async () => {
+    const pending = new Promise(() => {});
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, text: async () => '## A' })
+      .mockImplementationOnce(() => pending);
+    vi.stubGlobal('fetch', fetchMock);
+    const { rerender } = render(<Probe url="materials/chinese/u1/content.md" />);
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('ready:## A'));
+    rerender(<Probe url="materials/chinese/u2/content.md" />);
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('loading:'));
+  });
 });

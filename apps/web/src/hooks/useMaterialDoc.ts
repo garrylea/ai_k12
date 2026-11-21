@@ -54,6 +54,9 @@ export function useMaterialDoc(url: string | null | undefined): MaterialDocState
     const cached = getCachedMaterialDoc(url);
     if (cached !== null) { setText(cached); setStatus('ready'); return; }
     let alive = true;
+    // 先清上一篇文章：QuestionRunner 换题是 prop 变化、不重挂载，
+    // 不清就会在 B 题下显示 A 题的文章（派生状态必须带 key 归属）。
+    setText(null);
     setStatus('loading');
     preloadMaterialDoc(url)
       .then((t) => { if (alive) { setText(t); setStatus('ready'); } })

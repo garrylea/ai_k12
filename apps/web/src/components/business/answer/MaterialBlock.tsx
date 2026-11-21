@@ -33,15 +33,16 @@ export function MaterialBlock({
   url, text, variant = 'answer', draggable = false, testId, className = '',
 }: MaterialBlockProps) {
   const { text: doc, status, retry } = useMaterialDoc(url);
+  const docFailed = status === 'error' && !doc;
   const body = [doc, text].filter((s): s is string => Boolean(s && s.trim())).join('\n\n');
   const components = draggable ? draggableQuestionMarkdownComponents : markdownComponents;
   if (!body) {
-    if (status === 'loading') return <div data-testid={testId} className="text-xs text-[var(--text-tertiary)]">材料加载中…</div>;
-    if (status === 'error') return (
+    if (docFailed) return (
       <button type="button" data-testid={testId} onClick={retry} className="text-xs text-[var(--brand-500)] underline">
         材料加载失败，点击重试
       </button>
     );
+    if (status === 'loading') return <div data-testid={testId} className="text-xs text-[var(--text-tertiary)]">材料加载中…</div>;
     return null;
   }
   return (
@@ -57,6 +58,11 @@ export function MaterialBlock({
       >
         {preprocessMaterialMarkdown(body)}
       </ReactMarkdown>
+      {docFailed && (
+        <button type="button" onClick={retry} className="mt-1 text-xs text-[var(--brand-500)] underline">
+          材料加载失败，点击重试
+        </button>
+      )}
     </div>
   );
 }
