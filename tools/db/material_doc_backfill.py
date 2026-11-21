@@ -162,7 +162,10 @@ def build_plans(rows: list[dict], *, apply: bool,
         if material:
             plan = by_id.get(row["id"])
             if plan is None:
-                plan = [row["id"], None, None, None, None]
+                # 保留已有 material_url（共享文章）：这题可能既有文章又有题中素材
+                # （如「根据《曹刿论战》及下面的材料」），只补 material_text，
+                # 不能把文章 URL 写成 NULL（2026-11-21 修：否则 Q15 文章链接被抹掉）。
+                plan = [row["id"], row.get("material_url"), None, None, None]
                 plans.append(plan)
                 by_id[row["id"]] = plan
             plan[2] = material

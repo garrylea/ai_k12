@@ -8,6 +8,30 @@
 
 ---
 
+## 2026-11-21 做题要求归位：西城 Q15 等 3 题的题干从填充语段改为做题要求
+
+**用户裁决**：`语文-初三(下)-202507-西城-模拟二` Q15（q7750）原卷顺序是「做题要求 → 材料 + 注释 → 填充语段」。旧 splitter 把「要求 + 材料 + 注释」塞进 `material_text`、把填充语段当 `content`，页面上就变成语段在上、要求在下。正确口径：**做题要求才是题干**（`content` = 「根据《曹刿论战》及下面的材料，在后面语段中的横线上填写恰当的内容。(3分)」），材料 + 注释 + 填充语段全进 `material_text`，配合上一轮「material_text 在题干下方」的固定规则，顺序与原卷一致。
+
+**否决 `approach` 当子题干**：`approach` 语义是「解题思路」（教研五字段之一、AI 结构化题也写它），学生端载荷根本不下发；塞入填充语段会让教研老师看到「思路」栏是一段带横线要填的语段，且要新增渲染位置。语义纯净的正确做法是新增列，但为 3 道题加字段 + 改 API + 改 4 处渲染性价比太低。
+
+**改动**：`chinese_inline_material.py` 新增最高优先级规则 `_split_lead_as_stem`（首段做题要求 → `content`，其余全文 → `material_text`）；因返回顺序是 `rest + material`，与其余规则相反，在 `split_inline_material` 里单独自校验。注释块规则降为处理「首段不是做题要求」的题。单测 20 例全过（含 3 题实测切片）。
+
+**回填**：新脚本 `tools/db/lead_stem_backfill.py`（默认 dry-run，`--apply` 落库），一条命令完成搬运 + 未触碰列 MD5 校验 + 按现有口径重算 `content_hash` + 写回滚 SQL。命中并回填 3 行：q7750、q7561（八中《醉翁亭记》14 题）、q7613（西城 2026 模拟二）；回滚 `tools/db/backups/20261121_lead_stem_rollback.sql`。重跑 dry-run = 0 行（幂等）。八中 14 题是 11-20 spec §2.2 的样板题，故该 spec 的 §2.2/§4.3 rule 0/§7 断言/§11 决策 7 一并修订。
+
+---
+
+## 2026-11-21 材料渲染位置固定规则：文章在题干上、题中素材在题干下
+
+**用户裁决**：`material_url` 的文章显示在**题干上方**，`material_text` 的题中素材显示在**题干下方**。这是固定规则，不按「文章/题中素材」语义自行推断。起因是 `语文-初三(下)-202507-西城-模拟二` Q8（paper 730 / q7744）：题干是「班会的最后，小文写了一段话……根据文段内容，下面选项中最恰当的一项是」，文段在 `material_text`（295 字，`material_method='rule'`），按规则必须显示在设问下方。
+
+**此前口径（已作废）**：2026-11-20 spec §6.2 写「materialUrl → materialText → 题干」整体置于题干上方；changelog 1858 行也把「在题干上方渲染材料块」当设计决定。§4.3 rule 4 虽点名 Q8「题干在前、材料在后」，但只用于切分 `content`/`material_text`，没落到渲染位置。这是设计阶段漏掉，不是后来改坏的。
+
+**改动**：四处渲染改为两次调用 `MaterialBlock`——上方实例只传 `url`（`text={null}`，testId 保持 `question-material` 等原名），下方实例只传 `text`（`url={null}`，新增 `question-material-text` / `result-material-text` / `history-material-text` / `print-material-text`）。涉及 `QuestionRunner`、`AnswerResultList`、`PracticeHistoryDetailPage`、`PrintPaper`；`MaterialBlock` 内部取文/缓存/重试与 doc → text 相对顺序不变。物化/道法同样适用。单测断言改为「文章 → 题干 → 题中素材」的 DOM 顺序，5 个测试文件 68 例全过。
+
+**同步文档**：spec `2026-11-20-chinese-material-doc-design.md`（§2.2 / §6.2 / §6.4 / §7 / §8 / §11 决策 6）、spec `2026-11-02-material-question-design.md` §6.4、plan `2026-11-20-chinese-material-doc.md`、plan `2026-11-18-training-print-pdf.md`、`UX-UI设计文档.md` 考试三页参数化、数据库设计文档渲染伪代码。
+
+---
+
 ## 2026-11-21 手工补题在语文卷崩溃：ChineseStrategy 没有 split_material
 
 **现象**：用户修海淀模拟二题6（选项缺失），录完 A–D 并确认后，第 8/9 步报 `[ERROR] 阶段失败：'ChineseStrategy' object has no attribute 'split_material'`，本题录入未落盘。
@@ -3899,3 +3923,5 @@ MDM 描述文件（`com.apple.applicationaccess` 的 `allowAssistant=false`，ma
 **2026-11-21（再续）：会导致整批回滚的具体异常 + 单条 savepoint 隔离**：继续排查「什么异常会让 apply 整批回滚」，实测确认三类触发点——补题记录缺 `group_order`（KeyError）、题号非数字（ValueError）、extracted JSONL 有坏行（JSONDecodeError）；此外补题图片物化、共享文章文档写入、DB UNIQUE(content_hash) 冲突等也会抛。原实现一条抛异常就由 `run()` 外层回滚整批，好题跟着丢。修法：每条记录前 `SAVEPOINT apply_fix_record`，异常或「跳过」时 `ROLLBACK TO SAVEPOINT` 只撤销本条，成功才 `RELEASE`；题号先用 `_go_int()` 归一，非法值单独退回清单。配合上一条「applied 标记在 commit 后写」，现在单条坏记录既不会拖垮整批，也不会让好题被误标成已入库。测试：`test_one_bad_record_does_not_roll_back_whole_batch`、`test_invalid_group_order_is_rejected_without_crashing`。
 
 **2026-11-21（再续）：题号丢失时补题无法指认 material_url——三态字段 + 同卷候选**：导入 2025 海淀模拟二时预览冒出一条无关数学卷的 `[replay]`（`apply_fixes.run()` 在按学科/卷名过滤**之前**就打印，纯日志泄漏，未写库；另案）。顺查发现同一卷语文 Q20 的题干「阅读第一封信……」在 PDF→MD 时丢了行首 `20.`，切题器下一个题号是 `21.`，于是两封信材料 + Q20 题干整段并进 Q21–23，`material_text` 为空 → 分不到文章组 → published `material_url=None`；Q21 拿到带 `<u>` 标注且尾部粘着 Q20 题干的加长版，生成了 `8e5d0eab131b`。Q20 库里另存的 `8bdd2e775c45` 是干净版两封信 → **一篇两文**。`recognition_scan._body_owners` 把正文归给「前面最后一个题号」，丢了 `20.` 就误报「属于第 19 题」——这是纯规则假阳性，不是 LLM 判断。用户对设计裁决：小节标题同样会在转换中丢失，不能靠它自动推归属，选「补题记录显式 `material_url`」。修法：`material_url` 三态——字段不存在=不动（兼容旧记录/非 TTY）、显式 null=确认无材料写 NULL、字符串=写该 URL 并按它重算 `content_hash`（URL 本就在指纹里），文档不存在拒写；显式 URL 优先于 `material_scope` 且不走 `_correct_article_doc`（那是改正文重算 doc_key，不是认领已有文章）。交互候选从**同卷 published JSONL** 收集已有 URL 按题号列出，人看着原卷选序号/粘贴/`n`，不依赖小节标题。spec §4.5 同步。测试：`test_apply_fixes.py` 4 例（写URL+hash/清NULL/不动/缺文档拒写）、`test_manual_fix.py` 2 例（候选去重排序/缺文件空）。
+
+**2026-11-21（再续）：语文题中材料三处规则太窄，材料并进题干**：用户报 2025 西城模拟二 Q8/Q15 材料没被拆出。根因在 `tools/data-refinery/src/subject_strategies/chinese_inline_material.py`：① 注释块只认 `注：`，`[注释]/【注释】/【注】/注释：/[注]` 全漏；② 切点「最后一个圈号后第一个句号」在末条无句号时贪进语段（陈经纶「④数：多次」）、无圈号单条注又把语段占位 ① 当注条目（海淀期中 `[注] 阻风…`）、句号后换行仍被续写守卫误挡（35中语段以「“内核稳定”指…」开头）；③「题干在前、材料在后、无后续语段」没有规则（西城 Q8、首师大 Q13）。修法：扩 `NOTE_RE`；`_cut_after_note` 改为「换行早于句号取换行」+ 无圈号单条注切到注记行末 + 句号后换行不触发续写守卫（补 `意思为/意即`）；新增 `_split_stem_then_material`（题干在前）并对选项块（含点号丢失的 `A …`）/填空线/设问开头设守卫；`_split_by_note` 拒绝只剩 `答:` 的语段；`material_doc_backfill.py` 的题中素材分支保留已有 `material_url`（否则 Q15 共享文章 URL 被写成 NULL）。`LEAD_RE`/`needs_llm` 补 `根据/依据` 与 `文段`，疑似题进复核清单。测试：`test_chinese_inline_material.py` 新增 Q8/Q15/陈经纶/35中/海淀期中/选项块/意思为/答: 等 10 例，refinery 全量 2056 passed。已对 paper 730 跑 `material_doc_backfill.py --paper 730 --apply`（仅 Q8=7744、Q15=7750 两行；幂等复跑 0 行；回滚 `tools/db/backups/20261121_material_doc_rollback.sql`）。

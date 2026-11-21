@@ -221,9 +221,10 @@ export function AnswerResultList({
                     </div>
                     {/* Content */}
                     <div className="flex-1 min-w-0">
+                      {/* 材料位置固定规则：文章（material_url）在题干上方；题中素材（material_text）在题干下方 */}
                       <MaterialBlock
                         url={q.materialUrl}
-                        text={q.material}
+                        text={null}
                         variant="result"
                         testId="result-material"
                       />
@@ -232,6 +233,12 @@ export function AnswerResultList({
                           {preprocessMarkdown(q.text)}
                         </ReactMarkdown>
                       </div>
+                      <MaterialBlock
+                        url={null}
+                        text={q.material}
+                        variant="result"
+                        testId="result-material-text"
+                      />
                       <div className="mt-2 px-3 py-2 bg-[var(--bg-base)] rounded-lg">
                         <span className="text-xs text-[var(--text-tertiary)]">你的答案：</span>
                         {a?.studentAnswer ? (

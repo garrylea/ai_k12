@@ -102,7 +102,8 @@ describe('PrintPaper', () => {
         ]}
       />,
     );
-    expect(screen.getAllByTestId('print-material')).toHaveLength(2);
+    // 2026-11-21 修订：material_text 单独成块，在题干下方
+    expect(screen.getAllByTestId('print-material-text')).toHaveLength(2);
   });
 
   it('选择题打印选项且不留作答空白；填空题短空白、主观题长空白', () => {
@@ -390,6 +391,8 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
 
         return (
           <section className="print-q" data-testid="print-question" key={q.n}>
+            {/* 2026-11-21 修订：material_text 块移到题干下方、testId 改 print-material-text；
+                此处为历史稿，现行实现见 2026-11-20-chinese-material-doc 计划与 PrintPaper.tsx */}
             {showMaterial && (
               <div className="print-material md-prose" data-testid="print-material">
                 <ReactMarkdown

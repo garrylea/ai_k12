@@ -74,7 +74,6 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
         const text = q.material?.trim() ? q.material : null;
         const showDoc = url !== null && url !== lastUrl;
         const showText = text !== null && text !== lastText;
-        const showMaterial = showDoc || showText;
         lastUrl = url;
         lastText = text;
         const options = optionsOf(q);
@@ -82,13 +81,10 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
 
         return (
           <section className="print-q" data-testid="print-question" key={q.n}>
-            {showMaterial && (
+            {/* 材料位置固定规则：文章（material_url）在题干上方 */}
+            {showDoc && (
               <div className="print-material md-prose" data-testid="print-material">
-                <MaterialBlock
-                  url={showDoc ? url : null}
-                  text={showText ? text : null}
-                  variant="print"
-                />
+                <MaterialBlock url={url} text={null} variant="print" />
               </div>
             )}
 
@@ -123,6 +119,13 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
                 )}
               </div>
             </div>
+
+            {/* 题中素材（material_text）在题干下方 */}
+            {showText && (
+              <div className="print-material md-prose" data-testid="print-material-text">
+                <MaterialBlock url={null} text={text} variant="print" />
+              </div>
+            )}
 
             {blank && (
               <div

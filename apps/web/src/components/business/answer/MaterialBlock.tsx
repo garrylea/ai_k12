@@ -28,6 +28,10 @@ const SIZE: Record<NonNullable<MaterialBlockProps['variant']>, string> = {
 /**
  * 材料区：先渲染文章文档（按 url 取文），再渲染题中素材（materialText）。
  * url 是文章的唯一入口；text 为题目自带的补充材料。两者都缺省时不渲染。
+ *
+ * 位置固定规则（用户 2026-11-21）：material_url 的文章显示在题干上方，
+ * material_text 的题中素材显示在题干下方。调用方分两次传值（其一传 null）
+ * 即可把两块材料分别放到题干两侧；本组件内部顺序仍保持 doc → text。
  */
 export function MaterialBlock({
   url, text, variant = 'answer', draggable = false, testId, className = '',

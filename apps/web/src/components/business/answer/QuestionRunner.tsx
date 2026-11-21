@@ -582,12 +582,12 @@ export function QuestionRunner({
             nonScienceSubject ? 'max-h-[66.67%]' : choiceOptions ? 'max-h-[60%]' : 'max-h-[33%]'
           }`}
         >
-          {/* 同节共享材料（语文阅读/文段题）：文章 doc → 题中素材 → 题干。
+          {/* 材料位置固定规则（用户 2026-11-21）：material_url 文章 → 题干上方；material_text 题中素材 → 题干下方。
               理科保留独立滚动区（题目短路，避免材料把题面推出可视区）；
               非理科去掉独立上限，交给上面这层统一滚动 —— 否则 38vh 会先卡住，题干区多出的空间白给 */}
           <MaterialBlock
             url={q.materialUrl}
-            text={q.material}
+            text={null}
             variant="answer"
             draggable
             testId="question-material"
@@ -626,6 +626,15 @@ export function QuestionRunner({
               </div>
             )}
           </div>
+          {/* 题中素材（material_text）：固定显示在题干下方（用户 2026-11-21 规则），如「题干在前、材料在后」的文段题 */}
+          <MaterialBlock
+            url={null}
+            text={q.material}
+            variant="answer"
+            draggable
+            testId="question-material-text"
+            className={`mt-3 ${nonScienceSubject ? '' : 'max-h-[38vh] overflow-y-auto'}`}
+          />
           {/* 题目来源 + 卷内题号：专项练习传 questions.source / question_no；出问题时可据此溯源（2026-11-15 / 2026-11-16） */}
           {formatQuestionSource(q.source) && (
             <p

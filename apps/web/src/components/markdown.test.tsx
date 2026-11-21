@@ -446,4 +446,12 @@ describe('材料段落化（preprocessMaterialMarkdown）', () => {
     );
     expect(html).toContain('cn-material-note');
   });
+
+  it.each(['[注释]①晋侯：晋文公', '[注] 阻风：舟行因风受阻', '【注释】①治抚：治理抚州'])(
+    '方括号/注释体例也输出 cn-material-note: %s',
+    (note) => {
+      const html = render(preprocessMaterialMarkdown(`正文。\n${note}`));
+      expect(html).toContain('cn-material-note');
+    },
+  );
 });

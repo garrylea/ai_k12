@@ -222,7 +222,7 @@ export const preprocessMaterialMarkdown = (s: string | undefined | null): string
   const withNotes = prepared
     .split('\n')
     .map((line) =>
-      /^\s*(?:注|注释)\s*[:：]|^\s*【注】/.test(line)
+      /^\s*(?:注|注释)\s*[:：]|^\s*[\[【]\s*注\s*释?\s*[\]】]/.test(line)
         ? `\n<p class="cn-material-note">${line.trim()}</p>\n`
         : line,
     )

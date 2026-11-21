@@ -2044,10 +2044,13 @@ it('文章 + 题中素材 + 题干按顺序渲染', async () => {
       onFinish={async () => {}}
     />,
   );
-  const block = await screen.findByTestId('question-material');
-  await waitFor(() => expect(block.textContent).toContain('醉翁亭记'));
-  const text = block.textContent ?? '';
-  expect(text.indexOf('醉翁亭记')).toBeLessThan(text.indexOf('注：①罪废'));
+  // 2026-11-21 修订：文章在题干上方，题中素材在题干下方
+  const doc = await screen.findByTestId('question-material');
+  await waitFor(() => expect(doc.textContent).toContain('醉翁亭记'));
+  expect(screen.getByTestId('question-material-text').textContent).toContain('注：①罪废');
+  const stemText = screen.getByTestId('question-stem').textContent ?? '';
+  expect(stemText.indexOf('醉翁亭记')).toBeLessThan(stemText.indexOf('苏舜钦在沧浪亭中'));
+  expect(stemText.indexOf('苏舜钦在沧浪亭中')).toBeLessThan(stemText.indexOf('注：①罪废'));
 });
 ```
 
@@ -2082,11 +2085,16 @@ it('同文章 + 题中素材：文章只印一次，14 题的题中素材仍印'
     { n: '14', text: '题14', materialUrl: 'materials/chinese/k6/content.md',
       material: '《沧浪亭记》\n\n注：①罪废' },
   ]} />);
-  const blocks = screen.getAllByTestId('print-material');
-  expect(blocks).toHaveLength(2);
-  await waitFor(() => expect(blocks[0].textContent).toContain('醉翁亭记'));
-  expect(blocks[1].textContent).toContain('沧浪亭记');
-  expect(blocks[1].textContent).toContain('注：①罪废');
+  const docBlocks = screen.getAllByTestId('print-material');
+  const textBlocks = screen.getAllByTestId('print-material-text');
+  expect(docBlocks).toHaveLength(1);
+  expect(textBlocks).toHaveLength(1);
+  await waitFor(() => expect(docBlocks[0].textContent).toContain('醉翁亭记'));
+  expect(textBlocks[0].textContent).toContain('沧浪亭记');
+  expect(textBlocks[0].textContent).toContain('注：①罪废');
+  const sheetText = screen.getByTestId('print-sheet').textContent ?? '';
+  expect(sheetText.indexOf('醉翁亭记')).toBeLessThan(sheetText.indexOf('题14'));
+  expect(sheetText.indexOf('题14')).toBeLessThan(sheetText.indexOf('沧浪亭记'));
 });
 ```
 
@@ -2100,13 +2108,23 @@ Expected: FAIL.
 `QuestionRunner.tsx` — replace the `{q.material && (...)}` block with:
 
 ```tsx
+          {/* 2026-11-21 固定规则：文章在题干上方；题中素材在题干下方 */}
           <MaterialBlock
             url={q.materialUrl}
-            text={q.material}
+            text={null}
             variant="answer"
             draggable
             testId="question-material"
             className={nonScienceSubject ? '' : 'max-h-[38vh] overflow-y-auto'}
+          />
+          {/* ...题干 JSX... */}
+          <MaterialBlock
+            url={null}
+            text={q.material}
+            variant="answer"
+            draggable
+            testId="question-material-text"
+            className={`mt-3 ${nonScienceSubject ? '' : 'max-h-[38vh] overflow-y-auto'}`}
           />
 ```
 
@@ -2115,23 +2133,17 @@ Import `MaterialBlock`.
 `AnswerResultList.tsx` — replace `{q.material && (...)}` with:
 
 ```tsx
-                      <MaterialBlock
-                        url={q.materialUrl}
-                        text={q.material}
-                        variant="result"
-                        testId="result-material"
-                      />
+                      <MaterialBlock url={q.materialUrl} text={null} variant="result" testId="result-material" />
+                      {/* ...题干 JSX... */}
+                      <MaterialBlock url={null} text={q.material} variant="result" testId="result-material-text" />
 ```
 
 `PracticeHistoryDetailPage.tsx` — replace the `{q.materialText && (...)}` block with:
 
 ```tsx
-      <MaterialBlock
-        url={q.materialUrl}
-        text={q.materialText}
-        variant="history"
-        testId="history-material"
-      />
+      <MaterialBlock url={q.materialUrl} text={null} variant="history" testId="history-material" />
+      {/* ...题面 JSX... */}
+      <MaterialBlock url={null} text={q.materialText} variant="history" testId="history-material-text" />
 ```
 
 `PrintPaper.tsx` — replace `let lastMaterial` with two keys, and the per-question dedup with:
@@ -2141,7 +2153,6 @@ Import `MaterialBlock`.
         const text = q.material?.trim() ? q.material : null;
         const showDoc = url !== null && url !== lastUrl;
         const showText = text !== null && text !== lastText;
-        const showMaterial = showDoc || showText;
         lastUrl = url;
         lastText = text;
 ```
@@ -2149,13 +2160,17 @@ Import `MaterialBlock`.
 and the material JSX with:
 
 ```tsx
-            {showMaterial && (
+            {/* 文章在题干上方 */}
+            {showDoc && (
               <div className="print-material md-prose" data-testid="print-material">
-                <MaterialBlock
-                  url={showDoc ? url : null}
-                  text={showText ? text : null}
-                  variant="print"
-                />
+                <MaterialBlock url={url} text={null} variant="print" />
+              </div>
+            )}
+            {/* ...题干 JSX... */}
+            {/* 题中素材在题干下方 */}
+            {showText && (
+              <div className="print-material md-prose" data-testid="print-material-text">
+                <MaterialBlock url={null} text={text} variant="print" />
               </div>
             )}
 ```

@@ -46,7 +46,7 @@ describe('AnswerResultList 材料排版', () => {
         onClose={() => {}}
       />,
     );
-    const block = screen.getByTestId('result-material');
+    const block = screen.getByTestId('result-material-text');
     expect(block.className).toContain('md-prose');
     expect(block.querySelector('h2')?.textContent).toBe('发言稿三');
     // 管线材料一行一段：单换行必须拆成两个 <p>，不能挤成一段

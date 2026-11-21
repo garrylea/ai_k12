@@ -44,7 +44,7 @@
 **不按长度分流**。短到 55 字的大题导语也进 md；长到 2500 字的文章当然也进 md。理由：
 
 - 长度阈值会让同一篇材料在不同卷里落到不同列，语义不稳。
-- 短导语若进 `material_text`，14 题那种「文章 + 题内材料」的渲染顺序会乱（导语会跑到文章与题干之间）。
+- 短导语若进 `material_text`，会被渲染到题干下方（用户 2026-11-21 固定规则），而 14 题那种「文章 + 题内材料」的导语本该随文章出现在题干上方，顺序会乱。
 
 ### 2.1 八中卷实证（1–8 题）
 
@@ -61,10 +61,10 @@
 ### 2.2 12–14 题（文章 + 题内材料并存）
 
 - 共享文章 = `## 醉翁亭记` + 欧阳修 + 四段正文 → `{k6}`，12/13/14 三题同 URL。卷面小节指令 `## (三)阅读下面《醉翁亭记》，完成 12-14题（共7分）` 不进文档（含题号/分值，换卷就变）。
-- 14 题题内材料 = `联系《醉翁亭记》及下面材料…` + `予以罪废①…（取材于苏舜钦《沧浪亭记》）` + `注：①…⑥…` + `欧阳修与苏舜钦…不同。` → `material_text`。
-- 14 题 `content` = `苏舜钦在沧浪亭中时而放声高歌…在于 ③`。
+- 14 题 `content`（题干）= `联系《醉翁亭记》及下面材料，在后面语段的横线上填写恰当的内容。(3分)` —— **做题要求**（2026-11-21 用户修订）。
+- 14 题 `material_text` = `予以罪废①…（取材于苏舜钦《沧浪亭记》）` + `注：①…⑥…` + `苏舜钦在沧浪亭中…在于 ③`（材料 + 注释 + 填充语段）。
 
-渲染顺序：文章（URL）→ `material_text` → 题干。
+渲染顺序（**用户 2026-11-21 修订的固定规则**）：文章（`material_url`）显示在**题干上方**；`material_text` 的题中素材显示在**题干下方**。不再按「doc → text → 题干」整体置于题干上方。
 
 ### 2.3 同一篇文章的标注变体
 
@@ -104,7 +104,7 @@ output/assets/materials/chinese/{doc_key}/
 注：①罪废：因获罪被罢官 ②崇阜：高山 … ⑥磨戛（jiá）：摩擦碰撞欧阳修与苏舜钦同处贬谪之境，都借山水安顿身心，但“乐”的内涵不同。
 ```
 
-按用户 2026-11-20 的原话，这条 `注：…不同。` 整行都算注释，渲染成**灰色小字**；`content` 从「苏舜钦在沧浪亭中…」开始。切分器在最后一个 ①–⑳ 条目之后的第一个 `。` 处切，`注：` 之前另起一行。
+按用户 2026-11-20 的原话，这条 `注：…不同。` 整行都算注释，渲染成**灰色小字**（2026-11-21 起该行随材料+填充语段一起留在 `material_text`，`content` 改为做题要求）。切分器在最后一个 ①–⑳ 条目之后的第一个 `。` 处切，`注：` 之前另起一行。
 
 前端 `preprocessMaterialMarkdown` 把以 `注：` / `注释：` / `【注】` 开头的整行包成 `<p class="cn-material-note">…</p>`，CSS 定义为**灰色小字**（12px，`var(--text-tertiary)`，行高 1.6）。不改正文里其他 `注` 字。
 
@@ -163,11 +163,13 @@ split_inline_material(content) -> (material_text | None, rest)
 
 规则优先级：
 
+0. **做题要求首段**（2026-11-21 用户裁决，最高优先级）：首段形如「根据/联系/结合/阅读/参考/依据 … 下面/上述/以上/以下 … 材料/语段/文字/短文/文章/文段 …（N分）」的做题要求 → `content` = 该首段；其余全文（材料 + 注释 + 填充语段）→ `material_text`。命中后不再走下面任何规则。西城 2025 模拟二 Q15、八中 14 题、西城 2026 模拟二是同一形态。注意：该规则 `material`=其余全文、`rest`=首段，拼回顺序与其余规则相反，代码里单独按 `rest + material` 自校验。
 1. 命中 `【链接材料】` / `材料:` 标记：从标记起到下一个空行段落止。
-2. 命中 `注：` + ①–⑳ 条目：`material_text` = 引导语 + 材料正文 + `注：…` 注释行（含其后的过渡句，整行灰色）；**切点 = 最后一个 ①–⑳ 条目之后的第一个 `。`**，`content` 从该句号之后开始（八中 14 题即 `material_text` 以「…不同。」结尾，`content` 以「苏舜钦在沧浪亭中…」开头）。`注：` 之前插一个换行，让注释独占一行。
-3. 命中「联系/阅读/结合/参考 … 下面/上述/以下 … 材料/语段/文字/短文/文章」引导语，且后面有独立材料段：材料 = 引导语到答题段之前；答题段 = 以 `结合/根据/请/谈谈/说说/分析/概括/说明` 开头且含完整句子的最后一段。
+2. 命中注释块（行首 `注：` / `注释：` / `[注释]` / `【注释】` / `[注]` / `【注】`。2026-11-21 扩宽，此前只认 `注：`，西城 Q15「[注释]」、陈经纶「【注释】」、海淀期中「[注]」全部漏切）：`material_text` = 引导语 + 材料正文 + 注释块；**切点**取注释末条之后「换行早于句号」的位置——末条无句号时切在行末，不贪进语段（陈经纶「④数：多次」后直接换行）；无圈号的单条注只切到注记行末（海淀期中 `[注] 阻风：…`）；句号后是换行就不触发「注释续写」守卫（35中语段以「“内核稳定”指…」开头也不能漏切）。注释标记前插一个换行，让其独占一行。八中 14 题、西城 15 题这类「首段即做题要求」的题已由规则 0 优先接走；本规则只处理首段不是做题要求、注释块后无填充语段的题。
+3. 命中「联系/结合/阅读/参考/根据/依据 … 下面/上述/以下 … 材料/语段/文字/短文/诗句/文章/文段」引导语，且后面有独立材料段：材料 = 引导语到答题段之前；答题段 = 以 `结合/根据/请/谈谈/说说/分析/概括/说明` 开头且含完整句子的最后一段。
+4. **题干在前、材料在后**（无注释块、无引导语；西城模拟二 Q8、首师大 Q13、汇文 Q28 等）：首段是设问（同时含「这段/文段/诗/两首诗/文章…」材料指代与「的一项是/最恰当/分析/概括/异同…」设问词），其后是正文段（汉字 ≥60、无选项行、无填空线、不以设问引导开头）→ 材料 = 其后正文，`content` = 首段。选项块（`A.` / `A ` 这类点号被 OCR 丢掉的 A/B/C/D 行）一律不当材料。
 
-**publish / backfill 只跑上面三条规则，不调 LLM。** 规则切不动且 `len(content) >= 200`、有引导语的题，写入 `output/material_inline_review.jsonl`；由 `chinese_inline_material_cli.py` 单独跑 LLM（只判「切在第几行」，按原文切片）和人工确认，结果回写 extracted JSONL / DB。这样 publish 保持离线、确定性。
+**publish / backfill 只跑上面四条规则，不调 LLM。** 规则切不动且 `len(content) >= 200`、有引导语的题，写入 `output/material_inline_review.jsonl`；由 `chinese_inline_material_cli.py` 单独跑 LLM（只判「切在第几行」，按原文切片）和人工确认，结果回写 extracted JSONL / DB。这样 publish 保持离线、确定性。
 
 自校验：`material + rest == content`，**比较前先归一空白**（注与过渡句之间插的展示换行不算原文差异）。不成立即不切。
 
@@ -277,9 +279,16 @@ material = [docText, q.material_text].filter(Boolean).join('\n\n') || null
 3. `PracticeHistoryDetailPage.tsx`（历史回放）
 4. `components/business/print/PrintPaper.tsx`（PDF）
 
-顺序：`materialUrl` 文档正文 → `materialText` → 题干。`materialText` 为空时跳过；两者都空不渲染材料区。
+**材料位置固定规则（用户 2026-11-21 修订，覆盖原「全部置于题干上方」口径）**：
 
-样式沿用现有 `data-testid="question-material"`：浅底、理科 38vh 可滚动、结果页/历史 32vh；**不折叠**。
+| 字段 | 显示位置 | 对应 testId |
+|---|---|---|
+| `materialUrl` 文章文档 | **题干上方** | `question-material` / `result-material` / `history-material` / `print-material` |
+| `materialText` 题中素材 | **题干下方** | `question-material-text` / `result-material-text` / `history-material-text` / `print-material-text` |
+
+实现上每处调用 `MaterialBlock` 两次：上方实例只传 `url`（`text={null}`），下方实例只传 `text`（`url={null}`）。某块为空则该实例不渲染；两者都空不渲染材料区。`MaterialBlock` 内部仍保持 doc → text 的相对顺序，不改变取文/缓存/重试逻辑。
+
+样式沿用现有材料块样式：浅底、理科 38vh 可滚动、结果页/历史 32vh；**不折叠**。题干上方的文章块沿用原 `data-testid`，题干下方的题中素材块用上表 `-text` 后缀。
 
 ### 6.3 注释灰色小字
 
@@ -297,7 +306,7 @@ material = [docText, q.material_text].filter(Boolean).join('\n\n') || null
 
 `usePdfPrint` 目前只等图片。增加：**打开预览前**先把页面里所有 `materialUrl` 拉进模块级缓存（`Promise.all`，3s 超时也继续），`PrintPaper` 从缓存**同步**读正文（缓存缺失才显示占位）。不能等 `window.print()` 时再拉——预览本身就要显示文章。超时/失败时宁可缺材料也不让打印按钮卡死。
 
-`PrintPaper` 的「相邻同材料只印一次」比较键从 `material` 文本改为 `materialUrl + materialText`（文章题只比 URL，题中素材题只比 text）。
+`PrintPaper` 的「相邻同材料只印一次」比较键从 `material` 文本改为 `materialUrl + materialText`（文章题只比 URL，题中素材题只比 text）。打印位置同样遵守固定规则：文章块（`print-material`）在题干前，题中素材块（`print-material-text`）在题干后；两个去重标记 `showDoc` / `showText` 分别控制各自那一块。
 
 ---
 
@@ -318,13 +327,13 @@ material = [docText, q.material_text].filter(Boolean).join('\n\n') || null
 | 7、8 | k5 相同；md 内含 `<u>人们在…</u>` |
 | 9 | 两列 NULL |
 | 12、13、14 | k6 相同；文件正文含四段《醉翁亭记》；首行是「## 醉翁亭记」，**不含**「阅读下面…完成 12-14题」 |
-| 14 | `material_text` 含《沧浪亭记》+ `注：…`；`content` 以「苏舜钦在沧浪亭中」开头；`material_method='rule'` |
+| 14 | `content` = 「联系《醉翁亭记》及下面材料…(3分)」（做题要求）；`material_text` 含《沧浪亭记》+ `注：…` + 填充语段「苏舜钦在沧浪亭中…」；`material_method='rule'` |
 | 16–18、19–22、23–25 | 各一组，19–22 取含标注的 canonical |
 
 4. `ls output/assets/materials/chinese/{k}/`：`content.md` 存在，图片引用可解析。
 5. 起后端 + 前端，打开 paper 667 的作答页与结果页：
-   - 12 题先看到《醉翁亭记》，再看到题干；
-   - 14 题依次看到《醉翁亭记》→《沧浪亭记》→ 注（灰色小字）→ 题干；
+   - 12 题先看到《醉翁亭记》（题干上方），再看到题干；
+   - 14 题依次看到《醉翁亭记》（题干上方）→ 题干「联系《醉翁亭记》及下面材料…(3分)」→《沧浪亭记》→ 注（灰色小字）→ 填充语段「苏舜钦在沧浪亭中…」（均在题干下方）；
    - PDF 导出含文章且不重复。
 6. 通过后再跑全量语文回填 + 单元测试。
 
@@ -347,9 +356,9 @@ material = [docText, q.material_text].filter(Boolean).join('\n\n') || null
 
 **Web**
 - `useMaterialDoc.test.ts`（新）：加载/缓存/失败重试。
-- `QuestionRunner.test.tsx` / `AnswerResultList.test.tsx` / `PracticeHistoryDetailPage.test.tsx`：文章 + 题中素材 + 题干顺序。
+- `QuestionRunner.test.tsx` / `AnswerResultList.test.tsx` / `PracticeHistoryDetailPage.test.tsx`：文章在题干上方、题中素材在题干下方（断言 DOM 顺序：文章 → 题干 → 题中素材）。
 - `markdown.test.tsx`：`注：` 行输出 `cn-material-note`。
-- `PrintPaper.test.tsx`：同 URL 只印一次、14 题两块材料都印。
+- `PrintPaper.test.tsx`：同 URL 只印一次、14 题两块材料都印，且文章在题干前、题中素材在题干后。
 
 ---
 
@@ -386,6 +395,8 @@ material = [docText, q.material_text].filter(Boolean).join('\n\n') || null
 | 3 | 前端取文 | 按 `material_url` 取文件，不新增 `materialDoc` |
 | 4 | 迁移范围 | 先语文 783 题；物化不动 |
 | 5 | 试点 | 先八中 paper 667，通过后再全量 + 单测 |
+| 6 | 材料显示位置（2026-11-21 用户修订） | **固定规则**：`material_url` 文章在题干上方，`material_text` 题中素材在题干下方；覆盖原 §6.2「doc → text → 题干」整体置顶口径。四处分块渲染，物化/道法同样适用。 |
+| 7 | 做题要求归位（2026-11-21 用户裁决） | 「根据/联系…下面材料…（N分）」这类**做题要求是题干**，进 `content`；材料 + 注释 + 填充语段一起进 `material_text`。不用 `approach` 当子题干——它是「解题思路」语义，且学生端不下发。受影响 3 题已定向回填。 |
 
 ---
 

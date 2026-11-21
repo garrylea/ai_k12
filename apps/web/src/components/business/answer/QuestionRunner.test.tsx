@@ -345,7 +345,7 @@ describe('内联自评闸门按学科开放（闸门③）', () => {
 });
 
 describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
-  it('material 非空时题干上方渲染材料块（含图片走 resolveAsset），无 material 不渲染', () => {
+  it('material_text 非空时题干下方渲染材料块（含图片走 resolveAsset），无 material 不渲染', () => {
     const withMaterial: RunnerQuestion[] = [{
       n: '1',
       text: '根据材料回答',
@@ -364,7 +364,7 @@ describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
       />,
     );
 
-    const block = screen.getByTestId('question-material');
+    const block = screen.getByTestId('question-material-text');
     expect(block.textContent).toContain('这是阅读材料');
     expect(block.querySelector('img')?.getAttribute('src')).toContain('/assets/chinese/paper/fig1.png');
     // 材料块是 Markdown 正文容器：必须挂 md-prose，恢复被 Tailwind preflight
@@ -383,6 +383,7 @@ describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
         onFinish={async () => {}}
       />,
     );
+    expect(screen.queryByTestId('question-material-text')).toBeNull();
     expect(screen.queryByTestId('question-material')).toBeNull();
   });
 
@@ -403,7 +404,7 @@ describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
         onFinish={async () => {}}
       />,
     );
-    const block = screen.getByTestId('question-material');
+    const block = screen.getByTestId('question-material-text');
     expect([...block.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
       '①高铁一路向西。',
       '②眉山越来越近。',
@@ -411,7 +412,7 @@ describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
     ]);
   });
 
-  it('文章 + 题中素材 + 题干按顺序渲染', async () => {
+  it('文章在题干上方、题中素材在题干下方（用户 2026-11-21 固定规则）', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => '## 醉翁亭记' }));
     render(
       <QuestionRunner
@@ -429,10 +430,13 @@ describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
         onFinish={async () => {}}
       />,
     );
-    const block = await screen.findByTestId('question-material');
-    await waitFor(() => expect(block.textContent).toContain('醉翁亭记'));
-    const text = block.textContent ?? '';
-    expect(text.indexOf('醉翁亭记')).toBeLessThan(text.indexOf('注：①罪废'));
+    const doc = await screen.findByTestId('question-material');
+    await waitFor(() => expect(doc.textContent).toContain('醉翁亭记'));
+    expect(screen.getByTestId('question-material-text').textContent).toContain('注：①罪废');
+    // DOM 顺序必须是：文章 → 题干 → 题中素材
+    const stemText = screen.getByTestId('question-stem').textContent ?? '';
+    expect(stemText.indexOf('醉翁亭记')).toBeLessThan(stemText.indexOf('苏舜钦在沧浪亭中'));
+    expect(stemText.indexOf('苏舜钦在沧浪亭中')).toBeLessThan(stemText.indexOf('注：①罪废'));
   });
 });
 
@@ -486,13 +490,13 @@ describe('QuestionRunner 题面高度比例（非理科 2/3 / 理科 1/3）', ()
     const withMaterial: RunnerQuestion = { ...choiceQ, material: '## 材料一\n\n这是阅读材料' };
 
     const { unmount } = renderQ(2, withMaterial);
-    const chineseMaterial = screen.getByTestId('question-material');
+    const chineseMaterial = screen.getByTestId('question-material-text');
     expect(chineseMaterial.className).not.toContain('max-h-[38vh]');
     expect(chineseMaterial.className).not.toContain('overflow-y-auto');
     unmount();
 
     renderQ(1, withMaterial);
-    expect(screen.getByTestId('question-material').className).toContain('max-h-[38vh]');
+    expect(screen.getByTestId('question-material-text').className).toContain('max-h-[38vh]');
   });
 });
 

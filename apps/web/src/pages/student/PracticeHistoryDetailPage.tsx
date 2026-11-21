@@ -223,10 +223,10 @@ function QuestionCard({
         )}
       </div>
 
-      {/* 材料（语文/英语阅读材料、物化题内材料）：文章 doc → 题中素材，独立区块、可滚动 */}
+      {/* 材料位置固定规则：文章 doc（material_url）在题干上方；题中素材（material_text）在题干下方 */}
       <MaterialBlock
         url={q.materialUrl}
-        text={q.materialText}
+        text={null}
         variant="history"
         testId="history-material"
       />
@@ -240,6 +240,13 @@ function QuestionCard({
           {q.passageSentence && <p className="mt-1 text-[var(--text-secondary)]">{q.passageSentence}</p>}
         </div>
       ) : null}
+
+      <MaterialBlock
+        url={null}
+        text={q.materialText}
+        variant="history"
+        testId="history-material-text"
+      />
 
       {showSource && formatQuestionSource(q.questionSource) && (
         <p

@@ -206,7 +206,7 @@ explanation.explain({ ..., question: { content, answer, options, material } })
 - **作答页**（`QuestionRunner`）：已有 `q.material` 区，无需改结构。
 - **结果页**（`AnswerResultList`）：已有 `q.material`（`max-h-[32vh]` 可滚动），无需改结构。
 - **历史回放**（`PracticeHistoryDetailPage`）：**新增 material 渲染**（当前缺字段，见 §3）。
-- 视觉规范：材料区在题面上方、浅底、可滚动（复用现有 `data-testid="question-material"` 样式），问题区紧随其后。**不折叠**（学生需要边看材料边答题，折叠会多一次点击）。
+- 视觉规范（**2026-11-21 修订**）：材料位置为固定规则——`material_url` 文章在题干上方（复用 `data-testid="question-material"` 样式），`material_text` 题中素材在题干下方（`data-testid="question-material-text"`）。浅底、可滚动。**不折叠**（学生需要边看材料边答题，折叠会多一次点击）。原「材料区一律在题面上方」口径已作废。
 
 ### 6.5 接口变更
 

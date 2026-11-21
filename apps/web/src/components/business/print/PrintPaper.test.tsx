@@ -35,7 +35,7 @@ describe('PrintPaper', () => {
         ]}
       />,
     );
-    expect(screen.getAllByTestId('print-material')).toHaveLength(2);
+    expect(screen.getAllByTestId('print-material-text')).toHaveLength(2);
   });
 
   it('同 materialUrl 的连续题只印一次', () => {
@@ -55,11 +55,17 @@ describe('PrintPaper', () => {
       { n: '14', text: '题14', materialUrl: 'materials/chinese/k6/content.md',
         material: '《沧浪亭记》\n\n注：①罪废' },
     ]} />);
-    const blocks = screen.getAllByTestId('print-material');
-    expect(blocks).toHaveLength(2);
-    await waitFor(() => expect(blocks[0].textContent).toContain('醉翁亭记'));
-    expect(blocks[1].textContent).toContain('沧浪亭记');
-    expect(blocks[1].textContent).toContain('注：①罪废');
+    const docBlocks = screen.getAllByTestId('print-material');
+    const textBlocks = screen.getAllByTestId('print-material-text');
+    expect(docBlocks).toHaveLength(1);
+    expect(textBlocks).toHaveLength(1);
+    await waitFor(() => expect(docBlocks[0].textContent).toContain('醉翁亭记'));
+    expect(textBlocks[0].textContent).toContain('沧浪亭记');
+    expect(textBlocks[0].textContent).toContain('注：①罪废');
+    // 文章 → 题干 → 题中素材
+    const sheetText = screen.getByTestId('print-sheet').textContent ?? '';
+    expect(sheetText.indexOf('醉翁亭记')).toBeLessThan(sheetText.indexOf('题14'));
+    expect(sheetText.indexOf('题14')).toBeLessThan(sheetText.indexOf('沧浪亭记'));
   });
 
   it('选择题打印选项且不留作答空白；填空题短空白、主观题长空白', () => {
