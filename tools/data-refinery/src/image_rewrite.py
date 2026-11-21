@@ -19,7 +19,10 @@ from models import ExamQuestion, TextbookCard
 IMAGE_REF_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 # 已物化的路径前缀：再发布时原样跳过（否则会误报「图片源缺失」）
-_CANONICAL_PREFIXES = ("questions/", "textbooks/", "/assets/", "http://", "https://", "data:")
+_CANONICAL_PREFIXES = (
+    "questions/", "textbooks/", "materials/", "material/",
+    "/assets/", "http://", "https://", "data:",
+)
 
 
 class MissingImageError(ValueError):
@@ -106,6 +109,45 @@ def _rewrite_text(
 
     new_text = IMAGE_REF_RE.sub(replace, text or "")
     return new_text, materialized, metas
+
+
+def image_hashes_for(text: str | None, resolver: Callable[[str], Path | None]) -> list[str]:
+    """按出现顺序返回图片内容的 sha256（读不到源图则跳过）。"""
+    import hashlib
+
+    out: list[str] = []
+    for m in IMAGE_REF_RE.finditer(text or ""):
+        src = resolver(m.group(2))
+        if src is not None and src.exists():
+            out.append(hashlib.sha256(src.read_bytes()).hexdigest())
+    return out
+
+
+def rewrite_material_doc(
+    text: str,
+    resolver: Callable[[str], Path | None],
+    asset_store: AssetStore,
+    asset_prefix: str,
+) -> tuple[str, list[str]]:
+    """把文章正文里的图片按 fig_NN 物化到 asset_prefix，返回 (新正文, 物化路径)。"""
+    materialized: list[str] = []
+    index = 0
+
+    def replace(m: re.Match) -> str:
+        nonlocal index
+        alt, ref = m.group(1), m.group(2)
+        src = resolver(ref)
+        if src is None or not src.exists():
+            # 已是规范路径但本环境解析不到（http/data/未物化）→ 原样保留
+            print(f"[WARN] 文章图片源缺失，保留原引用：{ref}", flush=True)
+            return m.group(0)
+        index += 1
+        rel = f"{asset_prefix}/fig_{index:02d}{_ext_of(ref)}"
+        asset_store.put(rel, src)
+        materialized.append(rel)
+        return f"![{alt}]({rel})"
+
+    return IMAGE_REF_RE.sub(replace, text or ""), materialized
 
 
 def rewrite_fields(

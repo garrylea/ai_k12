@@ -68,19 +68,22 @@ def material_fingerprint(material: str | None) -> str:
     return s[:_MAT_HEAD] + s[mid - _MAT_MID // 2:mid + _MAT_MID // 2] + s[-_MAT_TAIL:]
 
 
-def content_hash(content: str | None, options=None, material: str | None = None) -> str:
+def content_hash(content: str | None, options=None, material: str | None = None,
+                 material_url: str | None = None) -> str:
     """题干（+ 选项 + 材料指纹）规范化后的 SHA-256，存 questions.content_hash 去重。
 
     必须带选项：`下列说法正确的是` 这类题题干相同、选项不同（2026-10-31 实测）。
     必须带材料指纹：跨卷同题干不同材料的语文阅读题不能被合并（2026-11-19 实测
     9 份卷共用一个 questions.id=5167，材料/答案互相覆盖）。
+    材料指纹同时覆盖 material_url（语文文章已迁到 materials/ 下的 md 文件）。
     无材料时与旧口径完全一致——存量非材料题的哈希不变。
     """
     base = normalize_content(content)
     sig = options_signature(options)
     if sig:
         base = f"{base}\x1f{sig}"
-    mat = material_fingerprint(material)
+    mat_input = f"{material_url or ''}\n{material or ''}"
+    mat = material_fingerprint(mat_input)
     if mat:
         base = f"{base}\x1fmat:{mat}"
     return hashlib.sha256(base.encode("utf-8")).hexdigest()

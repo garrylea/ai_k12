@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+from pathlib import Path
+from typing import Callable
+
+from image_rewrite import image_hashes_for, rewrite_material_doc
 
 _SUB_DOT_RE = re.compile(r"<sub\b[^>]*>.*?</sub>", re.I | re.S)
 _EMPHASIS_TAG_RE = re.compile(r"</?(?:u|span)\b[^>]*>", re.I)
@@ -82,3 +86,52 @@ def doc_key(body: str, image_hashes: list[str]) -> str:
     payload = normalize_for_group(strip_section_instruction(body))
     payload += "\n" + "\n".join(sorted(image_hashes))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def write_material_doc(
+    body: str,
+    *,
+    resolver: Callable[[str], Path | None],
+    store,
+    assets_dir: Path,
+    subject_code: str = "chinese",
+) -> tuple[str, str]:
+    """写 `materials/{subject}/{doc_key}/content.md`，返回 (doc_key, material_url)。"""
+    from page_markers import strip_page_markers
+
+    clean, _ = strip_page_markers(strip_section_instruction(body))
+    hashes = image_hashes_for(clean, resolver)
+    key = doc_key(clean, hashes)
+    prefix = f"materials/{subject_code}/{key}"
+    new_body, _ = rewrite_material_doc(clean, resolver, store, prefix)
+    out = Path(assets_dir) / prefix / "content.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(new_body.strip() + "\n", encoding="utf-8")
+    return key, f"{prefix}/content.md"
+
+
+def build_groups(rows: list[dict]) -> dict[str, list[dict]]:
+    """按 (paper_id 或 source) + 归一化 material_text 分组。纯标题组不返回。"""
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        text = row.get("material_text") or ""
+        if not text.strip() or is_heading_only(text):
+            continue
+        key = f"{row.get('paper_id') or row.get('source')}\x1f{normalize_for_group(text)}"
+        groups.setdefault(key, []).append(row)
+    return groups
+
+
+def rewrite_hash_for_row(row: dict) -> str:
+    """回填后用新的 material_url 重算 content_hash（与 db_loader 同口径）。"""
+    import json
+
+    from db_loader import content_hash
+
+    opts = row.get("options")
+    if isinstance(opts, str):
+        opts = json.loads(opts) if opts.strip() else None
+    return content_hash(
+        row.get("content"), opts,
+        row.get("material_text"), row.get("material_url"),
+    )
