@@ -849,15 +849,23 @@ In `tools/data-refinery/src/publish_cli.py`:
                     out_items.append(item.model_dump(mode="json"))
 ```
 
-- [ ] **Step 6: Run publish tests**
+- [ ] **Step 6: Persist `material_method` in db_loader**
+
+`material_method` is emitted by publish but must reach the DB in this task (otherwise the field is dead on arrival). In `db_loader.py`:
+
+- `_update_question_row` UPDATE list: add `material_method=%s`, and add `q.get("material_method")` to the params;
+- INSERT column list: add `material_method`, add one `%s` to VALUES, add `q.get("material_method")` to params;
+- the `old_hash == chash` metadata branch: add `material_method=%s` and `q.get("material_method")`.
+
+- [ ] **Step 7: Run publish tests**
 
 Run: `cd tools/data-refinery && python3 -m pytest tests/test_publish_cli.py -q`
 Expected: all pass.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add tools/data-refinery/src/models.py tools/data-refinery/src/chinese_material_doc.py tools/data-refinery/src/publish_cli.py tools/data-refinery/tests/test_publish_cli.py
+git add tools/data-refinery/src/models.py tools/data-refinery/src/chinese_material_doc.py tools/data-refinery/src/publish_cli.py tools/data-refinery/src/db_loader.py tools/data-refinery/tests/test_publish_cli.py
 git commit -m "feat(refinery): externalize chinese articles to markdown in publish"
 ```
 
@@ -924,7 +932,7 @@ At `load_questions`:
             chash = content_hash(content, opts, q.get("material_text"), q.get("material_url"))
 ```
 
-Also update the `old_hash == chash` metadata branch to write `material_url` and `material_method`:
+Also update the `old_hash == chash` metadata branch to write `material_url`（`material_method` 已在 Task 4 加过）：
 
 ```python
                         self._exec(
@@ -935,10 +943,7 @@ Also update the `old_hash == chash` metadata branch to write `material_url` and 
                              q.get("material_method"), qid))
 ```
 
-并在两处落库 SQL 补 `material_method`：
-
-- `_update_question_row` 的 UPDATE 列表加 `material_method=%s`，参数加 `q.get("material_method")`；
-- INSERT 的列清单加 `material_method`，`VALUES` 加一个 `%s`，参数加 `q.get("material_method")`。
+`_update_question_row` 与 INSERT 的 `material_method` 已在 Task 4 补过；本 Task 只确认它们同时带 `material_url`（原始代码已有）。
 
 - [ ] **Step 5: Run db_loader tests**
 
