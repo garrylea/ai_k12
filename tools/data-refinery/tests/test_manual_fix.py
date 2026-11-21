@@ -1052,7 +1052,7 @@ class _QuietConsole:
 
 
 def test_answer_only_record_keeps_stem(monkeypatch):
-    seq = iter(["42", "1"])
+    seq = iter(["42"])
     monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
     issue = {"source": "卷A", "rel_path": "数学/x/卷A", "group_order": 7,
              "kind": "answer_missing", "reasons": ["answer_empty"]}
@@ -1074,6 +1074,33 @@ def test_answer_only_skip_returns_empty(monkeypatch):
     issue = {"source": "卷A", "rel_path": "数学/x/卷A", "group_order": 7,
              "kind": "answer_missing"}
     assert manual_fix._ask_answer_only(issue, 7, {"content": "题干"}, _QuietConsole()) == []
+
+
+def test_collect_content_pre_read_shows_no_second_menu(monkeypatch):
+    """调用方已读到输入方式时不能再弹一条菜单，否则用户多敲的 1 会进正文第一行。"""
+    import io
+    class SpyConsole(_QuietConsole):
+        def __init__(self):
+            self.prompts = []
+        def prompt(self, text):
+            self.prompts.append(text)
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("答案正文\neof\n1\n\n"))
+    spy = SpyConsole()
+    got = manual_fix._collect_content(Path("/tmp"), allow_images=True,
+                                      first_line="1", label="答案")
+    assert got == "答案正文"
+    assert not any("选择答案输入方式" in p for p in spy.prompts)
+
+
+def test_answer_only_redo_command_reprompts(monkeypatch):
+    """只补答案时 r/redo 是重来命令，不能被当成答案写库。"""
+    seq = iter(["r", "42", "1"])
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
+    issue = {"source": "卷A", "rel_path": "数学/x/卷A", "group_order": 7,
+             "kind": "answer_missing"}
+    records = manual_fix._ask_answer_only(issue, 7, {"content": "题干"}, _QuietConsole())
+    assert records[0]["answer"] == "42"
 
 
 # ---------- 无图题配图 + 目录批量导入（第19题图变表格）----------
@@ -1383,7 +1410,7 @@ def test_material_split_skips_chinese_without_hook():
 
 def test_answer_only_fix_never_carries_material(monkeypatch):
     """只补答案时复制原 material_text 会让答案修正被材料归属判定误拦。"""
-    seq = iter(["42", "1"])
+    seq = iter(["42"])
     monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
     issue = {"source": "卷A", "rel_path": "数学/x/卷A", "group_order": 7,
              "kind": "answer_missing", "reasons": ["answer_empty"]}

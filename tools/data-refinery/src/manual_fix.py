@@ -877,7 +877,12 @@ def _collect_content(paper_md_dir: Path, *, allow_images: bool = True,
     while True:
         tip = (f"选择{label}输入方式 1/3（纯文字；或直接粘贴{label}）› " if not allow_images
                else f"选择{label}输入方式 1/2/3/4/5（5=多图+{label}；或直接粘贴{label} / ⌘V 图片后回车）› ")
-        c.prompt(tip)
+        # 调用方（只补答案）已在同一条提示上读到选择并传进来；这里再打一条
+        # 长得像菜单的提示会诱使用户多敲一次「1」，那个 1 会被当成正文第一行。
+        if pre_read is None:
+            c.prompt(tip)
+        else:
+            c.info(f"已选输入方式：接着粘贴{label}，EOF 结束")
         first = pre_read if pre_read is not None else _read_line()
         pre_read = None
         if first is None:
@@ -993,7 +998,7 @@ def _copyable_question_text(issue: dict) -> str:
 def _ask_material_scope(c) -> str | None:
     """材料修正归属：题内素材粘正文，共享文章只需指认 URL（正文已在 md 文档里）。"""
     c.prompt("材料需要修正吗？1 题内素材（粘正文，只挂本题）/ "
-             "2 共享文章（指认 URL，同节共用）/ 回车=不修 › ")
+             "2 共享文章（指认 URL，同节共用）/ 回车=正文不改（接着仍会问 URL 归属）› ")
     raw = (_read_line() or "").strip().lower()
     if raw == "1":
         return "inline"
@@ -1167,12 +1172,12 @@ def _ask_answer_only(issue: dict, target_no: int, original: dict,
     paper_md_dir = md_path.parent if md_path.name else (FIXES_DIR.parent / "md")
     answer = ""
     while True:
-        c.prompt(f"第 {target_no} 题答案（1文本/2图片/3文件/4剪贴板/5多图+题干）› ")
+        c.prompt(f"第 {target_no} 题答案（1文本/2图片/3文件/4剪贴板/5多图+答案）› ")
         text = _collect_answer(paper_md_dir, c)
-        if text is None:
+        if text is None or text in ("s", "skip"):
             c.warn(f"第 {target_no} 题已跳过")
             return []
-        if text in ("e", "edit"):   # 只补答案模式下 e 就是重来
+        if text in ("e", "edit", "r", "redo"):   # 只补答案模式下 e/r 就是重来
             continue
         if any(m in text for m in _ECHO_MARKERS):
             c.warn("答案里混进了界面文字，请重输")
@@ -1180,22 +1185,7 @@ def _ask_answer_only(issue: dict, target_no: int, original: dict,
         answer = text
         break
 
-    c.block("答案", answer, max_lines=4)
-    while True:
-        c.legend([("1", "确认"), ("2", "重输"), ("s", "跳过")])
-        c.prompt("选择 › ")
-        raw = _read_line()
-        if raw is None:
-            return []
-        choice = raw.strip().lower()
-        if choice in ("", "1"):
-            break
-        if choice == "2":
-            return _ask_answer_only(issue, target_no, original, c)
-        if choice in ("s", "skip"):
-            return []
-        c.warn("请按 1 确认 / 2 重输 / s 跳过")
-
+    # 正文已在 _collect_content 的确认框里展示并确认过，不再二次确认。
     return [{
         "source": issue["source"],
         "rel_path": issue["rel_path"],
@@ -1380,6 +1370,8 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
             if any(m in answer for m in _ECHO_MARKERS):
                 c.warn("答案里混进了界面文字，已置空")
                 answer = ""
+            if not answer.strip():
+                c.warn(f"第 {target} 题答案留空：复扫会再次报「答案缺失」，下次还会问你")
             record = {
                 "source": issue["source"],
                 "rel_path": issue["rel_path"],
