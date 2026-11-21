@@ -150,11 +150,35 @@ const mapOutsideFences = (s: string, fn: (t: string) => string): string =>
     .map((seg, i) => (i % 2 === 1 ? seg : fn(seg)))
     .join('');
 
+// ── 填空横线转义 ──
+// 中文题目的空位用连续下划线（___ / ____）表示。CommonMark 把成对的 ___X___
+// 解析成「粗斜体」（emphasis > strong），下划线被当标记吃掉、页面只剩 X；落单的
+// ___X（无收尾）才原样保留。这正是 2025 西城语文模拟二第 10 题的现象：
+// ___②___/___③___ 显示成 ②/③，而 ___④ 幸存（该题做过人工校对，DB 原文完好，
+// 不是校对吞的）。这里在预处理阶段把「连续 ≥2 个下划线」转义成 \_\_…，渲染时原样显示。
+// 边界：单个 _ 不动（保留 LaTeX 下标 x_1 / Markdown 斜体）；已转义的 \_ 不二次转义；
+// 行内代码与 $…$ 公式内部不动（那里的下划线是下标/代码字面语义）。
+const BLANK_UNDERSCORE_RE = /_{2,}/g;
+const CODE_OR_MATH_RE = /(\$\$[\s\S]*?\$\$|\$[^$\n]*?\$|`[^`]*`)/g;
+
+const escapeBlankUnderscores = (s: string): string =>
+  s
+    .split(CODE_OR_MATH_RE)
+    .map((seg, i) =>
+      i % 2 === 1
+        ? seg // 行内代码 / 公式段：原样保留
+        : seg.replace(BLANK_UNDERSCORE_RE, (run, offset: number, full: string) =>
+            // 前一个字符是反斜杠说明已经被转义过（如已入库的 \_\_\_\_），不再动
+            offset > 0 && full[offset - 1] === '\\' ? run : run.replace(/_/g, '\\_'),
+          ),
+    )
+    .join('');
+
 export const preprocessMarkdown = (s: string | undefined | null): string => {
   if (!s) return '';
   const restored = repairHtml(s.replace(/\\n(?![a-zA-Z])/g, '\n'));
   return mapOutsideFences(unwrapSvgFences(restored), (t) =>
-    normalizeMathDelimiters(normalizeLatexBrackets(t)),
+    escapeBlankUnderscores(normalizeMathDelimiters(normalizeLatexBrackets(t))),
   );
 };
 

@@ -346,6 +346,54 @@ describe('repairHtml：只修真正缺 > 的标签，不吞不等式链', () => 
   });
 });
 
+/**
+ * 填空横线（连续下划线）不能被 Markdown 当强调标记吃掉。
+ * 2026-11-21 用户报告：2025 西城语文模拟二第 10 题的 ___②___/___③___ 在页面上
+ * 只剩 ②/③，而落单的 ___④ 保留。DB 原文完好（做过人工校对，不是 TTY 吞的），
+ * 根因是 CommonMark 把成对的 ___X___ 解析成粗斜体（emphasis > strong），下划线
+ * 被当语法标记消耗。修在统一入口 preprocessMarkdown，一处改全局生效。
+ */
+describe('preprocessMarkdown：填空横线（连续下划线）原样显示', () => {
+  const REPORTED_Q10 =
+    '诗词中的女性形象充满了柔情与坚韧。《诗经》中提到“ ① ”是君子理想的伴侣；' +
+    '巾帼英雄木兰浴血奋战后，不图名利，“___②___，送儿还故乡”；才女李清照在《渔家傲》中用' +
+    '“九万里风鹏正举。风休住，___③___”表达对理想境界的向往；鉴湖女侠秋瑾的诗句' +
+    '“身不得，男儿列，心却比，___④ ,表现出豪迈的气概。';
+
+  it('真实题面：___②___ / ___③___ 的下划线不再被吃，且不产生强调标签', () => {
+    const html = render(REPORTED_Q10);
+    expect(html).toContain('___②___');
+    expect(html).toContain('___③___');
+    expect(html).toContain('___④');
+    expect(html).not.toContain('<em');
+    expect(html).not.toContain('<strong');
+  });
+
+  it('落单的 ___④ 仍原样显示（原本就不会被解析，不回归）', () => {
+    expect(render('心却比，___④ ,表现出豪迈的气概。')).toContain('___④');
+  });
+
+  it('已转义的 \\_\\_\\_\\_ 不被二次转义（原填空横线能力不回归）', () => {
+    expect(preprocessMarkdown('第\\_\\_\\_\\_个月')).toBe('第\\_\\_\\_\\_个月');
+    expect(render('第\\_\\_\\_\\_个月')).toContain('____个月');
+  });
+
+  it('单个下划线不动：LaTeX 下标与 Markdown 斜体仍正常', () => {
+    expect(preprocessMarkdown('$H _ { 2 } O _ { 2 }$')).toBe('$H _ { 2 } O _ { 2 }$');
+    expect(preprocessMarkdown('$x_{1}$')).toBe('$x_{1}$');
+    expect(render('公式 $x_{1}$ 与斜体 _x_')).toContain('<em>x</em>');
+  });
+
+  it('行内代码与公式内的连续下划线不动（避免破坏下标/代码字面语义）', () => {
+    const src = '代码 `a__b` 与公式 $x_{a__b}$';
+    expect(preprocessMarkdown(src)).toBe(src);
+  });
+
+  it('普通中文填空 ____ 原样渲染', () => {
+    expect(render('酒精具有挥发性和____性。')).toContain('____性');
+  });
+});
+
 describe('材料段落化（preprocessMaterialMarkdown）', () => {
   it('单个换行是自然段分界：补空行，让每段各自成 <p>', () => {
     const out = preprocessMaterialMarkdown('①第一段。\n②第二段。\n③第三段。');
