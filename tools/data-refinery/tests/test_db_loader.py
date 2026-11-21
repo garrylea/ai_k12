@@ -847,7 +847,7 @@ class TestLoadQuestionsPaperGrouping:
         loader.load_questions([q], paper=(_paper_meta(), 9))
         upd = [a for sql, a in queries if sql.startswith("UPDATE questions SET type=")]
         assert len(upd) == 1
-        assert upd[0][-2] == "新文段"  # material_text 参数
+        assert upd[0][-3] == "新文段"  # material_text 参数（其后是 material_method）
         assert upd[0][-1] == 501
 
     def test_writes_knowledge_points_from_extracted(self):
@@ -1053,5 +1053,5 @@ def test_cross_paper_shared_row_is_split():
     })
     loader.load_questions([q], paper=(_paper_meta(), 667))
     inserts = [a for sql, a in queries if sql.startswith("INSERT INTO questions")]
-    assert inserts and inserts[0][15] == chash  # 新行用带材料指纹的 hash
+    assert inserts and inserts[0][16] == chash  # 新行用带材料指纹的 hash（material_method 在 15）
     assert not [a for sql, a in queries if sql.startswith("UPDATE questions")]  # 旧行没被覆盖
