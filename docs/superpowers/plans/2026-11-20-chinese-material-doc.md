@@ -2073,6 +2073,21 @@ it('同 materialUrl 的连续题只印一次', () => {
   ]} />);
   expect(screen.getAllByTestId('print-material')).toHaveLength(1);
 });
+
+it('同文章 + 题中素材：文章只印一次，14 题的题中素材仍印', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => '## 醉翁亭记' }));
+  render(<PrintPaper questions={[
+    { n: '12', text: '题12', materialUrl: 'materials/chinese/k6/content.md' },
+    { n: '13', text: '题13', materialUrl: 'materials/chinese/k6/content.md' },
+    { n: '14', text: '题14', materialUrl: 'materials/chinese/k6/content.md',
+      material: '《沧浪亭记》\n\n注：①罪废' },
+  ]} />);
+  const blocks = screen.getAllByTestId('print-material');
+  expect(blocks).toHaveLength(2);
+  await waitFor(() => expect(blocks[0].textContent).toContain('醉翁亭记'));
+  expect(blocks[1].textContent).toContain('沧浪亭记');
+  expect(blocks[1].textContent).toContain('注：①罪废');
+});
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -2119,12 +2134,16 @@ Import `MaterialBlock`.
       />
 ```
 
-`PrintPaper.tsx` — replace `material !== lastMaterial` with:
+`PrintPaper.tsx` — replace `let lastMaterial` with two keys, and the per-question dedup with:
 
 ```tsx
-        const materialKey = q.materialUrl ?? q.material ?? null;
-        const showMaterial = materialKey !== null && materialKey !== lastMaterial;
-        lastMaterial = materialKey;
+        const url = q.materialUrl ?? null;
+        const text = q.material?.trim() ? q.material : null;
+        const showDoc = url !== null && url !== lastUrl;
+        const showText = text !== null && text !== lastText;
+        const showMaterial = showDoc || showText;
+        lastUrl = url;
+        lastText = text;
 ```
 
 and the material JSX with:
@@ -2133,13 +2152,15 @@ and the material JSX with:
             {showMaterial && (
               <div className="print-material md-prose" data-testid="print-material">
                 <MaterialBlock
-                  url={q.materialUrl}
-                  text={q.material}
+                  url={showDoc ? url : null}
+                  text={showText ? text : null}
                   variant="print"
                 />
               </div>
             )}
 ```
+
+（`let lastUrl: string | null = null; let lastText: string | null = null;` 放在组件顶部。这样 12/13 只印文章一次，14 题因 text 变了会再印一块「只有题中素材」的材料，不会丢《沧浪亭记》。）
 
 - [ ] **Step 4: Map materialUrl in pages**
 
@@ -2221,12 +2242,12 @@ import { preloadMaterialDoc } from '@/hooks/useMaterialDoc';
     Promise.race([
       Promise.all(urls.map((u) => preloadMaterialDoc(u))).then(() => undefined),
       timeout,
-    ]).finally(() => { if (alive) setDocsReady(true); });
+    ]).catch(() => undefined).finally(() => { if (alive) setDocsReady(true); });
     return () => { alive = false; };
   }, [open, questions]);
 ```
 
-Render `<PrintPaper>` only when `docsReady`; otherwise show `<p className="print-toolbar-hint">材料加载中…</p>`.
+Render `<PrintPaper>` only when `docsReady`; otherwise show `<p className="print-toolbar-hint">材料加载中…</p>`。预取期间「导出 PDF」按钮加 `disabled={!docsReady}`（否则 `sheetRef.current` 为 null，会印一张只有提示的空纸）。
 
 In `usePrint.ts`, keep the existing image wait; no change needed if preview preloads.
 
