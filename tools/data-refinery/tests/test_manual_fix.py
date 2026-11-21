@@ -1514,3 +1514,98 @@ def test_published_material_urls_missing_file_returns_empty(tmp_path, monkeypatc
     monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
     issue = {"rel_path": "语文/模拟二", "source": "不存在", "group_order": 20}
     assert manual_fix._published_material_urls(issue) == []
+
+
+# ---------- 题干没问题、只改材料（2026-11-21 用户反馈：无法跳过题干去改材料）----------
+
+def _prep_material_only(tmp_path, monkeypatch):
+    """题干完整的语文 incomplete_content：问题在共享文章缺画线标记。"""
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    rel = "语文/初中/second/2026/模拟二"
+    ext = tmp_path / "output" / "extracted" / rel
+    ext.mkdir(parents=True)
+    _write(ext / "模拟二.jsonl", [{
+        "group_order": 5,
+        "content": "文段中的画线句存在一处问题，请你修改。(2分)",
+        "options": [], "answer": "把“舟搔”改为“操纵”",
+        "material_text": "## 第三站中国(北京)航天科学中心\n该中心舟搔传统展馆局限。",
+    }])
+    pub = tmp_path / "output" / "published" / rel
+    pub.mkdir(parents=True)
+    _write(pub / "模拟二.jsonl", [
+        {"group_order": 5, "material_url": "materials/chinese/814d0a125a3c/content.md"},
+    ])
+    md = tmp_path / "output" / "md" / rel / "模拟二.md"
+    md.parent.mkdir(parents=True)
+    md.write_text("", encoding="utf-8")
+    issue = {"source": "模拟二", "rel_path": rel, "group_order": 5,
+             "kind": "incomplete_content", "reasons": ["llm_marked_incomplete"],
+             "pdf": None, "md": str(md), "status": "pending"}
+    path = tmp_path / "issues.jsonl"
+    path.write_text(_json.dumps(issue, ensure_ascii=False) + "\n", encoding="utf-8")
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    return issue, md.parent
+
+
+def test_content_issue_material_only_keeps_stem_and_writes_inline_material(tmp_path, monkeypatch):
+    """选 3「只改材料」：题干/选项/答案原样带出，只写新材料，不重录题干。"""
+    issue, md_dir = _prep_material_only(tmp_path, monkeypatch)
+    new_material = "## 第三站中国(北京)航天科学中心\n<u>该中心舟搔传统展馆局限</u>。"
+    # 3=只改材料 → 1=题内素材 → 粘材料 → EOF → 1=确认
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "3\n1\n" + new_material + "\nEOF\n1\n"))
+
+    recs = manual_fix._ask(issue, md_dir)
+
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec["content"] == "文段中的画线句存在一处问题，请你修改。(2分)"
+    assert rec["options"] == []
+    assert rec["answer"] == "把“舟搔”改为“操纵”"
+    assert rec["material_text"] == new_material
+    assert rec["material_scope"] == "inline"
+    assert "material_url" not in rec, "URL 列不能写，沿用库里原值"
+
+
+def test_content_issue_material_only_article_scope_keeps_original_url(tmp_path, monkeypatch):
+    """共享文章选 2：收修正后的文章全文，URL 不写记录，交给 apply_fixes 重写 md。"""
+    issue, md_dir = _prep_material_only(tmp_path, monkeypatch)
+    new_article = "## 第三站中国(北京)航天科学中心\n<u>该中心舟搔传统展馆局限</u>。\n下一站……"
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "3\n2\n" + new_article + "\nEOF\n1\n"))
+
+    recs = manual_fix._ask(issue, md_dir)
+
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec["material_scope"] == "article"
+    assert rec["material_text"] == new_article
+    assert "material_url" not in rec, "沿用库里原 URL，才能走 _correct_article_doc 重写文档"
+    assert rec["content"].startswith("文段中的画线句")
+
+
+def test_content_issue_material_only_without_original_question_is_refused(tmp_path, monkeypatch, capsys):
+    """extracted 里没有当前题：没法保证题干不动，拒收而不是盲写空题干。"""
+    issue, md_dir = _prep_material_only(tmp_path, monkeypatch)
+    (tmp_path / "output" / "extracted" / issue["rel_path"] / "模拟二.jsonl").write_text("", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO("3\n1\n材料\nEOF\n1\n"))
+
+    assert manual_fix._ask(issue, md_dir) == []
+    assert "读不到本题当前题干" in capsys.readouterr().out
+
+
+def test_content_issue_material_only_end_to_end_records_fix(tmp_path, monkeypatch):
+    """走完整 review_pending：选 3 后能落补题文件并把 issue 标 recorded。"""
+    _, _ = _prep_material_only(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "3\n2\n## 第三站\n<u>画线句</u>\nEOF\n1\n"))
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    assert res["fixed"] == 1
+    out = (tmp_path / "fixes" / "模拟二.jsonl").read_text(encoding="utf-8")
+    rec = _json.loads(out.splitlines()[0])
+    assert rec["material_scope"] == "article" and "<u>画线句</u>" in rec["material_text"]
+    path = manual_fix.ISSUES_FILE
+    saved = _json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert saved["status"] == "recorded"

@@ -1403,10 +1403,10 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
 
 
 def _ask_verdict(issue: dict) -> str:
-    """内容层问题先问「你看来有没有问题」：problem 改 / ok 保持原样 / skip 稍后再说。"""
+    """内容层问题先问「你看来有没有问题」：problem 整题改 / material 只改材料 / ok 保持原样 / skip 稍后再说。"""
     c = console()
     c.legend([("1", "有问题，我来修正"), ("2", "没有问题，保持原样（不写库）"),
-              ("s", "跳过，下次再问"), ("q", "退出")])
+              ("3", "题干没问题，只改材料"), ("s", "跳过，下次再问"), ("q", "退出")])
     while True:
         c.prompt(f"第 {issue['group_order']} 题你看来有问题吗 › ")
         raw = _read_line()
@@ -1417,11 +1417,65 @@ def _ask_verdict(issue: dict) -> str:
             return "problem"
         if ans in ("2", "n", "no"):
             return "ok"
+        if ans in ("3", "m", "material"):
+            return "material"
         if ans in ("s", "skip"):
             return "skip"
         if ans in ("q", "quit"):
             raise SystemExit(0)
-        c.warn("请按 1（有问题）/ 2（没问题）/ s（跳过）/ q（退出）选择")
+        c.warn("请按 1（整题改）/ 2（没问题）/ 3（只改材料）/ s（跳过）/ q（退出）选择")
+
+
+def _ask_material_only(issue: dict, paper_md_dir: Path) -> list[dict]:
+    """题干/选项/答案原样保留，只收修正后的材料。
+
+    题干没问题、问题出在材料（如画线标记丢失）时走这里，不必被迫整题重录
+    （2026-11-21 用户反馈：没法跳过题干去改材料）。记录字段照抄 _ask_one，
+    material_text 来自这里；不写 material_url，让 apply_fixes 沿用库里的 URL，
+    共享文章时由 _correct_article_doc 重写 md 文档并同步兄弟题。
+    """
+    c = console()
+    original = _current_question(issue)
+    if original is None:
+        c.err("读不到本题当前题干（extracted 里没有这道题），不能只改材料；请选 1 整题重录")
+        return []
+    c.info("题干、选项、答案都保持原样，这里只收修正后的材料")
+    current_url = next((url for no, url in _published_material_urls(issue)
+                        if no == issue.get("group_order")), None)
+    scope = _ask_material_scope(c)
+    if scope is None:
+        c.warn("没有要改的材料，已跳过")
+        return []
+    if scope == "article" and not current_url:
+        c.warn("本题没有共享文章归属（同卷 published 里查不到 URL），请选「1 题内素材」")
+        return []
+    label = "文章全文" if scope == "article" else "材料"
+    if scope == "article":
+        c.info(f"沿用共享文章 URL：{current_url}（会重写这篇 md 文档，同文兄弟题同步）")
+    text = _collect_content(paper_md_dir, allow_images=False, label=label)
+    if text is None or not text.strip():
+        c.warn("没收到材料内容，已跳过")
+        return []
+    return [{
+        "source": issue["source"],
+        "rel_path": issue["rel_path"],
+        "group_order": issue["group_order"],
+        "content": original.get("content") or "",
+        "options": original.get("options"),
+        # 带回原题答案：_patch_extracted 会把 answer 写回 extracted，留空会把答案抹掉
+        "answer": original.get("answer") or "",
+        "material_text": text.strip(),
+        "material_scope": scope,
+        "issue_kind": issue["kind"],
+        "issue_reasons": issue.get("reasons") or [],
+        "expected_type": None,
+        "pdf": issue.get("pdf"),
+        "md": issue.get("md"),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "operator": getpass.getuser(),
+        "status": "ready",
+        "applied": False,
+    }]
 
 
 def _ask(issue: dict, paper_md_dir: Path,
@@ -1430,7 +1484,8 @@ def _ask(issue: dict, paper_md_dir: Path,
 
     内容层问题（不完整/前后题合并）多一道门：先问人工「有没有问题」。
     确认没问题 → 只把结论写进清单（verdict=no_change），一个字段都不改库；
-    确认有问题 → 走和缺题一样的录入流程，由 apply_fixes 原地更新。
+    确认有问题 → 走和缺题一样的录入流程，由 apply_fixes 原地更新；
+    题干没问题只是材料要改 → 只收材料，题干/选项/答案原样带出。
     """
     strategy = get_strategy(_subject_of(issue))
     _print_context(issue, index, total)
@@ -1446,6 +1501,8 @@ def _ask(issue: dict, paper_md_dir: Path,
             return []
         if verdict == "skip":
             return []
+        if verdict == "material":
+            return _ask_material_only(issue, paper_md_dir)
 
     targets = _targets(issue)
     records: list[dict] = []

@@ -8,6 +8,16 @@
 
 ---
 
+## 2026-11-21 补录工具加「只改材料」：题干没问题、问题在材料时不必整题重录
+
+**反馈**：修《语文-初三(下)-202607-西城-模拟二》第 5 题时，判定为「画线/加点标记确实丢失，仅报告不修复」——题干「文段中的画线句存在一处问题，请你修改」本身完整，缺的是共享文章 `materials/chinese/814d0a125a3c/content.md` 里的 `<u>…</u>` 标记。但 `manual_fix._ask` 的「有问题」只会进整题重录（`_ask_one` → `_collect_content` 强制重粘题干），用户卡在题干输入菜单，没法跳过题干去改材料。
+
+**改动**：`_ask_verdict` 新增第 3 项「题干没问题，只改材料」（返回 `material`）；`_ask` 收到后走新增的 `_ask_material_only`——从 `_current_question` 原样带出题干/选项/答案，只收修正后的材料文本，记录带 `material_scope` 但不写 `material_url`（沿用库里 URL，共享文章由 `apply_fixes._correct_article_doc` 重写 md 文档并同步兄弟题）。extracted 里读不到当前题时拒收，避免盲写空题干。`apply_fixes.py` 未改。
+
+**测试**：`tests/test_manual_fix.py` 新增 4 例（题内素材 / 共享文章 / 读不到原题拒收 / `review_pending` 端到端）；全量 data-refinery 2133 passed、10 skipped。
+
+---
+
 ## 2026-11-21 做题要求归位：西城 Q15 等 3 题的题干从填充语段改为做题要求
 
 **用户裁决**：`语文-初三(下)-202507-西城-模拟二` Q15（q7750）原卷顺序是「做题要求 → 材料 + 注释 → 填充语段」。旧 splitter 把「要求 + 材料 + 注释」塞进 `material_text`、把填充语段当 `content`，页面上就变成语段在上、要求在下。正确口径：**做题要求才是题干**（`content` = 「根据《曹刿论战》及下面的材料，在后面语段中的横线上填写恰当的内容。(3分)」），材料 + 注释 + 填充语段全进 `material_text`，配合上一轮「material_text 在题干下方」的固定规则，顺序与原卷一致。
