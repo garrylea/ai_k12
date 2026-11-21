@@ -27,7 +27,7 @@ export function PrintPreview({ open, questions, meta, onClose }: PrintPreviewPro
     Promise.race([
       Promise.all(urls.map((u) => preloadMaterialDoc(u))).then(() => undefined),
       timeout,
-    ]).finally(() => { if (alive) setDocsReady(true); });
+    ]).catch(() => undefined).finally(() => { if (alive) setDocsReady(true); });
     return () => { alive = false; };
   }, [open, questions]);
 
@@ -54,6 +54,7 @@ export function PrintPreview({ open, questions, meta, onClose }: PrintPreviewPro
           <button
             type="button"
             className="print-btn print-btn--primary"
+            disabled={!docsReady}
             onClick={() => void print(sheetRef.current)}
           >
             导出 PDF

@@ -59,7 +59,8 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
   const title = meta?.title ?? `${subject}专项 · ${questions.length} 题`;
   const date = meta?.date ?? today();
 
-  let lastMaterial: string | null = null;
+  let lastUrl: string | null = null;
+  let lastText: string | null = null;
 
   return (
     <div ref={ref} className="print-sheet" data-testid="print-sheet">
@@ -69,9 +70,13 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
       </div>
 
       {questions.map((q, i) => {
-        const materialKey = q.materialUrl ?? q.material ?? null;
-        const showMaterial = materialKey !== null && materialKey !== lastMaterial;
-        lastMaterial = materialKey;
+        const url = q.materialUrl ?? null;
+        const text = q.material?.trim() ? q.material : null;
+        const showDoc = url !== null && url !== lastUrl;
+        const showText = text !== null && text !== lastText;
+        const showMaterial = showDoc || showText;
+        lastUrl = url;
+        lastText = text;
         const options = optionsOf(q);
         const blank = answerSpaceClass(q.type);
 
@@ -80,8 +85,8 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
             {showMaterial && (
               <div className="print-material md-prose" data-testid="print-material">
                 <MaterialBlock
-                  url={q.materialUrl}
-                  text={q.material}
+                  url={showDoc ? url : null}
+                  text={showText ? text : null}
                   variant="print"
                 />
               </div>

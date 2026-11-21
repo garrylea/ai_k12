@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { PrintPaper } from './PrintPaper';
 import type { RunnerQuestion } from '@/components/business/answer/types';
 
@@ -45,6 +45,21 @@ describe('PrintPaper', () => {
       { n: '2', text: '题2', materialUrl: 'materials/chinese/a/content.md' },
     ]} />);
     expect(screen.getAllByTestId('print-material')).toHaveLength(1);
+  });
+
+  it('同文章 + 题中素材：文章只印一次，14 题的题中素材仍印', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => '## 醉翁亭记' }));
+    render(<PrintPaper questions={[
+      { n: '12', text: '题12', materialUrl: 'materials/chinese/k6/content.md' },
+      { n: '13', text: '题13', materialUrl: 'materials/chinese/k6/content.md' },
+      { n: '14', text: '题14', materialUrl: 'materials/chinese/k6/content.md',
+        material: '《沧浪亭记》\n\n注：①罪废' },
+    ]} />);
+    const blocks = screen.getAllByTestId('print-material');
+    expect(blocks).toHaveLength(2);
+    await waitFor(() => expect(blocks[0].textContent).toContain('醉翁亭记'));
+    expect(blocks[1].textContent).toContain('沧浪亭记');
+    expect(blocks[1].textContent).toContain('注：①罪废');
   });
 
   it('选择题打印选项且不留作答空白；填空题短空白、主观题长空白', () => {
