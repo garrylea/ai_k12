@@ -140,3 +140,13 @@ def test_write_material_doc_strips_page_marker_before_instruction(tmp_path):
     assert "第 1 页" not in md
     assert "完成 12-14题" not in md
     assert md.startswith("## 醉翁亭记")
+
+
+def test_write_material_doc_dry_run_does_not_write(tmp_path):
+    assets = tmp_path / "assets"
+    key, url = write_material_doc(
+        "## 醉翁亭记\n\n正文", resolver=lambda ref: None,
+        store=_Store(assets), assets_dir=assets, dry_run=True,
+    )
+    assert url == f"materials/chinese/{key}/content.md"
+    assert not (assets / url).exists()

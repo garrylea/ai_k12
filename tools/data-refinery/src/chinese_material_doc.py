@@ -96,8 +96,12 @@ def write_material_doc(
     store,
     assets_dir: Path,
     subject_code: str = "chinese",
+    dry_run: bool = False,
 ) -> tuple[str, str]:
-    """写 `materials/{subject}/{doc_key}/content.md`，返回 (doc_key, material_url)。"""
+    """写 `materials/{subject}/{doc_key}/content.md`，返回 (doc_key, material_url)。
+
+    dry_run=True 只算 key/url，不落文件（回填的 dry-run 不能写盘）。
+    """
     from page_markers import strip_page_markers
 
     # 先洗页码，再删小节指令：页码可能在小节指令之前，反了就删不掉指令。
@@ -106,10 +110,11 @@ def write_material_doc(
     hashes = image_hashes_for(clean, resolver)
     key = doc_key(clean, hashes)
     prefix = f"materials/{subject_code}/{key}"
-    new_body, _ = rewrite_material_doc(clean, resolver, store, prefix)
-    out = Path(assets_dir) / prefix / "content.md"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(new_body.strip() + "\n", encoding="utf-8")
+    if not dry_run:
+        new_body, _ = rewrite_material_doc(clean, resolver, store, prefix)
+        out = Path(assets_dir) / prefix / "content.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(new_body.strip() + "\n", encoding="utf-8")
     return key, f"{prefix}/content.md"
 
 
