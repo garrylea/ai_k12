@@ -1364,7 +1364,7 @@ Expected: 打印 `[dry-run] N rows would change`，N ≥ 20。
 - [ ] **Step 2: Apply**
 
 Run: `python3 tools/db/material_doc_backfill.py --paper 667 --apply`
-Expected: `[apply] N rows updated; rollback: .../backups/YYYYMMDD_material_doc_rollback.sql`。
+Expected: `[apply] N rows updated (...); rollback: .../backups/YYYYMMDD_material_doc_rollback.sql`。随后**立刻**再跑一次 `--paper 667`（不带 `--apply`），必须输出 `[dry-run] 0 rows would change; 0 need review` —— 这是幂等验收，不通过就回 Task 6 修。
 
 - [ ] **Step 3: Verify DB**
 
