@@ -987,10 +987,16 @@ git commit -m "feat(refinery): persist material_url and hash article identity"
 
 - [ ] **Step 1: Write failing tests**
 
-Create `tests/test_material_doc_backfill.py`（纯函数在 `chinese_material_doc`，脚本只做 DB 编排，故测试不 import 脚本）:
+Create `tests/test_material_doc_backfill.py`（纯计划函数从脚本 import；`tools/db` 加进 `sys.path`）:
 
 ```python
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "db"))
+
 from chinese_material_doc import build_groups, rewrite_hash_for_row
+from material_doc_backfill import build_plans, eligible_for_article
 
 
 def test_build_groups_by_paper_and_normalized_text():
@@ -1021,12 +1027,32 @@ def test_rewrite_hash_for_row_uses_material_url():
     b = rewrite_hash_for_row({"content": "题干", "options": None, "material_text": None,
                               "material_url": "materials/chinese/bbb/content.md"})
     assert a != b
+
+
+def test_eligible_for_article_skips_processed_rows():
+    rows = [{"id": 1, "material_method": "rule"}, {"id": 2, "material_method": None}]
+    assert [r["id"] for r in eligible_for_article(rows)] == [2]
+
+
+def test_build_plans_is_idempotent_and_clears_heading_only():
+    rows = [
+        {"id": 1, "paper_id": 667, "source": "八中", "content": "题",
+         "options": None, "material_text": "## (一)默写。(共4分)",
+         "material_url": None, "material_method": None},
+        {"id": 2, "paper_id": 667, "source": "八中", "content": "题",
+         "options": None, "material_text": "题中素材",
+         "material_url": None, "material_method": "rule"},
+    ]
+    plans, review = build_plans(rows, apply=False)
+    assert [p[0] for p in plans] == [1]      # 标题行清空；已处理的 2 不再重排
+    assert plans[0][2] is None and plans[0][3] is None
+    assert review == []
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run tests to verify the new plan tests fail**
 
 Run: `cd tools/data-refinery && python3 -m pytest tests/test_material_doc_backfill.py -q`
-Expected: `4 passed`（纯函数已在 Task 3 实现；若 import 失败说明 Task 3 没做完）。
+Expected: the four pure-function tests pass; `test_eligible...` / `test_build_plans...` FAIL until Step 3 adds the functions.
 
 - [ ] **Step 3: Implement the script**
 
@@ -1045,7 +1071,7 @@ import hashlib
 import json
 import re
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pymysql
@@ -1119,6 +1145,69 @@ def _load_rows(cur, paper_id: int | None):
 Main:
 
 ```python
+def eligible_for_article(rows: list[dict]) -> list[dict]:
+    """已抽过题中素材的行不再参与文章分组（第二次运行必须 0 行）。"""
+    return [r for r in rows if r.get("material_method") != "rule"]
+
+
+def build_plans(rows: list[dict], *, apply: bool) -> tuple[list[list], list[dict]]:
+    """纯计划构建（可测试）。apply=False 时只算 key/url，不写文件。"""
+    group_rows = eligible_for_article(rows)
+    groups = build_groups(group_rows)
+    plans: list[list] = []  # [qid, material_url, material_text, content, material_method, new_hash]
+    for members in groups.values():
+        canonical = choose_canonical([m.get("material_text") or "" for m in members])
+        if is_heading_only(canonical):
+            continue
+        key, url = write_material_doc(
+            canonical, resolver=_resolver, store=_Store(), assets_dir=ASSETS,
+            dry_run=not apply,
+        )
+        for m in members:
+            plans.append([m["id"], url, None, None, None])
+
+    by_id = {p[0]: p for p in plans}
+    review: list[dict] = []
+    for row in rows:
+        if row.get("material_method") == "rule":
+            continue  # 已处理：保证第二次运行幂等
+        mt = row.get("material_text") or ""
+        if mt.strip() and is_heading_only(mt) and row["id"] not in by_id:
+            # 与 publish 同口径：纯标题旧材料清掉，不建文档
+            plans.append([row["id"], row.get("material_url"), None, None, None])
+            by_id[row["id"]] = plans[-1]
+            continue
+        material, rest = split_inline_material(row.get("content") or "")
+        if material:
+            plan = by_id.get(row["id"])
+            if plan is None:
+                plan = [row["id"], None, None, None, None]
+                plans.append(plan)
+                by_id[row["id"]] = plan
+            plan[2] = material
+            plan[3] = rest
+            plan[4] = "rule"
+        elif needs_llm(row.get("content") or ""):
+            review.append({
+                "id": row["id"],
+                "paper_id": row.get("paper_id"),
+                "source": row.get("source"),
+                "content": row.get("content"),
+            })
+
+    for plan in plans:
+        qid, url, mtext, content, method = plan
+        row = next(r for r in rows if r["id"] == qid)
+        new_row = dict(row)
+        new_row["material_url"] = url if url is not None else row.get("material_url")
+        new_row["material_text"] = mtext
+        if content is not None:
+            new_row["content"] = content
+        new_row["material_method"] = method
+        plan.append(rewrite_hash_for_row(new_row))
+    return plans, review
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--paper", type=int)
@@ -1128,85 +1217,70 @@ def main(argv=None) -> int:
 
     conn = pymysql.connect(**DB, autocommit=False)
     cur = conn.cursor()
-    rows = _load_rows(cur, ns.paper)
-    if ns.limit:
-        rows = rows[: ns.limit]
+    try:
+        rows = _load_rows(cur, ns.paper)
+        if ns.limit:
+            rows = rows[: ns.limit]
 
-    groups = build_groups(rows)
-    plans = []  # [qid, material_url, material_text, content, material_method, new_hash]
-    for members in groups.values():
-        canonical = choose_canonical([m.get("material_text") or "" for m in members])
-        if is_heading_only(canonical):
-            continue
-        key, url = write_material_doc(
-            canonical, resolver=_resolver, store=_Store(), assets_dir=ASSETS,
-            dry_run=not ns.apply,
+        plans, review = build_plans(rows, apply=ns.apply)
+        if not ns.apply:
+            print(f"[dry-run] {len(plans)} rows would change; {len(review)} need review")
+            return 0
+        if not plans:
+            print("[apply] 0 rows; nothing to do")
+            return 0
+
+        backup = BACKUP_DIR / f"{date.today():%Y%m%d}_material_doc_rollback.sql"
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        with backup.open("a", encoding="utf-8") as f:
+            f.write(f"\n-- run {datetime.now():%Y-%m-%dT%H:%M:%S} ({len(plans)} rows)\n")
+            f.write("SET NAMES utf8mb4;\n")
+            for qid, *_ in plans:
+                r = next(r for r in rows if r["id"] == qid)
+                f.write(
+                    "UPDATE questions SET "
+                    f"content={_sql_literal(r.get('content'))}, "
+                    f"material_text={_sql_literal(r.get('material_text'))}, "
+                    f"material_url={_sql_literal(r.get('material_url'))}, "
+                    f"material_method={_sql_literal(r.get('material_method'))}, "
+                    f"content_hash={_sql_literal(r.get('content_hash'))} WHERE id={qid};\n"
+                )
+
+        failed = 0
+        for qid, url, mtext, content, method, new_hash in plans:
+            try:
+                cur.execute(
+                    "UPDATE questions SET material_url=%s, material_text=%s, "
+                    "content=COALESCE(%s, content), material_method=%s, content_hash=%s "
+                    "WHERE id=%s",
+                    (url, mtext, content, method, new_hash, qid),
+                )
+            except pymysql.err.IntegrityError:
+                # 冲突时保留旧 hash，但其余列必须写入，避免半回填
+                cur.execute(
+                    "UPDATE questions SET material_url=%s, material_text=%s, "
+                    "content=COALESCE(%s, content), material_method=%s WHERE id=%s",
+                    (url, mtext, content, method, qid),
+                )
+                print(f"[WARN] id={qid} content_hash 冲突，保留旧 hash，其余列已更新", flush=True)
+                failed += 1
+        conn.commit()
+
+        review_path = Path(ASSETS).parent / "material_inline_review.jsonl"
+        review_path.write_text(
+            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in review),
+            encoding="utf-8",
         )
-        for m in members:
-            plans.append([m["id"], url, None, None, None])
-
-    by_id = {p[0]: p for p in plans}
-    for row in rows:
-        material, rest = split_inline_material(row.get("content") or "")
-        if not material:
-            continue
-        plan = by_id.get(row["id"])
-        if plan is None:
-            plan = [row["id"], None, None, None, None]
-            plans.append(plan)
-            by_id[row["id"]] = plan
-        plan[2] = material
-        plan[3] = rest
-        plan[4] = "rule"
-
-    for plan in plans:
-        qid, url, mtext, content, method = plan
-        row = next(r for r in rows if r["id"] == qid)
-        new_row = dict(row)
-        new_row["material_url"] = url if url is not None else row.get("material_url")
-        new_row["material_text"] = mtext  # 文章题为 None；题中素材题为原文
-        if content is not None:
-            new_row["content"] = content
-        new_row["material_method"] = method
-        plan.append(rewrite_hash_for_row(new_row))
-
-    if not ns.apply:
-        print(f"[dry-run] {len(plans)} rows would change")
+        print(f"[apply] {len(plans)} rows updated ({failed} hash conflicts); rollback: {backup}")
         return 0
-
-    backup = BACKUP_DIR / f"{date.today():%Y%m%d}_material_doc_rollback.sql"
-    backup.parent.mkdir(parents=True, exist_ok=True)
-    with backup.open("w", encoding="utf-8") as f:
-        for qid, *_ in plans:
-            r = next(r for r in rows if r["id"] == qid)
-            f.write(
-                "UPDATE questions SET "
-                f"content={_sql_literal(r.get('content'))}, "
-                f"material_text={_sql_literal(r.get('material_text'))}, "
-                f"material_url={_sql_literal(r.get('material_url'))}, "
-                f"material_method={_sql_literal(r.get('material_method'))}, "
-                f"content_hash={_sql_literal(r.get('content_hash'))} WHERE id={qid};\n"
-            )
-
-    for qid, url, mtext, content, method, new_hash in plans:
-        try:
-            cur.execute(
-                "UPDATE questions SET material_url=%s, material_text=%s, "
-                "content=COALESCE(%s, content), material_method=%s, content_hash=%s "
-                "WHERE id=%s",
-                (url, mtext, content, method, new_hash, qid),
-            )
-        except pymysql.err.IntegrityError:
-            print(f"[WARN] id={qid} content_hash 冲突，保留旧 hash", flush=True)
-    conn.commit()
-    print(f"[apply] {len(plans)} rows updated; rollback: {backup}")
-    return 0
+    finally:
+        conn.close()
 ```
 
 - [ ] **Step 4: Run tests**
 
 Run: `cd tools/data-refinery && python3 -m pytest tests/test_material_doc_backfill.py -q`
-Expected: `2 passed`.
+Expected: `6 passed`.
 
 - [ ] **Step 5: Commit**
 
