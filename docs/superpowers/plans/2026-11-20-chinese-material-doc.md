@@ -441,6 +441,7 @@ git commit -m "feat(refinery): split chinese in-question material by note/link m
 **Files:**
 - Modify: `tools/data-refinery/src/image_rewrite.py`
 - Modify: `tools/data-refinery/src/chinese_material_doc.py`
+- Modify: `tools/data-refinery/src/db_loader.py`（只加 `content_hash` 的第 4 个可选参数，供 `rewrite_hash_for_row` 使用）
 - Test: `tools/data-refinery/tests/test_chinese_material_doc.py`
 
 **Interfaces:**
@@ -448,6 +449,7 @@ git commit -m "feat(refinery): split chinese in-question material by note/link m
   - `image_rewrite.image_hashes_for(text, resolver) -> list[str]`
   - `image_rewrite.rewrite_material_doc(text, resolver, asset_store, asset_prefix) -> tuple[str, list[str]]`
   - `chinese_material_doc.write_material_doc(body, *, resolver, store, assets_dir, subject_code) -> tuple[str, str]`（返回 `doc_key`, `material_url`）
+- Consumes/extends: `db_loader.content_hash(content, options=None, material=None, material_url=None)` — 第 4 参在本 Task 提前加入（`rewrite_hash_for_row` 依赖它）；Task 5 只负责 loader 调用点与白名单。
 
 - [ ] **Step 1: Add failing tests**
 
@@ -571,6 +573,16 @@ _CANONICAL_PREFIXES = (
     "questions/", "textbooks/", "materials/", "material/",
     "/assets/", "http://", "https://", "data:",
 )
+```
+
+再给 `db_loader.content_hash` 加第 4 个可选参数（`rewrite_hash_for_row` 依赖它；Task 5 不再重复改签名）：
+
+```python
+def content_hash(content: str | None, options=None, material: str | None = None,
+                 material_url: str | None = None) -> str:
+    ...
+    mat = material_fingerprint(f"{material_url or ''}\n{material or ''}")
+    ...
 ```
 
 - [ ] **Step 4: Implement `write_material_doc`**
@@ -865,29 +877,11 @@ def test_materials_prefix_is_materialized():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd tools/data-refinery && python3 -m pytest tests/test_db_loader.py -q -k "material_url or materials_prefix"`
-Expected: FAIL.
+Expected: `test_hash_*` 已由 Task 3 的签名改动通过；`test_materials_prefix_is_materialized` 仍 FAIL（白名单还没改）。
 
-- [ ] **Step 3: Implement hash + whitelist**
+- [ ] **Step 3: Whitelist `materials/` and `material/`**
 
-In `db_loader.py`:
-
-```python
-def content_hash(content: str | None, options=None, material: str | None = None,
-                 material_url: str | None = None) -> str:
-    ...
-    mat = material_fingerprint(
-        f"{material_url or ''}\n{material_text_or_empty}"
-    )
-```
-
-Concretely, replace the function body's material part with:
-
-```python
-    mat_input = f"{material_url or ''}\n{material or ''}"
-    mat = material_fingerprint(mat_input)
-```
-
-Attach `material_url` to `_CANONICAL_IMG_PREFIXES`:
+`content_hash` 的第 4 参与指纹口径在 Task 3 已加，本 Task 不重复改。只改白名单：
 
 ```python
 _CANONICAL_IMG_PREFIXES = (
