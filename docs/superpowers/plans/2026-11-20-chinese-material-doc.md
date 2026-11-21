@@ -2415,6 +2415,11 @@ with:
 
 Update §9 目录结构：`materials/{subject_code}/{doc_key}/content.md` + `fig_NN.ext`（`group_id` 是「一/二/三」大题，不是文章 key；不要照抄旧示例）。
 
+**同一节里还有两处必须改（否则新字段说明与示例自相矛盾）：**
+
+1. `material_url` 列说明（字段表）改为：`文章文档相对路径（materials/chinese/{doc_key}/content.md）；题中素材题为 NULL`，去掉「长材料/音频」旧口径。
+2. 「复合题使用示例（语文阅读理解）」整段重写：4 条子题的 `material_url` 都填同一个 `materials/chinese/{doc_key}/content.md`，`material_text` 只有真正带题中素材的题才填；把示例里「第一题存材料、后续留空」的 INSERT 注释与紧跟的查询（`取第一题的 material_text ... group_order = 1`）改成「同节任一题的 material_url 相同」。不要在文档里留下任何「第一题存文章」的示例。
+
 - [ ] **Step 4: Update constraints**
 
 `docs/constraints/数据管线.md`：在材料段落补「语文文章 → md + material_url；material_text 只放题中素材；publish 不调 LLM；`materials/` 与 `material/` 都在图片白名单」。
