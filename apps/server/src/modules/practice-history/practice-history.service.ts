@@ -180,6 +180,7 @@ export class PracticeHistoryService {
             judgedAt: a.judged_at,
             questionContent: a.text,
             materialText: a.material_text,
+            materialUrl: a.material_url ?? null,
             questionAnswer: a.answer,
             questionAnalysis: a.explanation,
             questionSource: a.question_source ?? null,
@@ -268,6 +269,7 @@ export class PracticeHistoryService {
         questionContent: a.question_content,
         // 专项侧没有 material（语文专项的"材料"是篇名+句原文，走 passageTitle/passageSentence）
         materialText: null,
+        materialUrl: null,
         questionAnswer: standardAnswer ?? a.question_answer,
         questionAnalysis: a.question_analysis,
         questionSource: a.question_source ?? null,

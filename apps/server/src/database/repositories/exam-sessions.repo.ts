@@ -65,6 +65,7 @@ export interface ExamResultRow {
   explanation: string | null;
   answer: string | null; // 参考答案（主观题 self_assess 模式结果页自评展示）
   material_text: string | null; // 同节共享材料（语文阅读/文段题）
+  material_url: string | null; // 整段材料在素材库中的路径
   is_active: number; // 题目在架标记（详情判断 canRedo / canSimilar）
   question_source: string | null; // 题目来源（questions.source），详情页溯源用
 }
@@ -159,7 +160,7 @@ export class ExamSessionsRepository {
       `SELECT ea.question_id, ea.question_order, ea.answer_text, ea.is_correct, ea.analysis,
               ea.method, ea.judged_at,
               q.content AS text, q.type, q.options, q.explanation, q.answer AS answer,
-              q.material_text, q.is_active, q.source AS question_source
+              q.material_text, q.material_url, q.is_active, q.source AS question_source
        FROM exam_answers ea JOIN questions q ON q.id = ea.question_id
        WHERE ea.session_id = ?
        ORDER BY ea.question_order`,

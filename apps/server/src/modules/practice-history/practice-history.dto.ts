@@ -38,6 +38,8 @@ export interface PracticeHistoryQuestion {
   questionContent: string | null;
   /** 材料（questions.material_text，语文/英语阅读材料、物化题内材料）。无材料为 null。 */
   materialText: string | null;
+  /** 整段材料在素材库中的路径（语文阅读等整篇材料题）；无整篇材料为 null。 */
+  materialUrl: string | null;
   /** 标准答案（考试取自 questions.answer；语文含义专项按句回查题库重建）。 */
   questionAnswer: string | null;
   questionAnalysis: string | null;

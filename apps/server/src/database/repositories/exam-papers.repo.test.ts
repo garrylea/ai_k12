@@ -19,6 +19,15 @@ describe('ExamPapersRepository.findQuestionsByPaperId', () => {
     expect(sql).toContain('pq.in_exam = 1');
     expect(params).toEqual([17]);
   });
+
+  it('题目元数据带 materialUrl', async () => {
+    const pool = mockPool([]);
+    const repo = new ExamPapersRepository(pool as any);
+    await repo.findQuestionsByPaperId(17);
+    const [sql] = pool.execute.mock.calls[0];
+    expect(sql).toContain('q.material_text AS materialText');
+    expect(sql).toContain('q.material_url AS materialUrl');
+  });
 });
 
 describe('ExamPapersRepository.findPapers', () => {

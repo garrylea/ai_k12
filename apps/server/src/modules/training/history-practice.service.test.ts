@@ -36,7 +36,7 @@ describe('HistoryPracticeService.loadRedoQuestion', () => {
     const q = await svc.loadRedoQuestion(100);
     expect(q).toEqual({
       questionId: 100, text: '题干', type: 'choice',
-      options: [{ label: 'A', text: '1' }], materialText: null,
+      options: [{ label: 'A', text: '1' }], materialText: null, materialUrl: null,
     });
     expect(q).not.toHaveProperty('answer');
     expect(q).not.toHaveProperty('explanation');
@@ -410,6 +410,7 @@ describe('HistoryPracticeService.startSimilar — AI 补题', () => {
         { label: 'C', text: '3' }, { label: 'D', text: '4' },
       ],
       materialText: null,
+      materialUrl: null,
     }]);
     expect(r.questions[0]).not.toHaveProperty('answer');
     expect(r.questions[0]).not.toHaveProperty('explanation');

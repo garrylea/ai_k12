@@ -152,7 +152,7 @@ describe('ExamsService.getPaperDetail', () => {
     expect(r.id).toBe(1);
     expect(r.title).toBe('2025 年期末卷');
     expect(r.questions).toHaveLength(3);
-    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null });
+    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null, materialUrl: null });
     expect(r.questions[2].options).toBeNull();
   });
 
@@ -181,7 +181,7 @@ describe('ExamsService.getPaperDetail', () => {
     });
     const r = await mkSvc(deps).getPaperDetail(1);
     const q = r.questions[0];
-    expect(Object.keys(q).sort()).toEqual(['materialText', 'options', 'questionId', 'questionNo', 'text', 'type']);
+    expect(Object.keys(q).sort()).toEqual(['materialText', 'materialUrl', 'options', 'questionId', 'questionNo', 'text', 'type']);
     expect(JSON.stringify(r)).not.toContain('answer');
     expect(JSON.stringify(r)).not.toContain('explanation');
   });
@@ -227,7 +227,7 @@ describe('ExamsService.createSession', () => {
     expect(arg.deadlineAt.getTime()).toBeGreaterThan(Date.now() + 29 * 60000);
     expect(r.sessionId).toBe(1);
     expect(r.questions).toHaveLength(3);
-    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null });
+    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null, materialUrl: null });
     expect(r.remainingSeconds).toBeGreaterThanOrEqual(1790);
     expect(r.remainingSeconds).toBeLessThanOrEqual(1800);
   });
@@ -473,7 +473,7 @@ describe('ExamsService 语文考试（subject_id=2，2026-10-28）', () => {
     }));
   });
 
-  it('结果页：materialText 透传（语文阅读材料随题返回）', async () => {
+  it('结果页：materialText / materialUrl 透传（语文阅读材料随题返回）', async () => {
     const deps = mk({
       examSessionsRepo: {
         ...mk().examSessionsRepo,
@@ -482,11 +482,13 @@ describe('ExamsService 语文考试（subject_id=2，2026-10-28）', () => {
           question_id: 10, question_order: 1, answer_text: 'A', is_correct: 1, analysis: null,
           text: '题面', type: 'choice', options: null, explanation: null, answer: 'A',
           material_text: '材料原文',
+          material_url: 'materials/chinese/abc/content.md',
         }]),
       },
     });
     const r = await mkSvc(deps).getResults(1, 77);
     expect(r.items[0].materialText).toBe('材料原文');
+    expect(r.items[0].materialUrl).toBe('materials/chinese/abc/content.md');
   });
 });
 
@@ -881,7 +883,7 @@ describe('ExamsService.getResults', () => {
     expect(r.subjectiveCount).toBe(0);
     expect(r.items[0]).toEqual({
       questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'],
-      materialText: null,
+      materialText: null, materialUrl: null,
       answerText: 'A', isCorrect: 1, analysis: null, explanation: '选 A 因为...',
       answer: 'A', needsSelfAssessment: false, selfAssessment: null,
     });

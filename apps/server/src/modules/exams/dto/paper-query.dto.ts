@@ -36,5 +36,7 @@ export interface PaperDetailDto {
     options: unknown[] | null;
     /** 同节共享材料（语文阅读/文段题）；数学卷为 null。 */
     materialText: string | null;
+    /** 整段材料在素材库中的路径（语文阅读等整篇材料题）；题中材料为 null。 */
+    materialUrl: string | null;
   }>;
 }

@@ -499,9 +499,12 @@ describe('TrainingService.startTargetedPractice', () => {
     const q = r.questions[0];
     expect(q).toEqual({
       questionId: 10, text: '题面文本', type: 'choice',
-      options: ['A. 1', 'B. 2'], materialText: null, source: 'paper', questionNo: 12,
+      options: ['A. 1', 'B. 2'], materialText: null, materialUrl: null,
+      source: 'paper', questionNo: 12,
     });
-    expect(Object.keys(q).sort()).toEqual(['materialText', 'options', 'questionId', 'questionNo', 'source', 'text', 'type']);
+    expect(Object.keys(q).sort()).toEqual(
+      ['materialText', 'materialUrl', 'options', 'questionId', 'questionNo', 'source', 'text', 'type'],
+    );
     expect(JSON.stringify(r)).not.toContain('answer');
     expect(JSON.stringify(r)).not.toContain('explanation');
   });

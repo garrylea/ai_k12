@@ -21,6 +21,7 @@ export interface HistoryRunQuestion {
   type: string;
   options: unknown[] | null;
   materialText: string | null;
+  materialUrl: string | null;
 }
 
 /** 同类型练习结果：`sessionId` 为 null = 本轮不参与发分（题不够 / 无可用档位 / 建会话失败）。 */
@@ -206,6 +207,7 @@ export class HistoryPracticeService {
             type: seed.type,
             options,
             materialText: null,
+            materialUrl: null,
           });
         } catch (err) {
           this.logger.warn(
@@ -247,7 +249,8 @@ export class HistoryPracticeService {
 
   /** DB 题行 → 运行态白名单载荷（不含 answer/explanation）。 */
   private toRunQuestion(q: {
-    id: number; content: string; type: string; options: string | null; material_text: string | null;
+    id: number; content: string; type: string; options: string | null;
+    material_text: string | null; material_url: string | null;
   }): HistoryRunQuestion {
     return {
       questionId: q.id,
@@ -255,6 +258,7 @@ export class HistoryPracticeService {
       type: q.type,
       options: parseOptions(q.options),
       materialText: q.material_text ?? null,
+      materialUrl: q.material_url ?? null,
     };
   }
 }

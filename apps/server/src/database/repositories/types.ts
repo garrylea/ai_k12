@@ -99,6 +99,8 @@ export interface QuestionRow extends RowDataPacket {
   approach?: string | null;
   explanation: string | null;
   material_text: string | null;
+  /** 整段材料在素材库中的路径（语文阅读等整篇材料题）；题中材料为 null。 */
+  material_url: string | null;
   source: string | null;
   content_hash: string | null;
   is_active: number;

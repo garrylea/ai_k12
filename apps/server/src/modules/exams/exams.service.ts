@@ -277,6 +277,7 @@ export class ExamsService {
       type: row.type,
       options: parseOptions(row.options),
       materialText: row.material_text ?? null,
+      materialUrl: row.material_url ?? null,
       answerText: row.answer_text,
       isCorrect: row.is_correct,               // null = 主观题待自评
       analysis: row.analysis,
@@ -496,7 +497,7 @@ export class ExamsService {
 
   private toSessionQuestion(q: {
     questionId: number; questionNo: number; text: string; type: string;
-    options: string | null; materialText: string | null;
+    options: string | null; materialText: string | null; materialUrl: string | null;
   }): SessionQuestionDto {
     return {
       questionId: q.questionId,
@@ -505,6 +506,7 @@ export class ExamsService {
       type: q.type,
       options: parseOptions(q.options),
       materialText: q.materialText ?? null,
+      materialUrl: q.materialUrl ?? null,
     };
   }
 

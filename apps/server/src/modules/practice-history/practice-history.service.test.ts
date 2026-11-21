@@ -151,6 +151,7 @@ describe('PracticeHistoryService.getDetail', () => {
         analysis: null, method: 'exact', judged_at: new Date('2026-11-01T06:05:00Z'),
         text: '第1题题面', type: 'choice', options: '[]', explanation: '解析1', answer: 'C',
         material_text: '阅读下面的材料，完成第1-3题。',
+        material_url: 'materials/chinese/abc/content.md',
         is_active: 1,
       },
     ]);
@@ -161,6 +162,7 @@ describe('PracticeHistoryService.getDetail', () => {
       questionAnswer: 'C', method: 'exact', refType: 'question',
       // 材料随题返回（语文/英语阅读、物化题内材料）—— 2026-11-02
       materialText: '阅读下面的材料，完成第1-3题。',
+      materialUrl: 'materials/chinese/abc/content.md',
     });
   });
 
@@ -434,12 +436,12 @@ describe('PracticeHistoryService.redo', () => {
     h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ title: '期中卷' }));
     h.examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 100, question_order: 3 }]);
     h.historyPractice.loadRedoQuestion.mockResolvedValue({
-      questionId: 100, text: '题干', type: 'choice', options: null, materialText: null,
+      questionId: 100, text: '题干', type: 'choice', options: null, materialText: null, materialUrl: null,
     });
     const r = await h.service.redo({ studentId: 7, source: 'exam', sessionId: 1, questionId: 100 });
     expect(r?.title).toBe('重做：期中卷 · 第 3 题');
     expect(r?.questions).toEqual([{
-      questionId: 100, text: '题干', type: 'choice', options: null, materialText: null,
+      questionId: 100, text: '题干', type: 'choice', options: null, materialText: null, materialUrl: null,
     }]);
     // 重做是纯读路径：不得走抽题/AI 补题（那是同类型练习的事）
     expect(h.historyPractice.startSimilar).not.toHaveBeenCalled();
@@ -449,7 +451,7 @@ describe('PracticeHistoryService.redo', () => {
     h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession({ title: null }));
     h.examSessionsRepo.findAnswersBySession.mockResolvedValue([{ question_id: 100, question_order: 1 }]);
     h.historyPractice.loadRedoQuestion.mockResolvedValue({
-      questionId: 100, text: '题干', type: 'choice', options: null, materialText: null,
+      questionId: 100, text: '题干', type: 'choice', options: null, materialText: null, materialUrl: null,
     });
     const r = await h.service.redo({ studentId: 7, source: 'exam', sessionId: 1, questionId: 100 });
     expect(r?.title).toBe('重做：练习 · 第 1 题');
@@ -471,7 +473,7 @@ describe('PracticeHistoryService.redo', () => {
     h.specialSessionsRepo.findByIdOwned.mockResolvedValue(mkSpecialSession({ title: '默写专项' }));
     h.specialAnswersRepo.listBySession.mockResolvedValue([{ question_id: 200, question_order: 2 }]);
     h.historyPractice.loadRedoQuestion.mockResolvedValue({
-      questionId: 200, text: '题干', type: 'choice', options: null, materialText: null,
+      questionId: 200, text: '题干', type: 'choice', options: null, materialText: null, materialUrl: null,
     });
     const r = await h.service.redo({ studentId: 7, source: 'special', sessionId: 5, questionId: 200 });
     expect(r?.title).toBe('重做：默写专项 · 第 2 题');
