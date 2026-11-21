@@ -58,8 +58,14 @@ def _split_by_note(content: str) -> tuple[str, str] | None:
 
 
 def _split_by_link_marker(content: str) -> tuple[str, str] | None:
-    """【链接材料】/材料:：取到最后一个以设问开头的段落之前。"""
+    """【链接材料】/材料:：取到最后一个以设问开头的段落之前。
+
+    裸 `材料：` 只有在同时命中引导语（联系/阅读/结合…下面材料）时才切；
+    否则任何提到「材料：」的题干都会被误切成材料。`【链接材料】` 可独立命中。
+    """
     if not LINK_MARK_RE.search(content):
+        return None
+    if "【链接材料】" not in content and not LEAD_RE.search(content):
         return None
     paras = content.split("\n\n")
     if len(paras) < 2:

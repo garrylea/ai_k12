@@ -40,7 +40,14 @@ def test_note_is_on_its_own_line():
 
 
 def test_no_lead_no_split():
-    content = "下列加点字意思都相同的一项是(2分)\nA.甲 B.乙 C.丙 D.丁"
+    content = "下列加点字意思都相同的一项是(2分)\n" + "A.甲 B.乙 C.丙 D.丁。" * 12
+    material, rest = split_inline_material(content)
+    assert material is None
+    assert rest == content
+
+
+def test_bare_material_marker_without_lead_no_split():
+    content = "材料：这是一段说明文字，讲的是城市与河流的关系。" + "请简要概括本文的中心论点。" * 8
     material, rest = split_inline_material(content)
     assert material is None
     assert rest == content
