@@ -370,3 +370,36 @@ material = [docText, q.material_text].filter(Boolean).join('\n\n') || null
 | 3 | 前端取文 | 按 `material_url` 取文件，不新增 `materialDoc` |
 | 4 | 迁移范围 | 先语文 783 题；物化不动 |
 | 5 | 试点 | 先八中 paper 667，通过后再全量 + 单测 |
+
+---
+
+## 12. 部署闸门（合并后必须执行）
+
+> 这不是可选清理，是发布闸门。设计目标只有在新环境完成全量回填并验收后才算达成。
+
+1. **本分支只交付代码与回填工具**。`output/assets/materials/...` 是 gitignore 派生产物（`tools/data-refinery/.gitignore:2` → `output/`），不在版本库，合并代码不会把它们带到目标环境。35 次提交的 diff 里没有任何 `content.md`。
+
+2. **目标环境必须全量执行回填**（不带 `--paper`）：
+
+   ```bash
+   python3 tools/db/material_doc_backfill.py --apply
+   ```
+
+   试点 `--paper 667` 只迁了八中卷；截至本分支，全库仅 23 道语文题有 `material_url`，另有 759 道仍把整篇文章放在 `material_text`。**代码合并 ≠ 数据迁移**。
+
+3. **验收三条（缺一不可）**：
+
+   ```sql
+   -- ① 文章题数 ≈ 783
+   SELECT COUNT(*) FROM questions q JOIN subjects s ON s.id=q.subject_id
+    WHERE s.code='chinese' AND q.material_url IS NOT NULL;
+
+   -- ② 仍把整篇文章放在 material_text 的行 ≈ 0
+   --    （迁移后只有题中素材题保留 material_text，且 material_method='rule'）
+   SELECT COUNT(*) FROM questions q JOIN subjects s ON s.id=q.subject_id
+    WHERE s.code='chinese' AND q.material_text IS NOT NULL AND q.material_method IS NULL;
+   ```
+
+   ③ `GET /assets/materials/chinese/{doc_key}/content.md` 返回 **200**，且八中卷 12/13/14 共享同一 `material_url`（文件与静态资源根都在位）。
+
+4. **未执行前的降级行为**：功能对未迁移题无感降级（判题/展示仍走 `material_text`，不会报错）；但这只是兜底，设计目标（文章只存一份、同节共享 URL、判题/解析读到文章）**并未达成**。不得把「代码已合并」当成迁移完成而放行发布。

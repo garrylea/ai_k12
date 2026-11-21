@@ -2468,3 +2468,14 @@ git commit -m "docs: sync materialUrl contract and material doc layout"
 - `MaterialDocService.getText` 在 Task 9 定义，judge/explanation 调用一致。
 - `MaterialBlock` 在 Task 10 定义，Task 11 四处调用一致。
 - `RunnerQuestion.materialUrl` 在 Task 10 定义，Task 11 页面映射使用。
+
+---
+
+## 部署闸门
+
+本计划交付的全部代码与回填工具**不含迁移后的数据**：`output/assets/materials/...` 被 `tools/data-refinery/.gitignore:2`（`output/`）忽略，不随合并进入目标环境；本分支只回填了试点 paper 667。合并后必须在目标环境把数据迁移当作发布闸门执行，详见 **spec §12「部署闸门（合并后必须执行）」**：
+
+- **一条命令**：`python3 tools/db/material_doc_backfill.py --apply`（全量，**不带 `--paper`**）。
+- **三条验收**：① `s.code='chinese' AND material_url IS NOT NULL` 的题数 ≈ 783；② 仍把整篇文章放在 `material_text` 的行 ≈ 0；③ `GET /assets/materials/chinese/{doc_key}/content.md` 返回 200，且八中卷 12/13/14 共享同一 URL。
+
+未执行前功能对未迁移题无感降级（仍用 `material_text`），但设计目标未达成——不得把「代码已合并」当成迁移完成。

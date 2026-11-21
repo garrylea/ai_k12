@@ -23,9 +23,15 @@ export class MaterialDocService {
   // 刻意不写构造函数参数：带 @Injectable() 的类有接口/union 参数时，
   // design:paramtypes 会写成 Object/String，Nest 找不到 token 会启动失败。
   constructor() {
+    // 默认路径相对本模块文件定位，与 main.ts 的静态资源目录同源；不用 process.cwd()：
+    // 从 apps/server 之外的 cwd 启动（PM2/systemd/Docker WORKDIR/部署包装脚本）时 cwd 会漂移，
+    // main.ts 仍按模块位置挂 /assets/ 返回 200，而这里会读错路径、静默返回 null
+    // —— 已迁移文章题（material_text 为 NULL、material_url 有值）的判题/解析将拿不到文章。
+    // 5 个 up：modules/practice → src → server → apps → 仓库根，同 main.ts 的策略。
+    // 保留 ASSETS_DIR 覆盖供测试与特殊部署使用。
     this.assetsDir = path.resolve(
       process.env.ASSETS_DIR
-        ?? path.resolve(process.cwd(), '../../tools/data-refinery/output/assets'),
+        ?? path.resolve(import.meta.dirname, '../../../../../tools/data-refinery/output/assets'),
     );
   }
 
