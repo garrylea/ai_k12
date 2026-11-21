@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { PrintPaper } from './PrintPaper';
 import type { RunnerQuestion } from '@/components/business/answer/types';
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const q = (over: Partial<RunnerQuestion>): RunnerQuestion => ({ n: '1', text: '题面', ...over });
 
@@ -33,6 +36,15 @@ describe('PrintPaper', () => {
       />,
     );
     expect(screen.getAllByTestId('print-material')).toHaveLength(2);
+  });
+
+  it('同 materialUrl 的连续题只印一次', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => '## 文章' }));
+    render(<PrintPaper questions={[
+      { n: '1', text: '题1', materialUrl: 'materials/chinese/a/content.md' },
+      { n: '2', text: '题2', materialUrl: 'materials/chinese/a/content.md' },
+    ]} />);
+    expect(screen.getAllByTestId('print-material')).toHaveLength(1);
   });
 
   it('选择题打印选项且不留作答空白；填空题短空白、主观题长空白', () => {

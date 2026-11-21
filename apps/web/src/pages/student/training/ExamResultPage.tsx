@@ -168,7 +168,10 @@ export default function ExamResultPage() {
   }, [examPoints, summary, award, subjectId]);
 
   const resultQuestions = useMemo(
-    () => (items ?? []).map((it) => ({ n: String(it.questionNo), text: it.text, material: it.materialText })),
+    () => (items ?? []).map((it) => ({
+      n: String(it.questionNo), text: it.text,
+      material: it.materialText, materialUrl: it.materialUrl,
+    })),
     [items],
   );
 

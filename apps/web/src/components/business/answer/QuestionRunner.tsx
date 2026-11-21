@@ -14,10 +14,11 @@ import {
   markdownComponents,
   makeAnswerComponents,
   preprocessMarkdown,
-  preprocessMaterialMarkdown,
+  draggableQuestionMarkdownComponents,
   MarkdownImg,
   ANSWER_IMG_CLASS,
 } from '@/components/markdown';
+import { MaterialBlock } from './MaterialBlock';
 import { LatexEditor } from '../LatexEditor';
 import { autoWrapMath, normalizeAnswerMath } from '../LatexPreview';
 import { PreviewDraftPanel } from '../PreviewDraftPanel';
@@ -64,13 +65,8 @@ const questionMarkdownComponents = {
   ),
 };
 
-// 题干与材料里的图允许拖进草稿（学生要照着图标注）；提示/解析/参考答案仍用不拖的版本，避免误拖
-const draggableQuestionMarkdownComponents = {
-  ...questionMarkdownComponents,
-  img: (props: { src?: string; alt?: string }) => (
-    <MarkdownImg {...props} bucketHeight dragToDraft className="block mx-auto my-4 max-w-full object-contain rounded-lg" />
-  ),
-};
+// 题干里的图允许拖进草稿（学生要照着图标注）；提示/解析/参考答案仍用不拖的版本，避免误拖。
+// 拖拽版由 @/components/markdown 统一导出（MaterialBlock 也用同一份，别在本地再定义）。
 
 export interface QuestionRunnerProps {
   questions: RunnerQuestion[];
@@ -586,20 +582,17 @@ export function QuestionRunner({
             nonScienceSubject ? 'max-h-[66.67%]' : choiceOptions ? 'max-h-[60%]' : 'max-h-[33%]'
           }`}
         >
-          {/* 同节共享材料（语文阅读/文段题）：理科保留独立滚动区（题目短路，避免材料把题面推出可视区）；
+          {/* 同节共享材料（语文阅读/文段题）：文章 doc → 题中素材 → 题干。
+              理科保留独立滚动区（题目短路，避免材料把题面推出可视区）；
               非理科去掉独立上限，交给上面这层统一滚动 —— 否则 38vh 会先卡住，题干区多出的空间白给 */}
-          {q.material && (
-            <div
-              data-testid="question-material"
-              className={`md-prose mb-3 rounded-lg border border-[var(--learn-card-border)] bg-[var(--bg-base)] px-3 py-2.5 text-sm text-[var(--text-primary)] leading-[1.7] ${
-                nonScienceSubject ? '' : 'max-h-[38vh] overflow-y-auto'
-              }`}
-            >
-              <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={draggableQuestionMarkdownComponents}>
-                {preprocessMaterialMarkdown(q.material)}
-              </ReactMarkdown>
-            </div>
-          )}
+          <MaterialBlock
+            url={q.materialUrl}
+            text={q.material}
+            variant="answer"
+            draggable
+            testId="question-material"
+            className={nonScienceSubject ? '' : 'max-h-[38vh] overflow-y-auto'}
+          />
           <div className="flex gap-3">
             <div className="flex-1 min-w-0">
               <div

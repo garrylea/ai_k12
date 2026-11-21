@@ -509,6 +509,11 @@ body {
 .cn-emphasis-dot {
   position: relative;
 }
+.cn-material-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+}
 .cn-emphasis-dot::after {
   content: "";
   position: absolute;

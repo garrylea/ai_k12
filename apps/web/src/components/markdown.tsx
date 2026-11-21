@@ -217,13 +217,23 @@ function shouldSplitMaterialLine(prev: string, cur: string): boolean {
 
 export const preprocessMaterialMarkdown = (s: string | undefined | null): string => {
   const prepared = preprocessMarkdown(s);
-  if (!prepared.includes('\n')) return prepared;
+  // 「注：」「注释：」「【注】」整行是注释（多用于文言文实词/出处），单独包成灰字小段，
+  // 免得和正文同字号混在一起。先包再分段：包出来的 HTML 行会被段落化逻辑当 HTML 块跳过。
+  const withNotes = prepared
+    .split('\n')
+    .map((line) =>
+      /^\s*(?:注|注释)\s*[:：]|^\s*【注】/.test(line)
+        ? `\n<p class="cn-material-note">${line.trim()}</p>\n`
+        : line,
+    )
+    .join('\n');
+  if (!withNotes.includes('\n')) return withNotes;
   const out: string[] = [];
   let inFence = false;
   let inMath = false;
   // 处于「图片的注解块」：图片行之后的连续图注/分格标签（可多行）不再补空行。
   let captionBlock = false;
-  for (const line of prepared.split('\n')) {
+  for (const line of withNotes.split('\n')) {
     const fence = FENCE_LINE_RE.test(line);
     const mathFence = MATH_FENCE_LINE_RE.test(line);
     const insideBlock = inFence || inMath;
@@ -588,7 +598,7 @@ type ParaBlock =
   | { kind: 'text'; nodes: ReactNode[] }
   | { kind: 'figure'; images: ReactNode[]; caption: string | null };
 
-function MarkdownParagraph({ children }: { children?: ReactNode }) {
+function MarkdownParagraph({ children, className }: { children?: ReactNode; className?: string }) {
   const items = Children.toArray(children);
   // 按 **src 属性**认图，而不是按组件身份：题面区把 img 换成了 MarkdownImg 的包装
   // 组件（QuestionRunner 的 questionMarkdownComponents），`c.type === MarkdownImg`
@@ -676,7 +686,7 @@ function MarkdownParagraph({ children }: { children?: ReactNode }) {
   flushText();
 
   if (!blocks.some((b) => b.kind === 'figure')) {
-    return <p>{children}</p>;
+    return <p className={className}>{children}</p>;
   }
   return (
     <div>
@@ -691,7 +701,7 @@ function MarkdownParagraph({ children }: { children?: ReactNode }) {
             )}
           </figure>
         ) : (
-          <p key={idx}>{b.nodes}</p>
+          <p key={idx} className={className}>{b.nodes}</p>
         ),
       )}
     </div>

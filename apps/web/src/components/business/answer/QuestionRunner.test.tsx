@@ -8,7 +8,10 @@ import { useMemo, useState } from 'react';
 
 // vitest globals:false 下 @testing-library/react 不会自动注册 afterEach cleanup，
 // 需手动清理，否则上一个用例的 DOM 泄漏到下一个用例导致选择器重复命中。
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 // 上传挂起 → 由用例自己 resolve。必须可控：只有能 resolve，才能断言「上传完成后恢复可提交」，
 // 否则「上传中禁用」与「残留文本禁用」两条判据互相掩盖（删掉 onUploadingChange 接线也照样绿）。
@@ -406,6 +409,30 @@ describe('QuestionRunner 材料渲染（语文阅读/文段题）', () => {
       '②眉山越来越近。',
       '③次日一早。',
     ]);
+  });
+
+  it('文章 + 题中素材 + 题干按顺序渲染', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => '## 醉翁亭记' }));
+    render(
+      <QuestionRunner
+        questions={[{
+          n: '14',
+          text: '苏舜钦在沧浪亭中……',
+          type: 'short_answer',
+          materialUrl: 'materials/chinese/a/content.md',
+          material: '联系《醉翁亭记》及下面材料……\n\n注：①罪废：因获罪被罢官',
+        }]}
+        subjectId={2}
+        draftKeyPrefix="material-doc"
+        variant="embedded"
+        onSubmit={async (): Promise<RunnerJudgeOutcome> => ({ isCorrect: true, method: 'exact' })}
+        onFinish={async () => {}}
+      />,
+    );
+    const block = await screen.findByTestId('question-material');
+    await waitFor(() => expect(block.textContent).toContain('醉翁亭记'));
+    const text = block.textContent ?? '';
+    expect(text.indexOf('醉翁亭记')).toBeLessThan(text.indexOf('注：①罪废'));
   });
 });
 

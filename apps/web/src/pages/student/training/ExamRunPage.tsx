@@ -172,6 +172,7 @@ export default function ExamRunPage() {
         type: q.type,
         options: normalizeOptions(q.options),
         material: q.materialText,
+        materialUrl: q.materialUrl,
       })),
     [session],
   );

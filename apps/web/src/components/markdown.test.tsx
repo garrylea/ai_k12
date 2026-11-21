@@ -439,4 +439,11 @@ describe('材料段落化（preprocessMaterialMarkdown）', () => {
   it('已有空行不重复添加', () => {
     expect(preprocessMaterialMarkdown('甲。\n\n乙。')).toBe('甲。\n\n乙。');
   });
+
+  it('注：行输出 cn-material-note', () => {
+    const html = render(
+      preprocessMaterialMarkdown('正文。\n注：①罪废：因获罪被罢官'),
+    );
+    expect(html).toContain('cn-material-note');
+  });
 });

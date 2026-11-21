@@ -13,6 +13,7 @@ import {
   preprocessMaterialMarkdown,
 } from '@/components/markdown';
 import { autoWrapMath, normalizeAnswerMath } from '@/components/business/LatexPreview';
+import { MaterialBlock } from '@/components/business/answer/MaterialBlock';
 import { formatPaperQuestionNo, formatQuestionSource } from '@/utils/questionSource';
 import {
   getMyPointRules,
@@ -222,15 +223,13 @@ function QuestionCard({
         )}
       </div>
 
-      {/* 材料（语文/英语阅读材料、物化题内材料）：独立区块、可滚动，样式与结果页一致 */}
-      {q.materialText && (
-        <div
-          data-testid="history-material"
-          className="md-prose mb-3 max-h-[32vh] overflow-y-auto rounded-lg border border-[var(--bg-subtle)] bg-[var(--bg-base)] px-3 py-2 text-sm text-[var(--text-primary)] leading-[1.7]"
-        >
-          <MarkdownBlock text={q.materialText} material />
-        </div>
-      )}
+      {/* 材料（语文/英语阅读材料、物化题内材料）：文章 doc → 题中素材，独立区块、可滚动 */}
+      <MaterialBlock
+        url={q.materialUrl}
+        text={q.materialText}
+        variant="history"
+        testId="history-material"
+      />
 
       {/* 题面：考试取 questionContent；语文专项取篇名 + 句原文 */}
       {q.questionContent ? (

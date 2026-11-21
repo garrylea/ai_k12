@@ -9,8 +9,8 @@ import {
   markdownComponents,
   makeAnswerComponents,
   preprocessMarkdown,
-  preprocessMaterialMarkdown,
 } from '@/components/markdown';
+import { MaterialBlock } from './answer/MaterialBlock';
 import type { PracticeQuestion } from './AnswerModal';
 
 interface AnswerRecord {
@@ -221,16 +221,12 @@ export function AnswerResultList({
                     </div>
                     {/* Content */}
                     <div className="flex-1 min-w-0">
-                      {q.material && (
-                        <div
-                          data-testid="result-material"
-                          className="md-prose mb-2 max-h-[32vh] overflow-y-auto rounded-lg border border-[var(--bg-subtle)] bg-[var(--bg-base)] px-3 py-2 text-[13px] text-[var(--text-primary)] leading-[1.7]"
-                        >
-                          <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
-                            {preprocessMaterialMarkdown(q.material)}
-                          </ReactMarkdown>
-                        </div>
-                      )}
+                      <MaterialBlock
+                        url={q.materialUrl}
+                        text={q.material}
+                        variant="result"
+                        testId="result-material"
+                      />
                       <div className="text-sm font-medium text-[var(--text-primary)] leading-[1.6]">
                         <ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
                           {preprocessMarkdown(q.text)}

@@ -5,8 +5,8 @@ import {
   markdownRehypePlugins,
   markdownRemarkPlugins,
   preprocessMarkdown,
-  preprocessMaterialMarkdown,
 } from '@/components/markdown';
+import { MaterialBlock } from '@/components/business/answer/MaterialBlock';
 import type { RunnerQuestion } from '@/components/business/answer/types';
 
 export interface PrintMeta {
@@ -69,9 +69,9 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
       </div>
 
       {questions.map((q, i) => {
-        const material = q.material && q.material.trim() ? q.material : null;
-        const showMaterial = material !== null && material !== lastMaterial;
-        lastMaterial = material;
+        const materialKey = q.materialUrl ?? q.material ?? null;
+        const showMaterial = materialKey !== null && materialKey !== lastMaterial;
+        lastMaterial = materialKey;
         const options = optionsOf(q);
         const blank = answerSpaceClass(q.type);
 
@@ -79,13 +79,11 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
           <section className="print-q" data-testid="print-question" key={q.n}>
             {showMaterial && (
               <div className="print-material md-prose" data-testid="print-material">
-                <ReactMarkdown
-                  remarkPlugins={markdownRemarkPlugins}
-                  rehypePlugins={markdownRehypePlugins}
-                  components={markdownComponents}
-                >
-                  {preprocessMaterialMarkdown(material)}
-                </ReactMarkdown>
+                <MaterialBlock
+                  url={q.materialUrl}
+                  text={q.material}
+                  variant="print"
+                />
               </div>
             )}
 

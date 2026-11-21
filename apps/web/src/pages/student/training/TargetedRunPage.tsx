@@ -139,6 +139,7 @@ export default function TargetedRunPage() {
         type: e.type,
         options: normalizeOptions(e.options),
         material: e.materialText,
+        materialUrl: e.materialUrl,
         source: e.source ?? null,
         questionNo: e.questionNo ?? null,
       })),
@@ -147,7 +148,10 @@ export default function TargetedRunPage() {
 
   // AnswerResultList 的题目输入（n/text 与 RunnerQuestion 一致，共用 questionId 键）
   const resultQuestions: PracticeQuestion[] = useMemo(
-    () => (entries ?? []).map((e) => ({ n: String(e.questionId), text: e.text, material: e.materialText })),
+    () => (entries ?? []).map((e) => ({
+      n: String(e.questionId), text: e.text,
+      material: e.materialText, materialUrl: e.materialUrl,
+    })),
     [entries],
   );
 
