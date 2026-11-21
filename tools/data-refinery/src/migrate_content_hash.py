@@ -37,7 +37,7 @@ def main() -> int:
                            autocommit=False)
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, content, options, content_hash, material_text "
+            cur.execute("SELECT id, content, options, content_hash, material_text, material_url "
                         "FROM questions ORDER BY id")
             rows = cur.fetchall()
             if args.limit:
@@ -45,8 +45,8 @@ def main() -> int:
 
             planned: list[tuple[int, str, str]] = []
             by_new: dict[str, list[int]] = defaultdict(list)
-            for qid, content, options, old, material in rows:
-                new = content_hash(content, options, material)
+            for qid, content, options, old, material, material_url in rows:
+                new = content_hash(content, options, material, material_url)
                 planned.append((int(qid), new, old))
                 by_new[new].append(int(qid))
 

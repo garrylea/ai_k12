@@ -47,6 +47,17 @@ def test_plan_fixes_content_change_recomputes_hash():
     assert len(fix.field_fixes) == 1
 
 
+def test_plan_fixes_skips_article_row():
+    rows = [_row(
+        id=1,
+        content="题干\n\n第5页（共8页）\n",
+        material_url="materials/chinese/a/content.md",
+        content_hash="a" * 64,
+    )]
+    fixes, manual, conflicts = plan_fixes(rows, {1: (2, 3)})
+    assert fixes == [] and manual == [] and conflicts == []
+
+
 def test_plan_fixes_material_change_no_hash():
     rows = [_row(
         id=2,

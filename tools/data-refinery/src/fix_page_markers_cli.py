@@ -68,7 +68,8 @@ def _chunks(items: list[int], size: int = 1000):
 def load_rows(conn, *, paper_id: int | None = None,
               subject_id: int | None = None, limit: int | None = None) -> list[dict]:
     sql = (
-        "SELECT q.id, q.content, q.material_text, q.answer, q.explanation, "
+        "SELECT q.id, q.content, q.material_text, q.material_url, "
+        "q.answer, q.explanation, "
         "q.approach, q.options, q.content_hash, q.answer_verified "
         "FROM questions q WHERE 1=1"
     )
@@ -148,6 +149,9 @@ def plan_fixes(rows: list[dict], paper_map: dict[int, tuple[int, int]],
 
     for row in rows:
         qid = int(row["id"])
+        if row.get("material_url"):
+            print(f"[skip] id={qid} material_url={row['material_url']}（文章在 md 里，按文档清洗）", flush=True)
+            continue
         changed: dict[str, str] = {}
         field_fixes: list[FieldFix] = []
 

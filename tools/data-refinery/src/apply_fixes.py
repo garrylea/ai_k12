@@ -294,6 +294,11 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         # 题号在库、只是关联被摘掉（重导/旧版补题）：更新那一行，别新建同号题
         qid = _orphan_question(cur, paper_id, rec.get("source", ""), go)
         orphan = qid is not None
+    if qid:
+        cur.execute("SELECT material_url FROM questions WHERE id=%s", (qid,))
+        row = cur.fetchone()
+        if row and row[0]:
+            return "跳过：文章已外置为 md（material_url 非空），请在材料文档里修改"
     # 没有挂到卷上时，可能是「新增」，也可能是「复用」一条同内容的遗留行（重导摘了关联、
     # 没删题）。真正的选择要等内容物化后算哈希才知道，预览先把这个可能说清楚。
     action = "更新" if qid else "新增（同内容已存在则复用）"

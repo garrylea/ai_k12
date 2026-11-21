@@ -75,7 +75,8 @@ def _load_papers(conn, args) -> list[dict]:
 def _load_questions(conn, paper_id: int) -> list[dict]:
     with conn.cursor(pymysql.cursors.DictCursor) as cur:
         cur.execute(
-            "SELECT q.id, pq.question_no, q.content, q.material_text, q.options, q.content_hash "
+            "SELECT q.id, pq.question_no, q.content, q.material_text, q.material_url, "
+            "q.options, q.content_hash "
             "FROM paper_questions pq JOIN questions q ON q.id=pq.question_id "
             "WHERE pq.paper_id=%s ORDER BY pq.question_no",
             (paper_id,),
@@ -175,6 +176,10 @@ def main(argv=None):
             rows = _load_questions(conn, paper["id"])
             changes = []
             for row in rows:
+                if row.get("material_url"):
+                    print(f"[skip] id={row['id']} material_url={row['material_url']}"
+                          f"（文章在 md 里，按文档清洗）", flush=True)
+                    continue
                 new, _, applied = _decorate_row(row, decorations, args.verbose)
                 if any(new[k] != (row.get(k) or "") for k in ("content", "material_text")):
                     changed = True
@@ -218,7 +223,8 @@ def main(argv=None):
                         "UPDATE questions SET content=%s, material_text=%s, options=%s, content_hash=%s "
                         "WHERE id=%s",
                         (new["content"], new["material_text"] or None, new["options"],
-                         content_hash(new["content"], new["options"], new["material_text"]),
+                         content_hash(new["content"], new["options"], new["material_text"],
+                                      row.get("material_url")),
                          row["id"]),
                     )
                     after = _fetch_row(cur, row["id"])
