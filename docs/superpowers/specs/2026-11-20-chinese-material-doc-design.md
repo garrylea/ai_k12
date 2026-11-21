@@ -191,6 +191,22 @@ material_fingerprint_input = (material_url or "") + "\n" + (material_text or "")
 - 跨卷同题 → 沿用 db_loader 现有的 `_reusable_question` 复用逻辑，并打印告警；
 - 无法自动决定的行保持旧 hash 并记入回填报告，不阻塞整批。
 
+### 4.5 人工补题指认 `material_url`（三态）
+
+PDF→MD 时**题号、小节标题都可能丢失**：切题器靠题号切分，丢号那题的题干会被并进相邻题的材料，`material_text` 为空 → 分不到文章组 → 没有 `material_url`（实测 2025 海淀模拟二 Q20）。此时工具无法判断该题到底有没有共享文章，**由补题时人工指认，不猜**。
+
+补题记录的 `material_url` 字段为三态（`manual_fix.py` / `apply_fixes.py`）：
+
+| 取值 | 写库行为 |
+|---|---|
+| 字段不存在 | 不动库里现有 `material_url`（兼容旧记录 / 非 TTY 调用） |
+| 显式 `null` | 人工确认本题无材料 → 写 `NULL` |
+| 字符串 URL | 写该 URL，并按它重算 `content_hash`（§4.4）；文档不存在则拒写 |
+
+- 交互候选从**同卷 published JSONL** 收集已有 `material_url`，按题号列出，人看着原卷选序号或直接粘贴；不依赖小节标题（同样会丢）。
+- 显式 URL 优先于 `material_scope`，也不再走 `_correct_article_doc`（那是「改正文重算 doc_key」，不是「认领已有文章」）。
+- 旧 `applied_hash` 记录不受影响；指认后重算的 hash 写回 `applied_hash`，下次重导冲掉仍可重放。
+
 ---
 
 ## 5. 服务端改动

@@ -1739,3 +1739,65 @@ def test_split_options_loose_fallback_ignores_image_name():
     content = "![](images/图A.jpg)\n这是一段题干文字"
     stem, opts = split_options(content)
     assert opts is None
+
+
+POST_STEM_MATERIAL_PAPER = r"""## （二）阅读《游山西村》，完成 11-12 题。（共 6分）
+
+## 游山西村
+
+陆游
+
+莫笑农家腊酒浑，丰年留客足鸡豚。山重水复疑无路，柳暗花明又一村。箫鼓追随春社近，衣冠简朴古风存。从今若许闲乘月，拄杖无时夜叩门。
+
+11.根据你的理解，在下面横线上填写恰当的内容。（2分）
+
+诗作开篇渲染了丰收之年的气象，一个“\_\_①\_\_”字描述了农家待客的盛情。
+
+12.在记游抒情的古诗词中，诗人常通过所见来抒发所感。结合本诗画线句与《行香子》下片的相关句子，说说诗人是如何描绘农家风情画卷来抒发情感的。（4分）
+
+## 行香子
+
+## 秦观
+
+树绕村庄，水满陂塘<sup>①</sup>。倚东风，豪兴徜徉<sup>②</sup>。小园几许<sup>③</sup>，收尽春光。有桃花红，李花白，菜花黄。 远远围墙，隐隐茅堂。飏<sup>④</sup>青旗<sup>⑤</sup>，流水桥旁。偶然乘兴，步过东冈。正莺儿啼，燕儿舞，蝶儿忙。
+
+注：①〔陂(bēi)塘〕池塘。②〔徜徉〕闲游，安闲自在地步行。③〔几许〕多少，这里表示园子不大。④〔飏(yáng)〕飞扬，飘扬。⑤〔青旗〕酒店门口挂的青色酒榥。
+
+## （三）阅读两篇文言文节选，完成 13-15 题。（共 8 分）
+
+## （一）
+太行、王屋二山，方七百里，高万仞，本在冀州之南。
+
+13. “方七百里”中的“方”与下列词语中加点的“方”，意思相同的一项是(2分)
+A. 甲
+B. 乙
+C. 丙
+D. 丁
+"""
+
+
+def test_post_stem_material_attaches_to_citing_question():
+    """海淀 202507 模拟二真题：题后《行香子》必须挂到引用它的题12。
+
+    题前《游山西村》仍归本节共享材料（Q11/Q12），题后的《行香子》只归 Q12，
+    不能漏掉、不能挂给 Q11/Q13、不能混进题干，也不能跨过下一节标题。
+    """
+    questions = split_page(
+        POST_STEM_MATERIAL_PAPER, Path("x.md"), strategy=get_strategy("chinese"))
+    q = {x.group_order: x for x in questions}
+
+    assert "游山西村" in q[11].material_text
+    assert "行香子" not in q[11].material_text
+
+    assert "游山西村" in q[12].material_text
+    assert "行香子" in q[12].material_text
+    assert "秦观" in q[12].material_text
+    assert "注：" in q[12].material_text
+    assert "树绕村庄" not in q[12].content
+    assert q[12].material_text.index("游山西村") < q[12].material_text.index("行香子")
+    # 标注看到的是合并视图；发布用的 base 仍是原来的共享文章
+    assert "游山西村" in q[12].post_material_base
+    assert "行香子" not in q[12].post_material_base
+
+    assert "太行" in q[13].material_text
+    assert "行香子" not in q[13].material_text

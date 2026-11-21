@@ -35,6 +35,11 @@ from subject_codes import subject_code_for_parts  # noqa: E402
 
 FIXES_DIR = ROOT / "output" / "manual_fixes"
 
+# material_url 三态：字段不存在 = 保持库里现状（兼容旧记录）；显式 None = 人工确认
+# 本题无材料（写 NULL）；字符串 = 写入该 URL。题号/小节标题都可能在 PDF→MD 时丢失，
+# 切题器判不出共享文章归属，只能由补题时人工指认，工具不猜（2026-11-21 用户裁决）。
+_NO_URL_FIELD = object()
+
 _IMG_REF_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
 
@@ -55,7 +60,9 @@ def _has_images(*texts, options=None) -> bool:
 
 
 def _patch_extracted(rec: dict, *, content: str, answer: str,
-                     material_text, options, output_dir: Path) -> None:
+                     material_text, options, output_dir: Path,
+                     post_material_text: str | None = None,
+                     preserve_existing_material: bool = False) -> None:
     """把补好的题写回 extracted，保证下次 publish/loader 看到同一份题号。
 
     为什么必须回写：补题原先只写库，published 仍按旧题号（缺题的位置是空洞）。
@@ -89,9 +96,14 @@ def _patch_extracted(rec: dict, *, content: str, answer: str,
         "content": content,
         "options": options,
         "answer": answer,
-        "material_text": material_text,
+        "material_text": ((existing or {}).get("material_text")
+                          if preserve_existing_material else material_text),
         "needs_review": False,
     }
+    # 文章已外置的共存题：extracted 里的 material_text 是文章原文（publish 要据此
+    # 外置），不能被题内素材覆盖；题内素材走 _post_material_text 通道。
+    if post_material_text:
+        payload["_post_material_text"] = post_material_text
     if pos is None:
         pos = next((i for i, r in enumerate(rows) if int(r.get("group_order") or 0) > go), len(rows))
         sibling = rows[pos] if pos < len(rows) else (rows[-1] if rows else {})
@@ -116,6 +128,13 @@ def _patch_extracted(rec: dict, *, content: str, answer: str,
     checkpoint.load()
     checkpoint.unmark_published(f"{rel}/{src}")
     print(f"[INFO] 已回写 extracted 并标记重发：{path}", flush=True)
+
+
+def _unmark_publish_checkpoint(rel: str, src: str, output_dir: Path) -> None:
+    """只让这份卷下次重新 publish，不动 extracted（文章修正用）。"""
+    checkpoint = RefineryCheckpoint(output_dir / ".publish_checkpoint.json")
+    checkpoint.load()
+    checkpoint.unmark_published(f"{rel}/{src}")
 
 
 def _patch_extracted_answer(rec: dict, answer: str, output_dir: Path) -> None:
@@ -146,6 +165,14 @@ def _patch_extracted_answer(rec: dict, answer: str, output_dir: Path) -> None:
     checkpoint.load()
     checkpoint.unmark_published(f"{rel}/{src}")
     print(f"[INFO] 已回写 extracted 答案并标记重发：{path}", flush=True)
+
+
+def _go_int(value) -> int | None:
+    """题号归一：补题记录可能是旧格式或被手改过，非法值不能让整批崩掉。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -277,6 +304,111 @@ def needing_replay(subject: str | None = None, source: str | None = None,
         conn.close()
 
 
+def _unmark_publish_for_source(src: str, output_dir: Path) -> None:
+    """按卷名找 extracted 里的相对路径，清掉该卷的 publish checkpoint。"""
+    extracted = output_dir / "extracted"
+    if not extracted.exists():
+        return
+    for path in extracted.rglob(f"{src}.jsonl"):
+        rel = path.relative_to(extracted).with_suffix("")
+        _unmark_publish_checkpoint(str(rel.parent), src, output_dir)
+
+
+def _log_hash_conflict(output_dir: Path, qid: int) -> None:
+    path = output_dir / "content_hash_conflicts.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"question_id": qid, "reason": "article_url_change",
+                             "ts": datetime.now().isoformat(timespec="seconds")},
+                            ensure_ascii=False) + "\n")
+
+
+def _sync_applied_hashes(hash_map: dict, output_dir: Path) -> None:
+    """兄弟题 URL 变了 → applied_hash 也要跟着换，否则 needing_replay 每次都误报。"""
+    from manual_fix import _read_jsonl, _write_jsonl
+
+    for f in (output_dir / "manual_fixes").glob("*.jsonl"):
+        rows = _read_jsonl(f)
+        changed = False
+        for row in rows:
+            old = row.get("applied_hash")
+            if old in hash_map:
+                row["applied_hash"] = hash_map[old]
+                changed = True
+        if changed:
+            _write_jsonl(f, rows)
+
+
+def _correct_article_doc(cur, rec, material_text: str, old_url: str,
+                         output_dir: Path) -> tuple[str, str]:
+    """人工校对共享文章：按规范化参数重算 doc_key，写文档并同步兄弟题。
+
+    返回 (最终 material_url, 结果说明)。key 不变时原地改 content.md、URL/hash 不动；
+    key 变了就写新文档、把共用旧 URL 的所有题（含跨卷）改到新 URL 并重算 hash。
+    """
+    from chinese_material_doc import write_material_doc
+    from image_rewrite import _resolve_src
+    from manual_fix import _read_jsonl, _write_jsonl
+
+    assets_dir = output_dir / "assets"
+    md_images_dir = output_dir / "md" / Path(rec.get("rel_path", ""))
+    resolver = lambda ref: _resolve_src(ref, md_images_dir)
+    store = LocalAssetStore(assets_dir)
+    kwargs = dict(resolver=resolver, store=store, assets_dir=assets_dir,
+                  subject_code="chinese")
+    new_key, new_url = write_material_doc(
+        material_text, dry_run=True, **kwargs)
+    old_key = Path(old_url).parent.name
+
+    if new_key == old_key:
+        write_material_doc(material_text, dry_run=False, **kwargs)
+        note = "文章规范化后 doc_key 不变，已原地重写 content.md"
+    else:
+        write_material_doc(material_text, dry_run=False, **kwargs)
+        cur.execute(
+            "SELECT id, source, content, options, content_hash FROM questions "
+            "WHERE material_url=%s", (old_url,))
+        rows = cur.fetchall()
+        stamp = hashlib.sha256(datetime.now().isoformat().encode()).hexdigest()[:12]
+        hash_map: dict = {}
+        for idx, (qid, source, content, opts_json, old_hash) in enumerate(rows):
+            # 两阶段更新，避开 UNIQUE(content_hash) 在批量换 URL 时的中间态冲突
+            cur.execute("UPDATE questions SET content_hash=%s WHERE id=%s",
+                        (f"_tmp_{stamp}_{idx}", qid))
+            try:
+                opts = json.loads(opts_json) if opts_json else None
+            except (TypeError, ValueError):
+                opts = None
+            final = content_hash(content or "", opts, None, new_url)
+            try:
+                cur.execute("UPDATE questions SET material_url=%s, content_hash=%s "
+                            "WHERE id=%s", (new_url, final, qid))
+                hash_map[old_hash] = final
+            except Exception:
+                cur.execute("UPDATE questions SET material_url=%s WHERE id=%s",
+                            (new_url, qid))
+                hash_map[old_hash] = old_hash
+                _log_hash_conflict(output_dir, qid)
+            if source:
+                _unmark_publish_for_source(source, output_dir)
+        _sync_applied_hashes(hash_map, output_dir)
+        note = (f"文章 doc_key {old_key}→{new_key}，已同步 {len(rows)} 道兄弟题的 URL/hash")
+
+    # publish 下次仍要从 extracted 读文章；override 保证修正不会被冲掉。
+    # 匹配只按 old_key（跨卷兄弟题也要命中），source 仅作溯源。
+    path = output_dir / "material_doc_overrides.jsonl"
+    overrides = [r for r in _read_jsonl(path) if r.get("old_key") != old_key] \
+        if path.exists() else []
+    overrides.append({
+        "old_key": old_key, "new_key": new_key, "body": material_text,
+        "provenance_source": rec.get("source"),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    })
+    _write_jsonl(path, overrides)
+    _unmark_publish_for_source(rec.get("source", ""), output_dir)
+    return new_url, note
+
+
 def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None,
                  output_dir: Path | None = None) -> str:
     from manual_fix import looks_like_ui_echo
@@ -294,15 +426,9 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         # 题号在库、只是关联被摘掉（重导/旧版补题）：更新那一行，别新建同号题
         qid = _orphan_question(cur, paper_id, rec.get("source", ""), go)
         orphan = qid is not None
-    if qid:
-        cur.execute("SELECT material_url FROM questions WHERE id=%s", (qid,))
-        row = cur.fetchone()
-        if row and row[0]:
-            return "跳过：文章已外置为 md（material_url 非空），请在材料文档里修改"
-    # 没有挂到卷上时，可能是「新增」，也可能是「复用」一条同内容的遗留行（重导摘了关联、
-    # 没删题）。真正的选择要等内容物化后算哈希才知道，预览先把这个可能说清楚。
-    action = "更新" if qid else "新增（同内容已存在则复用）"
 
+    # 只补答案：不碰题面/材料，必须放在材料归属护栏之前。旧版 answer_only 记录
+    # 曾复制 material_text，若先过护栏会被误拦（2026-11-21 实测缺口）。
     if rec.get("answer_only"):
         answer = (rec.get("answer") or "").strip()
         if not apply:
@@ -318,10 +444,42 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         )
         return f"更新答案：paper={paper_id} 第{go}题 -> question_id={qid}"
 
+    # 材料修正必须明确归属，不能猜：题内素材只挂本题，共享文章改 md 文档。
+    # Q20 这类不带材料的补题不受影响；旧记录没标归属又遇到已外置文章 → 要求重录，
+    # 防止把整篇文章误塞进 material_text（2026-11-21 用户反馈的旧事故）。
+    scope = rec.get("material_scope")
+    has_material = bool((rec.get("material_text") or "").strip())
+    explicit_url = rec.get("material_url", _NO_URL_FIELD)
+    target_url = None
+    existing_method = None
+    existing_options = None
+    if qid:
+        cur.execute("SELECT material_url, material_method, options FROM questions WHERE id=%s",
+                    (qid,))
+        row = cur.fetchone()
+        if row:
+            target_url, existing_method, existing_options = row[0], row[1], row[2]
+    # 显式 material_url 已是人工指认的归属，不再要求 material_scope（那本来是给
+    # 「材料中粘改」用的；这里只指认 URL，题干照改）。没有显式 URL 时维持原护栏。
+    if explicit_url is _NO_URL_FIELD and has_material and target_url and not scope:
+        return ("跳过：材料归属未标明（该题文章已外置为 md）。"
+                "请重新校对时选择「1 题内素材」或「2 本节共享文章」")
+    # 没有挂到卷上时，可能是「新增」，也可能是「复用」一条同内容的遗留行（重导摘了关联、
+    # 没删题）。真正的选择要等内容物化后算哈希才知道，预览先把这个可能说清楚。
+    action = "更新" if qid else "新增（同内容已存在则复用）"
+
+    url_note = ""
+    if explicit_url is not _NO_URL_FIELD:
+        if isinstance(explicit_url, str) and explicit_url.strip():
+            url_note = (f" · material_url: {target_url or '无'} → "
+                        f"{explicit_url.strip()}")
+        else:
+            url_note = f" · material_url: {target_url or '无'} → 无（确认无材料）"
+
     if not apply:
         # 预览要能判断"内容对不对"，只报更新/新增没用（用户 2026-10-31 指出）
         detail = (f"{action}：paper={paper_id} 第{go}题（question_id={qid or '—'}）"
-                  f" · 新内容 {len(rec.get('content') or '')} 字")
+                  f" · 新内容 {len(rec.get('content') or '')} 字{url_note}")
         if qid:
             cur.execute("SELECT CHAR_LENGTH(content) FROM questions WHERE id=%s", (qid,))
             row = cur.fetchone()
@@ -335,6 +493,47 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
     material_text = rec.get("material_text")
     options = rec.get("options")
     forced_type = rec.get("expected_type") or None
+
+    # 只改题干时粘贴内容里没有 A/B/C/D，补题记录的 options 是 None；直接写库会把
+    # 原题已有选项整列抹掉（用户 2026-11-21 报的「选项符被吞掉」）。没有新选项
+    # 就沿用原选项；确实要清空需显式给空列表。
+    if options is None and existing_options:
+        try:
+            parsed = (json.loads(existing_options)
+                      if isinstance(existing_options, str) else existing_options)
+            if isinstance(parsed, list) and parsed:
+                options = parsed
+                print(f"[INFO] 第{go}题补题未带选项，保留原题已有的 "
+                      f"{'/'.join(str(o.get('label') or '?') for o in options)}", flush=True)
+        except (TypeError, ValueError):
+            pass
+
+    article_note = ""
+    new_url = target_url
+    if explicit_url is not _NO_URL_FIELD:
+        # 人工指认优先：字符串=写入该 URL；None=确认无材料。两种情况都不再走
+        # `_correct_article_doc`（那是「改文章正文并重算 doc_key」的路径，不是「认领
+        # 已存在的文章」）——否则会把人工选的 URL 又被规范化结果覆盖掉。
+        if isinstance(explicit_url, str) and explicit_url.strip():
+            new_url = explicit_url.strip()
+            # 边界校验：指认的 URL 必须是已物化的文章文档，否则前端必 404（不静默写坏）
+            asset = (output_dir or RefineryConfig.from_env().output_dir) / "assets" / new_url
+            if not asset.exists():
+                return f"跳过：指认的材料文档不存在（{new_url}），请确认 URL 或先重发该卷"
+            if scope == "article":
+                material_text = None       # 共享文章在 md 文档里，不写题内素材列
+        else:
+            new_url = None
+            material_text = None
+    elif has_material and scope == "article" and target_url:
+        new_url, article_note = _correct_article_doc(
+            cur, rec, material_text, target_url,
+            output_dir or RefineryConfig.from_env().output_dir)
+        material_text = None       # 共享文章在 md 文档里，不写题内素材列
+    method_value = ("manual" if has_material and scope in ("inline", "legacy_inline")
+                    else existing_method)
+    if scope == "article" and target_url:
+        method_value = existing_method
 
     # 手录时容易漏掉图片语法的 `!`（写成 `[](images/...)` 而不是 `![](images/...)`），
     # 导致：① rewrite_fields 不认它为图片 → 不物化；② 前端渲染成空链接 → 选项消失。
@@ -377,22 +576,31 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         except MissingImageError as e:
             return f"跳过：{e}"
 
-    chash = content_hash(content, options, raw_material)
-    _patch_extracted(
-        rec, content=raw_content, answer=raw_answer,
-        material_text=raw_material, options=raw_options,
-        output_dir=output_dir or RefineryConfig.from_env().output_dir,
-    )
+    material_for_hash = None if scope == "article" else raw_material
+    chash = content_hash(content, options, material_for_hash, new_url)
+    out_dir = output_dir or RefineryConfig.from_env().output_dir
+    if scope == "article" and target_url:
+        # 文章正文不能从 extracted 覆盖（下次 publish 会据此再写文档）
+        _unmark_publish_checkpoint(rec.get("rel_path", ""), rec["source"], out_dir)
+    else:
+        _patch_extracted(
+            rec, content=raw_content, answer=raw_answer,
+            material_text=raw_material, options=raw_options,
+            output_dir=out_dir,
+            post_material_text=(raw_material if target_url and
+                                scope in ("inline", "legacy_inline") else None),
+            preserve_existing_material=bool(target_url),
+        )
     if qid:
         cur.execute(
             "UPDATE questions SET content=%s, options=%s, "
             "type=COALESCE(%s, IF(%s,'choice',type)), "
             "answer=COALESCE(NULLIF(%s,''), answer), material_text=%s, "
-            "content_hash=%s, is_active=1 WHERE id=%s",
+            "material_method=%s, content_hash=%s, material_url=%s, is_active=1 WHERE id=%s",
             (content,
              json.dumps(options, ensure_ascii=False) if options else None,
              forced_type, 1 if options else 0,
-             answer, material_text, chash, qid))
+             answer, material_text, method_value, chash, new_url, qid))
         if orphan:
             # 旧行没挂在卷上：把卷内的题号关系补回来（内容已更新，不新建行）
             cur.execute(
@@ -412,12 +620,12 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
             cur.execute(
                 "UPDATE questions SET content=%s, options=%s, "
                 "type=COALESCE(%s, IF(%s,'choice',type)), "
-                "answer=COALESCE(NULLIF(%s,''), answer), material_text=%s, is_active=1 "
-                "WHERE id=%s",
+                "answer=COALESCE(NULLIF(%s,''), answer), material_text=%s, "
+                "material_method=%s, is_active=1, material_url=%s WHERE id=%s",
                 (content,
                  json.dumps(options, ensure_ascii=False) if options else None,
                  forced_type, 1 if options else 0,
-                 answer, material_text, qid))
+                 answer, material_text, method_value, new_url, qid))
             cur.execute(
                 "INSERT IGNORE INTO paper_questions "
                 "(paper_id, question_id, question_no, group_order) VALUES (%s,%s,%s,%s)",
@@ -426,13 +634,14 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
             action = "新增"
             cur.execute(
                 "INSERT INTO questions (subject_id, group_order, type, difficulty, content, options, "
-                "answer, material_text, grade_band, source, source_year, content_hash, is_active) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)",
+                "answer, material_text, material_method, grade_band, source, source_year, "
+                "content_hash, is_active, material_url) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s)",
                 (subject_id, go, forced_type or ("choice" if options else "short_answer"), 2,
                  content,
                  json.dumps(options, ensure_ascii=False) if options else None,
-                 answer, material_text,
-                 "junior", rec["source"], 2024, chash))
+                 answer, material_text, method_value,
+                 "junior", rec["source"], 2024, chash, new_url))
             qid = int(cur.lastrowid)
             cur.execute(
                 "INSERT IGNORE INTO paper_questions (paper_id, question_id, question_no, group_order) "
@@ -447,7 +656,8 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
               flush=True)
     # 记下写入时的内容哈希：下次重导若把这道题的内容换回旧的，能立刻发现并重放
     rec["applied_hash"] = chash
-    return f"{action}：paper={paper_id} 第{go}题 -> question_id={qid}"
+    suffix = f" · {article_note}" if article_note else ""
+    return f"{action}：paper={paper_id} 第{go}题 -> question_id={qid}{suffix}"
 
 
 def _replay_reason(cur, rec: dict) -> str | None:
@@ -529,6 +739,8 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
     parser.add_argument("--apply", action="store_true", help="真正写库（默认只预览）")
     parser.add_argument("--dry-run", action="store_true", help="只预览（与默认行为一致，便于显式声明）")
     parser.add_argument("--force", action="store_true", help="连 applied=true 的记录也重放")
+    parser.add_argument("--group-order", type=int,
+                        help="只处理指定卷面题号的补题记录（避免误写同卷其它 pending 题）")
     args = parser.parse_args(argv)
     if args.apply and args.dry_run:
         parser.error("--apply 与 --dry-run 互斥")
@@ -545,8 +757,12 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
     total = 0
     previewed = 0
     applied_keys: list[tuple[str, int, str]] = []
-    rejected_keys: list[tuple[str, int, str]] = []
+    rejected_keys: list[tuple[str, int, str, str]] = []
     applied_sources: dict[str, dict[str, set[int]]] = {}   # 学科目录 -> 卷名 -> 题号
+    # 补题文件的 applied 标记必须在事务提交**之后**落盘。否则同一批里后面的记录
+    # 抛异常 → conn.rollback()，但前面文件已写成 applied=True，库里却没写，
+    # needing_replay 又认不出，题就永久丢了（2026-11-21 实测复现）。
+    written_files: list[tuple[Path, list[dict]]] = []
     try:
         with conn.cursor() as cur:
             for f in files:
@@ -566,33 +782,61 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                     todo = [r for r in todo if Path(r["rel_path"]).parts[0] == args.subject]
                 if args.source:
                     todo = [r for r in todo if args.source in r["source"]]
+                if args.group_order is not None:
+                    todo = [r for r in todo
+                            if _go_int(r.get("group_order")) == args.group_order]
                 for rec in todo:
-                    msg = apply_record(cur, rec, args.apply)
-                    print(f"[{rec['source'][:26]}] 题{rec['group_order']}: {msg}",
-                          flush=True)
+                    go = _go_int(rec.get("group_order"))
+                    if go is None:
+                        msg = f"跳过：题号非法（{rec.get('group_order')!r}），请重新补录"
+                        print(f"[{str(rec.get('source'))[:26]}] 题?: {msg}", flush=True)
+                        rejected_keys.append((str(rec.get("source", "?")),
+                                              str(rec.get("group_order", "?")),
+                                              str(f), msg))
+                        continue
+                    # 每条记录一个 savepoint：单条异常/拒绝只回滚它自己，其它题照常入库。
+                    # 否则一条坏记录会让整批回滚，好题也跟着丢（2026-11-21 实测）。
+                    if args.apply:
+                        cur.execute("SAVEPOINT apply_fix_record")
+                    try:
+                        msg = apply_record(cur, rec, args.apply)
+                    except Exception as exc:  # noqa: BLE001 - 单条失败不能拖垮整批
+                        if args.apply:
+                            cur.execute("ROLLBACK TO SAVEPOINT apply_fix_record")
+                            cur.execute("RELEASE SAVEPOINT apply_fix_record")
+                        msg = f"跳过：处理异常（{type(exc).__name__}: {exc}）"
+                    print(f"[{str(rec.get('source'))[:26]}] 题{go}: {msg}", flush=True)
                     if not args.apply:
                         previewed += 1
                         continue
                     if msg.startswith("跳过"):
-                        # 补录内容本身不合法：提交后把它退回待处理，下次扫描/补题还会提醒
-                        rejected_keys.append((rec["source"], rec["group_order"], str(f)))
+                        # 补录内容本身不合法：撤销本条已做的部分写，退回待处理
+                        cur.execute("ROLLBACK TO SAVEPOINT apply_fix_record")
+                        cur.execute("RELEASE SAVEPOINT apply_fix_record")
+                        rejected_keys.append((rec["source"], rec["group_order"],
+                                              str(f), msg))
                         continue
+                    cur.execute("RELEASE SAVEPOINT apply_fix_record")
                     rec["applied"] = True
                     rec["applied_at"] = datetime.now().isoformat(timespec="seconds")
                     total += 1
-                    applied_keys.append((rec["source"], rec["group_order"], str(f)))
+                    applied_keys.append((rec["source"], go, str(f)))
                     subject_cn = Path(rec["rel_path"]).parts[0]
                     applied_sources.setdefault(subject_cn, {}).setdefault(
-                        rec["source"], set()).add(int(rec["group_order"]))
-                if args.apply:
-                    _write_jsonl(f, rows)
+                        rec["source"], set()).add(go)
+                if args.apply and rows:
+                    written_files.append((f, rows))
         if args.apply:
             conn.commit()
+            # 提交成功后才落 applied 标记；提交失败/中途异常时全部保持待写状态
+            for f, rows in written_files:
+                _write_jsonl(f, rows)
             # 状态回写在事务提交之后：写库失败时清单不能被误标成已解决
             for source, go, f in applied_keys:
                 mark_issue(source, go, "resolved", note="已写入题库", fix_file=f)
-            for source, go, _ in rejected_keys:
-                mark_issue(source, go, "pending", note="补录内容被拒（疑似界面文字），请重新补录")
+            for source, go, f, reason in rejected_keys:
+                mark_issue(source, go, "pending", note=f"补录内容被拒：{reason}",
+                           fix_file=f)
             print(f"\n[ok] 已写入 {total} 题", flush=True)
             _rescan(applied_sources)
         else:

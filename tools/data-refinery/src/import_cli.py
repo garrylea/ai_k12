@@ -672,14 +672,9 @@ def _execute(args) -> int:
     if resolve_rc is not None:
         return resolve_rc
 
-    # 重转卷时，先作废该卷的旧补题记录：栅格化重转后旧的手工补题已过时，
-    # 留着会在第 9 步被重新应用、覆盖刚修好的切题结果（2026-11-18 海淀数学(9) 实测）。
+    # 重转卷时是否清理旧补题，要等 extract 跑完才知道：只有「重抽后已经恢复」的题
+    # 才作废旧补题；仍缺题的补录必须保留（上次在切题前无差别丢弃，导致 Q20 重录丢失）。
     rebuild = args.reconvert or args.re_extract or args.redo
-    if rebuild and args.file and not args.dry_run:
-        from manual_fix import discard_fixes_for_source
-        n = discard_fixes_for_source(args.file)
-        if n:
-            print(f"[rebuild] 该卷旧补题记录已作废（移入 _discarded/）：{n} 条", flush=True)
 
     stages = []
     if not args.skip_convert:
@@ -727,6 +722,14 @@ def _execute(args) -> int:
             if rc not in (None, 0):
                 print(f"[ERROR] {label} 返回 {rc}，已停止；后续阶段未执行", flush=True)
                 return rc
+            # extract 之后才判定旧补题是否过时：重抽恢复的作废，仍缺题的保留，
+            # 让第 9 步能写库（--redo 与首次导入得到同样的结果）。
+            if rebuild and args.file and not args.dry_run and label.startswith("2/9 extract"):
+                from manual_fix import discard_fixes_for_source
+                n = discard_fixes_for_source(args.file)
+                if n:
+                    print(f"[rebuild] 该题已重抽恢复，旧补题记录作废（移入 _discarded/）："
+                          f"{n} 条", flush=True)
     except KeyboardInterrupt:
         print("\n[中断] 已停止；已完成阶段有 checkpoint，重跑同一命令即可继续",
               flush=True)

@@ -112,6 +112,37 @@ def _match_pages(jsonl_name: str, page_nums: set[int]) -> bool:
     return True
 
 
+def _manual_inline_materials(output_dir: Path, sources: set[str]) -> dict[str, dict[int, str]]:
+    """人工校对的题内素材修正：publish 时回写，且优先于自动找回的 _post_material_text。
+
+    --redo 的 extract 会重写 extracted JSONL，只写在那里会被冲掉；补题记录是持久源。
+    """
+    fixes_dir = Path(output_dir) / "manual_fixes"
+    out: dict[str, dict[int, str]] = {}
+    for src in sources:
+        path = fixes_dir / f"{src}.jsonl"
+        if not path.exists():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if (rec.get("applied") and rec.get("material_scope") == "inline"
+                    and not rec.get("answer_only") and (rec.get("material_text") or "").strip()):
+                try:
+                    out.setdefault(src, {})[int(rec["group_order"])] = rec["material_text"]
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
 def _kind_for(jsonl_path: Path) -> str:
     """按 JSONL 里记录的**形状**判类型，形状判不出再退回文件名。
 
@@ -219,6 +250,13 @@ def main(argv=None):
             ]
 
             if kind == "questions":
+                # 题后找回材料先摘出来，避免被当成文章一起外置；
+                # 文章外置完再写回 material_text（题内素材，不占 material_url）。
+                post_materials = {
+                    idx: raw.pop("_post_material_text")
+                    for idx, raw in enumerate(raw_items)
+                    if raw.get("_post_material_text")
+                }
                 items = [ExamQuestion(**raw) for raw in raw_items]
                 if subject_code == "chinese":
                     externalize_chinese_materials(
@@ -228,6 +266,17 @@ def main(argv=None):
                         store=store,
                         subject_code=subject_code,
                     )
+                    for idx, text in post_materials.items():
+                        items[idx].material_text = text
+                        items[idx].material_method = "rule"
+                    # 人工 inline 修正优先于自动找回：--redo 冲掉 extracted 后仍保得住
+                    manual_inline = _manual_inline_materials(
+                        config.output_dir, {it.source for it in items})
+                    for idx, item in enumerate(items):
+                        override = manual_inline.get(item.source, {}).get(item.group_order)
+                        if override:
+                            item.material_text = override
+                            item.material_method = "manual"
                 out_items = []
                 for idx, item in enumerate(items, start=1):
                     asset_prefix = f"questions/{subject_code}/{source_key}/{idx}"

@@ -12949,7 +12949,7 @@ components:
           description: 学段（可空）
         questionCount:
           type: integer
-          description: 可考题目数（paper_questions.in_exam=1 且 questions.is_active=1；语文卷剔除阅读/作文后为实际进卷题数）
+          description: 可考题目数（paper_questions.in_exam=1 且 questions.is_active=1；语文卷仅剔除作文后为实际进卷题数）
       required: [id, title, year, district, examType, gradeBand, questionCount]
 
     ExamQuestionMeta:

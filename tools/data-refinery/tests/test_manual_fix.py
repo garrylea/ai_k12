@@ -980,14 +980,20 @@ def test_copyable_question_text_falls_back_to_excerpt(tmp_path, monkeypatch):
     assert manual_fix._copyable_question_text(issue) == "某题的旧快照"
 
 
-def test_discard_fixes_for_source_moves_only_matching(tmp_path):
-    """重转卷时只作废该卷的旧补题记录，移到 _discarded/ 带时间戳不覆盖。"""
+def test_discard_fixes_for_source_moves_only_matching(tmp_path, monkeypatch):
+    """重转后只作废「已恢复」的旧补题，且只动目标卷。"""
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
     fixes = tmp_path / "manual_fixes"
     fixes.mkdir()
     target = fixes / "海淀数学(9).jsonl"
     other = fixes / "西城物理.jsonl"
-    _write(target, [{"group_order": 1, "content": "甲"}])
-    _write(other, [{"group_order": 1, "content": "乙"}])
+    _write(target, [{"group_order": 1, "content": "甲", "source": "海淀数学(9)",
+                     "rel_path": "数学/海淀数学(9)"}])
+    _write(other, [{"group_order": 1, "content": "乙", "source": "西城物理",
+                    "rel_path": "物理/西城物理"}])
+    ext = tmp_path / "output" / "extracted" / "数学" / "海淀数学(9)"
+    ext.mkdir(parents=True)
+    _write(ext / "海淀数学(9).jsonl", [{"group_order": 1, "content": "重抽出来的题"}])
 
     n = manual_fix.discard_fixes_for_source("海淀数学(9)", fixes_dir=fixes)
     assert n == 1
@@ -1003,14 +1009,38 @@ def test_discard_fixes_for_source_no_dir(tmp_path):
     assert manual_fix.discard_fixes_for_source("某卷", fixes_dir=tmp_path / "nope") == 0
 
 
-def test_discard_fixes_for_source_keyword(tmp_path):
+def test_discard_fixes_for_source_keyword(tmp_path, monkeypatch):
     """source_file 是关键词时也能匹配（兼容补题时的写法）。"""
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
     fixes = tmp_path / "manual_fixes"
     fixes.mkdir()
     target = fixes / "海淀数学(9).jsonl"
-    _write(target, [{"group_order": 1, "content": "甲"}])
+    _write(target, [{"group_order": 1, "content": "甲", "source": "海淀数学(9)",
+                     "rel_path": "数学/海淀数学(9)"}])
+    ext = tmp_path / "output" / "extracted" / "数学" / "海淀数学(9)"
+    ext.mkdir(parents=True)
+    _write(ext / "海淀数学(9).jsonl", [{"group_order": 1, "content": "重抽出来的题"}])
     assert manual_fix.discard_fixes_for_source("海淀 数学", fixes_dir=fixes) == 1
     assert not target.exists()
+
+
+def test_discard_keeps_pending_when_still_missing_and_applied_always(tmp_path, monkeypatch):
+    """仍缺题的 pending 补题与 applied=True 的重放信号都不能被 redo 清掉。"""
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    fixes = tmp_path / "manual_fixes"
+    fixes.mkdir()
+    target = fixes / "模拟二.jsonl"
+    _write(target, [
+        {"group_order": 20, "content": "补的题", "source": "模拟二",
+         "rel_path": "语文/模拟二"},                      # extracted 里没有 → 保留
+        {"group_order": 9, "content": "已写过", "source": "模拟二",
+         "rel_path": "语文/模拟二", "applied": True},      # 重放信号 → 保留
+    ])
+    assert manual_fix.discard_fixes_for_source("模拟二", fixes_dir=fixes) == 0
+    import json
+    rows = [json.loads(l) for l in target.read_text(encoding="utf-8").splitlines()
+            if l.strip()]
+    assert len(rows) == 2
 
 
 class _QuietConsole:
@@ -1349,3 +1379,85 @@ def test_material_split_skips_chinese_without_hook():
     assert material is None
     assert stem.startswith("下列选项")
     assert [o["label"] for o in options] == ["A", "B", "C", "D"]
+
+
+def test_answer_only_fix_never_carries_material(monkeypatch):
+    """只补答案时复制原 material_text 会让答案修正被材料归属判定误拦。"""
+    seq = iter(["42", "1"])
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
+    issue = {"source": "卷A", "rel_path": "数学/x/卷A", "group_order": 7,
+             "kind": "answer_missing", "reasons": ["answer_empty"]}
+    original = {"content": "题干", "options": None,
+                "material_text": "## 游山西村\n莫笑农家腊酒浑。"}
+    rec = manual_fix._ask_answer_only(issue, 7, original, _QuietConsole())[0]
+    assert rec["material_text"] is None
+    assert rec["answer"] == "42"
+
+
+def test_material_scope_prompt(monkeypatch):
+    for raw, want in (("1", "inline"), ("2", "article"), ("", None), ("x", None)):
+        seq = iter([raw])
+        monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
+        assert manual_fix._ask_material_scope(_QuietConsole()) == want
+
+
+def test_copyable_text_includes_current_inline_material(tmp_path, monkeypatch):
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    rel = tmp_path / "output" / "extracted" / "语文" / "模拟二"
+    rel.mkdir(parents=True)
+    _write(rel / "模拟二.jsonl", [
+        {"group_order": 12, "content": "题干", "options": [],
+         "material_text": "## 游山西村\n陆游\n莫笑农家腊酒浑。",
+         "_post_material_text": "## 行香子\n秦观\n树绕村庄。"},
+    ])
+    issue = {"source": "模拟二", "rel_path": "语文/模拟二", "group_order": 12}
+    text = manual_fix._copyable_question_text(issue)
+    assert "游山西村" in text and "行香子" in text and "[当前材料]" in text
+
+
+def test_restore_swallowed_option_label_after_b_and_c():
+    """TTY 粘贴把 C./D. 的首字母吞掉时，按上一行选项字母补回。"""
+    stem = "根据小组建议，下列选项恰当的一项是(2分)"
+    a = "  A. 科技与艺术的相互融合，留存了校园的时光印记。"
+    b = "  B. 融合了科技与艺术，校园的时光印记得以留存。"
+    c = "C. 展示出科技与艺术的融合，留存了校园的时光印记。"
+    d = "D. 创新科技融合了艺术元素，校园留存了时光的印记。"
+
+    fixed = manual_fix._restore_swallowed_option_label([stem, a, b, f". {c[3:]}", d])
+    assert fixed[3].strip().startswith("C.")
+    fixed = manual_fix._restore_swallowed_option_label([stem, a, b, c, f". {d[3:]}"])
+    assert fixed[4].strip().startswith("D.")
+
+
+def test_restore_swallowed_option_label_leaves_decimal_alone():
+    """选项行后面的 ".5 分" 是小数/评分，不能误补成 C.5 分。"""
+    lines = ["  A. 甲", "  B. 乙", ".5 分"]
+    assert manual_fix._restore_swallowed_option_label(lines) == lines
+
+
+# ---- material_url 候选：题号丢失时人工指认同卷文章 ----
+
+def test_published_material_urls_dedup_and_sorted(tmp_path, monkeypatch):
+    """同卷候选按题号列出，同一 URL 只保留最小题号代表。"""
+    rel = "语文/初中/second/2025/语文-模拟二"
+    pub = tmp_path / "output" / "published" / rel
+    pub.mkdir(parents=True)
+    _write(pub / "语文-模拟二.jsonl", [
+        {"group_order": 19, "material_url": "materials/chinese/A/content.md"},
+        {"group_order": 20, "material_url": None},          # 题号丢了那题
+        {"group_order": 21, "material_url": "materials/chinese/A/content.md"},
+        {"group_order": 24, "material_url": "materials/chinese/B/content.md"},
+        {"group_order": 25, "material_url": None},
+    ])
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    issue = {"rel_path": rel, "source": "语文-模拟二", "group_order": 20}
+    assert manual_fix._published_material_urls(issue) == [
+        (19, "materials/chinese/A/content.md"),
+        (24, "materials/chinese/B/content.md"),
+    ]
+
+
+def test_published_material_urls_missing_file_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    issue = {"rel_path": "语文/模拟二", "source": "不存在", "group_order": 20}
+    assert manual_fix._published_material_urls(issue) == []

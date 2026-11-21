@@ -15,7 +15,8 @@ class FakeCursor:
     """按 SQL 片段返回预设结果，记录所有执行过的语句。"""
 
     def __init__(self, paper=None, existing=None, renumber_rows=None,
-                 existing_active=1, hash_row=None, existing_hash=None, orphan_id=None):
+                 existing_active=1, hash_row=None, existing_hash=None, orphan_id=None,
+                 material_url=None, siblings=None, existing_options_json=None):
         self.sql: list[tuple[str, tuple | None]] = []
         self.paper = paper                # (paper_id, subject_id)
         self.existing = existing          # question_id 或 None
@@ -23,6 +24,9 @@ class FakeCursor:
         self.hash_row = hash_row          # 同 content_hash 的行（重导后遗留的孤儿题）
         self.existing_hash = existing_hash
         self.orphan_id = orphan_id        # 同卷同题号、但没挂关联的旧行
+        self.material_url = material_url  # 已外置的文章文档路径
+        self.siblings = siblings or []    # 共用旧 material_url 的兄弟题
+        self.existing_options_json = existing_options_json
         self.renumber_rows = renumber_rows or []
         self.rowcount = 1
         self.lastrowid = 777
@@ -43,6 +47,12 @@ class FakeCursor:
             self._rows = [(self.hash_row,)] if self.hash_row else []
         elif "SELECT question_id, group_order FROM paper_questions" in sql:
             self._rows = list(self.renumber_rows)
+        elif "FROM questions WHERE material_url=%s" in sql:
+            self._rows = list(self.siblings)
+        elif "SELECT material_url, material_method, options FROM questions" in sql:
+            self._rows = [(self.material_url, None, self.existing_options_json)]
+        elif "SELECT material_url FROM questions" in sql:
+            self._rows = [(self.material_url,)]
         else:
             self._rows = []
 
@@ -452,3 +462,407 @@ def test_answer_only_preview_does_not_write(tmp_path):
 
     assert "只补答案" in msg and "题面不动" in msg
     assert not any(sql.startswith("UPDATE") for sql, _ in cur.sql)
+
+
+def test_orphan_relink_allowed_when_fix_has_no_material_text():
+    """Q20 类：文章已外置但补题不带 material_text，必须允许重挂卷。"""
+    rec = {**REC, "source": "语文-模拟二", "group_order": 20,
+           "content": "阅读第一封信，填写形容词并说明理由。", "material_text": None}
+    cur = FakeCursor(paper=(17, 2), orphan_id=5182,
+                     material_url="materials/chinese/x/content.md")
+    msg = A.apply_record(cur, rec, apply=True)
+    assert not msg.startswith("跳过"), msg
+    relinks = [a for sql, a in cur.sql
+               if "INSERT IGNORE INTO paper_questions" in sql and len(a or ()) >= 4]
+    assert (17, 5182, 20, 20) in relinks
+
+
+def test_externalized_material_still_blocks_when_fix_carries_material_text():
+    rec = {**REC, "content": "阅读下文作答。", "material_text": "## 另一篇文章\n正文很长。"}
+    cur = FakeCursor(paper=(17, 2), orphan_id=5182,
+                     material_url="materials/chinese/x/content.md")
+    msg = A.apply_record(cur, rec, apply=True)
+    assert msg.startswith("跳过：材料归属未标明")
+    assert not any("INSERT IGNORE INTO paper_questions" in sql for sql, _ in cur.sql)
+
+
+def test_group_order_filter_limits_apply_scope(monkeypatch, tmp_path):
+    """--group-order 只处理指定题号，避免把同卷其它 pending 补题一起写进去。"""
+    import apply_fixes as impl
+
+    recs = [
+        {**REC, "group_order": 20, "applied": False},
+        {**REC, "group_order": 24, "applied": False},
+    ]
+    called = []
+    monkeypatch.setattr(impl, "_read_jsonl", lambda f: [dict(r) for r in recs])
+    monkeypatch.setattr(impl, "apply_record",
+                        lambda cur, rec, apply: called.append(rec["group_order"]) or "更新")
+    monkeypatch.setattr(impl, "_write_jsonl", lambda f, rows: None)
+    monkeypatch.setattr(impl, "mark_issue", lambda *a, **kw: 0)
+    monkeypatch.setattr(impl, "_rescan", lambda *a, **kw: None)
+
+    class FakeConn:
+        def cursor(self):
+            class Cur:
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+                def execute(self, sql, args=None): return None
+                def fetchone(self): return None
+                def fetchall(self): return []
+            return Cur()
+        def commit(self):
+            pass
+        def rollback(self):
+            pass
+        def close(self):
+            pass
+    monkeypatch.setattr(impl.pymysql, "connect", lambda *a, **kw: FakeConn())
+    (tmp_path / "卷A.jsonl").write_text("{}\n", encoding="utf-8")
+    assert impl.run(["--fixes-dir", str(tmp_path), "--apply",
+                     "--group-order", "20"]) == 0
+    assert called == [20]
+
+
+def test_inline_material_fix_on_externalized_row_keeps_article(tmp_path, monkeypatch):
+    """题内素材修正（Q12 类）：可写 material_text，文章 URL 与 extracted 原文不动。"""
+    import apply_fixes as impl
+
+    calls = []
+    monkeypatch.setattr(impl, "_patch_extracted",
+                        lambda rec, **kw: calls.append(kw))
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "group_order": 12, "content": "题干",
+           "material_text": "## 行香子\n秦观\n树绕村庄。",
+           "material_scope": "inline"}
+    cur = FakeCursor(paper=(17, 2), existing=5174,
+                     material_url="materials/chinese/x/content.md")
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert "跳过" not in msg
+    assert calls and calls[0]["post_material_text"] == rec["material_text"]
+    assert calls[0]["preserve_existing_material"] is True
+    upd = [a for sql, a in cur.sql
+           if sql.startswith("UPDATE questions SET content=")]
+    assert upd and upd[0][6] == "manual"          # material_method
+    assert upd[0][5] == rec["material_text"]       # DB 写题内素材；文章仍在 material_url
+
+
+def test_article_fix_same_doc_key_rewrites_file_in_place(tmp_path, monkeypatch):
+    """规范化后 key 不变：只改 content.md，URL/hash 不变，写 override 供 redo 用。"""
+    import apply_fixes as impl
+
+    written = []
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+
+    def fake_write(body, *, dry_run, **kwargs):
+        written.append((body, dry_run))
+        return ("samekey", "materials/chinese/samekey/content.md")
+
+    import chinese_material_doc
+    monkeypatch.setattr(chinese_material_doc, "write_material_doc", fake_write)
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "group_order": 9, "content": "题干",
+           "material_text": "## 游山西村\n陆游\n修正后的诗文。",
+           "material_scope": "article"}
+    cur = FakeCursor(paper=(17, 2), existing=5171,
+                     material_url="materials/chinese/samekey/content.md")
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert "doc_key 不变" in msg
+    assert len(written) == 2 and written[1][1] is False
+    overrides = (tmp_path / "material_doc_overrides.jsonl").read_text(encoding="utf-8")
+    assert "samekey" in overrides and "修正后的诗文" in overrides
+    upd = [a for sql, a in cur.sql if sql.startswith("UPDATE questions SET content=")]
+    assert upd and upd[0][5] is None                 # 不写 material_text
+
+
+def test_legacy_inline_without_url_is_written(tmp_path, monkeypatch):
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    rec = {**REC, "rel_path": "物理/卷A", "source": "物理-卷A-试卷",
+           "content": "阅读以下材料作答。(1)甲 (2)乙",
+           "material_text": "材料正文很长很长。", "material_scope": "legacy_inline"}
+    cur = FakeCursor(paper=(9, 5))
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert "跳过" not in msg
+    ins = [a for sql, a in cur.sql if sql.startswith("INSERT INTO questions")]
+    assert ins and ins[0][8] == "manual"             # material_method
+
+
+def test_hash_uses_material_url(tmp_path, monkeypatch):
+    import apply_fixes as impl
+
+    seen = []
+    real = impl.content_hash
+    monkeypatch.setattr(impl, "content_hash",
+                        lambda *a: seen.append(a) or real(*a))
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "content": "题干", "material_scope": "inline",
+           "material_text": "题内素材"}
+    cur = FakeCursor(paper=(17, 2), existing=5174,
+                     material_url="materials/chinese/x/content.md")
+    A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert seen and len(seen[0]) == 4 and seen[0][3] == "materials/chinese/x/content.md"
+
+
+def test_article_fix_new_doc_key_syncs_siblings(tmp_path, monkeypatch):
+    """正文真变了：换 doc_key，所有兄弟题（含跨卷）一起改 URL 并重算 hash。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+
+    def fake_write(body, *, dry_run, **kwargs):
+        return ("newkey", "materials/chinese/newkey/content.md")
+
+    import chinese_material_doc
+    monkeypatch.setattr(chinese_material_doc, "write_material_doc", fake_write)
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "group_order": 9, "content": "题干",
+           "material_text": "## 完全另一篇文章\n正文。", "material_scope": "article"}
+    cur = FakeCursor(
+        paper=(17, 2), existing=5171,
+        material_url="materials/chinese/oldkey/content.md",
+        siblings=[(5171, "语文-模拟二", "题干", None, "oldhash"),
+                  (9999, "语文-别的卷", "题干", None, "oldhash2")],
+    )
+    # 兄弟题补题记录里的 applied_hash 也要跟着换，否则 needing_replay 每次误报
+    fixes = tmp_path / "manual_fixes"
+    fixes.mkdir()
+    (fixes / "模拟二.jsonl").write_text(json.dumps({
+        "source": "语文-模拟二", "group_order": 9, "applied": True,
+        "applied_hash": "oldhash",
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert "doc_key oldkey→newkey" in msg and "2 道兄弟题" in msg
+    url_updates = [a for sql, a in cur.sql
+                   if sql.startswith("UPDATE questions SET material_url=")]
+    assert len(url_updates) == 2
+    assert all(a[0] == "materials/chinese/newkey/content.md" for a in url_updates)
+    overrides = (tmp_path / "material_doc_overrides.jsonl").read_text(encoding="utf-8")
+    assert '"old_key": "oldkey"' in overrides and '"new_key": "newkey"' in overrides
+    updated_rec = json.loads((fixes / "模拟二.jsonl").read_text(encoding="utf-8").strip())
+    expected = impl.content_hash("题干", None, None,
+                                 "materials/chinese/newkey/content.md")
+    assert updated_rec["applied_hash"] == expected
+
+
+def test_answer_only_record_with_material_is_not_blocked(tmp_path, monkeypatch):
+    """旧 answer_only 记录带着 material_text 时不能被材料归属护栏拦住。"""
+    import apply_fixes as impl
+
+    called = []
+    monkeypatch.setattr(impl, "_patch_extracted_answer", lambda *a, **kw: called.append(a))
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "group_order": 12, "answer": "示例", "answer_only": True,
+           "material_text": "## 行香子\n题内素材（旧记录误带）"}
+    cur = FakeCursor(paper=(17, 2), existing=5174,
+                     material_url="materials/chinese/x/content.md")
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert msg.startswith("更新答案")
+    assert called and not any("材料归属未标明" in m for m in [msg])
+
+
+def test_article_new_key_hash_collision_keeps_old_hash(tmp_path, monkeypatch):
+    """换 URL 时撞 UNIQUE(content_hash)：保留旧 hash 并写冲突清单，不整批失败。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+
+    def fake_write(body, *, dry_run, **kwargs):
+        return ("newkey", "materials/chinese/newkey/content.md")
+
+    import chinese_material_doc
+    monkeypatch.setattr(chinese_material_doc, "write_material_doc", fake_write)
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "group_order": 9, "content": "题干",
+           "material_text": "## 另一篇\n正文。", "material_scope": "article"}
+    cur = FakeCursor(
+        paper=(17, 2), existing=5171,
+        material_url="materials/chinese/oldkey/content.md",
+        siblings=[(5171, "语文-模拟二", "题干", None, "oldhash")],
+    )
+    orig_exec = cur.execute
+
+    def flaky(sql, args=None):
+        if sql.startswith("UPDATE questions SET material_url=%s, content_hash=%s"):
+            raise RuntimeError("Duplicate entry for key 'uniq_q_content_hash'")
+        return orig_exec(sql, args)
+
+    cur.execute = flaky
+    A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert "5171" in (tmp_path / "content_hash_conflicts.jsonl").read_text(encoding="utf-8")
+    assert any(sql.startswith("UPDATE questions SET material_url=%s WHERE id=%s")
+               for sql, _ in cur.sql)
+
+
+def test_inline_material_fix_without_url(tmp_path, monkeypatch):
+    """文章还没外置时，inline 材料直接写 material_text，method=manual。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "group_order": 12, "content": "题干", "material_text": "## 短文\n正文",
+           "material_scope": "inline"}
+    cur = FakeCursor(paper=(17, 2), existing=5173)   # material_url=None
+    A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    upd = [a for sql, a in cur.sql if sql.startswith("UPDATE questions SET content=")]
+    assert upd and upd[0][5] == "## 短文\n正文" and upd[0][6] == "manual"
+
+
+def test_stem_only_fix_preserves_existing_options(tmp_path, monkeypatch):
+    """只补题干时 options=None，不能把原题 A/B/C/D 选项整列抹掉。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    opts = [{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"},
+            {"label": "C", "text": "丙"}, {"label": "D", "text": "丁"}]
+    rec = {**REC, "source": "语文-卷", "rel_path": "语文/卷",
+           "group_order": 7, "content": "选出下列词语正确的一项（修正）",
+           "options": None}
+    cur = FakeCursor(paper=(17, 2), existing=5174,
+                     existing_options_json=json.dumps(opts, ensure_ascii=False))
+    A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    upd = [a for sql, a in cur.sql if sql.startswith("UPDATE questions SET content=")]
+    assert upd and [o["label"] for o in json.loads(upd[0][1])] == ["A", "B", "C", "D"]
+
+
+def test_one_bad_record_does_not_roll_back_whole_batch(tmp_path, monkeypatch):
+    """单条异常只回滚它自己：其它题照常写库，坏记录原因落清单。"""
+    import apply_fixes as impl
+
+    (tmp_path / "A.jsonl").write_text(json.dumps({
+        "source": "A", "rel_path": "语文/A", "group_order": 1,
+        "content": "甲", "applied": False,
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+    (tmp_path / "B.jsonl").write_text(json.dumps({
+        "source": "B", "rel_path": "语文/B", "group_order": 1,
+        "content": "乙", "applied": False,
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    commits: list[bool] = []
+    notes: list[tuple] = []
+
+    class Cur:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, args=None): return None
+        def fetchone(self): return None
+        def fetchall(self): return []
+
+    class Conn:
+        def cursor(self): return Cur()
+        def commit(self): commits.append(True)
+        def rollback(self): pass
+        def close(self): pass
+
+    monkeypatch.setattr(impl.pymysql, "connect", lambda *a, **kw: Conn())
+    monkeypatch.setattr(impl, "mark_issue",
+                        lambda src, go, status, **kw: notes.append((src, go, status, kw)))
+
+    def flaky(cur, rec, apply, **kw):
+        if rec["source"] == "B":
+            raise RuntimeError("boom")
+        rec["applied"] = True
+        return "更新：ok"
+
+    monkeypatch.setattr(impl, "apply_record", flaky)
+    assert impl.run(["--fixes-dir", str(tmp_path), "--apply"]) == 0
+    assert commits == [True]
+    a = json.loads((tmp_path / "A.jsonl").read_text(encoding="utf-8").strip())
+    b = json.loads((tmp_path / "B.jsonl").read_text(encoding="utf-8").strip())
+    assert a["applied"] is True and b["applied"] is False
+    assert any("boom" in str(n[3].get("note")) for n in notes)
+
+
+def test_invalid_group_order_is_rejected_without_crashing(tmp_path, monkeypatch):
+    """题号非数字的补题记录被单独退回，不影响整批。"""
+    import apply_fixes as impl
+
+    (tmp_path / "A.jsonl").write_text(json.dumps({
+        "source": "A", "rel_path": "语文/A", "group_order": "第七题",
+        "content": "甲", "applied": False,
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+    assert impl.run(["--fixes-dir", str(tmp_path), "--apply"]) == 0
+    row = json.loads((tmp_path / "A.jsonl").read_text(encoding="utf-8").strip())
+    assert row["applied"] is False
+
+
+# ---- material_url 三态（2026-11-21：题号丢失时人工指认文章归属）----
+
+def _update_args(cur):
+    """取 apply_record 写主表的 UPDATE 参数：index 8 = material_url。"""
+    ups = [a for sql, a in cur.sql if sql.startswith("UPDATE questions SET content=")]
+    assert ups, "没有写主表的 UPDATE"
+    return ups[0]
+
+
+def _fake_doc(tmp_path, url):
+    """造一个已物化的文章文档，供指认 URL 的边界校验通过。"""
+    path = tmp_path / "assets" / url
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# 文章\n正文", encoding="utf-8")
+
+
+def test_explicit_material_url_written_and_hash_uses_it(tmp_path, monkeypatch):
+    """显式 URL：写入该 URL，content_hash 也按它重算，不再走 _correct_article_doc。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    url = "materials/chinese/8e5d0eab131b/content.md"
+    _fake_doc(tmp_path, url)
+    seen = []
+    real = impl.content_hash
+    monkeypatch.setattr(impl, "content_hash", lambda *a: seen.append(a) or real(*a))
+    monkeypatch.setattr(impl, "_correct_article_doc",
+                        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("不应重算 doc_key")))
+
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "group_order": 20, "content": "阅读第一封信，填空并说明理由。",
+           "material_url": url}
+    cur = FakeCursor(paper=(17, 2), existing=5182, material_url=None)
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+
+    assert "跳过" not in msg
+    assert _update_args(cur)[8] == url               # 写库用的是指认的 URL
+    assert seen[-1][3] == url                        # hash 也按它算
+    assert rec["applied_hash"] == real(*seen[-1]) and len(rec["applied_hash"]) == 64
+
+
+def test_explicit_null_clears_material_url(tmp_path, monkeypatch):
+    """显式 null：人工确认本题无材料，把库里旧 URL 清成 NULL。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "content": "题干", "material_url": None}
+    cur = FakeCursor(paper=(17, 2), existing=5182,
+                     material_url="materials/chinese/oldkey/content.md")
+    A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert _update_args(cur)[8] is None
+
+
+def test_missing_url_field_keeps_db_url(tmp_path, monkeypatch):
+    """字段不存在（旧记录 / 非 TTY 补题）：不动库里已有 material_url。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    old = "materials/chinese/8e5d0eab131b/content.md"
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二", "content": "题干"}
+    cur = FakeCursor(paper=(17, 2), existing=5182, material_url=old)
+    A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert _update_args(cur)[8] == old
+
+
+def test_explicit_url_missing_doc_is_rejected(tmp_path, monkeypatch):
+    """指认的 URL 没有对应文档：拒绝写库，避免前端 404。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "content": "题干", "material_url": "materials/chinese/nope/content.md"}
+    cur = FakeCursor(paper=(17, 2), existing=5182, material_url=None)
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert msg.startswith("跳过")
+    assert not any(sql.startswith("UPDATE questions SET content=") for sql, _ in cur.sql)

@@ -318,3 +318,14 @@ python emphasis_cli.py --all-chinese          # 全部语文卷预演（--apply 
 - 匹配用上下文唯一性（8→2 字）；选项按 `A./B．` 行 + 纯汉字上下文；题干只做 `<sub>` 归一化，不套标注。步骤幂等（`decorate_text` 见 `already_marked` 跳过），extract 与 emphasis_cli 都跑不会重复插标签。
 - 安全：`emphasis_cli` 默认 dry-run、幂等；只 UPDATE `content/material_text/options/content_hash`，写后逐列校验其它列未变；备份在 `tools/db/backups/`。
 - 适用范围：**电子版（有文字层）PDF**（实测大兴 36 处、五中 14 处）；纯扫描件 0 命中，需 OCR 字符框 + 图像层横线检测或视觉模型，本期不做，这类题一律 `needs_review`。
+
+## 人工校对修材料（2026-11-21）
+
+- `manual_fix` 在录入题面后会问材料归属：`1 题内素材（只挂本题）/ 2 本节共享文章（同节共用）/ 回车不修`（非 TTY 不问）。记录写 `material_scope=inline|article|legacy_inline`；`answer_only` 记录不带材料。
+- `apply_fixes` 按归属写库：
+  - `inline`：写 `material_text` + `material_method='manual'`，保留 `material_url`；extracted 里原文章正文不动，题内素材走 `_post_material_text`。
+  - `article`：不写 `material_text`。按 `write_material_doc(..., dry_run=True)` 的规范化参数算 `doc_key`——key 不变就重写原 `content.md`；key 变了就写新文档、把共用旧 URL 的所有题（含跨卷）改到新 URL 并重算 hash，写 `output/material_doc_overrides.jsonl`。
+  - 旧记录有材料但无归属且题目已外置 → 跳过，要求重新校对选择，防止把整篇文章误塞进题内素材。
+- `publish` 用 override 保证 redo 不会把修正后的文章冲回旧正文；题内素材优先取 `output/manual_fixes/<卷>.jsonl` 里 `applied=true` 的 `inline` 记录（优先于自动找回的 `_post_material_text`）。
+- 无需 DB migration（schema 已有 `material_text/material_url/material_method`）。`material_doc_overrides.jsonl` 是持久产物，不要随手删。
+- 已知剩余项：`fix_page_markers_cli.py` / `emphasis_cli.py` 对 `material_url` 非空的行仍走「跳过」护栏（独立 CLI，不经 import_cli）。

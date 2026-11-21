@@ -1077,3 +1077,55 @@ def test_materials_prefix_is_materialized():
         material_text="![](materials/chinese/aaa/fig_01.jpg)",
         context="test",
     )
+
+
+def test_verified_row_with_changed_hash_still_syncs_metadata():
+    """answer_verified=1 只保护内容，不能连带冻结 is_active / 材料字段。
+
+    题15：published needs_review=False，但旧行 hash 变了 + answer_verified=1，
+    旧逻辑整行跳过，is_active 永远停在 0，前端看不到。
+    """
+    from db_loader import content_hash
+
+    q = {"subject_id": "math", "content": "题干一", "type": "choice",
+         "group_id": "一", "group_order": 1,
+         "options": [{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"}],
+         "material_text": "新文段", "needs_review": False}
+    chash = content_hash(q["content"], q["options"], "新文段")
+    loader, queries = _make_loader_seq({
+        "FROM subjects WHERE code": [[(1,)]],
+        "FROM paper_questions pq JOIN questions q": [
+            [(501, "旧hash", 1, "choice", 2, 0, "旧文段", None)]
+        ],
+    })
+    loader.load_questions([q], paper=(_paper_meta(), 9))
+
+    ups = [a for sql, a in queries if sql.startswith("UPDATE questions SET type=")]
+    assert len(ups) == 1
+    assert ups[0][-5] == 1            # is_active 跟 needs_review=False 放行
+    assert ups[0][-4] == "新文段"      # 材料同步
+    assert ups[0][-1] == 501
+    # 内容/答案/hash 不能被覆盖
+    assert not any("UPDATE questions SET subject_id" in sql for sql, _ in queries)
+    assert not any(sql.startswith("UPDATE questions") and "content_hash=%s" in sql
+                   for sql, _ in queries)
+
+
+def test_in_exam_normalized_on_every_load():
+    """首次导入与 --redo 都按同一规则维护 in_exam：语文作文 0，其余（含现代文）1。"""
+    q_read = {"subject_id": "chinese", "content": "阅读下文，回答问题。",
+              "type": "short_answer", "group_id": "二", "group_order": 17,
+              "needs_review": False}
+    q_essay = {"subject_id": "chinese",
+               "content": "从下面两个题目中任选一题，按要求写一篇文章。",
+               "type": "short_answer", "group_id": "二", "group_order": 27,
+               "needs_review": False}
+    loader, queries = _make_loader_seq({
+        "FROM subjects WHERE code": [[(2,)]],
+        "FROM questions WHERE content_hash": [[], []],
+        "LAST_INSERT_ID": [[(601,)], [(602,)]],
+    })
+    loader.load_questions([q_read, q_essay],
+                          paper=(_paper_meta(subject="语文"), 9))
+    ups = [a for sql, a in queries if "UPDATE paper_questions SET in_exam" in sql]
+    assert ups == [(1, 9, 601), (0, 9, 602)]

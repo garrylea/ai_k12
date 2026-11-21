@@ -803,6 +803,10 @@ class RawQuestion:
     score: int | None = None        # 每题满分（分组标题解析），无则为 None
     material_text: str | None = None  # 同节共享材料（策略的 material_policy 开启时填）
     multi_choice: bool = False      # 所在大题标题写的是「多项选择题」→ 题型应为 multi_choice
+    # 题后材料（题号之后的独立材料块）：标注时看合并视图，写 JSONL 时拆回两列
+    post_material_base: str | None = None       # 切题器原本挂的共享材料
+    post_material_appended: str | None = None   # 找回的题后材料块
+    post_material_pending: list[dict] | None = None  # 归属判不出，交 LLM 兜底
 
 
 def _strip_main_stem_prefix(line: str) -> str:
@@ -1344,6 +1348,10 @@ def split_page(text: str, md_path: Path,
     attach_pre = getattr(strategy, "attach_pre_material", None)
     if callable(attach_pre):
         attach_pre(questions, lines)
+    # 题后材料（语文）：与 attach_pre 对称的可选钩子，其它学科没有此方法，行为不变。
+    attach_post = getattr(strategy, "attach_post_material", None)
+    if callable(attach_post):
+        attach_post(questions, lines, md_path.stem)
 
     if jump_warnings:
         detail = "、".join(f"{a}→{b}@{line}" for a, b, line in jump_warnings[:8])

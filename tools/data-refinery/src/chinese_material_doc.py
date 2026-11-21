@@ -250,6 +250,24 @@ def _resolver_for(md_images_dir: Path):
     return lambda ref: _resolve_src(ref, md_images_dir)
 
 
+def _load_material_overrides(output_dir: Path) -> dict[str, dict]:
+    """读人工校对写的共享文章修正记录，按 old_key 索引。"""
+    path = Path(output_dir) / "material_doc_overrides.jsonl"
+    if not path.exists():
+        return {}
+    out: dict[str, dict] = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            if rec.get("old_key") and rec.get("body"):
+                out[rec["old_key"]] = rec
+    except (OSError, json.JSONDecodeError):
+        return out
+    return out
+
+
 def externalize_chinese_materials(
     items,
     *,
@@ -273,9 +291,20 @@ def externalize_chinese_materials(
     resolver = _resolver_for(Path(md_images_dir))
     skipped_items: set[int] = set()
     skipped: list[dict] = []
+    # 人工校对修过共享文章时写下的 override：publish 必须用它，否则下次重发
+    # 又会把 content.md 改回 extracted 里的旧正文（2026-11-21 用户反馈）。
+    # 匹配按 doc_key（old_key），不按 source —— 跨卷兄弟题共用同一篇文章。
+    overrides = _load_material_overrides(Path(assets_dir).parent)
+
     for members in groups.values():
         canonical = choose_canonical([m.material_text or "" for m in members])
-        reason = material_group_reason(canonical)
+        old_key, _ = write_material_doc(
+            canonical, resolver=resolver, store=store,
+            assets_dir=Path(assets_dir), subject_code=subject_code, dry_run=True,
+        )
+        override = overrides.get(old_key)
+        body = override.get("body") if override else canonical
+        reason = material_group_reason(body)
         if reason:
             # 不像文章：保留 material_text 原样，不写文档、不设 URL。
             skipped_items.update(id(m) for m in members)
@@ -287,7 +316,7 @@ def externalize_chinese_materials(
             })
             continue
         key, url = write_material_doc(
-            canonical, resolver=resolver, store=store,
+            body, resolver=resolver, store=store,
             assets_dir=Path(assets_dir), subject_code=subject_code,
         )
         for m in members:

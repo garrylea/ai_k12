@@ -229,6 +229,10 @@ def _safe_regenerated(regen: dict, q, md_dir=None) -> tuple[str, object, str | N
     material = regen.get("material_text")
     if is_placeholder_text(material):
         material = q.material_text
+    # 题后找回材料不能被 LLM 修复覆盖：丢掉就拼回，保证后面拆列时还能剥出来
+    appended = getattr(q, "post_material_appended", None)
+    if appended and material and re.sub(r"\s+", "", appended) not in re.sub(r"\s+", "", material):
+        material = material.rstrip() + "\n\n" + appended
     answer = regen.get("answer", q.answer) or q.answer
 
     if md_dir is not None:
@@ -440,6 +444,14 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                       f" → {note}（见 labeling_issues.jsonl）", flush=True)
             if q.type == "choice" and item_options:
                 item_answer = _normalize_choice_answer(item_answer, item_options)
+            # 题后材料：标注时合并看，写 JSONL 时拆回两列 —— 共享文章仍走
+            # material_text（publish 外置成原文档），找回块单独存 _post_material_text。
+            post_text = getattr(q, "post_material_appended", None)
+            if post_text:
+                marker = post_text.strip()
+                if marker and (item_material_text or "").rfind(marker) >= 0:
+                    cut = item_material_text.rfind(marker)
+                    item_material_text = item_material_text[:cut].rstrip() or None
             item = {
                 "subject_id": subject_code,
                 "group_id": q.group_id,
@@ -453,6 +465,7 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                 "answer": item_answer,
                 "explanation": q.explanation,
                 "material_text": item_material_text,
+                **({"_post_material_text": post_text} if post_text else {}),
                 "grade_band": grade_band,
                 "source": source_name,
                 "source_year": source_year,
@@ -547,6 +560,98 @@ def _judge_suspects(llm, suspects: list[dict], paper_stem: str) -> set[int]:
     except OSError:
         pass
     return accepted
+
+
+def _resolve_post_material_llm(llm, questions: list, paper_stem: str, output_dir: Path) -> int:
+    """题后材料的 LLM 兜底：**仅当**标题/位置规则判不出归属时才调用一次。
+
+    接受的决定必须同时满足：block_id 存在、group_order 在该块的候选里、
+    题号在材料块之前、且与块同节。任何异常/幻觉都不改数据，只写 review 清单。
+    """
+    from subject_strategies.material_after_stem import append_block
+
+    pending: dict[int, dict] = {}
+    for q in questions:
+        for rec in (getattr(q, "post_material_pending", None) or []):
+            pending.setdefault(rec.get("block_id"), rec)
+    if not pending or llm is None:
+        return 0
+
+    try:
+        system = (Path(__file__).parent / "prompts" / "post_material_judge.txt").read_text(
+            encoding="utf-8")
+    except OSError:
+        system = (
+            "判断题后出现的材料块属于哪道题，只输出 JSON："
+            '{"decisions":[{"block_id":0,"group_order":12}]}；无法确定则不要输出该条。'
+        )
+    chunks = []
+    for block_id, rec in sorted(pending.items()):
+        stems = "\n".join(f"  题{n}：{text}" for n, text in rec.get("stems", {}).items())
+        chunks.append(
+            f"--- 材料块 {block_id}（原卷第 {rec.get('block_line')} 行） ---\n"
+            f"所在小节：{rec.get('section_key', '')}\n"
+            f"材料摘要：{rec.get('block_excerpt', '')}\n"
+            f"候选题干（材料之前的题）：\n{stems}"
+        )
+    try:
+        resp = llm.complete(system, "\n\n".join(chunks))
+        data = _parse_json_object(resp.content or "")
+    except Exception as exc:
+        print(f"[post-material] {paper_stem}: LLM 复核失败（{exc}），材料暂不挂", flush=True)
+        _log_post_material_review(output_dir, paper_stem, pending.values(), "llm_error")
+        for q in questions:
+            q.post_material_pending = []
+        return 0
+
+    accepted: dict[int, int] = {}
+    for item in data.get("decisions", []):
+        try:
+            block_id = int(item.get("block_id"))
+            order = int(item.get("group_order"))
+        except (TypeError, ValueError):
+            continue
+        rec = pending.get(block_id)
+        if not rec or order not in rec.get("candidate_orders", []):
+            continue
+        accepted[block_id] = order
+
+    resolved = 0
+    rejected: list[dict] = []
+    for block_id, rec in sorted(pending.items()):
+        if block_id in accepted:
+            order = accepted[block_id]
+            for q in questions:
+                if q.group_order == order:
+                    append_block(q, rec["block_text"])
+                    resolved += 1
+                    print(f"[post-material] {paper_stem}: 题{order} ← 题后材料"
+                          f"@{rec.get('block_line')}（llm）", flush=True)
+                    break
+        else:
+            rejected.append(rec)
+    if rejected:
+        _log_post_material_review(output_dir, paper_stem, rejected, "invalid_decision")
+    for q in questions:
+        q.post_material_pending = []
+    return resolved
+
+
+def _log_post_material_review(output_dir: Path, paper_stem: str,
+                              records, reason: str) -> None:
+    try:
+        path = Path(output_dir) / "post_material_review.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            for rec in records:
+                fh.write(json.dumps({
+                    "paper": paper_stem, "reason": reason,
+                    "block_line": rec.get("block_line"),
+                    "candidate_orders": rec.get("candidate_orders"),
+                    "excerpt": rec.get("block_excerpt"),
+                }, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        print(f"[WARN] 写题后材料复核清单失败：{exc}", flush=True)
 
 
 def _load_prepared_text(md_path: Path) -> str:
@@ -655,6 +760,10 @@ def extract_questions_file(source, config, llm, fb_llm,
     questions = kept
     if not questions:
         return 0
+
+    # 题后材料的 LLM 兜底：只有规则判不出归属的块才会走到这里（普通题零调用）
+    if llm is not None:
+        _resolve_post_material_llm(llm, questions, md_path.stem, extracted_dir.parent)
 
     # 题内材料切分（2026-11-02，物理/化学/道法）：材料与小问在同一题号内
     # （`31. 阅读以下文字…` + 材料 + `(1)(2)(3)`），切成 material_text + content。

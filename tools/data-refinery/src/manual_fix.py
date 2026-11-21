@@ -173,6 +173,34 @@ def _split_at_marker(text: str) -> tuple[str, bool]:
     return "\n".join(kept).strip(), False
 
 
+_OPTION_LINE_HEAD_RE = re.compile(r"^\s*([A-F])[.．、]\s*\S")
+_LOST_LABEL_HEAD_RE = re.compile(r"^(\s*)([.．、]\s*\S)")
+
+
+def _restore_swallowed_option_label(lines: list[str]) -> list[str]:
+    """修 TTY 粘贴时长行之后下一行首字母被吞（`C.` → `.`）。
+
+    只在「上一行是 A–F 选项、这一行以裸点号开头」时按序补回下一个字母；
+    其它情况一律不动，避免误伤以点号开头的正文。补回会打 WARN 让用户看见。
+    """
+    out: list[str] = []
+    prev: str | None = None
+    for line in lines:
+        lost = _LOST_LABEL_HEAD_RE.match(line)
+        if lost and prev and not lost.group(2)[1:2].isdigit():
+            # ".5 分" 这类小数/编号不是吞字母，别误补
+            pm = _OPTION_LINE_HEAD_RE.match(prev)
+            if pm:
+                nxt = chr(ord(pm.group(1).upper()) + 1)
+                if nxt <= "F":
+                    line = f"{lost.group(1)}{nxt}{lost.group(2)}"
+                    console().warn(f"粘贴时选项字母被终端吞掉，已按序补回「{nxt}」")
+        out.append(line)
+        if line.strip():
+            prev = line
+    return out
+
+
 def _read_block(first_chunk: str = "") -> str:
     """读到结束标记为止，返回正文；first_chunk 是已经读到的那一段。"""
     c = console()
@@ -188,7 +216,7 @@ def _read_block(first_chunk: str = "") -> str:
             if len(lines) % 10 == 0:
                 c.info(f"已收到 {len(lines)} 行…")
     c.ok(f"已收到 {len(lines)} 行")
-    return "\n".join(lines).strip()
+    return "\n".join(_restore_swallowed_option_label(lines)).strip()
 
 
 _STEM_PREFIX_RE = re.compile(r"^\s*\d{1,2}\s*[.．、:：]\s*")
@@ -593,12 +621,13 @@ def _apply_image_placeholders(text: str, refs: list[str]) -> str:
 
 
 def discard_fixes_for_source(source_file: str, *, fixes_dir: Path | None = None) -> int:
-    """重转卷（--reconvert/--re-extract/--redo）时，把该卷的旧补题记录移进 _discarded/。
+    """重转卷后只作废「已经被重新抽出来」的旧补题，保留仍需人工补的记录。
 
-    栅格化重转后，之前为「公式丢失版」手工补的题已过时：留着会在第 9 步被重新应用，
-    覆盖刚修好的切题结果（2026-11-18 海淀数学(9) Q1 实测）。移到 _discarded/ 是仓库
-    既有的作废约定：apply_fixes 只认顶层 *.jsonl，recognition_scan 也会据此重开 issue。
-    返回移走的记录条数。
+    - `applied=True` 永远保留：这是 `needing_replay` 在重导清掉关联后恢复题号的唯一信号，
+      整文件丢弃会让补过的题永久消失（2026-11-21 语文模拟二 Q20 实测）。
+    - pending 记录：重抽后该题已出现在 extracted 里 → 旧补题过时，作废归档；
+      仍缺题 → 保留，等第 9 步写库，不必让用户再录一遍。
+    返回作废的记录条数。
     """
     out_dir = Path(fixes_dir) if fixes_dir else FIXES_DIR
     if not out_dir.exists():
@@ -611,10 +640,28 @@ def discard_fixes_for_source(source_file: str, *, fixes_dir: Path | None = None)
         # 解析后的 chosen.name）；也兼容关键词——只要两边分词互相命中即可。
         if not (match_keyword(f.stem, source_file) or match_keyword(source_file, f.stem)):
             continue
+        rows = _read_jsonl(f)
+        keep: list[dict] = []
+        drop: list[dict] = []
+        for rec in rows:
+            if rec.get("applied"):
+                keep.append(rec)
+                continue
+            current = _current_question(rec)
+            if current and (current.get("content") or "").strip():
+                drop.append(rec)       # 重抽已恢复：旧补题过时
+            else:
+                keep.append(rec)       # 仍缺题：保留用户补题
+        if not drop:
+            continue
         discarded.mkdir(parents=True, exist_ok=True)
         dest = discarded / f"{f.stem}.{stamp}{f.suffix}"
-        shutil.move(str(f), str(dest))
-        moved += 1
+        if keep:
+            _write_jsonl(dest, drop)
+            _write_jsonl(f, keep)
+        else:
+            shutil.move(str(f), str(dest))
+        moved += len(drop)
     return moved
 
 
@@ -930,7 +977,87 @@ def _copyable_question_text(issue: dict) -> str:
         text = (opt.get("text") or "").strip()
         if label:
             lines.append(f"{label}. {text}".rstrip())
+    # 材料也要让用户看到：文章题的题内素材现在存在 _post_material_text，
+    # 漏掉它用户就是「盲修材料」（2026-11-21 用户反馈）。
+    article = (row.get("material_text") or "").strip()
+    inline = (row.get("_post_material_text") or "").strip()
+    if article or inline:
+        lines += ["", "[当前材料]"]
+        if article:
+            lines.append(article)
+        if inline:
+            lines.append(inline)
     return "\n".join(lines)
+
+
+def _ask_material_scope(c) -> str | None:
+    """材料修正归属：题内素材粘正文，共享文章只需指认 URL（正文已在 md 文档里）。"""
+    c.prompt("材料需要修正吗？1 题内素材（粘正文，只挂本题）/ "
+             "2 共享文章（指认 URL，同节共用）/ 回车=不修 › ")
+    raw = (_read_line() or "").strip().lower()
+    if raw == "1":
+        return "inline"
+    if raw == "2":
+        return "article"
+    return None
+
+
+# material_url 的三态哨兵：_KEEP_URL=字段不写（兼容旧记录，apply_fixes 不碰该列），
+# None=人工确认本题无材料（显式写 NULL），字符串=写入该 URL。
+# 题号/小节标题都可能在 PDF→MD 时丢失，归属只能由人看着原卷确认，工具不猜。
+_KEEP_URL = object()
+
+
+def _published_material_urls(issue: dict) -> list[tuple[int, str]]:
+    """同卷已入库题目的 material_url，按题号列出，供补题时人工指认归属。
+
+    只读 published JSONL（入库产物），不连 DB：题号丢了也能靠同卷兄弟题的 URL
+    定位到同一篇文章，且不依赖小节标题（小节标题同样会在转换中丢失）。
+    URL 去重，保留最小题号那一处作为代表。
+    """
+    rel, source = issue.get("rel_path"), issue.get("source")
+    if not rel or not source:
+        return []
+    path = ROOT / "output" / "published" / rel / f"{source}.jsonl"
+    if not path.exists():
+        return []
+    by_url: dict[str, int] = {}
+    for row in _read_jsonl(path):
+        url = row.get("material_url")
+        no = row.get("group_order")
+        if not url or not isinstance(no, int):
+            continue
+        if url not in by_url or no < by_url[url]:
+            by_url[url] = no
+    return sorted((no, url) for url, no in by_url.items())
+
+
+def _ask_material_url(c, issue: dict) -> object:
+    """问这道题的 material_url 怎么处理：序号沿用 / 粘贴 URL / n=无材料 / 回车=不动。
+
+    返回 _KEEP_URL / None / 字符串（见 _KEEP_URL 注释）。题号丢失时切题器无法判断
+    本题有没有共享文章，这一步让人看着原卷明确表态，不再由工具猜。
+    """
+    candidates = _published_material_urls(issue)
+    current = None
+    for no, url in candidates:
+        if no == issue.get("group_order"):
+            current = url
+            break
+    c.write("")
+    c.write("材料 URL（题号/小节标题可能在转换中丢失，请对照原卷确认）")
+    c.write(f"  当前：{current or '（无）'}")
+    for i, (no, url) in enumerate(candidates, 1):
+        c.write(f"  {i}) 第{no}题  {url}")
+    c.prompt("  序号=沿用该题 URL / 直接粘贴 URL / n=确认本题无材料 / 回车=不动 › ")
+    raw = (_read_line() or "").strip()
+    if not raw:
+        return _KEEP_URL
+    if raw.lower() in ("n", "none", "null", "无"):
+        return None
+    if raw.isdigit() and 1 <= int(raw) <= len(candidates):
+        return candidates[int(raw) - 1][1]
+    return raw
 
 
 def _print_context(issue: dict, index: int | None = None, total: int | None = None) -> None:
@@ -1075,7 +1202,8 @@ def _ask_answer_only(issue: dict, target_no: int, original: dict,
         "group_order": target_no,
         "content": original.get("content") or "",
         "options": original.get("options"),
-        "material_text": original.get("material_text"),
+        # 只补答案时不碰材料：复制原 material_text 会让答案修正被材料归属判定误拦
+        "material_text": None,
         "answer": answer,
         "answer_only": True,
         "issue_kind": issue["kind"],
@@ -1193,6 +1321,33 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                      f"{'/'.join(o['label'] for o in options)}")
             else:
                 c.ok(f"第 {target} 题 · 题干 {len(stem)} 字{mat_note} · 无选项（按简答题处理）")
+            # 材料修正：明确问归属，不让 apply_fixes 猜（2026-11-21 用户反馈）。
+            # 非 TTY（管道/CI/脚本化输入）不问，避免吞掉调用方预置的输入行。
+            scope = _ask_material_scope(c) if sys.stdin.isatty() else None
+            material_url = _KEEP_URL
+            if scope == "article":
+                # 共享文章的正文已在 md 文档里，只需指认 URL —— 不再让人粘一遍正文/路径
+                # （旧流程把指认的 URL 串当成 material_text 粘进来，既多余又污染库）。
+                url = _ask_material_url(c, issue)
+                if url is _KEEP_URL or url is None:
+                    scope = None           # 回车=不修 / n=无材料，都不写题内素材
+                    if url is None:
+                        material_url = None  # 人工确认本题无材料
+                else:
+                    material_url = url
+                    material = ""          # 文章在 md 里，不写题内素材列
+                    c.ok(f"已指认共享文章：{url}")
+            elif scope == "inline":
+                pasted_material = _collect_content(
+                    paper_md_dir, allow_images=False, label="材料")
+                if pasted_material and pasted_material.strip():
+                    material = pasted_material.strip()   # 显式修正优先于自动拆出的材料
+                    c.ok(f"题内素材已录入 {len(material)} 字（只挂本题）")
+                else:
+                    scope = None
+            elif sys.stdin.isatty():
+                # 没选范围也要给一次机会：题号丢了，切题器判不出本题有没有共享文章。
+                material_url = _ask_material_url(c, issue)
             hint = ("答案（1文本/2图片/3文件/4剪贴板/5多图+答案；直接输入或回车留空；"
                     "e 改题面 / r 重录 / s 放弃本题）› ")
             c.prompt(f"第 {target} 题{hint}" if multi else hint)
@@ -1225,7 +1380,7 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
             if any(m in answer for m in _ECHO_MARKERS):
                 c.warn("答案里混进了界面文字，已置空")
                 answer = ""
-            records.append({
+            record = {
                 "source": issue["source"],
                 "rel_path": issue["rel_path"],
                 "group_order": target,
@@ -1233,6 +1388,8 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 "options": options,
                 "answer": answer,
                 "material_text": material,
+                # 显式选择优先；自动拆出的材料标记为 legacy_inline（物化/化学/道法）
+                "material_scope": scope or ("legacy_inline" if material else None),
                 "issue_kind": issue["kind"],
                 "issue_reasons": issue.get("reasons") or [],
                 # 题型以「同大题」为准（试卷不会同一大题混排）：type_mismatch 的题写库时
@@ -1245,7 +1402,10 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 "operator": getpass.getuser(),
                 "status": "ready",
                 "applied": False,
-            })
+            }
+            if material_url is not _KEEP_URL:
+                record["material_url"] = material_url
+            records.append(record)
             c.ok(f"已记录第 {target} 题（{len(stem.strip())} 字）")
             break
     return records

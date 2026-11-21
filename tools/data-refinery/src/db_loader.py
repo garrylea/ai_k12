@@ -1318,6 +1318,16 @@ class DbLoader:
              0 if q.get("needs_review") else 1, qid),
         )
 
+    @staticmethod
+    def _in_exam_for(sid: int, content: str) -> int:
+        """每次入库都按统一规则维护 in_exam，保证首次导入与 --redo 结果一致。
+
+        语文作文（题干含「写一篇文章」）不进考试；其余题（含现代文阅读）进考试。
+        """
+        if sid == 2 and "写一篇文章" in (content or ""):
+            return 0
+        return 1
+
     def load_questions(self, questions: list[dict],
                        paper: tuple[PaperMeta, int] | None = None) -> int:
         """入库题目；paper 非 None 时同步按行序归组（写 paper_questions）。
@@ -1396,7 +1406,11 @@ class DbLoader:
                     # hash 不变，旧逻辑会静默保留旧材料（2026-11-07 海淀语文
                     # 题2/题3：JSONL 已挂「发言稿一」，库里仍是小节导语）。
                     material_changed = (old_material or "") != (q.get("material_text") or "")
-                    if old_hash == chash and (
+                    # answer_verified=1 保护的是**人工核验过的题干/答案**，不是
+                    # is_active / 材料字段。published 的 needs_review=False 才是
+                    # 放行信号；即使内容 hash 变了（如补材料导致），这些非内容字段
+                    # 也必须同步，否则题会永远停在 is_active=0（2026-11-21 题15）。
+                    if (old_hash == chash or verified) and (
                         old_type != q.get("type")
                         or old_difficulty != q.get("difficulty")
                         or old_active != new_active
@@ -1513,8 +1527,15 @@ class DbLoader:
                     (paper[1], qid, i, q.get("group_id"), q.get("group_order")),
                 )
                 linked += 1
-                if qid is not None and qid not in linked_ids:
-                    linked_ids.append(qid)
+                if qid is not None:
+                    # 首次导入与 --redo 都按同一规则纠正 in_exam；不读旧值，
+                    # 否则老卷的现代文阅读会一直停在迁移写入的 0。
+                    self._exec(
+                        "UPDATE paper_questions SET in_exam=%s "
+                        "WHERE paper_id=%s AND question_id=%s",
+                        (self._in_exam_for(sid, content), paper[1], qid))
+                    if qid not in linked_ids:
+                        linked_ids.append(qid)
         if paper is not None:
             # 清掉本次没有关联到的历史行（重抽后丢掉的噪声题/缺题留下的僵尸行），
             # 再按卷面题号重排 question_no —— 用「本次挂了哪些题」判定，不看行数，

@@ -420,6 +420,10 @@ class LabeledQuestion:
     completeness_issues: list = None    # ["选项不足4个", "题干截断", ...]
     regenerated: dict = None            # {content, options, material_text, answer} 修复后
     material_text: str | None = None    # 同节共享材料（切分器按小节归属，语文阅读用）
+    # 题后材料：标注时看合并视图，写 JSONL 时拆成 material_text + _post_material_text
+    post_material_base: str | None = None
+    post_material_appended: str | None = None
+    post_material_pending: list = None
 
     @classmethod
     def from_raw(cls, q: "RawQuestion") -> "LabeledQuestion":
@@ -431,6 +435,9 @@ class LabeledQuestion:
             explanation=q.explanation,
             score=q.score,
             material_text=q.material_text,
+            post_material_base=getattr(q, "post_material_base", None),
+            post_material_appended=getattr(q, "post_material_appended", None),
+            post_material_pending=getattr(q, "post_material_pending", None),
             knowledge_points=[],
             suggested_new_kps=[],
             _confirmed_new_kps=[],

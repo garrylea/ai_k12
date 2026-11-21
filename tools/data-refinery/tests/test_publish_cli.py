@@ -317,3 +317,157 @@ def test_chinese_publish_keeps_non_article_material(tmp_path):
     report = out / "material_group_skipped.jsonl"
     assert report.exists()
     assert "option_block" in report.read_text(encoding="utf-8")
+
+
+def test_chinese_publish_keeps_article_url_and_adds_inline_post_material(tmp_path):
+    """题后找回的材料写进 material_text，不能顶掉共享文章的 material_url。"""
+    out = tmp_path / "out"
+    ext = out / "extracted" / "语文" / "试卷"
+    ext.mkdir(parents=True)
+    article = "## 游山西村\n\n陆游\n莫笑农家腊酒浑。"
+    inline = "## 行香子\n\n秦观\n树绕村庄，水满陂塘。\n注：①陂塘，池塘。"
+    rows = [
+        {"subject_id": "chinese", "type": "short_answer", "difficulty": 3,
+         "content": "填写恰当的内容", "answer": "丰", "material_text": article},
+        {"subject_id": "chinese", "type": "short_answer", "difficulty": 4,
+         "content": "结合本诗画线句与《行香子》下片相关句子作答", "answer": "示例", "material_text": article,
+         "_post_material_text": inline},
+    ]
+    (ext / "试卷.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8",
+    )
+    (out / "md" / "语文" / "试卷").mkdir(parents=True)
+
+    with patch("publish_cli.RefineryConfig") as mock_config:
+        mock_config.from_env.return_value = MagicMock(output_dir=out)
+        main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+    got = [
+        json.loads(l) for l in
+        (out / "published" / "语文" / "试卷" / "试卷.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert got[0]["material_url"] == got[1]["material_url"]
+    assert got[0]["material_url"].startswith("materials/chinese/")
+    assert got[0]["material_text"] is None          # Q11 不受影响
+    assert got[1]["material_text"] == inline         # Q12 题内素材
+    assert got[1]["material_method"] == "rule"
+    assert "_post_material_text" not in got[1]
+    md = out / "assets" / got[1]["material_url"]
+    assert "游山西村" in md.read_text(encoding="utf-8")
+    assert "行香子" not in md.read_text(encoding="utf-8")
+
+
+def test_publish_manual_inline_fix_wins_and_survives_extract(tmp_path):
+    """人工 inline 修正从 manual_fixes 读，优先于 _post_material_text，且文章 URL 不变。"""
+    out = tmp_path / "out"
+    ext = out / "extracted" / "语文" / "试卷"
+    ext.mkdir(parents=True)
+    article = "## 游山西村\n\n陆游\n莫笑农家腊酒浑。"
+    rows = [
+        {"subject_id": "chinese", "type": "short_answer", "difficulty": 3,
+         "content": "填写内容", "answer": "丰", "material_text": article,
+         "source": "试卷", "group_order": 1},
+        {"subject_id": "chinese", "type": "short_answer", "difficulty": 4,
+         "content": "结合两句作答", "answer": "示例", "material_text": article,
+         "source": "试卷", "group_order": 2,
+         "_post_material_text": "## 自动找回的诗\n自动内容"},
+    ]
+    (ext / "试卷.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8",
+    )
+    fixes = out / "manual_fixes"
+    fixes.mkdir()
+    (fixes / "试卷.jsonl").write_text(json.dumps({
+        "source": "试卷", "group_order": 2, "applied": True,
+        "material_scope": "inline", "material_text": "## 行香子\n人工修正后的题内素材",
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+    (out / "md" / "语文" / "试卷").mkdir(parents=True)
+
+    with patch("publish_cli.RefineryConfig") as mock_config:
+        mock_config.from_env.return_value = MagicMock(output_dir=out)
+        main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+    got = [
+        json.loads(l) for l in
+        (out / "published" / "语文" / "试卷" / "试卷.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert got[0]["material_url"] == got[1]["material_url"]
+    assert got[0]["material_text"] is None
+    assert got[1]["material_text"] == "## 行香子\n人工修正后的题内素材"
+    assert got[1]["material_method"] == "manual"
+    doc = (out / "assets" / got[1]["material_url"]).read_text(encoding="utf-8")
+    assert "游山西村" in doc and "行香子" not in doc
+
+
+def test_publish_uses_manual_article_override(tmp_path):
+    """共享文章修正写 override 后，publish 用修正正文写文档，不被 extracted 旧正文冲掉。"""
+    from chinese_material_doc import write_material_doc
+    from asset_store import LocalAssetStore
+
+    out = tmp_path / "out"
+    ext = out / "extracted" / "语文" / "试卷"
+    ext.mkdir(parents=True)
+    old_article = "## 游山西村\n\n陆游\n莫笑农家腊酒浑。旧版。"
+    (ext / "试卷.jsonl").write_text(json.dumps({
+        "subject_id": "chinese", "type": "short_answer", "difficulty": 3,
+        "content": "作答", "answer": "略", "material_text": old_article,
+        "source": "试卷", "group_order": 1,
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+    (out / "md" / "语文" / "试卷").mkdir(parents=True)
+    store = LocalAssetStore(out / "assets")
+    old_key, _ = write_material_doc(old_article, resolver=lambda ref: None,
+                                    store=store, assets_dir=out / "assets",
+                                    subject_code="chinese", dry_run=True)
+    corrected = "## 游山西村\n\n陆游\n莫笑农家腊酒浑。人工修正版。"
+    (out / "material_doc_overrides.jsonl").write_text(json.dumps({
+        "old_key": old_key, "new_key": old_key, "body": corrected,
+        "provenance_source": "试卷",
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    with patch("publish_cli.RefineryConfig") as mock_config:
+        mock_config.from_env.return_value = MagicMock(output_dir=out)
+        main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+    got = json.loads(
+        (out / "published" / "语文" / "试卷" / "试卷.jsonl").read_text(encoding="utf-8").strip())
+    doc = (out / "assets" / got["material_url"]).read_text(encoding="utf-8")
+    assert "人工修正版" in doc and "旧版" not in doc
+
+
+def test_article_override_matches_by_old_key_across_papers(tmp_path):
+    """override 只按 old_key 命中：跨卷共用同一篇文章的题也要拿到修正正文。"""
+    from chinese_material_doc import write_material_doc
+    from asset_store import LocalAssetStore
+
+    out = tmp_path / "out"
+    article = "## 游山西村\n\n陆游\n莫笑农家腊酒浑。旧版。"
+    for name in ("试卷A", "试卷B"):
+        ext = out / "extracted" / "语文" / name
+        ext.mkdir(parents=True)
+        (ext / f"{name}.jsonl").write_text(json.dumps({
+            "subject_id": "chinese", "type": "short_answer", "difficulty": 3,
+            "content": "作答", "answer": "略", "material_text": article,
+            "source": name, "group_order": 1,
+        }, ensure_ascii=False) + "\n", encoding="utf-8")
+        (out / "md" / "语文" / name).mkdir(parents=True)
+    store = LocalAssetStore(out / "assets")
+    old_key, _ = write_material_doc(article, resolver=lambda ref: None,
+                                    store=store, assets_dir=out / "assets",
+                                    subject_code="chinese", dry_run=True)
+    corrected = "## 游山西村\n\n陆游\n莫笑农家腊酒浑。修正版。"
+    (out / "material_doc_overrides.jsonl").write_text(json.dumps({
+        "old_key": old_key, "new_key": old_key, "body": corrected,
+        "provenance_source": "试卷A",
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    with patch("publish_cli.RefineryConfig") as mock_config:
+        mock_config.from_env.return_value = MagicMock(output_dir=out)
+        main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+    for name in ("试卷A", "试卷B"):
+        got = json.loads(
+            (out / "published" / "语文" / name / f"{name}.jsonl").read_text(encoding="utf-8").strip())
+        doc = (out / "assets" / got["material_url"]).read_text(encoding="utf-8")
+        assert "修正版" in doc and "旧版" not in doc, name

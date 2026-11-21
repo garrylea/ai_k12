@@ -156,6 +156,11 @@ class ChineseStrategy:
     def material_policy(self) -> MaterialPolicy:
         return ChineseMaterialPolicy(attach=True)
 
+    def attach_post_material(self, questions, lines, paper_stem: str = "") -> int:
+        """题后材料：《行香子》这类题号之后才出现的材料归到引用它的题。"""
+        from subject_strategies.material_after_stem import attach_post_material
+        return attach_post_material(questions, lines, paper_stem)
+
     def extract_answers(self, text: str, md_path: Path) -> list[ExtractedAnswer]:
         return extract_chinese_answers(text, md_path)
 
