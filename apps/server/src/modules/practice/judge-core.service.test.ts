@@ -30,11 +30,13 @@ const mk = (overrides: any = {}) => ({
     recordFromJudge: vi.fn().mockResolvedValue(undefined),
     recordFromSelfAssessment: vi.fn().mockResolvedValue(undefined),
   },
+  // Task 9 新增第 10 参：整篇素材读取（默认读不到，只保留题内 material_text）
+  materialDoc: { getText: vi.fn().mockResolvedValue(null) },
   ...overrides,
 });
 
 const mkSvc = (deps: ReturnType<typeof mk>) =>
-  new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any, deps.pointsService as any, deps.masteryService as any);
+  new JudgeCoreService(deps.questionsRepo, deps.mainErrorRepo, deps.structuring, deps.judgment as any, deps.explanationCache as any, deps.selfAssessRepo as any, deps.pointsService as any, deps.masteryService as any, undefined, deps.materialDoc as any);
 
 describe('JudgeCoreService.judgeQuestion', () => {
   it('choice 命中 -> exact 比对，答错入错题本（source 透传）', async () => {
@@ -210,6 +212,47 @@ describe('JudgeCoreService.judgeQuestion', () => {
     });
     expect(deps.judgment.judge).toHaveBeenCalled();
     expect(r.method).toBe('ai');
+  });
+});
+
+describe('judgeQuestion 材料注入（material_url 指向素材文件，Task 9）', () => {
+  // 语文/物化道的非客观题一律早退自评（不调 judgment），拿不到 judgment.judge 的入参，
+  // 故用数学填空「归一化不等」落到路由 2 AI 判定来断言 material 的拼装。
+  const materialQ = {
+    id: 1, subject_id: 1, type: 'fill_blank', content: '题', answer: '2/3',
+    material_text: '题中素材', material_url: 'materials/chinese/a/content.md',
+  };
+  const mkDeps = (getText: any) => mk({
+    materialDoc: { getText },
+    questionsRepo: {
+      findById: vi.fn().mockResolvedValue(materialQ),
+      findByContentHash: vi.fn(), findOrCreate: vi.fn(), deleteById: vi.fn(),
+    },
+    judgment: { judge: vi.fn().mockResolvedValue({ isCorrect: true, errorType: null }) },
+  });
+  const judge = (svc: JudgeCoreService) =>
+    svc.judgeQuestion({ studentId: 1, subjectId: 1, questionId: 1, studentAnswer: '0.66', source: 'targeted' });
+
+  it('material_url 存在时把文章拼进 judgment.material', async () => {
+    const deps = mkDeps(vi.fn().mockResolvedValue('## 醉翁亭记'));
+    await judge(mkSvc(deps));
+    expect(deps.materialDoc.getText).toHaveBeenCalledWith('materials/chinese/a/content.md');
+    expect(deps.judgment.judge.mock.calls[0][0].material).toContain('## 醉翁亭记');
+    expect(deps.judgment.judge.mock.calls[0][0].material).toContain('题中素材');
+  });
+
+  it('素材读不到（null）时只保留题内 material_text，判题照常', async () => {
+    const deps = mkDeps(vi.fn().mockResolvedValue(null));
+    await judge(mkSvc(deps));
+    expect(deps.judgment.judge.mock.calls[0][0].material).toBe('题中素材');
+  });
+
+  it('material_url 为空时不去读文件，material 只剩题内材料', async () => {
+    const deps = mkDeps(vi.fn().mockResolvedValue(null));
+    deps.questionsRepo.findById = vi.fn().mockResolvedValue({ ...materialQ, material_url: null });
+    await judge(mkSvc(deps));
+    expect(deps.materialDoc.getText).toHaveBeenCalledWith(null);
+    expect(deps.judgment.judge.mock.calls[0][0].material).toBe('题中素材');
   });
 });
 

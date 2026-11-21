@@ -4,6 +4,7 @@ import { ExplanationCacheService } from './explanation-cache.service.js';
 function makeQuestion(over = {} as Partial<{
   id: number; answer: string; explanation: string;
   content: string; options: string | null;
+  material_text: string | null; material_url: string | null;
 }>) {
   return { id: 1, answer: 'B', explanation: '', content: '题干', options: null, ...over } as any;
 }
@@ -81,6 +82,23 @@ describe('ExplanationCacheService', () => {
     // 2026-11-01：物化道各自成档（此前共用 math），路由与提示词角色都按真实学科
     expect(req.subject).toBe('physics');
     expect(req.subjectLabel).toBe('物理');
+  });
+
+  it('material_url 指向整篇素材时读文件拼进 question.material（Task 9）', async () => {
+    deps.explanation.explain.mockResolvedValue({ content: '题解', mode: 'solution' });
+    deps.questionsRepo.findById.mockResolvedValue(makeQuestion({
+      material_text: '题中素材',
+      material_url: 'materials/chinese/a/content.md',
+    }));
+    const materialDoc = { getText: vi.fn().mockResolvedValue('## 醉翁亭记') };
+    const svc = new ExplanationCacheService(deps.questionsRepo as any, deps.explanation as any, materialDoc as any);
+    svc.ensureExplanation(makeQuestion({ answer: 'B' }));
+    await svc.waitExplanation(1, 5000);
+
+    expect(materialDoc.getText).toHaveBeenCalledWith('materials/chinese/a/content.md');
+    const req = deps.explanation.explain.mock.calls[0][0];
+    expect(req.question.material).toContain('## 醉翁亭记');
+    expect(req.question.material).toContain('题中素材');
   });
 
   it('options 是坏 JSON -> 当没有选项，不影响生成', async () => {

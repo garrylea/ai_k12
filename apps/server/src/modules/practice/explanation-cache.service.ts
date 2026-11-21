@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import { ExplanationCapability, SUBJECT_LABELS } from '../../ai-core/capabilities/explanation.capability.js';
+import { MaterialDocService } from './material-doc.service.js';
 import type { QuestionOption, Subject } from '../../ai-core/types.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
@@ -62,6 +63,8 @@ export class ExplanationCacheService {
   constructor(
     private readonly questionsRepo: QuestionsRepository,
     private readonly explanation: ExplanationCapability,
+    // 素材库文章读取（整篇材料题）：可选注入，未提供时退化为只用题内 material_text。
+    @Optional() private readonly materialDoc?: MaterialDocService,
   ) {}
 
   /** 判错分支调用：fire-and-forget。q 只用 id/answer/explanation 三个字段。 */
@@ -152,6 +155,9 @@ export class ExplanationCacheService {
       // 学科从库里查：写死 'math' 会让物理/化学题解顶着「数学老师」生成。
       // 查不到不影响生成（回退数学档位 + 通用角色名）。
       const subjectCode = await this.questionsRepo.findSubjectCode(id).catch(() => null);
+      // 2026-11-20：整篇文章改由 material_url 指向的素材文件提供（读不到就只有题内材料）。
+      const docText = await this.materialDoc?.getText(q.material_url ?? null);
+      const material = [docText, q.material_text].filter(Boolean).join('\n\n') || null;
       const result = await this.explanation.explain({
         mode: 'solution',
         studentId: '',
@@ -163,7 +169,7 @@ export class ExplanationCacheService {
           answer: q.answer ?? undefined,
           options: parseQuestionOptions(q.options),
           // 2026-11-02：材料随题交给模型（语文/英语阅读、物化题内材料）
-          material: q.material_text ?? null,
+          material,
         },
         wrongAnswer: '',
         knowledgePoint: { id: '', name: '' },

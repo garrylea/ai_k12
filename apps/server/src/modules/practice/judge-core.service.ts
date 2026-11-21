@@ -1,8 +1,9 @@
-import { Injectable, Logger, HttpException } from '@nestjs/common';
+import { Injectable, Logger, HttpException, Optional } from '@nestjs/common';
 import { QuestionsRepository, MainErrorBooksRepository, QuestionSelfAssessmentsRepository } from '../../database/repositories/index.js';
 import { QuestionStructuringCapability } from '../../ai-core/capabilities/question-structuring.capability.js';
 import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capability.js';
 import { ExplanationCacheService } from './explanation-cache.service.js';
+import { MaterialDocService } from './material-doc.service.js';
 import { MasteryService } from './mastery.service.js';
 import { PointsService, type AwardResult } from '../points/points.service.js';
 import { EventsService } from '../analytics/events.service.js';
@@ -181,7 +182,20 @@ export class JudgeCoreService {
     private readonly pointsService: PointsService,
     private readonly masteryService: MasteryService,
     private readonly events?: EventsService, // 埋点 Phase 2：可选注入（旧测试不传即全 no-op；生产由 DI 提供）
+    // 素材库文章读取（整篇材料题）：可选注入，未提供时退化为只用题内 material_text。
+    @Optional() private readonly materialDoc?: MaterialDocService,
   ) {}
+
+  /**
+   * 交给模型的材料：整篇素材（material_url 指向的文件）+ 题内材料拼在一起。
+   * `material_url` 自 2026-11-20 起承担整篇文章，`material_text` 只留题内片段；
+   * 二者都有时按「先整篇、后题内」拼接，缺失任一段都不影响另一段。
+   * 读文件失败返回 null（MaterialDocService 内部已 warn），绝不阻断判题。
+   */
+  private async resolveMaterial(q: Pick<QuestionRow, 'material_url' | 'material_text'> | null): Promise<string | null> {
+    const docText = await this.materialDoc?.getText(q?.material_url ?? null);
+    return [docText, q?.material_text].filter(Boolean).join('\n\n') || null;
+  }
 
   // ---- 埋点 Phase 2（行为事件流）--------------------------------------------
   // 全部走 EventsService.track（fire-and-forget，吞异常），绝不影响判题主链路。
@@ -351,7 +365,8 @@ export class JudgeCoreService {
           // 2026-11-01：按题目学科取路由档位（此前写死 math，物化道永远走数学档）。
           subject: subjectCodeOf(q.subject_id),
           // 2026-11-02：阅读理解/题内材料随题交给模型
-          material: q.material_text ?? null,
+          // 2026-11-20：整篇文章改由 material_url 指向的素材文件提供（读不到就只有题内材料）。
+          material: await this.resolveMaterial(q),
           questionType,
         });
         isCorrect = result.isCorrect;
@@ -514,7 +529,8 @@ export class JudgeCoreService {
           // q 可能不存在（孤儿题）——回落 math 档，与无学科信息时的历史口径一致。
           subject: q?.subject_id != null ? subjectCodeOf(q.subject_id) : 'math',
           // 2026-11-02：阅读理解/题内材料随题交给模型
-          material: q?.material_text ?? null,
+          // 2026-11-20：整篇文章改由 material_url 指向的素材文件提供（读不到就只有题内材料）。
+          material: await this.resolveMaterial(q),
           questionType,
         });
         isCorrect = result.isCorrect;

@@ -8,6 +8,7 @@ import { JudgmentCapability } from '../../ai-core/capabilities/judgment.capabili
 import { HintCapability } from '../../ai-core/capabilities/hint.capability.js';
 import { ExplanationCapability } from '../../ai-core/capabilities/explanation.capability.js';
 import { ExplanationCacheService } from './explanation-cache.service.js';
+import { MaterialDocService } from './material-doc.service.js';
 import { MasteryService } from './mastery.service.js';
 import { ConversationsModule } from '../conversations/conversations.module.js';
 import { ContentModule } from '../content/content.module.js';
@@ -45,11 +46,13 @@ import { AnalyticsModule } from '../analytics/analytics.module.js';
     HintCapability,
     ExplanationCacheService,
     ExplanationCapability,
+    // 素材库文章读取（判题/解析提示词用）：零构造参数，读 process.env.ASSETS_DIR。
+    MaterialDocService,
     // 掌握度回写（埋点 Phase 1B）：JudgeCoreService 判题出口调用（fire-and-forget）。
     // StudentKnowledgeMasteryRepository **只在本模块 provide 一次**（重复 provide 会得到两份实例）。
     StudentKnowledgeMasteryRepository,
     MasteryService,
   ],
-  exports: [PracticeService, JudgeCoreService, ExplanationCacheService, MasteryService],
+  exports: [PracticeService, JudgeCoreService, ExplanationCacheService, MasteryService, MaterialDocService],
 })
 export class PracticeModule {}
