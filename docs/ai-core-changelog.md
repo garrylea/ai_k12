@@ -16,7 +16,7 @@
 
 **新增文章纯度护栏**（`chinese_material_doc.material_group_reason`）：行首顿号题号 / 连续 A–D 选项块 / 答题脚手架 / 材料中间再起小节 / 无标题且不足 40 汉字的碎片 → **不外置**，保留 `material_text` 原样并写 `output/material_group_skipped.jsonl`。本次挡下 **18 组 / 32 行**（option_block 9、no_article 4、cross_section 2、scaffold 2、punct_stem 1）。原因：外置后 `apply_fixes` / `fix_page_markers_cli` / `emphasis_cli` 都跳过 `material_url` 行，错材料将无法再修。publish 与回填共用该规则，且被挡行不再跑题中素材切分（避免覆盖原文却无 URL）。
 
-**后续（① 已在下一节修复）**：① `（一）（二）（三）阅读…完成…题` 小节标题不重置材料域 → 5175/5461/5475 三卷 8 题 material 带上一篇诗文（切题器补 `_start_scope()` + 定向修复，见下条）；② 全库 110 条 `content_hash` 是旧口径，`migrate_content_hash.py` 遇跨卷同题会整体中止。
+**后续（①② 均已在下方条目修复）**：① `（一）（二）（三）阅读…完成…题` 小节标题不重置材料域 → 5175/5461/5475 三卷 8 题 material 带上一篇诗文；② 全库 110 条 `content_hash` 是旧口径，`migrate_content_hash.py` 遇跨卷同题会整体中止。
 
 **验证**：新增 4 类用例；refinery 全量 `2061 passed / 10 skipped`。
 
@@ -31,6 +31,16 @@
 **顺带**：`strip_section_instruction` 扩到「（X）…（共N分）」和「（X）文言文阅读/古诗阅读」这类小节标题，文章 md 不再以卷面小节标题开头。
 
 **验证**：新增 2 条切题用例；refinery 全量 `2064 passed / 10 skipped`。
+
+## 2026-11-21 content_hash 全量迁移：跨卷同题不再中止
+
+**问题**：`content_hash` 2026-11-20 加入 `material_url` 后没跑全量 rehash，全库 110 条旧哈希；`migrate_content_hash.py` 一遇「新哈希相同」就整体 abort，而跨卷同题（同一道题挂两张卷）是正常业务。
+
+**改动**：抽出 `plan_updates()`（纯函数、可测试）。每个冲突组只让一行拿目标哈希：组内已有行等于目标 → 保留它；否则 id 最小的一行更新，其余保持旧值并写入 `output/content_hash_conflicts.jsonl`。两段式更新（临时值→终值）保留，避免中途撞唯一索引。
+
+**结果**：1938 题，101 条更新；冲突 1 组（5167/7629：海淀模拟二题5 = 八中题7，同题跨卷）；迁移后 stale 110 → 1，二次 dry-run 0 条。**遗留**：5167/7629 是真跨卷重复行，是否合并（repoint answers/错题本/paper_questions）需人工决定，未自动合并。
+
+**验证**：新增 `tests/test_migrate_content_hash.py` 4 例。
 
 ---
 
