@@ -99,7 +99,9 @@ def write_material_doc(
     """写 `materials/{subject}/{doc_key}/content.md`，返回 (doc_key, material_url)。"""
     from page_markers import strip_page_markers
 
-    clean, _ = strip_page_markers(strip_section_instruction(body))
+    # 先洗页码，再删小节指令：页码可能在小节指令之前，反了就删不掉指令。
+    cleaned, _ = strip_page_markers(body)
+    clean = strip_section_instruction(cleaned)
     hashes = image_hashes_for(clean, resolver)
     key = doc_key(clean, hashes)
     prefix = f"materials/{subject_code}/{key}"
