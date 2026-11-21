@@ -847,7 +847,7 @@ class TestLoadQuestionsPaperGrouping:
         loader.load_questions([q], paper=(_paper_meta(), 9))
         upd = [a for sql, a in queries if sql.startswith("UPDATE questions SET type=")]
         assert len(upd) == 1
-        assert upd[0][-3] == "新文段"  # material_text 参数（其后是 material_method）
+        assert upd[0][-4] == "新文段"  # material_text 参数（其后是 material_url、material_method）
         assert upd[0][-1] == 501
 
     def test_writes_knowledge_points_from_extracted(self):
@@ -1055,3 +1055,25 @@ def test_cross_paper_shared_row_is_split():
     inserts = [a for sql, a in queries if sql.startswith("INSERT INTO questions")]
     assert inserts and inserts[0][16] == chash  # 新行用带材料指纹的 hash（material_method 在 15）
     assert not [a for sql, a in queries if sql.startswith("UPDATE questions")]  # 旧行没被覆盖
+
+
+from db_loader import content_hash
+
+
+def test_hash_includes_material_url():
+    a = content_hash("同一题干", None, None, "materials/chinese/aaa/content.md")
+    b = content_hash("同一题干", None, None, "materials/chinese/bbb/content.md")
+    assert a != b
+
+
+def test_hash_unchanged_without_material():
+    assert content_hash("同一题干", None, None, None) == content_hash("同一题干", None, None)
+
+
+def test_materials_prefix_is_materialized():
+    from db_loader import assert_materialized_images
+
+    assert_materialized_images(
+        material_text="![](materials/chinese/aaa/fig_01.jpg)",
+        context="test",
+    )

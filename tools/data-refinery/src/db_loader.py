@@ -91,7 +91,10 @@ def content_hash(content: str | None, options=None, material: str | None = None,
 
 # 图片引用与「已是物化产物」的路径前缀（publish 会改写成 questions/ 或 textbooks/）
 _IMG_REF_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
-_CANONICAL_IMG_PREFIXES = ("questions/", "textbooks/", "/assets/", "http://", "https://", "data:")
+_CANONICAL_IMG_PREFIXES = (
+    "questions/", "textbooks/", "materials/", "material/",
+    "/assets/", "http://", "https://", "data:",
+)
 
 
 def assert_materialized_images(*, content=None, answer=None, explanation=None,
@@ -1351,7 +1354,7 @@ class DbLoader:
                 options=opts,
                 context=f"paper={paper[1] if paper else '-'} 题{q.get('group_order', i)}",
             )
-            chash = content_hash(content, opts, q.get("material_text"))
+            chash = content_hash(content, opts, q.get("material_text"), q.get("material_url"))
             qid: int | None = None
 
             # 1) 同卷同题：优先按 group_order（卷面题号）匹配 —— 重抽后题目行数可能变
@@ -1407,9 +1410,10 @@ class DbLoader:
                         # 题21：difficulty 2→3、is_active 1→0 都没写进库）。
                         self._exec(
                             "UPDATE questions SET type=%s, difficulty=%s, is_active=%s, "
-                            "material_text=%s, material_method=%s WHERE id=%s",
+                            "material_text=%s, material_url=%s, material_method=%s WHERE id=%s",
                             (q.get("type"), q.get("difficulty"), new_active,
-                             q.get("material_text"), q.get("material_method"), qid))
+                             q.get("material_text"), q.get("material_url"),
+                             q.get("material_method"), qid))
                         updated += 1
                     if old_hash != chash:
                         other = self._reusable_question(chash, opts, exclude_id=qid)
