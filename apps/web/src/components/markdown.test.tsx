@@ -392,6 +392,45 @@ describe('preprocessMarkdown：填空横线（连续下划线）原样显示', (
   it('普通中文填空 ____ 原样渲染', () => {
     expect(render('酒精具有挥发性和____性。')).toContain('____性');
   });
+
+  // 2026-11-21 回归：西城模拟二第 20 题的空位写在原生 HTML 表格的 <td> 里
+  // （`<td>见证着____2____</td>`）。转义成 \_\_\_\_ 后 rehype-raw 不会把 HTML
+  // 元素内部的文本再当 markdown 解析，反斜杠原样 leaking 到页面。HTML 元素内部
+  // 的文本本就不会被 CommonMark 当强调标记吃掉，不能转义。
+  const REPORTED_Q20_CELL =
+    '<table><tr><td>今</td><td>钟鼓楼作为现代都市中传统文化的留存,见证着____2____</td></tr></table>';
+
+  it('原生 HTML 表格单元格里的 ____ 不被转义（不改 preprocessor 输出）', () => {
+    expect(preprocessMarkdown(REPORTED_Q20_CELL)).toContain('见证着____2____');
+    expect(preprocessMarkdown(REPORTED_Q20_CELL)).not.toContain('\\_');
+  });
+
+  it('原生 HTML 表格单元格里的 ____ 渲染后不露反斜杠', () => {
+    const html = render(REPORTED_Q20_CELL);
+    expect(html).toContain('____2____');
+    expect(html).not.toContain('\\_');
+    expect(html).not.toContain('<em');
+    expect(html).not.toContain('<strong');
+  });
+
+  it('HTML 之外的填空仍照常转义，HTML 内部不转义（混合场景）', () => {
+    const src = '第____空\n<table><tr><td>____2____</td></tr></table>\n末____空';
+    const out = preprocessMarkdown(src);
+    expect(out).toContain('第\\_\\_\\_\\_空');
+    expect(out).toContain('末\\_\\_\\_\\_空');
+    expect(out).toContain('<td>____2____</td>');
+    const html = render(src);
+    expect(html).toContain('第____空');
+    expect(html).toContain('____2____');
+    expect(html).toContain('末____空');
+    expect(html).not.toContain('\\_');
+  });
+
+  it('HTML 内部的公式下划线保持 LaTeX 语义，不被误改', () => {
+    const src = '<table><tr><td>$x_{1}$</td></tr></table>';
+    expect(preprocessMarkdown(src)).toBe(src);
+    expect(render(src)).toContain('katex');
+  });
 });
 
 describe('材料段落化（preprocessMaterialMarkdown）', () => {

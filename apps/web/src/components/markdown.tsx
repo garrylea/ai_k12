@@ -157,22 +157,50 @@ const mapOutsideFences = (s: string, fn: (t: string) => string): string =>
 // ___②___/___③___ 显示成 ②/③，而 ___④ 幸存（该题做过人工校对，DB 原文完好，
 // 不是校对吞的）。这里在预处理阶段把「连续 ≥2 个下划线」转义成 \_\_…，渲染时原样显示。
 // 边界：单个 _ 不动（保留 LaTeX 下标 x_1 / Markdown 斜体）；已转义的 \_ 不二次转义；
-// 行内代码与 $…$ 公式内部不动（那里的下划线是下标/代码字面语义）。
+// 行内代码与 $…$ 公式内部不动（那里的下划线是下标/代码字面语义）；**原生 HTML 元素
+// 内部的文本也不动**——rehype-raw 不会把 HTML 里的文本再当 markdown 解析，转义出的
+// \_ 永远不会被还原，反斜杠会原样漏到页面（2026-11-21 西城模拟二第 20 题
+// `<td>见证着____2____</td>` 显示成 \_\_\_\_2\_\_\_\_）。HTML 内部文本本就不会被
+// CommonMark 当强调标记吃掉，无需转义。
 const BLANK_UNDERSCORE_RE = /_{2,}/g;
-const CODE_OR_MATH_RE = /(\$\$[\s\S]*?\$\$|\$[^$\n]*?\$|`[^`]*`)/g;
+// 整串按「公式 / 行内代码 / HTML 标签」切成 token，逐个处理并跟踪 HTML 嵌套深度。
+const SKIP_OR_HTML_TAG_RE =
+  /(\$\$[\s\S]*?\$\$|\$[^$\n]*?\$|`[^`]*`|<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>)/g;
+const VOID_HTML_TAGS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
 
-const escapeBlankUnderscores = (s: string): string =>
-  s
-    .split(CODE_OR_MATH_RE)
-    .map((seg, i) =>
-      i % 2 === 1
-        ? seg // 行内代码 / 公式段：原样保留
-        : seg.replace(BLANK_UNDERSCORE_RE, (run, offset: number, full: string) =>
-            // 前一个字符是反斜杠说明已经被转义过（如已入库的 \_\_\_\_），不再动
-            offset > 0 && full[offset - 1] === '\\' ? run : run.replace(/_/g, '\\_'),
-          ),
-    )
-    .join('');
+const escapeRuns = (text: string): string =>
+  text.replace(BLANK_UNDERSCORE_RE, (run, offset: number, full: string) =>
+    // 前一个字符是反斜杠说明已经被转义过（如已入库的 \_\_\_\_），不再动
+    offset > 0 && full[offset - 1] === '\\' ? run : run.replace(/_/g, '\\_'),
+  );
+
+/** HTML 开/闭标签是否改变嵌套深度（自闭合与 void 元素不改变）。 */
+function nextHtmlDepth(depth: number, tag: string): number {
+  if (/^<\//.test(tag)) return Math.max(0, depth - 1);
+  if (/\/\s*>$/.test(tag)) return depth;
+  const name = /^<([A-Za-z][A-Za-z0-9-]*)/.exec(tag)?.[1]?.toLowerCase();
+  return name && VOID_HTML_TAGS.has(name) ? depth : depth + 1;
+}
+
+const escapeBlankUnderscores = (s: string): string => {
+  let out = '';
+  let last = 0;
+  let depth = 0;
+  for (const m of s.matchAll(SKIP_OR_HTML_TAG_RE)) {
+    const token = m[0];
+    const start = m.index ?? 0;
+    const text = s.slice(last, start);
+    out += depth > 0 ? text : escapeRuns(text); // 仅转义 HTML 外的普通文本
+    out += token; // 公式 / 行内代码 / HTML 标签一律原样
+    if (/^<\/?[A-Za-z]/.test(token)) depth = nextHtmlDepth(depth, token);
+    last = start + token.length;
+  }
+  const tail = s.slice(last);
+  return out + (depth > 0 ? tail : escapeRuns(tail));
+};
 
 export const preprocessMarkdown = (s: string | undefined | null): string => {
   if (!s) return '';
