@@ -1052,3 +1052,34 @@ def test_article_fix_in_place_pulls_forked_sibling_back(tmp_path, monkeypatch):
                if sql.startswith("UPDATE questions SET material_url=%s, content_hash=%s")]
     assert len(updated) == 1 and updated[0][1][0] == old_url
     assert updated[0][1][2] == 5172, "只应把分叉出去的那道题并回来"
+
+
+def test_publish_sources_reloads_db_from_published(monkeypatch):
+    """人工修正收尾必须 publish → 回灌库；只 publish 会让库和发布分叉。
+
+    背景（2026-11-22 东城模拟一 Q11 实测）：apply_fixes 先把题干直接写库；publish
+    的 `externalize_chinese_materials` 才把「题后材料」从题干拆进 material_text
+    （`chinese_inline_material.split_inline_material`，content 261→72）。只发布不
+    回灌时，题库仍是「题干含韩愈题后材料、material_text 为空」，页面把材料当题干
+    显示。修复：publish 之后用 db_loader 增量重载同卷（不删行、不换 id）。
+    """
+    import publish_cli
+    import db_loader_cli
+
+    calls: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(
+        publish_cli, "main",
+        lambda argv=None: (calls.append(("publish", list(argv or []))), 0)[1])
+    monkeypatch.setattr(
+        db_loader_cli, "main",
+        lambda argv=None: (calls.append(("load", list(argv or []))), 0)[1])
+
+    src = "语文-初三(下)-202607-东城-模拟一-试卷"
+    _impl._publish_sources({src})
+
+    assert [k for k, _ in calls] == ["publish", "load"], "必须先发布、再回灌库"
+    assert calls[0][1] == ["--book", src]
+    load_argv = calls[1][1]
+    assert "--load-cards" in load_argv, "回灌必须用增量，绝不能全量 delete"
+    assert "--questions-only" in load_argv
+    assert "--file" in load_argv and src in load_argv

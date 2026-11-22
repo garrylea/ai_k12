@@ -8,6 +8,23 @@
 
 ---
 
+## 2026-11-22 人工修正后库与 published 分叉（东城 Q11 题后材料当题干）
+
+**问题**：东城模拟一 Q11（id 8032）页面把韩愈《送孟东野序》的题后材料显示在题干里、`material_text` 为空。根因：21:09 人工修正（operator=lichao，Q4/Q11/Q17）把 extracted 的合并版题干**直接写库**；而 publish 的 `externalize_chinese_materials` 才会用 `split_inline_material` 把题后材料拆进 `material_text`（content 261→72）。apply 后自动 publish 了，但**没有把 published 回灌库**，库停在合并版。同卷 23 题只有 Q11 中招（唯一「被人工修正 + 有题后材料」的题）。
+
+**改法**：
+- `apply_fixes._publish_sources`：publish 成功后追加 db_loader 增量回灌（`--load-cards --questions-only --file <src>`），保证 **库 == published**（按 `(paper_id, group_order)` 原址更新，question id 不变，进行中考试/作答关联不断）。
+- 回归用例 `test_publish_sources_reloads_db_from_published`：断言同一卷先 publish 再回灌、且必须用增量参数。
+- 数据：已回灌东城卷，Q11 content 72 / material_text 188 / `material_url` 不变（id 8032 / answer_verified=0）；回灌前备份 `output/_q11_backup/q8032_before.json`。
+
+**文件**：`apply_fixes.py`、`tests/test_apply_fixes.py`。无需 DB migration。
+
+**验证**：4 个相关测试文件 362 passed；refinery 全量 2115 passed / 10 skipped（排除联网 `test_import_cli.py`）；`GET /api/exams/sessions/104` 的 Q11 已返回 text=题干(72)、materialText=韩愈段(188)、materialUrl=文章。
+
+**遗留**：其他人工修正卷仍有库/发布差异（页脚清洗、markdown 包裹、图片 vs 表格表示、`material_url` 空等），原因不一，单独清单逐条甄别，不随本次全量重灌。
+
+---
+
 ## 2026-11-22 语文小节标题被当成材料（默写题「(一)默写。(共4分)」）
 
 **问题**：东城模拟一 Q6（question_id 8027）页面把 `(一)默写。(共4分)` 当材料显示，真正的 6 句默写在题干里。根因是 2026-11-21 `4cf545e4` 修「上一篇诗文串进下一篇」时新增 `is_section_header` 分支，`_start_scope()` 的同时还把标题行 `scope_pending.append(line)`；阅读小节后面有正文会盖过它，**默写小节没有文章，标题就成了唯一材料**。同病还有海淀模拟二 5170/5171/5172（`(一)默写，完成 8-10题。(共 4 分)`）。旧逻辑（`_SECTION_HEADER_RE`）只 `_start_scope()` 不 append，所以 11-21 之前没有这个问题。另：`chinese_material_doc.is_heading_only` 只认 `##` 前缀标题，库里存的是裸标题，publish 兜底也没清掉。

@@ -1068,22 +1068,41 @@ def _rescan(applied: dict[str, dict[str, set[int]]]) -> None:
 
 
 def _publish_sources(sources: set[str]) -> None:
-    """补题/材料改完后同步 published（一条命令内完成，不让用户另跑 publish）。
+    """补题/材料改完后同步 published，并把 published 回灌数据库（一条命令内完成）。
 
-    页面读的是库，publish 失败不回滚已提交的库，只告警；但不跑这一步，
-    published 会和库长期分叉，下次导入又把旧内容带回来（2026-11-22 Q21 实测）。
+    页面读的是库，apply_fixes 先把人工内容直接写库；但 publish 还会做**题后材料
+    拆分**（`externalize_chinese_materials` → `split_inline_material`）、文章外置、
+    页脚/小节指令清洗、图片路径改写等变换。只 publish 不回灌，库会停在变换前的
+    版本：东城模拟一 Q11 的题干带着韩愈题后材料、`material_text` 为空，页面就把
+    材料当题干显示（2026-11-22 实测）。所以 publish 后再用 db_loader 增量重载
+    同卷，保证 **库 == published**。
+
+    失败不回滚已提交的库，只告警（与 publish 同口径）；回灌失败时 published 已
+    是正确版本，下次导入/重载会自愈。
     """
     if not sources:
         return
     from publish_cli import main as publish_main
+    from db_loader_cli import main as loader_main
 
-    print("\n[发布] 同步 published（改写过的卷）：", flush=True)
+    print("\n[发布] 同步 published 并回灌库（改写过的卷）：", flush=True)
     for src in sorted(sources):
         try:
             rc = publish_main(["--book", src])
-            print(f"  · {src}: {'ok' if rc in (None, 0) else f'返回 {rc}'}", flush=True)
         except Exception as exc:            # noqa: BLE001 - 库已提交，发布失败不影响页面
             print(f"  ! {src}: publish 失败（库已写入，不影响页面）：{exc}", flush=True)
+            continue
+        if rc not in (None, 0):
+            print(f"  ! {src}: publish 返回 {rc}，跳过回灌（库已写入）", flush=True)
+            continue
+        print(f"  · {src}: publish ok", flush=True)
+        # 增量回灌：--load-cards 不触发 full-reload，按 (paper_id, group_order)
+        # 原地更新，question id 不变（进行中的考试/作答关联不会断）。
+        try:
+            rc = loader_main(["--load-cards", "--questions-only", "--file", src])
+            print(f"  · {src}: 回灌 {'ok' if rc in (None, 0) else f'返回 {rc}'}", flush=True)
+        except Exception as exc:            # noqa: BLE001 - published 已是正确版本
+            print(f"  ! {src}: 回灌失败（published 已更新，下次导入会自愈）：{exc}", flush=True)
 
 
 def run(argv=None, *, via_pipeline: bool = False) -> int:
