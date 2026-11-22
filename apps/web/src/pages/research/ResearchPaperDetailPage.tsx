@@ -34,8 +34,8 @@ function MarkdownBody({ text }: { text: string }) {
 }
 
 /**
- * 表格里的解析 / 思路单元格：只露出前几行供教研扫一眼有没有内容，
- * 被裁掉时末尾补「……」；悬停用浮层展示完整富文本（表格列宽固定，全展开会把行撑得非常高）。
+ * 表格里的答案 / 解析 / 思路单元格：内容铺满整个单元格（宽高随格子），
+ * 超出可视区域时末尾补「……」；悬停用浮层展示完整富文本（表格列宽固定，全展开会把行撑得非常高）。
  */
 function MarkdownPreviewCell({ text, label }: { text: string | null; label: string }) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -96,7 +96,11 @@ function MarkdownPreviewCell({ text, label }: { text: string | null; label: stri
   }, [anchor]);
 
   if (!text || !text.trim()) {
-    return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
+    return (
+      <span className="block px-4 py-3" style={{ color: 'var(--text-tertiary)' }}>
+        —
+      </span>
+    );
   }
   const body = text;
 
@@ -145,7 +149,7 @@ function MarkdownPreviewCell({ text, label }: { text: string | null; label: stri
 
   return (
     <div
-      className="relative"
+      className="absolute inset-x-4 inset-y-3"
       data-testid="markdown-preview-cell"
       onMouseEnter={handleEnter}
       onMouseLeave={scheduleHide}
@@ -153,7 +157,7 @@ function MarkdownPreviewCell({ text, label }: { text: string | null; label: stri
       <div
         ref={bodyRef}
         data-testid="markdown-preview-body"
-        className="max-h-24 overflow-hidden"
+        className="h-full overflow-hidden"
         style={{ color: 'var(--text-primary)' }}
       >
         <div ref={contentRef}>
@@ -229,7 +233,17 @@ export default function ResearchPaperDetailPage() {
         </div>
       ) : (
         <div data-testid="detail-table" className="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[1270px] table-fixed text-sm">
+            <colgroup>
+              <col className="w-16" />
+              <col className="w-20" />
+              <col />
+              <col className="w-[10.5rem]" />
+              <col className="w-56" />
+              <col className="w-48" />
+              <col className="w-28" />
+              <col className="w-[6.5rem]" />
+            </colgroup>
             <thead className="bg-gray-50" style={{ color: 'var(--text-secondary)' }}>
               <tr>
                 <th className="text-left px-4 py-3 font-medium">题号</th>
@@ -247,26 +261,18 @@ export default function ResearchPaperDetailPage() {
                 <tr key={q.id} className="border-t border-gray-100">
                   <td className="px-4 py-3">{q.questionNo}</td>
                   <td className="px-4 py-3">{q.type}</td>
-                  <td className="px-4 py-3 max-w-md" title={q.content}>
-                    <ReactMarkdown
-                      remarkPlugins={markdownRemarkPluginsWithBreaks}
-                      rehypePlugins={markdownRehypePlugins}
-                      components={markdownComponents}
-                    >
-                      {preprocessMarkdown(q.content)}
-                    </ReactMarkdown>
+                  <td className="px-4 py-3">
+                    <MarkdownBody text={q.content} />
                   </td>
-                  {/* 答案只露前 10 个字，列宽就不再被长解析文本撑开；完整值放 title */}
-                  <td className="px-4 py-3 align-top">
-                    <div className="max-w-[10rem] truncate" title={q.answer}>
-                      {q.answer.length > 10 ? `${q.answer.slice(0, 10)}…` : q.answer}
-                    </div>
+                  {/* 答案与解析/思路同口径渲染富文本；格子高度随行高，超出才裁掉并在悬停时看全文 */}
+                  <td className={`relative p-0 align-top ${q.answer.trim() ? 'h-20' : ''}`}>
+                    <MarkdownPreviewCell text={q.answer} label="答案" />
                   </td>
                   {/* 显示正文而不是「有/无」：教研改完解析/思路要能在列表里立刻看到变化（PRD §7.14 的明细含这两列） */}
-                  <td className="px-4 py-3 align-top text-xs max-w-[16rem]">
+                  <td className={`relative p-0 align-top text-xs ${q.explanation?.trim() ? 'h-28' : ''}`}>
                     <MarkdownPreviewCell text={q.explanation} label="解析" />
                   </td>
-                  <td className="px-4 py-3 align-top text-xs max-w-[16rem]">
+                  <td className={`relative p-0 align-top text-xs ${q.approach?.trim() ? 'h-28' : ''}`}>
                     <MarkdownPreviewCell text={q.approach} label="思路" />
                   </td>
                   <td className="px-4 py-3">

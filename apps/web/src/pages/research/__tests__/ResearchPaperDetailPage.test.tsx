@@ -141,8 +141,12 @@ describe('ResearchPaperDetailPage 加载与表格', () => {
     expect(stemCell.querySelector('svg')).not.toBeNull();
   });
 
-  it('答案只露前 10 个字，完整值放进 title', async () => {
-    const answer = '第一第二第三第四第五第六';
+  it('答案走 markdown + latex + html + svg 富文本渲染，不显示原始标记', async () => {
+    const answer = [
+      '**结论**：$x=2$',
+      '<table><tr><td>答案单元格</td></tr></table>',
+      '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" /></svg>',
+    ].join('\n\n');
     detailMock.mockResolvedValueOnce(detail({ questions: [question({ answer })] }));
 
     renderDetail();
@@ -150,8 +154,11 @@ describe('ResearchPaperDetailPage 加载与表格', () => {
     const row = within(table).getAllByRole('row')[1] as HTMLTableRowElement;
     const answerCell = row.cells[3]; // 题号 / 题型 / 题干 / 答案
 
-    expect(answerCell.textContent).toBe('第一第二第三第四第五…');
-    expect(answerCell.querySelector('[title]')).toHaveAttribute('title', answer);
+    expect(answerCell.querySelector('strong')?.textContent).toBe('结论');
+    expect(answerCell.querySelector('.katex')).not.toBeNull();
+    expect(answerCell.querySelector('svg')).not.toBeNull();
+    expect(answerCell.textContent).not.toContain('$x=2$');
+    expect(answerCell.textContent).not.toContain('<svg');
   });
 
   it('来源列收窄，完整来源放进 title', async () => {
