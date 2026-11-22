@@ -1076,6 +1076,27 @@ def test_answer_only_skip_returns_empty(monkeypatch):
     assert manual_fix._ask_answer_only(issue, 7, {"content": "题干"}, _QuietConsole()) == []
 
 
+def test_collect_content_menu_false_skips_input_method_menu(monkeypatch, capsys):
+    """归属已选「粘正文」时不再弹输入方式菜单，首行即正文（数字也不当命令）。"""
+    # menu=False 下首行 "1" 必须当正文，而不是被当成「选 1 粘贴文本」吞掉
+    monkeypatch.setattr("sys.stdin", io.StringIO("1 材料一\n材料二\nEOF\n1\n"))
+    got = manual_fix._collect_content(Path("/tmp"), allow_images=False,
+                                      label="材料", menu=False)
+    assert got == "1 材料一\n材料二"
+    out = capsys.readouterr().out
+    assert "选择材料输入方式" not in out, "不应再问输入方式"
+    assert "请粘贴材料" in out
+
+
+def test_collect_content_menu_true_keeps_input_method_menu(monkeypatch, capsys):
+    """默认仍弹菜单：题干等富输入场景不受影响。"""
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n题干正文\nEOF\n1\n"))
+    got = manual_fix._collect_content(Path("/tmp"), allow_images=False, label="题干")
+    assert got == "题干正文"
+    out = capsys.readouterr().out
+    assert "选择题干输入方式" in out
+
+
 def test_collect_content_pre_read_shows_no_second_menu(monkeypatch):
     """调用方已读到输入方式时不能再弹一条菜单，否则用户多敲的 1 会进正文第一行。"""
     import io

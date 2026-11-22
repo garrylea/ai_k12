@@ -861,16 +861,19 @@ def _clear_clipboard() -> None:
 def _collect_content(paper_md_dir: Path, *, allow_images: bool = True,
                      out_refs: list[str] | None = None,
                      first_line: str | None = None,
-                     label: str = "题干") -> str | None:
+                     label: str = "题干",
+                     menu: bool = True) -> str | None:
     """读人工输入；返回 Markdown 正文，跳过时返回 None。
 
-    先问用哪种方式（1 粘贴 / 2 图片路径 / 3 文件 / 4 剪贴板 / 5 多图+题干），再预览确认。
+    默认先问用哪种方式（1 粘贴 / 2 图片路径 / 3 文件 / 4 剪贴板 / 5 多图+题干），再预览确认。
     直接粘贴正文也认：首行不是这些命令就当成正文的第一行。
     空行也认：截图后按 ⌘V 时终端送不出任何字符，用户接着按的回车就是这里读到的
     空行 —— 此时先探一次剪贴板，有图就按图片处理，没图再走原来的「粘贴文本」。
     `out_refs` 非空列表时，选 5 会把配好的图片引用写进去。
     `first_line`：调用方已读好的首行（答案录入要先识别 e/r/s 命令），有则不重复读。
     `label`：提示词语境，'题干' 或 '答案'（答案的确认框第 4 项是留空而非放弃整题）。
+    `menu=False`：归属提示里已经选了「粘正文」（如材料选「题内素材」），不必再问
+    输入方式 —— 直接提示粘贴正文，首行即正文（2026-11-22 用户反馈二次选择多余）。
     """
     c = console()
     pre_read = first_line
@@ -879,7 +882,10 @@ def _collect_content(paper_md_dir: Path, *, allow_images: bool = True,
                else f"选择{label}输入方式 1/2/3/4/5（5=多图+{label}；或直接粘贴{label} / ⌘V 图片后回车）› ")
         # 调用方（只补答案）已在同一条提示上读到选择并传进来；这里再打一条
         # 长得像菜单的提示会诱使用户多敲一次「1」，那个 1 会被当成正文第一行。
-        if pre_read is None:
+        if not menu:
+            # 上一步已选「粘正文」，只收正文：不解析输入方式命令，首行即正文。
+            c.prompt(f"请粘贴{label}（EOF 结束）› ")
+        elif pre_read is None:
             c.prompt(tip)
         else:
             c.info(f"已选输入方式：接着粘贴{label}，EOF 结束")
@@ -894,15 +900,18 @@ def _collect_content(paper_md_dir: Path, *, allow_images: bool = True,
         if low == "q":
             raise SystemExit(0)
 
-        if first in ("e", "r"):
+        if not menu:
+            # 归属提示里已选「粘正文」：首行就是正文，不把 1/3/@ 等当输入方式命令
+            text = _read_block(first)
+        elif first in ("e", "r"):
             # 还没录内容就想改：说清楚该按什么，别把这个字母吃进正文
             c.warn("还没有可修改的内容；请按 1 粘贴正文 / 2 图片路径 / "
                    "3 文件路径 / 4 剪贴板图片 / 5 多图+题干")
             continue
-        if low in ("2", "4") and not allow_images:
+        elif low in ("2", "4") and not allow_images:
             c.warn("当前是「纯文字」模式：图片请在上一步按 1/2 处理，这里只收文字")
             continue
-        if low == "5":
+        elif low == "5":
             if out_refs is None:
                 c.warn("当前流程不支持多图+题干（纯文字模式）")
                 continue
@@ -1330,8 +1339,9 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                     material = ""          # 文章在 md 里，不写题内素材列
                     c.ok(f"已指认共享文章：{url}")
             elif scope == "inline":
+                # 归属已选「题内素材」，直接收正文，不再弹「输入方式」菜单
                 pasted_material = _collect_content(
-                    paper_md_dir, allow_images=False, label="材料")
+                    paper_md_dir, allow_images=False, label="材料", menu=False)
                 if pasted_material and pasted_material.strip():
                     material = pasted_material.strip()   # 显式修正优先于自动拆出的材料
                     c.ok(f"题内素材已录入 {len(material)} 字（只挂本题）")
@@ -1452,7 +1462,8 @@ def _ask_material_only(issue: dict, paper_md_dir: Path) -> list[dict]:
     label = "文章全文" if scope == "article" else "材料"
     if scope == "article":
         c.info(f"沿用共享文章 URL：{current_url}（会重写这篇 md 文档，同文兄弟题同步）")
-    text = _collect_content(paper_md_dir, allow_images=False, label=label)
+    # 归属已在上一步选定，直接收正文，不再弹「输入方式」菜单（二次选择多余）
+    text = _collect_content(paper_md_dir, allow_images=False, label=label, menu=False)
     if text is None or not text.strip():
         c.warn("没收到材料内容，已跳过")
         return []
