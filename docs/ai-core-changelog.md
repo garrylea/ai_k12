@@ -8,6 +8,22 @@
 
 ---
 
+## 2026-11-22 爬虫支持「跨区大汇总表」页（shitiku/86887）
+
+**问题**：`--url https://www.zgkao.com/shitiku/86887.html` 解析出 0 条目，整页一份 PDF 也下不到，同站其他页正常。
+
+**根因**：这是「2026 北京初三各区期末」的跨区×跨年汇总页，表格只有 `区 | 科目 | 2026期末考试卷＆答案 | 2025…` 列头，**没有** `2026海淀初三二模试卷&答案` 那种跨列标题行。`IndexParser` 靠标题行一次性取「年份/区县/年级/考试类型」，取不到就把前两行全吃掉并返回空表；网页标题写「…期末**试题**及答案汇总」，也不匹配 `_GRADE_PATTERN` 的「试卷」后缀。
+
+**改法**（`tools/crawler/src/parser.py` 为主）：
+- 新增 `_parse_page_header(soup)`：无标题行时从 `<h1>/<title>` 取年级 + 考试词（期末/期中/一模…）+ 区县（`_clean_region` 已把「北京各区」这类范围词归空），年级或考试词缺一就返回 `None`，维持旧行为。
+- `_parse_table` 接 `page_header`：标题行优先；没有标题行时才用页面级信息，列头仍走既有 `区/科目/年份` 识别分支（`header_from_page` 只影响 `_split_subject_school`）。
+- `_split_subject_school`：该页「科目」列偶尔填学校名（`清华附中` + 链接「数学试卷」、`北京二中-语文`），按科目词把学校名拆出来，避免生成 `数学/初中/first/清华附中/` 这种目录。
+- `adapters/zgkao.py`：`list_items` 与二级页递归改用 `urljoin(当前页, href)`——该页有 1 条站内相对链接 `/zk/202401/68756.html`，此前直接交给 fetcher 必然失败。
+
+**验证**：该页 dry-run 0 → 279 条目 / 307 文件、失败 0（其中相对链接那一份由失败转为可下）；旧格式页 `89047.html` 的新旧解析结果逐条 `dataclasses.astuple` 比对完全一致（233 条）；真实落盘抽测 `--subject 物理 --district 通州 --year 2024` 得 `物理-初三(上)-202407-通州-期末-试卷.pdf`（11.2 MB，正是原相对链接那份）。`tools/crawler` 291 passed（基线 279 + 新增 12）。
+
+---
+
 ## 2026-11-22 人工修正后库与 published 分叉（东城 Q11 题后材料当题干）
 
 **问题**：东城模拟一 Q11（id 8032）页面把韩愈《送孟东野序》的题后材料显示在题干里、`material_text` 为空。根因：21:09 人工修正（operator=lichao，Q4/Q11/Q17）把 extracted 的合并版题干**直接写库**；而 publish 的 `externalize_chinese_materials` 才会用 `split_inline_material` 把题后材料拆进 `material_text`（content 261→72）。apply 后自动 publish 了，但**没有把 published 回灌库**，库停在合并版。同卷 23 题只有 Q11 中招（唯一「被人工修正 + 有题后材料」的题）。

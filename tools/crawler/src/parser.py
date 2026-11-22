@@ -32,6 +32,18 @@ _EMPTY_MARKERS = frozenset({"", "—", "——", "-", "--", "/", "无", "暂无"
 
 UNKNOWN_LOCATION = "待确认"
 
+# 汇总表「科目」列的正常取值。跨区大汇总表的这一列偶尔填的是学校名，
+# 真正科目写在链接文字里（`清华附中 | 数学试卷`），靠这组词把两者拆开。
+_SUBJECTS = (
+    "语文", "数学", "英语", "物理", "化学", "生物", "历史", "地理",
+    "政治", "道法", "科学", "信息", "体育", "音乐", "美术",
+)
+
+# 页面标题里的考试词（跨区汇总表没有跨列标题行，卷种只在标题里）。
+_EXAM_TYPE_MARKERS = ("一模", "二模", "三模", "期末", "期中", "月考", "开学考", "模拟")
+
+_PAGE_GRADE = re.compile(r"(初一|初二|初三|高一|高二|高三)")
+
 
 @dataclass
 class PaperItem:
@@ -55,18 +67,46 @@ class IndexParser:
     @staticmethod
     def parse(html: str) -> list[PaperItem]:
         soup = BeautifulSoup(html, "html.parser")
+        page_header = IndexParser._parse_page_header(soup)
         items: list[PaperItem] = []
         for table in soup.find_all("table"):
-            items.extend(IndexParser._parse_table(table))
+            items.extend(IndexParser._parse_table(table, page_header))
         return items
 
     @staticmethod
-    def _parse_table(table) -> list[PaperItem]:
+    def _parse_page_header(soup) -> dict | None:
+        """页面标题里的年级/考试类型/区县，供没有跨列标题行的汇总表兜底。
+
+        站点把「2026年北京初三各区期末试题及答案汇总」这种跨区大表放在一页里，
+        表格本身只有 `区 | 科目 | 2026期末考试卷＆答案 …` 列头，卷种信息只在页面标题。
+        年级或考试词缺一就返回 None —— 宁可不解析，也不拿半截信息去命名文件。
+        """
+        for tag in ("h1", "title"):
+            node = soup.find(tag)
+            text = node.get_text(" ", strip=True) if node else ""
+            if not text:
+                continue
+            grade_match = _PAGE_GRADE.search(text)
+            if not grade_match:
+                continue
+            exam_type = next((m for m in _EXAM_TYPE_MARKERS if m in text), "")
+            if not exam_type:
+                continue
+            return {
+                "district": IndexParser._clean_region(text[: grade_match.start()]),
+                "grade": grade_match.group(1),
+                "exam_type": exam_type,
+            }
+        return None
+
+    @staticmethod
+    def _parse_table(table, page_header: dict | None = None) -> list[PaperItem]:
         grid = IndexParser._expand_table(table)
         if not grid:
             return []
 
         header: dict | None = None
+        header_from_page = False
         column_header_seen = False
         subject_col = region_col = school_col = None
         year_cols: dict[int, str] = {}
@@ -81,7 +121,13 @@ class IndexParser:
                 info = IndexParser._parse_header(title)
                 if info:
                     header = info
-                continue
+                    continue
+                if page_header is None:
+                    continue
+                # 跨区汇总表：没有跨列标题行，年级/考试类型改从页面标题取，
+                # 列头（`区 | 科目 | 2026期末考试卷＆答案`）交给下面的既有分支识别。
+                header = dict(page_header)
+                header_from_page = True
 
             if IndexParser._spanning_text(cells):
                 continue
@@ -109,9 +155,15 @@ class IndexParser:
             # 合并单元格造成的空科目行没有可归属的试卷，直接跳过
             if not subject or subject == "科目":
                 continue
+            school_from_row = ""
+            if header_from_page:
+                # 这一列偶尔是学校名（`清华附中`、`北京二中-语文`），科目在链接文字里
+                subject, school_from_row = IndexParser._split_subject_school(subject, texts)
 
             region = IndexParser._cell_value(cells, region_col, IndexParser._clean_region)
             school = IndexParser._cell_value(cells, school_col, IndexParser._clean_school)
+            if not school:
+                school = school_from_row
             if not region:
                 region = header["district"]
 
@@ -131,6 +183,22 @@ class IndexParser:
                     school=school,
                 ))
         return items
+
+    @staticmethod
+    def _split_subject_school(cell_text: str, row_texts: list[str]) -> tuple[str, str]:
+        """跨区汇总表的「科目」列偶尔填学校名，真正科目写在链接文字里。
+
+        `清华附中 | 数学试卷` → (数学, 清华附中)；`北京二中-语文` → (语文, 北京二中)。
+        都认不出科目时原样返回，「科目」列仍按旧口径当学科用。
+        """
+        if cell_text in _SUBJECTS:
+            return cell_text, ""
+        for text in (cell_text, *row_texts):
+            for subject in _SUBJECTS:
+                if subject in text:
+                    school = cell_text.replace(subject, "").strip(" ·-—/")
+                    return subject, school
+        return cell_text, ""
 
     @staticmethod
     def _expand_table(table) -> list[list[tuple[str, object]]]:

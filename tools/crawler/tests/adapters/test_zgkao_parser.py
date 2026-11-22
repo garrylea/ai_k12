@@ -282,6 +282,126 @@ class TestIndexParser:
         assert items[0].district == "大兴"
 
 
+# 跨区大汇总表：表格没有跨列标题行，卷种信息只在页面标题里。
+# 真实页面 https://www.zgkao.com/shitiku/86887.html（2026 北京初三各区期末汇总）。
+SUMMARY_TABLE_HTML = """
+<html><head><title>2026年北京初三各区期末试题及答案汇总_北京中考在线</title></head><body>
+<table>
+  <tr><td>区</td><td>科目</td><td>2026期末考试卷＆答案</td><td>2025期末考试卷＆答案</td></tr>
+  <tr>
+    <td rowspan="3">海淀区</td>
+    <td>语文</td>
+    <td><a href="https://www.zgkao.com/shitiku/87009.html">试卷丨答案</a></td>
+    <td><a href="https://www.zgkao.com/shitiku/78360.html">试卷 | 答案</a></td>
+  </tr>
+  <tr>
+    <td>数学</td>
+    <td><a href="https://www.zgkao.com/shitiku/86970.html">试卷 | 答案</a></td>
+    <td>静待更新</td>
+  </tr>
+  <tr>
+    <td>清华附中</td>
+    <td><a href="https://www.zgkao.com/shitiku/88029.html">数学试卷</a></td>
+    <td>/</td>
+  </tr>
+  <tr>
+    <td>东城区</td>
+    <td>北京二中-语文</td>
+    <td><a href="https://www.zgkao.com/shitiku/87790.html">试卷丨答案</a></td>
+    <td>静待更新</td>
+  </tr>
+</table>
+</body></html>
+"""
+
+
+class TestSummaryTableWithoutTitleRow:
+    """跨区汇总表（`86887.html`）：`区 | 科目 | 2026期末考试卷＆答案 …`，无跨列标题行。
+
+    旧实现把前两行都当「找标题」吃掉，整表返回 0 条，整页一份也下不了。
+    """
+
+    def test_extracts_items(self):
+        items = IndexParser.parse(SUMMARY_TABLE_HTML)
+        assert len(items) == 5
+
+    def test_grade_and_exam_type_come_from_page_title(self):
+        items = IndexParser.parse(SUMMARY_TABLE_HTML)
+        assert items
+        assert all(item.grade == "初三" for item in items)
+        assert all(item.exam_type == "期末" for item in items)
+
+    def test_year_comes_from_column_header(self):
+        items = IndexParser.parse(SUMMARY_TABLE_HTML)
+        assert {item.year for item in items} == {"2026", "2025"}
+
+    def test_district_comes_from_row(self):
+        items = IndexParser.parse(SUMMARY_TABLE_HTML)
+        by_url = {item.detail_url: item for item in items}
+        assert by_url["https://www.zgkao.com/shitiku/87009.html"].district == "海淀"
+        assert by_url["https://www.zgkao.com/shitiku/87790.html"].district == "东城"
+
+    def test_generic_page_title_district_stays_empty(self):
+        """页面标题的「北京初三各区」是范围描述，不是区县 —— 不能写进文件名。"""
+        items = IndexParser.parse(SUMMARY_TABLE_HTML)
+        assert items
+        assert all(item.district != "北京" for item in items)
+
+    def test_school_row_uses_link_text_as_subject(self):
+        """「科目」列填学校名时（`清华附中` + 链接「数学试卷」），科目要取链接文字。"""
+        items = IndexParser.parse(SUMMARY_TABLE_HTML)
+        by_url = {item.detail_url: item for item in items}
+        school_row = by_url["https://www.zgkao.com/shitiku/88029.html"]
+        assert school_row.subject == "数学"
+        assert school_row.school == "清华附中"
+        assert school_row.district == "海淀"
+
+    def test_school_row_with_subject_suffix_is_split(self):
+        items = IndexParser.parse(SUMMARY_TABLE_HTML)
+        by_url = {item.detail_url: item for item in items}
+        row = by_url["https://www.zgkao.com/shitiku/87790.html"]
+        assert row.subject == "语文"
+        assert row.school == "北京二中"
+        assert row.district == "东城"
+
+    def test_no_fallback_without_grade_in_page_title(self):
+        """页面标题给不出年级时不硬猜，维持旧行为（整表不出条目）。"""
+        html = SUMMARY_TABLE_HTML.replace("2026年北京初三各区期末", "北京各区")
+        assert IndexParser.parse(html) == []
+
+    def test_title_row_still_wins_over_page_title(self):
+        """表内有跨列标题行时，以表内标题为准（页面标题是另一场考试也不受影响）。"""
+        html = """
+        <html><head><title>2026年北京初三各区期末试题及答案汇总</title></head><body>
+        <table>
+          <tr><td colspan="2"><strong>2026西城初三二模试卷&答案</strong></td></tr>
+          <tr><td>科目</td><td>2026年</td></tr>
+          <tr><td>数学</td><td><a href="https://www.zgkao.com/shitiku/90299.html">试卷</a></td></tr>
+        </table>
+        </body></html>
+        """
+        items = IndexParser.parse(html)
+        assert len(items) == 1
+        assert items[0].district == "西城"
+        assert items[0].exam_type == "二模"
+
+    def test_district_from_page_title_when_table_has_no_region_column(self):
+        """单区汇总表没有「区」列时，区县从页面标题取。"""
+        html = """
+        <html><head><title>2025-2026学年海淀区初三期末试题及答案汇总</title></head><body>
+        <table>
+          <tr><td>科目</td><td>2026期末考试卷＆答案</td></tr>
+          <tr><td>数学</td><td><a href="https://www.zgkao.com/shitiku/90001.html">试卷</a></td></tr>
+        </table>
+        </body></html>
+        """
+        items = IndexParser.parse(html)
+        assert len(items) == 1
+        assert items[0].district == "海淀"
+        assert items[0].grade == "初三"
+        assert items[0].exam_type == "期末"
+
+
 class TestDetailParser:
     def test_extracts_pdf_url(self):
         links = DetailParser.parse(DETAIL_HTML)

@@ -396,6 +396,53 @@ class TestZgkaoSecondaryIndex:
         assert "数学-初三(下)-202307-海淀-模拟二-答案.pdf" in names
 
 
+RELATIVE_LINK_INDEX_HTML = """
+<html><body>
+<table>
+  <tr><td colspan="2"><strong>2024-2025学年通州初三（上）期中试卷&答案汇总</strong></td></tr>
+  <tr><td>科目</td><td>2024年</td></tr>
+  <tr><td>物理</td><td><a href="/zk/202401/68756.html">试卷</a></td></tr>
+</table>
+</body></html>
+"""
+
+
+class TestRelativeDetailLinks:
+    """站内表格里偶有相对链接（`/zk/202401/68756.html`），必须按当前页补齐域名。"""
+
+    def test_list_items_resolves_relative_href(self):
+        fetcher = MockFetcher()
+        fetcher._routes["https://www.zgkao.com/shitiku/89047.html"] = ("text", RELATIVE_LINK_INDEX_HTML)
+        adapter = ZgkaoAdapter(fetcher, "https://www.zgkao.com/shitiku/89047.html", {})
+        item = list(adapter.list_items({}))[0]
+        assert item.id == "https://www.zgkao.com/zk/202401/68756.html"
+
+    def test_recursion_resolves_relative_href(self, tmp_path):
+        """二级页里的相对链接同样要补齐域名，否则 fetcher 拿到裸路径失败。"""
+        fetcher = MockFetcher()
+        fetcher._routes.update({
+            "https://www.zgkao.com/shitiku/89047.html": ("text", INDEX_HTML),
+            "https://www.zgkao.com/shitiku/90304.html": ("text", RELATIVE_LINK_INDEX_HTML),
+            "https://www.zgkao.com/zk/202401/68756.html": ("text", """
+<html><body>
+<script id="__NUXT_DATA__" type="application/json">
+["Reactive", "2024通州初三（上）期中物理试卷.pdf",
+ "https://cdn.zgkao.com/zixunzhan/202401/68756.pdf"]
+</script>
+</body></html>
+"""),
+            "https://cdn.zgkao.com/zixunzhan/202401/68756.pdf": ("bytes", make_pdf_bytes()),
+        })
+        adapter = ZgkaoAdapter(
+            fetcher, "https://www.zgkao.com/shitiku/89047.html", {},
+            semester_resolver=StubResolver("first"),
+        )
+        items = list(adapter.list_items({}))
+        result = adapter.download_item(items[0], _make_ctx(tmp_path, fetcher))
+        assert result.files_downloaded == 1
+        assert list((tmp_path / "物理" / "初中" / "first" / "2024").glob("*.pdf"))
+
+
 class TestZgkaoSplitWithNoAnswerMarker:
     """双链接里一个文件名写「无答案」时，is_split 仍须成立并落成一 paper 一 answer。"""
 

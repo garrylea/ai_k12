@@ -3,7 +3,7 @@
 import re
 from pathlib import Path
 from typing import Iterator, Optional
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 from adapters.base import DownloadContext, DownloadResult, Item, SiteAdapter
 from classifier import Classification, Classifier, SemesterResolver
@@ -98,7 +98,7 @@ class ZgkaoAdapter(SiteAdapter):
         html = self._fetcher.fetch_text(self._entry_url)
         for paper in IndexParser.parse(html):
             yield Item(
-                id=paper.detail_url,
+                id=urljoin(self._entry_url, paper.detail_url),
                 title=f"{paper.subject}-{paper.grade}-{paper.exam_type}-{paper.year}",
                 tags={
                     "subject": paper.subject,
@@ -165,7 +165,9 @@ class ZgkaoAdapter(SiteAdapter):
         for sub in sub_items:
             sub_result = self.download_item(
                 Item(
-                    id=sub.detail_url,
+                    # 表内偶有站内相对链接（`/zk/202401/68756.html`），按当前页补齐域名，
+                    # 否则 fetcher 拿到裸路径直接失败
+                    id=urljoin(item.id, sub.detail_url),
                     title=sub.subject,
                     tags={},
                     raw={"paper": sub},
