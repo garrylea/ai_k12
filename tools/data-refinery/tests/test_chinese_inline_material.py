@@ -330,3 +330,37 @@ def test_answer_scaffold_rest_falls_through_to_stem_first():
     assert material.startswith("范仲淹")
     assert rest.startswith("根据对《岳阳楼记》")
     assert _norm(rest + material) == _norm(content)
+
+
+# ── 2026-11-22 回归：做题要求末词写「内容」时也要命中 ───────────────────
+# 西城 2026 模拟二 Q11（q7609）：首行「根据你的理解，在下面横线处填写恰当的内容。(2分)」。
+# 原词表只认「材料/语段/…」→ 整段不切、填充语段残留题干；扩词后应切成「要求 + 语段」。
+Q11_JIANDJIA = (
+    "根据你的理解，在下面横线处填写恰当的内容。(2分)\n"
+    "《蒹葭》情韵悠远，最宜在诵读中体会其意境与情感。诵读“蒹葭苍苍，白露为霜”，"
+    "语速放缓，重音落在“苍苍”“为霜”上，表现深秋①的氛围；诵读“溯洄从之，道阻且长”，"
+    "“道阻”“且长”间稍作停顿，语调沉缓，读出诗人追寻之路的②进而体会他深沉的情感。"
+)
+
+
+def test_lead_para_ending_with_neirong_splits():
+    """做题要求末词是「内容」而非「材料/语段」时，同样切成「要求作题干 + 语段进材料」。"""
+    material, rest = split_inline_material(Q11_JIANDJIA)
+    assert rest == "根据你的理解，在下面横线处填写恰当的内容。(2分)"
+    assert material is not None
+    assert material.startswith("《蒹葭》情韵悠远")
+    assert material.rstrip().endswith("进而体会他深沉的情感。")
+    assert _norm(rest + material) == _norm(Q11_JIANDJIA)
+
+
+def test_sorting_stem_without_below_marker_not_split():
+    """排序题 q7602 用「语境/语句」且无「下面/上述」→ 不在本次扩词范围，保持不切。"""
+    content = (
+        "根据语境，在横线出补写语句，排序恰当的一项是(2分)\n"
+        "①在指尖划过操控台的瞬间，那些你在课本里读到的太空探测成了触手可及的真实体验"
+        "②当目光扫过排列整齐的长征系列火箭，几代航天人接力奋斗的脉络在你眼前逐渐清晰"
+        "③看屏幕上航天员漂浮的身影，让你明白“上九天揽月”的浪漫早已变成了鲜活的现实"
+    )
+    material, rest = split_inline_material(content)
+    assert material is None
+    assert rest == content
