@@ -186,3 +186,28 @@ def test_write_material_doc_dry_run_does_not_write(tmp_path):
     )
     assert url == f"materials/chinese/{key}/content.md"
     assert not (assets / url).exists()
+
+
+def test_doc_key_paper_scoped_same_content_different_papers():
+    from chinese_material_doc import paper_scope_for
+    body = "## 文章\n正文内容一样。"
+    a = doc_key(body, [], paper_scope=paper_scope_for("语文/卷A", "卷A"))
+    b = doc_key(body, [], paper_scope=paper_scope_for("语文/卷B", "卷B"))
+    assert a != b, "同一段内容在不同试卷必须得到不同 key"
+    assert a == doc_key(body, [], paper_scope=paper_scope_for("语文/卷A", "卷A"))
+
+
+def test_doc_key_without_paper_scope_stable():
+    body = "## 文章\n正文。"
+    assert doc_key(body, []) == doc_key(body, [], paper_scope=None)
+
+
+def test_same_article_tolerates_typo_and_annotations():
+    from chinese_material_doc import same_article
+    doc = "该中心舟搔传统展馆局限，融入市民生活，成为北京航天科普新地标。"
+    fixed = "该中心开拓传统展馆局限，融入市民生活，成为北京航天科普新地标。"
+    marked = "<u>该中心开拓传统展馆局限，融入市民生活，成为北京航天科普新地标</u>"
+    other = "完全不同的另一段阅读材料，讲的是别的事情。"
+    assert same_article(fixed, doc)
+    assert same_article(marked, doc)
+    assert not same_article(other, doc)

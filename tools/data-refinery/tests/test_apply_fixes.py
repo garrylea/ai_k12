@@ -16,7 +16,8 @@ class FakeCursor:
 
     def __init__(self, paper=None, existing=None, renumber_rows=None,
                  existing_active=1, hash_row=None, existing_hash=None, orphan_id=None,
-                 material_url=None, siblings=None, existing_options_json=None):
+                 material_url=None, siblings=None, existing_options_json=None,
+                 existing_material_text=None, siblings_by_paper=None):
         self.sql: list[tuple[str, tuple | None]] = []
         self.paper = paper                # (paper_id, subject_id)
         self.existing = existing          # question_id 或 None
@@ -27,6 +28,8 @@ class FakeCursor:
         self.material_url = material_url  # 已外置的文章文档路径
         self.siblings = siblings or []    # 共用旧 material_url 的兄弟题
         self.existing_options_json = existing_options_json
+        self.existing_material_text = existing_material_text
+        self.siblings_by_paper = siblings_by_paper
         self.renumber_rows = renumber_rows or []
         self.rowcount = 1
         self.lastrowid = 777
@@ -47,8 +50,16 @@ class FakeCursor:
             self._rows = [(self.hash_row,)] if self.hash_row else []
         elif "SELECT question_id, group_order FROM paper_questions" in sql:
             self._rows = list(self.renumber_rows)
+        elif "JOIN paper_questions pq" in sql and "q.material_url=%s" in sql:
+            if self.siblings_by_paper is not None and self.paper:
+                self._rows = list(self.siblings_by_paper.get(self.paper[0], []))
+            else:
+                self._rows = list(self.siblings)
         elif "FROM questions WHERE material_url=%s" in sql:
             self._rows = list(self.siblings)
+        elif "SELECT material_url, material_method, options, material_text FROM questions" in sql:
+            self._rows = [(self.material_url, None, self.existing_options_json,
+                           self.existing_material_text)]
         elif "SELECT material_url, material_method, options FROM questions" in sql:
             self._rows = [(self.material_url, None, self.existing_options_json)]
         elif "SELECT material_url FROM questions" in sql:
@@ -606,8 +617,8 @@ def test_hash_uses_material_url(tmp_path, monkeypatch):
     assert seen and len(seen[0]) == 4 and seen[0][3] == "materials/chinese/x/content.md"
 
 
-def test_article_fix_new_doc_key_syncs_siblings(tmp_path, monkeypatch):
-    """正文真变了：换 doc_key，所有兄弟题（含跨卷）一起改 URL 并重算 hash。"""
+def test_article_fix_new_doc_key_syncs_same_paper_siblings(tmp_path, monkeypatch):
+    """正文真变了：换 doc_key，只同步**同一份卷**里引用旧 URL 的题（不同卷各自独立）。"""
     import apply_fixes as impl
 
     monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
@@ -623,8 +634,10 @@ def test_article_fix_new_doc_key_syncs_siblings(tmp_path, monkeypatch):
     cur = FakeCursor(
         paper=(17, 2), existing=5171,
         material_url="materials/chinese/oldkey/content.md",
-        siblings=[(5171, "语文-模拟二", "题干", None, "oldhash"),
-                  (9999, "语文-别的卷", "题干", None, "oldhash2")],
+        siblings_by_paper={
+            17: [(5171, "语文-模拟二", "题干", None, "oldhash")],
+            99: [(9999, "语文-别的卷", "题干", None, "oldhash2")],
+        },
     )
     # 兄弟题补题记录里的 applied_hash 也要跟着换，否则 needing_replay 每次误报
     fixes = tmp_path / "manual_fixes"
@@ -635,11 +648,15 @@ def test_article_fix_new_doc_key_syncs_siblings(tmp_path, monkeypatch):
     }, ensure_ascii=False) + "\n", encoding="utf-8")
 
     msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
-    assert "doc_key oldkey→newkey" in msg and "2 道兄弟题" in msg
+    assert "doc_key oldkey→newkey" in msg and "1 道同卷题" in msg
     url_updates = [a for sql, a in cur.sql
                    if sql.startswith("UPDATE questions SET material_url=")]
-    assert len(url_updates) == 2
-    assert all(a[0] == "materials/chinese/newkey/content.md" for a in url_updates)
+    assert len(url_updates) == 1
+    assert url_updates[0][0] == "materials/chinese/newkey/content.md"
+    assert all(a[-1] != 9999 for a in url_updates), "别的卷不能被改"
+    # applied_hash 已同步
+    rows = [json.loads(l) for l in (fixes / "模拟二.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert rows[0]["applied_hash"] != "oldhash"
     overrides = (tmp_path / "material_doc_overrides.jsonl").read_text(encoding="utf-8")
     assert '"old_key": "oldkey"' in overrides and '"new_key": "newkey"' in overrides
     updated_rec = json.loads((fixes / "模拟二.jsonl").read_text(encoding="utf-8").strip())
@@ -866,3 +883,33 @@ def test_explicit_url_missing_doc_is_rejected(tmp_path, monkeypatch):
     msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
     assert msg.startswith("跳过")
     assert not any(sql.startswith("UPDATE questions SET content=") for sql, _ in cur.sql)
+
+
+def test_duplicate_inline_text_is_healed_to_article(tmp_path, monkeypatch):
+    """Q5 类：material_text 与文档是同段（仅差错字）→ 按文章修正并清空 material_text。"""
+    import apply_fixes as impl
+
+    calls = {}
+
+    def fake_correct(cur, rec, text, old_url, output_dir, **kw):
+        calls["text"] = text
+        calls["old"] = old_url
+        return ("materials/chinese/new/content.md", "doc_key old→new")
+
+    monkeypatch.setattr(impl, "_correct_article_doc", fake_correct)
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    doc_dir = tmp_path / "assets" / "materials" / "chinese" / "old"
+    doc_dir.mkdir(parents=True)
+    (doc_dir / "content.md").write_text(
+        "## 第三站\n该中心舟搔传统展馆局限，融入市民生活。", encoding="utf-8")
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二", "group_order": 5,
+           "content": "文段中的画线句存在一处问题，请你修改。", "answer": "x",
+           "material_text": "该中心开拓传统展馆局限，融入市民生活。"}
+    cur = FakeCursor(paper=(17, 2), existing=5171,
+                     material_url="materials/chinese/old/content.md",
+                     existing_material_text="该中心开拓传统展馆局限，融入市民生活。")
+    A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+    assert calls.get("text", "").startswith("该中心开拓")
+    args = _update_args(cur)
+    assert args[5] is None, "重复的题内素材应被清空（不能 url+text 并存）"
+    assert args[8] == "materials/chinese/new/content.md"

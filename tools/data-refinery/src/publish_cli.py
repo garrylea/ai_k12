@@ -16,7 +16,7 @@ from pathlib import Path
 
 from asset_store import LocalAssetStore
 from checkpoint import RefineryCheckpoint
-from chinese_material_doc import externalize_chinese_materials
+from chinese_material_doc import externalize_chinese_materials, same_article
 from config import RefineryConfig
 from image_rewrite import rewrite_item
 from material_kind import SCOPE_KIND, kind_of_jsonl
@@ -29,6 +29,8 @@ from subject_codes import subject_code_for_path as _subject_code_for
 # 不需要用户记住 `--force`（2026-10-31 用户指出：能记一个命令就不该让人记两个）。
 # 2 = 起于 2026-10-31：answer 字段里的图片也一并物化改写。
 # 3 = 起于 2026-11-20：语文共享文章外置为 materials/chinese/{doc_key}/content.md。
+# 注意：2026-11-22 给 doc_key 加了卷维度，但**故意不 bump 版本** —— bump 会强制
+# 所有旧卷重发、把全库文档换成新 key，等同一次全量迁移；本需求是「只对新导入生效」。
 PUBLISH_VERSION = 3
 
 # 试卷题干/材料/答案/解析里可能残留的页码标记（extract 已洗，这里兜底）
@@ -112,10 +114,27 @@ def _match_pages(jsonl_name: str, page_nums: set[int]) -> bool:
     return True
 
 
-def _manual_inline_materials(output_dir: Path, sources: set[str]) -> dict[str, dict[int, str]]:
-    """人工校对的题内素材修正：publish 时回写，且优先于自动找回的 _post_material_text。
+def _record_target(rec: dict) -> str | None:
+    """补题记录的材料目标：material_target 优先，回退旧 material_scope。"""
+    t = rec.get("material_target")
+    if t in ("article", "inline", "both"):
+        return t
+    s = rec.get("material_scope")
+    if s == "article":
+        return "article"
+    if s in ("inline", "legacy_inline"):
+        return "inline"
+    return None
+
+
+def _manual_inline_materials(output_dir: Path, sources: set[str], *,
+                             rel_path: str | None = None) -> dict[str, dict[int, str]]:
+    """人工校对的**题内素材**修正：publish 时回写，优先于自动找回的 _post_material_text。
 
     --redo 的 extract 会重写 extracted JSONL，只写在那里会被冲掉；补题记录是持久源。
+    只回注 ``inline``（material_text）/``both``（material_inline_text）两类；``article``
+    修正只经 material_doc_overrides.jsonl 落到文档，**绝不写进 material_text**。
+    ``rel_path`` 用于避免不同目录下的同名卷互相串。
     """
     fixes_dir = Path(output_dir) / "manual_fixes"
     out: dict[str, dict[int, str]] = {}
@@ -134,10 +153,20 @@ def _manual_inline_materials(output_dir: Path, sources: set[str]) -> dict[str, d
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if (rec.get("applied") and rec.get("material_scope") == "inline"
-                    and not rec.get("answer_only") and (rec.get("material_text") or "").strip()):
+            if not rec.get("applied") or rec.get("answer_only"):
+                continue
+            if rel_path and rec.get("rel_path") and rec["rel_path"] != rel_path:
+                continue
+            target = _record_target(rec)
+            if target == "inline":
+                text = rec.get("material_text")
+            elif target == "both":
+                text = rec.get("material_inline_text")
+            else:
+                continue
+            if (text or "").strip():
                 try:
-                    out.setdefault(src, {})[int(rec["group_order"])] = rec["material_text"]
+                    out.setdefault(src, {})[int(rec["group_order"])] = text
                 except (TypeError, ValueError):
                     continue
     return out
@@ -259,24 +288,56 @@ def main(argv=None):
                 }
                 items = [ExamQuestion(**raw) for raw in raw_items]
                 if subject_code == "chinese":
+                    paper_scope = rel_file.as_posix()
                     externalize_chinese_materials(
                         items,
                         md_images_dir=md_images_dir,
                         assets_dir=assets_dir,
                         store=store,
                         subject_code=subject_code,
+                        paper_scope=paper_scope,
                     )
+
+                    doc_cache: dict[str | None, str | None] = {}
+
+                    def _doc_body(url):
+                        if url not in doc_cache:
+                            p = (Path(assets_dir) / url) if url else None
+                            try:
+                                doc_cache[url] = (p.read_text(encoding="utf-8")
+                                                  if p and p.exists() else None)
+                            except OSError:
+                                doc_cache[url] = None
+                        return doc_cache[url]
+
+                    def _inject(item, text, method):
+                        """写题内素材；若与文档是同段（Q5 类重复）则丢弃并记账。"""
+                        if not (text or "").strip():
+                            return
+                        if same_article(text, _doc_body(item.material_url)):
+                            heal_path = config.output_dir / "material_duplicate_healed.jsonl"
+                            heal_path.parent.mkdir(parents=True, exist_ok=True)
+                            with heal_path.open("a", encoding="utf-8") as f:
+                                f.write(json.dumps({
+                                    "source": item.source,
+                                    "group_order": item.group_order,
+                                    "chars": len(text),
+                                    "reason": "duplicate_of_doc",
+                                }, ensure_ascii=False) + "\n")
+                            return
+                        item.material_text = text
+                        item.material_method = method
+
                     for idx, text in post_materials.items():
-                        items[idx].material_text = text
-                        items[idx].material_method = "rule"
+                        _inject(items[idx], text, "rule")
                     # 人工 inline 修正优先于自动找回：--redo 冲掉 extracted 后仍保得住
                     manual_inline = _manual_inline_materials(
-                        config.output_dir, {it.source for it in items})
-                    for idx, item in enumerate(items):
+                        config.output_dir, {it.source for it in items},
+                        rel_path=rel_file.parent.as_posix())
+                    for item in items:
                         override = manual_inline.get(item.source, {}).get(item.group_order)
                         if override:
-                            item.material_text = override
-                            item.material_method = "manual"
+                            _inject(item, override, "manual")
                 out_items = []
                 for idx, item in enumerate(items, start=1):
                     asset_prefix = f"questions/{subject_code}/{source_key}/{idx}"

@@ -471,3 +471,49 @@ def test_article_override_matches_by_old_key_across_papers(tmp_path):
             (out / "published" / "语文" / name / f"{name}.jsonl").read_text(encoding="utf-8").strip())
         doc = (out / "assets" / got["material_url"]).read_text(encoding="utf-8")
         assert "修正版" in doc and "旧版" not in doc, name
+
+
+def test_externalize_paper_scope_splits_same_article(tmp_path):
+    """同一篇文章在两套卷 → 各自的 content.md，互不共用。"""
+    from models import ExamQuestion
+    from chinese_material_doc import externalize_chinese_materials
+    from asset_store import LocalAssetStore
+
+    md = tmp_path / "md"
+    md.mkdir()
+    assets = tmp_path / "assets"
+    store = LocalAssetStore(assets)
+    body = "## 同一篇文章\n完全相同的正文内容，用于验证卷内隔离。"
+    a = ExamQuestion(subject_id="chinese", type="short_answer", difficulty=2,
+                     content="题干", answer="", material_text=body, source="卷A")
+    b = ExamQuestion(subject_id="chinese", type="short_answer", difficulty=2,
+                     content="题干", answer="", material_text=body, source="卷B")
+    externalize_chinese_materials([a], md_images_dir=md, assets_dir=assets,
+                                  store=store, paper_scope="语文/卷A")
+    externalize_chinese_materials([b], md_images_dir=md, assets_dir=assets,
+                                  store=store, paper_scope="语文/卷B")
+    assert a.material_url and b.material_url
+    assert a.material_url != b.material_url
+    assert a.material_text is None and b.material_text is None
+
+
+def test_manual_inline_materials_only_inline_targets(tmp_path):
+    """publish 只回注 inline/both.inline；article 目标绝不写进 material_text。"""
+    from publish_cli import _manual_inline_materials
+
+    fixes = tmp_path / "manual_fixes"
+    fixes.mkdir()
+    recs = [
+        {"source": "卷A", "rel_path": "语文/卷A", "group_order": 1, "applied": True,
+         "material_target": "article", "material_text": "## 文章\n正文"},
+        {"source": "卷A", "rel_path": "语文/卷A", "group_order": 2, "applied": True,
+         "material_target": "inline", "material_text": "素材二"},
+        {"source": "卷A", "rel_path": "语文/卷A", "group_order": 3, "applied": True,
+         "material_target": "both", "material_text": "文章三", "material_inline_text": "素材三"},
+    ]
+    (fixes / "卷A.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in recs) + "\n", encoding="utf-8")
+    out = _manual_inline_materials(tmp_path, {"卷A"}, rel_path="语文/卷A")
+    assert 1 not in out.get("卷A", {}), "article 目标不能进 material_text"
+    assert out["卷A"][2] == "素材二"
+    assert out["卷A"][3] == "素材三"

@@ -1442,13 +1442,6 @@ def test_answer_only_fix_never_carries_material(monkeypatch):
     assert rec["answer"] == "42"
 
 
-def test_material_scope_prompt(monkeypatch):
-    for raw, want in (("1", "inline"), ("2", "article"), ("", None), ("x", None)):
-        seq = iter([raw])
-        monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
-        assert manual_fix._ask_material_scope(_QuietConsole()) == want
-
-
 class _TtyStdin(io.StringIO):
     def isatty(self):
         return True
@@ -1486,7 +1479,8 @@ def test_copyable_text_includes_current_inline_material(tmp_path, monkeypatch):
     ])
     issue = {"source": "模拟二", "rel_path": "语文/模拟二", "group_order": 12}
     text = manual_fix._copyable_question_text(issue)
-    assert "游山西村" in text and "行香子" in text and "[当前材料]" in text
+    assert "游山西村" in text and "行香子" in text
+    assert "[共享文章]" in text and "[题内素材]" in text
 
 
 def test_restore_swallowed_option_label_after_b_and_c():
@@ -1539,22 +1533,26 @@ def test_published_material_urls_missing_file_returns_empty(tmp_path, monkeypatc
 
 # ---------- 题干没问题、只改材料（2026-11-21 用户反馈：无法跳过题干去改材料）----------
 
-def _prep_material_only(tmp_path, monkeypatch):
+def _prep_material_only(tmp_path, monkeypatch, *, with_url=True, post_material=None):
     """题干完整的语文 incomplete_content：问题在共享文章缺画线标记。"""
     monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
     rel = "语文/初中/second/2026/模拟二"
     ext = tmp_path / "output" / "extracted" / rel
     ext.mkdir(parents=True)
-    _write(ext / "模拟二.jsonl", [{
+    row = {
         "group_order": 5,
         "content": "文段中的画线句存在一处问题，请你修改。(2分)",
         "options": [], "answer": "把“舟搔”改为“操纵”",
         "material_text": "## 第三站中国(北京)航天科学中心\n该中心舟搔传统展馆局限。",
-    }])
+    }
+    if post_material:
+        row["_post_material_text"] = post_material
+    _write(ext / "模拟二.jsonl", [row])
     pub = tmp_path / "output" / "published" / rel
     pub.mkdir(parents=True)
     _write(pub / "模拟二.jsonl", [
-        {"group_order": 5, "material_url": "materials/chinese/814d0a125a3c/content.md"},
+        {"group_order": 5,
+         "material_url": ("materials/chinese/814d0a125a3c/content.md" if with_url else None)},
     ])
     md = tmp_path / "output" / "md" / rel / "模拟二.md"
     md.parent.mkdir(parents=True)
@@ -1568,41 +1566,58 @@ def _prep_material_only(tmp_path, monkeypatch):
     return issue, md.parent
 
 
-def test_content_issue_material_only_keeps_stem_and_writes_inline_material(tmp_path, monkeypatch):
-    """选 3「只改材料」：题干/选项/答案原样带出，只写新材料，不重录题干。"""
+def test_content_issue_material_only_article_auto_routes(tmp_path, monkeypatch):
+    """文章题：不再问存储通道，直接收「共享文章全文」，记为 article 目标。"""
     issue, md_dir = _prep_material_only(tmp_path, monkeypatch)
-    new_material = "## 第三站中国(北京)航天科学中心\n<u>该中心舟搔传统展馆局限</u>。"
-    # 3=只改材料 → 1=题内素材 → 粘材料 → EOF → 1=确认
+    new_article = "## 第三站中国(北京)航天科学中心\n<u>该中心舟搔传统展馆局限</u>。\n下一站……"
+    # 3=只改材料 → 直接粘文章 → EOF → 1=确认
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "3\n1\n" + new_material + "\nEOF\n1\n"))
+        "3\n" + new_article + "\nEOF\n1\n"))
 
     recs = manual_fix._ask(issue, md_dir)
 
     assert len(recs) == 1
     rec = recs[0]
     assert rec["content"] == "文段中的画线句存在一处问题，请你修改。(2分)"
-    assert rec["options"] == []
-    assert rec["answer"] == "把“舟搔”改为“操纵”"
-    assert rec["material_text"] == new_material
-    assert rec["material_scope"] == "inline"
-    assert "material_url" not in rec, "URL 列不能写，沿用库里原值"
+    assert rec["material_target"] == "article"
+    assert rec["material_text"] == new_article
+    assert "material_url" not in rec, "沿用库里原 URL，才能走 _correct_article_doc 重写文档"
 
 
-def test_content_issue_material_only_article_scope_keeps_original_url(tmp_path, monkeypatch):
-    """共享文章选 2：收修正后的文章全文，URL 不写记录，交给 apply_fixes 重写 md。"""
-    issue, md_dir = _prep_material_only(tmp_path, monkeypatch)
-    new_article = "## 第三站中国(北京)航天科学中心\n<u>该中心舟搔传统展馆局限</u>。\n下一站……"
+def test_content_issue_material_only_inline_auto_routes(tmp_path, monkeypatch):
+    """文本型题目（无 url）：直接收「题内素材」，记为 inline 目标。"""
+    issue, md_dir = _prep_material_only(tmp_path, monkeypatch, with_url=False)
+    new_inline = "补一句题内素材。"
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "3\n2\n" + new_article + "\nEOF\n1\n"))
+        "3\n" + new_inline + "\nEOF\n1\n"))
 
     recs = manual_fix._ask(issue, md_dir)
 
     assert len(recs) == 1
     rec = recs[0]
-    assert rec["material_scope"] == "article"
+    assert rec["material_target"] == "inline"
+    assert rec["material_text"] == new_inline
+    assert rec["material_scope"] == "inline"
+    assert "material_url" not in rec
+
+
+def test_content_issue_material_only_both_edits_article_then_inline(tmp_path, monkeypatch):
+    """文章+题内素材：先改文章、再改素材，记 both（两个字段分开存）。"""
+    issue, md_dir = _prep_material_only(
+        tmp_path, monkeypatch, post_material="旧题内素材。")
+    new_article = "## 第三站\n<u>修正后的文章</u>。"
+    new_inline = "修正后的题内素材。"
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "3\n" + new_article + "\nEOF\n1\n" + new_inline + "\nEOF\n1\n"))
+
+    recs = manual_fix._ask(issue, md_dir)
+
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec["material_target"] == "both"
     assert rec["material_text"] == new_article
-    assert "material_url" not in rec, "沿用库里原 URL，才能走 _correct_article_doc 重写文档"
-    assert rec["content"].startswith("文段中的画线句")
+    assert rec["material_inline_text"] == new_inline
+    assert "material_scope" not in rec, "both 不写旧 scope，防旧读取器猜错"
 
 
 def test_content_issue_material_only_without_original_question_is_refused(tmp_path, monkeypatch, capsys):
@@ -1619,7 +1634,7 @@ def test_content_issue_material_only_end_to_end_records_fix(tmp_path, monkeypatc
     """走完整 review_pending：选 3 后能落补题文件并把 issue 标 recorded。"""
     _, _ = _prep_material_only(tmp_path, monkeypatch)
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "3\n2\n## 第三站\n<u>画线句</u>\nEOF\n1\n"))
+        "3\n## 第三站\n<u>画线句</u>\nEOF\n1\n"))
 
     res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
 

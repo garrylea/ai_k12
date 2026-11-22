@@ -995,27 +995,13 @@ def _copyable_question_text(issue: dict) -> str:
     # 漏掉它用户就是「盲修材料」（2026-11-21 用户反馈）。
     article = (row.get("material_text") or "").strip()
     inline = (row.get("_post_material_text") or "").strip()
-    if article or inline:
-        lines += ["", "[当前材料]"]
-        if article:
-            lines.append(article)
-        if inline:
-            lines.append(inline)
+    if article and inline:
+        lines += ["", "[共享文章]", article, "", "[题内素材]", inline]
+    elif article:
+        lines += ["", "[共享文章]", article]
+    elif inline:
+        lines += ["", "[题内素材]", inline]
     return "\n".join(lines)
-
-
-def _ask_material_scope(c) -> str | None:
-    """材料修正归属：题内素材粘正文，共享文章只需指认 URL（正文已在 md 文档里）。"""
-    # 回车=材料完全不动：正文和 URL 都不再问（2026-11-21 用户裁决：
-    # 「不改材料」就该整段跳过，别再拿同卷 URL 清单二次打扰）。
-    c.prompt("材料需要修正吗？1 题内素材（粘正文，只挂本题）/ "
-             "2 共享文章（指认 URL，同节共用）/ 回车=不改材料 › ")
-    raw = (_read_line() or "").strip().lower()
-    if raw == "1":
-        return "inline"
-    if raw == "2":
-        return "article"
-    return None
 
 
 # material_url 的三态哨兵：_KEEP_URL=字段不写（兼容旧记录，apply_fixes 不碰该列），
@@ -1322,31 +1308,14 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                      f"{'/'.join(o['label'] for o in options)}")
             else:
                 c.ok(f"第 {target} 题 · 题干 {len(stem)} 字{mat_note} · 无选项（按简答题处理）")
-            # 材料修正：明确问归属，不让 apply_fixes 猜（2026-11-21 用户反馈）。
-            # 非 TTY（管道/CI/脚本化输入）不问，避免吞掉调用方预置的输入行。
-            scope = _ask_material_scope(c) if sys.stdin.isatty() else None
+            # 材料：自动拆出的题内素材直接记 inline（不再问存储通道）。
+            # 题号丢失且没材料时，可认领同卷兄弟文章（这是「归属哪篇」，不是「写哪列」）。
             material_url = _KEEP_URL
-            if scope == "article":
-                # 共享文章的正文已在 md 文档里，只需指认 URL —— 不再让人粘一遍正文/路径
-                # （旧流程把指认的 URL 串当成 material_text 粘进来，既多余又污染库）。
+            if (sys.stdin.isatty() and not material
+                    and issue.get("kind") in ("missing", "punct_stem", "repair_truncated")):
                 url = _ask_material_url(c, issue)
-                if url is _KEEP_URL or url is None:
-                    scope = None           # 回车=不修 / n=无材料，都不写题内素材
-                    if url is None:
-                        material_url = None  # 人工确认本题无材料
-                else:
+                if url is not _KEEP_URL:
                     material_url = url
-                    material = ""          # 文章在 md 里，不写题内素材列
-                    c.ok(f"已指认共享文章：{url}")
-            elif scope == "inline":
-                # 归属已选「题内素材」，直接收正文，不再弹「输入方式」菜单
-                pasted_material = _collect_content(
-                    paper_md_dir, allow_images=False, label="材料", menu=False)
-                if pasted_material and pasted_material.strip():
-                    material = pasted_material.strip()   # 显式修正优先于自动拆出的材料
-                    c.ok(f"题内素材已录入 {len(material)} 字（只挂本题）")
-                else:
-                    scope = None
             hint = ("答案（1文本/2图片/3文件/4剪贴板/5多图+答案；直接输入或回车留空；"
                     "e 改题面 / r 重录 / s 放弃本题）› ")
             c.prompt(f"第 {target} 题{hint}" if multi else hint)
@@ -1389,8 +1358,8 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 "options": options,
                 "answer": answer,
                 "material_text": material,
-                # 显式选择优先；自动拆出的材料标记为 legacy_inline（物化/化学/道法）
-                "material_scope": scope or ("legacy_inline" if material else None),
+                # 自动拆出的材料是题内素材；不再有「题内/共享」通道选择
+                "material_scope": "inline" if material else None,
                 "issue_kind": issue["kind"],
                 "issue_reasons": issue.get("reasons") or [],
                 # 题型以「同大题」为准（试卷不会同一大题混排）：type_mismatch 的题写库时
@@ -1436,13 +1405,47 @@ def _ask_verdict(issue: dict) -> str:
         c.warn("请按 1（整题改）/ 2（没问题）/ 3（只改材料）/ s（跳过）/ q（退出）选择")
 
 
+def _material_slots(issue: dict) -> dict:
+    """把一道题的现有材料拆成「文章槽 / 题内素材槽」，供人工按内容修订。
+
+    用户不需要知道材料存在 md 还是 material_text —— 这里只是让「改哪段」明确。
+    """
+    row = _current_question(issue) or {}
+    url = next((u for no, u in _published_material_urls(issue)
+                if no == issue.get("group_order")), None)
+    article = None
+    if url:
+        p = ROOT / "output" / "assets" / url
+        try:
+            article = p.read_text(encoding="utf-8").strip() if p.exists() else None
+        except OSError:
+            article = None
+    text = (row.get("material_text") or "").strip()
+    inline = (row.get("_post_material_text") or "").strip()
+    if not url and text:
+        # 文本型题目（未外置）：material_text 就是唯一材料槽
+        inline = inline or text
+    return {"article_url": url, "article": article, "inline": inline or None}
+
+
+def _collect_optional_block(paper_md_dir: Path, label: str, current: str | None) -> str | None:
+    """收「修正后的某段材料」；直接回车=这段不改。"""
+    c = console()
+    if current:
+        c.block(f"当前{label}", current, max_lines=8)
+    c.prompt(f"粘贴修正后的{label}（EOF 结束；直接回车=这段不改）› ")
+    first = _read_line()
+    if first is None or not first.strip():
+        return None
+    return _collect_content(paper_md_dir, allow_images=False, label=label,
+                            menu=False, first_line=first)
+
+
 def _ask_material_only(issue: dict, paper_md_dir: Path) -> list[dict]:
     """题干/选项/答案原样保留，只收修正后的材料。
 
-    题干没问题、问题出在材料（如画线标记丢失）时走这里，不必被迫整题重录
-    （2026-11-21 用户反馈：没法跳过题干去改材料）。记录字段照抄 _ask_one，
-    material_text 来自这里；不写 material_url，让 apply_fixes 沿用库里的 URL，
-    共享文章时由 _correct_article_doc 重写 md 文档并同步兄弟题。
+    用户只改内容；系统按现有材料形态决定写哪里（文章→重写文档并同步同卷，素材→
+    material_text）。两者都有时先改文章、再改题内素材（可分别回车跳过）。
     """
     c = console()
     original = _current_question(issue)
@@ -1450,24 +1453,36 @@ def _ask_material_only(issue: dict, paper_md_dir: Path) -> list[dict]:
         c.err("读不到本题当前题干（extracted 里没有这道题），不能只改材料；请选 1 整题重录")
         return []
     c.info("题干、选项、答案都保持原样，这里只收修正后的材料")
-    current_url = next((url for no, url in _published_material_urls(issue)
-                        if no == issue.get("group_order")), None)
-    scope = _ask_material_scope(c)
-    if scope is None:
+
+    slots = _material_slots(issue)
+    article = inline = None
+    material_url = _KEEP_URL
+    if slots["article_url"] and slots["inline"]:
+        c.info("本题同时有共享文章和题内素材：先改文章、再改题内素材；不改的直接回车跳过")
+        article = _collect_optional_block(paper_md_dir, "共享文章全文", slots["article"])
+        inline = _collect_optional_block(paper_md_dir, "题内素材", slots["inline"])
+    elif slots["article_url"] or slots["article"]:
+        article = _collect_optional_block(paper_md_dir, "共享文章全文", slots["article"])
+    elif slots["inline"]:
+        inline = _collect_optional_block(paper_md_dir, "题内素材", slots["inline"])
+    else:
+        # 完全没有材料：只能认领同卷兄弟文章或确认无材料
+        url = _ask_material_url(c, issue)
+        if url is None:
+            c.warn("已确认本题无材料，未记录")
+            return []
+        if url is not _KEEP_URL:
+            material_url = url
+        inline = _collect_optional_block(paper_md_dir, "题内素材", "")
+
+    target = ("both" if article and inline else
+              "article" if article else
+              "inline" if inline else None)
+    if target is None:
         c.warn("没有要改的材料，已跳过")
         return []
-    if scope == "article" and not current_url:
-        c.warn("本题没有共享文章归属（同卷 published 里查不到 URL），请选「1 题内素材」")
-        return []
-    label = "文章全文" if scope == "article" else "材料"
-    if scope == "article":
-        c.info(f"沿用共享文章 URL：{current_url}（会重写这篇 md 文档，同文兄弟题同步）")
-    # 归属已在上一步选定，直接收正文，不再弹「输入方式」菜单（二次选择多余）
-    text = _collect_content(paper_md_dir, allow_images=False, label=label, menu=False)
-    if text is None or not text.strip():
-        c.warn("没收到材料内容，已跳过")
-        return []
-    return [{
+
+    rec = {
         "source": issue["source"],
         "rel_path": issue["rel_path"],
         "group_order": issue["group_order"],
@@ -1475,8 +1490,8 @@ def _ask_material_only(issue: dict, paper_md_dir: Path) -> list[dict]:
         "options": original.get("options"),
         # 带回原题答案：_patch_extracted 会把 answer 写回 extracted，留空会把答案抹掉
         "answer": original.get("answer") or "",
-        "material_text": text.strip(),
-        "material_scope": scope,
+        "material_target": target,
+        "material_text": (article if target in ("article", "both") else inline),
         "issue_kind": issue["kind"],
         "issue_reasons": issue.get("reasons") or [],
         "expected_type": None,
@@ -1486,7 +1501,14 @@ def _ask_material_only(issue: dict, paper_md_dir: Path) -> list[dict]:
         "operator": getpass.getuser(),
         "status": "ready",
         "applied": False,
-    }]
+    }
+    if target == "both":
+        rec["material_inline_text"] = inline
+    else:
+        rec["material_scope"] = target
+    if material_url is not _KEEP_URL:
+        rec["material_url"] = material_url
+    return [rec]
 
 
 def _ask(issue: dict, paper_md_dir: Path,

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import re
@@ -175,10 +176,59 @@ def append_skipped_report(path: Path, records: list[dict]) -> None:
             f.write(json.dumps({"run_at": stamp, **rec}, ensure_ascii=False) + "\n")
 
 
-def doc_key(body: str, image_hashes: list[str]) -> str:
-    """文章身份：归一化正文 + 图片内容哈希。只改标注不换 key。"""
+def paper_scope_for(rel_path: str | Path, source: str) -> str:
+    """试卷稳定身份：``rel_path/source``（与 exam_papers.source_key 同源、无扩展名）。
+
+    用作 doc_key 的卷维度，保证「同一段内容在不同试卷 = 不同文件」。
+    """
+    return (Path(rel_path) / str(source)).as_posix()
+
+
+def _drop_first_heading(text: str) -> str:
+    """去掉首行的 Markdown 标题（`## 标题`），正文与「带标题的文档」才能对齐。"""
+    lines = (text or "").strip().splitlines()
+    if lines and lines[0].lstrip().startswith("#"):
+        return "\n".join(lines[1:])
+    return text or ""
+
+
+def _norm_for_compare(text: str) -> str:
+    return normalize_for_group(text or "").replace("#", "")
+
+
+def same_article(text: str | None, doc_body: str | None, *,
+                 threshold: float = 0.85) -> bool:
+    """判断两段文字是否为「同一篇文章」（忽略标注/空白/图片/标题，容忍个别错字）。
+
+    依次比「原文」与「去首行标题」两种形态：文档常带 `## 标题`、题内素材常不带；
+    纯子串判不出「只改了错字」，再用相似度兜底（Q5 事故）。
+    """
+    for a_src in (text or "", _drop_first_heading(text or "")):
+        a = _norm_for_compare(a_src)
+        if not a:
+            continue
+        for b_src in (doc_body or "", _drop_first_heading(doc_body or "")):
+            b = _norm_for_compare(b_src)
+            if not b:
+                continue
+            if a in b or b in a:
+                return True
+            if difflib.SequenceMatcher(None, a, b).ratio() >= threshold:
+                return True
+    return False
+
+
+def doc_key(body: str, image_hashes: list[str], *,
+            paper_scope: str | None = None) -> str:
+    """文章身份：归一化正文 + 图片内容哈希（+ 可选卷维度）。只改标注不换 key。
+
+    ``paper_scope`` 为空时与旧行为完全一致（存量/回填不受影响）；
+    传入时同一段内容在不同试卷会得到不同 key。
+    """
     payload = normalize_for_group(strip_section_instruction(body))
     payload += "\n" + "\n".join(sorted(image_hashes))
+    if paper_scope:
+        payload = f"{paper_scope}\n{payload}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
@@ -189,11 +239,13 @@ def write_material_doc(
     store,
     assets_dir: Path,
     subject_code: str = "chinese",
+    paper_scope: str | None = None,
     dry_run: bool = False,
 ) -> tuple[str, str]:
     """写 `materials/{subject}/{doc_key}/content.md`，返回 (doc_key, material_url)。
 
     dry_run=True 只算 key/url，不落文件（回填的 dry-run 不能写盘）。
+    ``paper_scope`` 透传给 ``doc_key``：有值则卷内隔离，缺省保持旧行为。
     """
     from page_markers import strip_page_markers
 
@@ -201,7 +253,7 @@ def write_material_doc(
     cleaned, _ = strip_page_markers(body)
     clean = strip_section_instruction(cleaned)
     hashes = image_hashes_for(clean, resolver)
-    key = doc_key(clean, hashes)
+    key = doc_key(clean, hashes, paper_scope=paper_scope)
     prefix = f"materials/{subject_code}/{key}"
     if not dry_run:
         new_body, _ = rewrite_material_doc(clean, resolver, store, prefix)
@@ -275,6 +327,7 @@ def externalize_chinese_materials(
     assets_dir: Path,
     store,
     subject_code: str = "chinese",
+    paper_scope: str | None = None,
 ) -> None:
     """publish 阶段：文章 → md + material_url；题中素材 → material_text。
 
@@ -300,9 +353,17 @@ def externalize_chinese_materials(
         canonical = choose_canonical([m.material_text or "" for m in members])
         old_key, _ = write_material_doc(
             canonical, resolver=resolver, store=store,
-            assets_dir=Path(assets_dir), subject_code=subject_code, dry_run=True,
+            assets_dir=Path(assets_dir), subject_code=subject_code,
+            paper_scope=paper_scope, dry_run=True,
         )
         override = overrides.get(old_key)
+        if override is None and paper_scope:
+            # 兼容卷内 key 之前的旧 override（按纯内容 key 记录）。
+            legacy_key, _ = write_material_doc(
+                canonical, resolver=resolver, store=store,
+                assets_dir=Path(assets_dir), subject_code=subject_code, dry_run=True,
+            )
+            override = overrides.get(legacy_key)
         body = override.get("body") if override else canonical
         reason = material_group_reason(body)
         if reason:
@@ -318,6 +379,7 @@ def externalize_chinese_materials(
         key, url = write_material_doc(
             body, resolver=resolver, store=store,
             assets_dir=Path(assets_dir), subject_code=subject_code,
+            paper_scope=paper_scope,
         )
         for m in members:
             m.material_url = url

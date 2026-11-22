@@ -8,6 +8,23 @@
 
 ---
 
+## 2026-11-22 人工校对材料按目标写入正确位置 + 语文材料文档卷内隔离
+
+**问题**：西城 2026 模拟二 Q5 同时有 `material_url` 和 `material_text`，且是同一段的新旧两版。根因是人工校对先把修正以「题内素材」写进 `material_text`，而该题材料其实是外置文章（`material_url`）；`apply_fixes` 的 inline 分支保留 URL 又写 text，真正的 `content.md` 没被改，`publish` 的 `_manual_inline_materials` 还会每次把这段重灌回 `material_text`。同卷 Q11/Q15 的 url+text 是「文章+题内补充」（内容不同，合法），不能一刀切禁止共存。
+
+**改法**：
+- 新增 `material_target ∈ {article,inline,both}`（`material_text`=文章/素材，`both` 时 `material_inline_text`=素材），不再让人选存储通道；`manual_fix` 按现有材料槽自动/顺序收集。
+- `apply_fixes` 按目标路由：`article/both` 走 `_correct_article_doc`（重算 key、写文档、清 text）；`inline` 写 `material_text`；无 target 的旧记录用 `same_article`（归一化+去首行标题+子串/相似度≥0.85，容忍错字）判「是不是文章」，与文档同段的 text 直接清空（Q5 自愈）。
+- `doc_key` 增加 `paper_scope = rel_path/source` 卷维度：同内容不同试卷 = 不同文件；改文档只同步**同卷**引用题。`write_material_doc/externalize` 默认 `paper_scope=None`（存量/回填行为不变）。
+- `publish` 只回注 `inline`/`both.inline`，article 目标只经 `material_doc_overrides.jsonl` 生效；注入前判重并记 `material_duplicate_healed.jsonl`。
+- **故意不 bump `PUBLISH_VERSION`**、不迁移存量：bump 会强制全卷重发等于全量迁移；本需求是新导入/编辑生效，旧文档保留不删。
+
+**文件**：`chinese_material_doc.py`（paper_scope_for / same_article / doc_key / write_material_doc / externalize）、`publish_cli.py`、`apply_fixes.py`、`manual_fix.py`；测试 `test_chinese_material_doc/test_publish_cli/test_apply_fixes/test_manual_fix`；文档 `constraints/数据管线.md`、spec 2026-11-20、数据管线总结。无需 DB schema/API 改动。
+
+**验证**：核心 4 个测试文件 223 项通过；全量 2077 passed / 10 skipped。
+
+---
+
 ## 2026-11-22 做题要求词表补「内容」：西城 2026 模拟二 Q11 等 10 题的填充语段从题干归位到材料
 
 **问题**：`语文-初三(下)-202607-西城-模拟二` Q11（q7609）首行是「根据你的理解，在下面横线处填写恰当的内容。(2分)」，而 `_LEAD_PARA_RE` 的名词表只有「材料/语段/文字/短文/文章/文段」，不含「内容」→ 规则不命中，整段《蒹葭》诵读填充语段残留在 `content`、`material_text=NULL`。同卷 Q15（q7613）写「阅读**下面的材料**…**语段**…」，命中同一规则、正常切出，是同形态对照。

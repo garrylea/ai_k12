@@ -59,10 +59,52 @@ def _has_images(*texts, options=None) -> bool:
     return False
 
 
+def _record_target(rec: dict) -> str | None:
+    """补题记录的材料目标：material_target 优先，回退旧 material_scope。"""
+    t = rec.get("material_target")
+    if t in ("article", "inline", "both"):
+        return t
+    s = rec.get("material_scope")
+    if s == "article":
+        return "article"
+    if s in ("inline", "legacy_inline"):
+        return "inline"
+    return None
+
+
+def _paper_scope_of(rec: dict) -> str:
+    from chinese_material_doc import paper_scope_for
+    return paper_scope_for(rec.get("rel_path", ""), rec.get("source", ""))
+
+
+def _read_doc_body(output_dir: Path, url: str | None) -> str | None:
+    """读 material_url 指向的文档正文；缺文件返回 None，不抛。"""
+    if not url:
+        return None
+    try:
+        return (Path(output_dir) / "assets" / url).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _looks_like_article(text: str | None) -> bool:
+    """粗判一段文字像不像「文章」（而非题内小素材）。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    from chinese_material_doc import material_group_reason
+    if material_group_reason(t) is not None:
+        return False
+    has_title = bool(re.search(r"(?m)^\s*#{1,6}\s", t))
+    cjk = len(re.findall(r"[\u4e00-\u9fff]", t))
+    return has_title or cjk >= 100
+
+
 def _patch_extracted(rec: dict, *, content: str, answer: str,
                      material_text, options, output_dir: Path,
                      post_material_text: str | None = None,
-                     preserve_existing_material: bool = False) -> None:
+                     preserve_existing_material: bool = False,
+                     drop_post_material: bool = False) -> None:
     """把补好的题写回 extracted，保证下次 publish/loader 看到同一份题号。
 
     为什么必须回写：补题原先只写库，published 仍按旧题号（缺题的位置是空洞）。
@@ -118,6 +160,10 @@ def _patch_extracted(rec: dict, *, content: str, answer: str,
         })
     else:
         rows[pos] = {**rows[pos], **payload}
+        if drop_post_material:
+            # 与文档重复的题内素材已被判脏清空，extracted 里的 _post 也要一并清掉，
+            # 否则下次 publish 又把这段重复文本注回去。
+            rows[pos].pop("_post_material_text", None)
 
     path.write_text(
         "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
@@ -323,14 +369,20 @@ def _log_hash_conflict(output_dir: Path, qid: int) -> None:
                             ensure_ascii=False) + "\n")
 
 
-def _sync_applied_hashes(hash_map: dict, output_dir: Path) -> None:
-    """兄弟题 URL 变了 → applied_hash 也要跟着换，否则 needing_replay 每次都误报。"""
+def _sync_applied_hashes(hash_map: dict, output_dir: Path,
+                         *, source: str | None = None) -> None:
+    """兄弟题 URL 变了 → applied_hash 也要跟着换，否则 needing_replay 每次都误报。
+
+    按 source 过滤：卷内 key 后不同卷的同一段内容各有 URL，不能串着改。
+    """
     from manual_fix import _read_jsonl, _write_jsonl
 
     for f in (output_dir / "manual_fixes").glob("*.jsonl"):
         rows = _read_jsonl(f)
         changed = False
         for row in rows:
+            if source and row.get("source") and row.get("source") != source:
+                continue
             old = row.get("applied_hash")
             if old in hash_map:
                 row["applied_hash"] = hash_map[old]
@@ -340,11 +392,13 @@ def _sync_applied_hashes(hash_map: dict, output_dir: Path) -> None:
 
 
 def _correct_article_doc(cur, rec, material_text: str, old_url: str,
-                         output_dir: Path) -> tuple[str, str]:
-    """人工校对共享文章：按规范化参数重算 doc_key，写文档并同步兄弟题。
+                         output_dir: Path, *, paper_id: int | None = None,
+                         paper_scope: str | None = None) -> tuple[str, str]:
+    """人工校对共享文章：按规范化参数重算 doc_key，写文档并同步**同卷**兄弟题。
 
     返回 (最终 material_url, 结果说明)。key 不变时原地改 content.md、URL/hash 不动；
-    key 变了就写新文档、把共用旧 URL 的所有题（含跨卷）改到新 URL 并重算 hash。
+    key 变了就写新文档、把**同一份卷**里共用旧 URL 的题改到新 URL 并重算 hash。
+    卷维度让同一段内容在不同试卷各自成文件、互不影响（旧文档不删）。
     """
     from chinese_material_doc import write_material_doc
     from image_rewrite import _resolve_src
@@ -356,18 +410,26 @@ def _correct_article_doc(cur, rec, material_text: str, old_url: str,
     store = LocalAssetStore(assets_dir)
     kwargs = dict(resolver=resolver, store=store, assets_dir=assets_dir,
                   subject_code="chinese")
+    paper_scope = paper_scope if paper_scope is not None else _paper_scope_of(rec)
     new_key, new_url = write_material_doc(
-        material_text, dry_run=True, **kwargs)
+        material_text, dry_run=True, paper_scope=paper_scope, **kwargs)
     old_key = Path(old_url).parent.name
 
     if new_key == old_key:
-        write_material_doc(material_text, dry_run=False, **kwargs)
+        write_material_doc(material_text, dry_run=False, paper_scope=paper_scope, **kwargs)
         note = "文章规范化后 doc_key 不变，已原地重写 content.md"
     else:
-        write_material_doc(material_text, dry_run=False, **kwargs)
-        cur.execute(
-            "SELECT id, source, content, options, content_hash FROM questions "
-            "WHERE material_url=%s", (old_url,))
+        write_material_doc(material_text, dry_run=False, paper_scope=paper_scope, **kwargs)
+        if paper_id is not None:
+            # 只改同一份卷里引用旧 URL 的题；不同卷各自有独立文档，不动它们。
+            cur.execute(
+                "SELECT q.id, q.source, q.content, q.options, q.content_hash "
+                "FROM questions q JOIN paper_questions pq ON pq.question_id=q.id "
+                "WHERE q.material_url=%s AND pq.paper_id=%s", (old_url, paper_id))
+        else:
+            cur.execute(
+                "SELECT id, source, content, options, content_hash FROM questions "
+                "WHERE material_url=%s", (old_url,))
         rows = cur.fetchall()
         stamp = hashlib.sha256(datetime.now().isoformat().encode()).hexdigest()[:12]
         hash_map: dict = {}
@@ -391,8 +453,8 @@ def _correct_article_doc(cur, rec, material_text: str, old_url: str,
                 _log_hash_conflict(output_dir, qid)
             if source:
                 _unmark_publish_for_source(source, output_dir)
-        _sync_applied_hashes(hash_map, output_dir)
-        note = (f"文章 doc_key {old_key}→{new_key}，已同步 {len(rows)} 道兄弟题的 URL/hash")
+        _sync_applied_hashes(hash_map, output_dir, source=rec.get("source"))
+        note = (f"文章 doc_key {old_key}→{new_key}，已同步 {len(rows)} 道同卷题")
 
     # publish 下次仍要从 extracted 读文章；override 保证修正不会被冲掉。
     # 匹配只按 old_key（跨卷兄弟题也要命中），source 仅作溯源。
@@ -444,26 +506,26 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         )
         return f"更新答案：paper={paper_id} 第{go}题 -> question_id={qid}"
 
-    # 材料修正必须明确归属，不能猜：题内素材只挂本题，共享文章改 md 文档。
-    # Q20 这类不带材料的补题不受影响；旧记录没标归属又遇到已外置文章 → 要求重录，
-    # 防止把整篇文章误塞进 material_text（2026-11-21 用户反馈的旧事故）。
-    scope = rec.get("material_scope")
-    has_material = bool((rec.get("material_text") or "").strip())
+    # ---- 材料路由：按「内容实际存在哪」写入正确位置，不再让人选存储通道 ----
+    # 语文材料有两种载位：外置文章（material_url）与题内素材（material_text）。
+    # 人工只改内容，这里按目标自动分流；article 走 _correct_article_doc
+    # （重算 key/url、同步同卷、清 text），inline 写 material_text。
     explicit_url = rec.get("material_url", _NO_URL_FIELD)
     target_url = None
     existing_method = None
     existing_options = None
+    existing_text = None
     if qid:
-        cur.execute("SELECT material_url, material_method, options FROM questions WHERE id=%s",
-                    (qid,))
+        cur.execute(
+            "SELECT material_url, material_method, options, material_text "
+            "FROM questions WHERE id=%s", (qid,))
         row = cur.fetchone()
         if row:
             target_url, existing_method, existing_options = row[0], row[1], row[2]
-    # 显式 material_url 已是人工指认的归属，不再要求 material_scope（那本来是给
-    # 「材料中粘改」用的；这里只指认 URL，题干照改）。没有显式 URL 时维持原护栏。
-    if explicit_url is _NO_URL_FIELD and has_material and target_url and not scope:
-        return ("跳过：材料归属未标明（该题文章已外置为 md）。"
-                "请重新校对时选择「1 题内素材」或「2 本节共享文章」")
+            existing_text = row[3] or ""
+    out_dir = output_dir or RefineryConfig.from_env().output_dir
+    chinese = subject_code_for_parts(Path(rec["rel_path"]).parts, default="") == "chinese"
+
     # 没有挂到卷上时，可能是「新增」，也可能是「复用」一条同内容的遗留行（重导摘了关联、
     # 没删题）。真正的选择要等内容物化后算哈希才知道，预览先把这个可能说清楚。
     action = "更新" if qid else "新增（同内容已存在则复用）"
@@ -490,7 +552,6 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
 
     content = rec["content"]
     answer = rec.get("answer") or ""
-    material_text = rec.get("material_text")
     options = rec.get("options")
     forced_type = rec.get("expected_type") or None
 
@@ -508,32 +569,125 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         except (TypeError, ValueError):
             pass
 
+    # ---- 应用路由结果 ----
+    record_target = _record_target(rec)
+    article_rec = (rec.get("material_text") or "").strip()
+    inline_rec = (rec.get("material_inline_text") or "").strip()
     article_note = ""
     new_url = target_url
-    if explicit_url is not _NO_URL_FIELD:
-        # 人工指认优先：字符串=写入该 URL；None=确认无材料。两种情况都不再走
-        # `_correct_article_doc`（那是「改文章正文并重算 doc_key」的路径，不是「认领
-        # 已存在的文章」）——否则会把人工选的 URL 又被规范化结果覆盖掉。
-        if isinstance(explicit_url, str) and explicit_url.strip():
-            new_url = explicit_url.strip()
-            # 边界校验：指认的 URL 必须是已物化的文章文档，否则前端必 404（不静默写坏）
-            asset = (output_dir or RefineryConfig.from_env().output_dir) / "assets" / new_url
-            if not asset.exists():
-                return f"跳过：指认的材料文档不存在（{new_url}），请确认 URL 或先重发该卷"
-            if scope == "article":
-                material_text = None       # 共享文章在 md 文档里，不写题内素材列
+    material_text = existing_text or None
+    method_value = existing_method
+    extracted_material = None
+    extracted_post = None
+    drop_post = False
+    preserve_existing = False
+    skip_extracted = False
+
+    if not chinese:
+        # 非语文：材料只有 material_text，沿用旧逻辑（直接写列）
+        material_text = rec.get("material_text")
+        # 保留旧护栏：非语文一般不外置文章；若这行已有 material_url 又带
+        # material_text、且未声明归属，仍拒收，避免 url+text 串档。
+        if (explicit_url is _NO_URL_FIELD and material_text
+                and str(material_text).strip() and target_url
+                and not rec.get("material_scope")):
+            return ("跳过：材料归属未标明（该题文章已外置为 md）。"
+                    "请重新校对时选择「1 题内素材」或「2 本节共享文章」")
+        if explicit_url is not _NO_URL_FIELD:
+            if isinstance(explicit_url, str) and explicit_url.strip():
+                new_url = explicit_url.strip()
+                if not (out_dir / "assets" / new_url).exists():
+                    return f"跳过：指认的材料文档不存在（{new_url}），请确认 URL 或先重发该卷"
+            else:
+                new_url, material_text = None, None
+        method_value = ("manual" if material_text and str(material_text).strip()
+                        else existing_method)
+        extracted_material = material_text
+    else:
+        from chinese_material_doc import same_article
+        doc_body = _read_doc_body(out_dir, target_url)
+        heal_inline = bool(target_url and existing_text and doc_body
+                           and same_article(existing_text, doc_body))
+
+        if explicit_url is not _NO_URL_FIELD:
+            # 人工指认 URL（写/清 URL 列），不重写文档
+            if (record_target == "article" and article_rec
+                    and isinstance(explicit_url, str) and explicit_url.strip()):
+                return "跳过：指认 URL 与改文章正文不能同时进行，请分开处理"
+            if explicit_url is None:
+                new_url, material_text = None, None
+                drop_post = True
+            else:
+                cu = (explicit_url.strip()
+                      if isinstance(explicit_url, str) and explicit_url.strip() else None)
+                if cu and not (out_dir / "assets" / cu).exists():
+                    return f"跳过：指认的材料文档不存在（{cu}），请确认 URL 或先重发该卷"
+                new_url = cu
+                if article_rec:            # URL + 题内素材（认领 + 补充）
+                    material_text = article_rec
+                    method_value = "manual"
+                    extracted_post = article_rec
+                    preserve_existing = bool(cu)
+                else:                      # 仅认领/沿用 URL
+                    material_text = existing_text or None
+                    method_value = existing_method if material_text else None
+                    preserve_existing = bool(cu)
         else:
-            new_url = None
-            material_text = None
-    elif has_material and scope == "article" and target_url:
-        new_url, article_note = _correct_article_doc(
-            cur, rec, material_text, target_url,
-            output_dir or RefineryConfig.from_env().output_dir)
-        material_text = None       # 共享文章在 md 文档里，不写题内素材列
-    method_value = ("manual" if has_material and scope in ("inline", "legacy_inline")
-                    else existing_method)
-    if scope == "article" and target_url:
-        method_value = existing_method
+            if not record_target and article_rec:
+                # 记录没标目标 → 按内容推断
+                if target_url and doc_body and same_article(article_rec, doc_body):
+                    record_target = "article"
+                elif target_url and existing_text and not same_article(existing_text, doc_body):
+                    record_target = "inline"
+                elif target_url:
+                    record_target = "article" if _looks_like_article(article_rec) else "inline"
+                else:
+                    record_target = "article" if _looks_like_article(article_rec) else "inline"
+
+            if article_rec and target_url and doc_body and same_article(article_rec, doc_body):
+                # 目标写 inline、但内容其实是文档同段（Q5 类）→ 按文章修
+                if record_target in (None, "inline"):
+                    record_target = "article"
+                heal_inline = True
+
+            if record_target in ("article", "both") and article_rec:
+                if target_url:
+                    new_url, article_note = _correct_article_doc(
+                        cur, rec, article_rec, target_url, out_dir,
+                        paper_id=paper_id, paper_scope=_paper_scope_of(rec))
+                else:
+                    extracted_material = article_rec
+                    _unmark_publish_for_source(rec.get("source", ""), out_dir)
+                if record_target == "both":
+                    material_text = inline_rec or None
+                    extracted_post = inline_rec or None
+                elif heal_inline:
+                    material_text = None
+                    drop_post = True
+                else:
+                    material_text = existing_text or None   # 保留合法题内补充
+                    preserve_existing = bool(target_url)
+            elif record_target == "inline" or (record_target is None and inline_rec):
+                val = inline_rec or article_rec or None
+                material_text = val
+                if val and new_url:
+                    extracted_post = val
+                    preserve_existing = True
+                else:
+                    extracted_material = val
+            else:
+                # 无材料改动：保持 extracted 现有材料
+                material_text = existing_text or None
+                preserve_existing = True
+
+            method_value = ("manual" if material_text and record_target in ("inline", "both")
+                            else (existing_method if material_text else None))
+            if record_target == "article":
+                method_value = existing_method if material_text else None
+
+        skip_extracted = bool(target_url and record_target in ("article", "both")
+                              and not extracted_post and not drop_post
+                              and extracted_material is None)
 
     # 手录时容易漏掉图片语法的 `!`（写成 `[](images/...)` 而不是 `![](images/...)`），
     # 导致：① rewrite_fields 不认它为图片 → 不物化；② 前端渲染成空链接 → 选项消失。
@@ -549,7 +703,7 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
     # extracted 要保留**md 原始引用**（images/...），物化只发生在 publish。
     # rewrite_fields 会原地改写 options，所以先深拷贝一份原始值用于回写。
     raw_content, raw_answer = content, answer
-    raw_material = material_text
+    raw_material = extracted_material if extracted_material is not None else material_text
     raw_options = copy.deepcopy(options) if options else options
 
     # 补题内容里的图是 md 相对路径（images/xxx.jpg），前端只认物化后的规范路径。
@@ -576,20 +730,19 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         except MissingImageError as e:
             return f"跳过：{e}"
 
-    material_for_hash = None if scope == "article" else raw_material
-    chash = content_hash(content, options, material_for_hash, new_url)
-    out_dir = output_dir or RefineryConfig.from_env().output_dir
-    if scope == "article" and target_url:
-        # 文章正文不能从 extracted 覆盖（下次 publish 会据此再写文档）
+    chash = content_hash(content, options, material_text, new_url)
+    if skip_extracted:
+        # 只改文章正文：extracted 的旧正文不能被覆盖（下次 publish 会据此再写文档），
+        # 修正靠 material_doc_overrides.jsonl 生效。
         _unmark_publish_checkpoint(rec.get("rel_path", ""), rec["source"], out_dir)
     else:
         _patch_extracted(
             rec, content=raw_content, answer=raw_answer,
             material_text=raw_material, options=raw_options,
             output_dir=out_dir,
-            post_material_text=(raw_material if target_url and
-                                scope in ("inline", "legacy_inline") else None),
-            preserve_existing_material=bool(target_url),
+            post_material_text=extracted_post,
+            preserve_existing_material=preserve_existing,
+            drop_post_material=drop_post,
         )
     if qid:
         cur.execute(

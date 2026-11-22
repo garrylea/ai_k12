@@ -88,13 +88,14 @@ output/assets/materials/chinese/{doc_key}/
 └── fig_02.png
 ```
 
-- `doc_key = sha256(normalize(doc_body) + "\n" + "\n".join(sorted(image_sha256)))[:12]`
+- `doc_key = sha256(paper_scope + "\n" + normalize(doc_body) + "\n" + "\n".join(sorted(image_sha256)))[:12]`
+- **`paper_scope` 卷维度（2026-11-22 新增）**：`paper_scope = rel_path/source`（与 `exam_papers.source_key` 同源）。**一篇文档只在本卷内共享**；同一段内容出现在不同试卷 = 不同文件，互不影响修改。`write_material_doc(..., paper_scope=None)` 保持旧行为（存量/回填不迁移）。
 - `normalize`：去掉 `<u>` / `<span class="cn-emphasis-dot">` 标签（保留标签内文字）；`<sub>…</sub>` 是「加点」点号标记，**连内容一起去掉**（否则 `．．` 会让同一篇文章分不到一组）；统一空白、去掉图片 URL 前缀。这样**只改标注不会换 URL / 换题目身份**。
 - **图片内容哈希一并入 key**：文字相同但配图不同的两篇文章不能共用 key（否则后写的会覆盖先写的）。`image_sha256` 取文档引用图片的 sha256，按排序后拼接。
-- **正文去掉卷面小节指令**：`## (三)阅读下面《醉翁亭记》，完成 12-14题（共7分）` 含卷面题号/分值，不属于文章，写 md 前删掉；正文从文章标题（`## 醉翁亭记`）或第一段开始。否则同一篇文章换一张卷 `doc_key` 就变，跨卷去重失效。识别式：`^#{1,6}\s*.*(阅读|阅读下面|阅读下文).{0,20}完成.{0,10}[题0-9]`。
+- **正文去掉卷面小节指令**：`## (三)阅读下面《醉翁亭记》，完成 12-14题（共7分）` 含卷面题号/分值，不属于文章，写 md 前删掉；正文从文章标题（`## 醉翁亭记`）或第一段开始。识别式：`^#{1,6}\s*.*(阅读|阅读下面|阅读下文).{0,20}完成.{0,10}[题0-9]`。
 - `material_url = materials/chinese/{doc_key}/content.md`（相对路径，前端 `resolveAsset` 补 `/assets/`）。
 - md 内图片引用改成根相对路径：`materials/chinese/{doc_key}/fig_01.jpg`。现有 `resolveAsset` 已能把相对路径补成 `/assets/...`。
-- 相同文章在别的卷再次出现 → 同一份文字 + 同一组图片 → 同一个 `doc_key`，天然去重。
+- 相同文章在别的卷再次出现 → 因 `paper_scope` 不同而得到**不同** `doc_key`（各卷独立文件）；同卷内相同文章仍归一为同一 key。
 
 ### 3.2 `material_text` 的注释块
 
@@ -126,13 +127,13 @@ output/assets/materials/chinese/{doc_key}/
 
 为不打断现有切题/标注链路，**文章外置放在 publish 阶段**（此处能拿到整卷所有题、源 md 图片目录、`source_key`）。顺序不能反：必须先记住文章，再切题内材料，否则 14 题的文章会被题内材料覆盖。
 
-1. **先记文章**：对每道题的 `material_text` 做**归一化分组**（§3.1 的 normalize + 把 `questions/chinese/{src8}/{idx}/` 里的 idx 抹平），同组 = 同一篇共享文章；每组选 canonical 版本暂存。
+1. **先记文章**：对每道题的 `material_text` 做**归一化分组**（§3.1 的 normalize + 把 `questions/chinese/{src8}/{idx}/` 里的 idx 抹平），同组 = 同一篇共享文章；每组选 canonical 版本暂存。publish 对每份卷各调用一次，`doc_key` 计算带 `paper_scope = rel_path/source`（卷内隔离，§3.1）。
 2. **再切题内材料**：对每条语文题跑 §4.3 **规则**（publish 不调 LLM）；命中则记下 `inline_material`，并用剩余部分替换 `content`。规则切不动的记入 `output/material_inline_review.jsonl`，由单独的 CLI 补切，不阻塞 publish。
 3. **回填**：组内每题 `material_url = materials/chinese/{doc_key}/content.md`；若该题有 `inline_material`，`material_text = inline_material`、`material_method = 'rule'`，否则 `material_text = NULL`、`material_method = NULL`。
 4. 每组写 `materials/chinese/{doc_key}/content.md`，图片物化到同目录并改写引用。
 5. 只有标题/页码的组：不写文档、不设 `material_url`；`material_text` 仍按第 3 步（该题若有题内材料则保留）。
 6. 题内材料（`inline_material`）走原有 `rewrite_item` 物化。
-7. `PUBLISH_VERSION` 升到 3（规则变化，旧产物自动重发）。
+7. `PUBLISH_VERSION` 保持 3 —— 2026-11-22 加卷维度时**故意不 bump**：bump 会强制所有旧卷重发、把全库文档换成新 key，等同一次全量迁移；本需求是「只对新导入/编辑生效」，旧文档不迁移、不删除。
 
 新增/修改文件：
 
@@ -152,6 +153,7 @@ output/assets/materials/chinese/{doc_key}/
 4. 组内 `UPDATE questions SET material_url=..., material_text=<inline_material 或 NULL>, material_method=<'rule' 或 NULL>`；只有标题/页码的组 `material_url=NULL`、不写文件。
 5. 重算 `content_hash`（§4.4）；**逐行 catch `ER_DUP_ENTRY`**，冲突行回退旧 hash 并记入报告，不能整批失败。
 6. 幂等：已有 `material_url` 且文件存在则跳过；dry-run 打印将改行数；写 `backup/YYYYMMDD_material_doc_rollback.sql`（还原 material_text/material_url/material_method/content/content_hash）。
+7. **回填只处理存量、不迁移 key**：`write_material_doc` 不传 `paper_scope`，沿用旧的纯内容 key，避免把全库文档改名（2026-11-22 决策）。
 
 ### 4.3 题内材料切分（14 题形态）
 
@@ -208,6 +210,8 @@ PDF→MD 时**题号、小节标题都可能丢失**：切题器靠题号切分�
 - 交互候选从**同卷 published JSONL** 收集已有 `material_url`，按题号列出，人看着原卷选序号或直接粘贴；不依赖小节标题（同样会丢）。
 - 显式 URL 优先于 `material_scope`，也不再走 `_correct_article_doc`（那是「改正文重算 doc_key」，不是「认领已有文章」）。
 - 旧 `applied_hash` 记录不受影响；指认后重算的 hash 写回 `applied_hash`，下次重导冲掉仍可重放。
+
+**材料目标改为 `material_target`（2026-11-22）**：人工不再选「题内素材 / 共享文章」存储通道。`manual_fix` 按现有材料槽（url 文档 / `material_text`）自动决定写哪里；两者都有时先编辑文章、再编辑素材，记 `material_target=both`（文章存 `material_text`、素材存 `material_inline_text`）。`apply_fixes._record_target` 兼容旧 `material_scope`；无 target 时用 `same_article`（归一化 + 去标题 + 子串/相似度）判断「这段是不是文章」，与文档同段的 `material_text` 直接清空并按文章修（Q5 类自愈）。文章修正走 `_correct_article_doc`，只同步**同卷**引用题（§3.1 `paper_scope`）。
 
 ---
 
