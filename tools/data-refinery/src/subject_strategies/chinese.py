@@ -40,10 +40,11 @@ _CHOICE_STEM_RE = re.compile(r'一项|下列|选择|选出|正确|错误|不恰�
 _CN_OPTION_RES = (
     re.compile(r'(?m)^[ \t]*【\s*([甲乙丙丁])\s*】'),
     re.compile(r'(?m)^[ \t]*[（(]\s*([甲乙丙丁])\s*[）)]'),
-    re.compile(r'(?m)^[ \t]*([甲乙丙丁])\s*[.．、](?=\s*\S)'),
+    re.compile(r'(?m)^[ \t]*([甲乙丙丁])\s*[.．、，](?=\s*\S)'),
 )
 _CIRCLED_OPTION_RE = re.compile(r'(?m)^[ \t]*([①②③④])')
-_LATIN_FLEX_RE = re.compile(r'(?<![A-Za-z0-9])([A-F])\s*[.．、](?=\s*\S)')
+# 分隔符含 ，（西城模拟二 Q14 的 'C，交代了…'）；仍要求连续标签序列才采纳。
+_LATIN_FLEX_RE = re.compile(r'(?<![A-Za-z0-9])([A-F])\s*[.．、，](?=\s*\S)')
 
 # 带序号的栏目/活动标题：`发言稿一 烽火古道 赤诚抗日`。这类标题常超过 12 字，
 # 旧的长度上限会把标题连同下面的文段一起并进上一题题干（海淀 2026 期中
@@ -216,7 +217,7 @@ class ChineseMaterialPolicy(MaterialPolicy):
         # 选项行不能当材料：分段落排版的 A./B./C./D.（或甲乙丙 / ①②③）选项，
         # 前一题拆出 3 项后，下一行 D 会被误判成「下一题的材料」，整段语段反而
         # 丢掉（人大附中 2024 题5 的 D 选项实测）。
-        if re.match(r'^[A-F甲乙丙丁]\s*[.．、]\s*\S|^【\s*[甲乙丙丁]\s*】|^[①②③④]', text):
+        if re.match(r'^[A-F甲乙丙丁]\s*[.．、，]\s*\S|^【\s*[甲乙丙丁]\s*】|^[①②③④]', text):
             return False
         _, opts = _STRATEGY.split_options(current_content)
         return bool(opts) and len(opts) >= 3 and all(o["text"].strip() for o in opts)

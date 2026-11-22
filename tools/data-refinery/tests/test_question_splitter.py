@@ -880,6 +880,81 @@ def test_material_title_between_questions_moves_block():
     assert "【甲】" in q5.material_text and "【乙】" in q5.material_text
 
 
+# --- 题号/选项分隔符放宽（西城 2026 模拟二：题号 23/24/25 与 Q14 的 C 选项用「，」）---
+
+
+def test_is_main_stem_comma_separator():
+    """题号后跟中文逗号 '23，结合文中…'：当题号。"""
+    ok, n = is_main_stem("23，结合文中“我”的思想感情，简要分析。")
+    assert ok and n == 23
+
+
+def test_is_main_stem_dunhao_separator():
+    """题号后跟顿号 '24、结合文中…'：当题号。"""
+    ok, n = is_main_stem("24、结合文中“我”的思想感情，简要分析。")
+    assert ok and n == 24
+
+
+def test_is_main_stem_rejects_comma_before_digit():
+    """逗号后是数字（'9，5'）不是题号，避免正文数字误判。"""
+    ok, _ = is_main_stem("9，5")
+    assert not ok
+
+
+def test_is_main_stem_rejects_chinese_numeral_group_header():
+    """大题标题 '一、选择题' 用中文数字，不能因放宽顿号被当题号。"""
+    ok, _ = is_main_stem("一、选择题（共 12 分）")
+    assert not ok
+
+
+def test_strip_main_stem_prefix_comma():
+    """剥前缀时连同中文逗号一起剥，题干不残留 '23，'。"""
+    assert _strip_main_stem_prefix("23，结合文中“我”的思想感情") == "结合文中“我”的思想感情"
+
+
+def test_split_page_comma_stems():
+    """西城模拟二：题 23/24/25 题号后为中文逗号/顿号，必须逐题切开。"""
+    text = (
+        "22. 阅读下面的文字，完成题目。\n"
+        "23，结合文中“我”的思想感情，谈谈你的理解。\n"
+        "24、简要分析文中画线句的作用。\n"
+        "25，任选一个角度，赏析本文的语言特色。"
+    )
+    result = split_page(text, Path("test.md"))
+    assert [q.group_order for q in result] == [22, 23, 24, 25]
+    assert result[1].content.startswith("结合文中")
+
+
+def test_split_options_comma_separator():
+    """西城模拟二 题14：C 选项后是中文逗号 'C，交代了…'，必须拆出 C/D。"""
+    content = (
+        "下列对文章的理解正确的一项是(2分)A.交代了故事背景。B.放弃了寻找。"
+        "C，交代了刘子骥的结局。D. 批判渔人不守承诺。"
+    )
+    _, opts = split_options(content)
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+    assert opts[2]["text"].startswith("交代了刘子骥")
+
+
+def test_split_options_chinese_comma_separator():
+    """题14 走 chinese.split_options，同样要拆出 'C，…'。"""
+    content = (
+        "下列对文章的理解正确的一项是(2分)A.交代了故事背景。B.放弃了寻找。"
+        "C，交代了刘子骥的结局。D. 批判渔人不守承诺。"
+    )
+    _, opts = get_strategy("chinese").split_options(content)
+    assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
+    assert opts[2]["text"].startswith("交代了刘子骥")
+
+
+def test_split_options_enumeration_comma_not_split():
+    """反例：正文枚举 'A，B，C，D 四点' 不能当选项（D 后是空格，凑不齐连续 4 标记）。"""
+    content = "如图, A，B，C，D 四点均在圆上，求证：四边形 $ABCD$ 是正方形。"
+    stem, opts = split_options(content)
+    assert stem == content
+    assert opts is None
+
+
 def test_series_material_title_and_shared_untitled_block():
     """海淀 2026 期中：题1 只是书写题，其后「发言稿一…」是题2/3 的材料；
     题3 与题4 之间无标题的「奇稷农场」文段应同时挂给题4、题5。"""
