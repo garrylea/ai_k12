@@ -114,3 +114,62 @@ def test_short_block_is_ignored():
         "## （三）阅读《岳阳楼记》，完成题。", "",
     ]
     assert find_post_material_blocks(lines) == []
+
+
+# ---------- 2026-11-22 海淀模拟一：题后材料跨站拼接事故 ----------
+
+HAIDIAN_LINES = [
+    "## 一、基础·运用", "",
+    "“进京赶考”原指古代科举学子赴京应试。", "",
+    "## 第一站 清华园车站旧址", "", "清华园车站旧址是京张铁路上的地标。" * 4, "",
+    "1.你审核资料中标注的字音。下列加点字读音标注不正确的一项是（2分）", "",
+    "2.文段中的画线句存在问题，请你修改。(2分)", "",
+    "## 第二站 颐和园益寿堂", "", "颐和园益寿堂是清光绪年间修建的四合院。" * 4, "",
+    "3.一位同学想为益寿堂拟写一副对联。", "",
+    "②铸魂育人", "",                      # 重复的残句小标题（不是材料标题）
+    "## 第三站 双清别墅", "", "双清别墅位于海淀区香山公园南部山腰。" * 4, "",
+    "4.你检查了文段中成语使用的情况。", "",
+    "## 第四站 香山革命纪念馆", "", "香山革命纪念馆6000平方米的展厅里陈列着文物。" * 4, "",
+    "5.文段中“革故鼎新”的意思是什么。", "",
+]
+
+
+def test_circled_number_line_is_not_a_material_title():
+    """①-⑳ 开头的是选项/子项序号，不是材料标题。"""
+    from subject_strategies.material_after_stem import _title_at
+
+    for i, line in enumerate(HAIDIAN_LINES):
+        if line.strip().startswith("②"):
+            assert _title_at(HAIDIAN_LINES, i) is None
+            return
+    raise AssertionError("测试夹具里没找到 ② 开头的行")
+
+
+def test_post_material_does_not_span_next_section():
+    """题后材料块不能跨过「## 第X站」把下一节吞进来（Q2 事故回归）。"""
+    blocks = find_post_material_blocks(HAIDIAN_LINES)
+    # 可能识别出「第二站/第三站/第四站」，但每块都只含自己那一站
+    for b in blocks:
+        title = b["title"]
+        assert ("第三站" in b["text"]) == (title == "第三站 双清别墅"), \
+            f"块 {title!r} 串进了不相干的站点内容"
+        assert "②铸魂育人" not in b["text"], "残句小标题不该成为材料块正文"
+    # 最关键：没有任何块把「第二站」和「第三站」拼在一起
+    assert not any("第二站" in b["text"] and "第三站" in b["text"] for b in blocks)
+
+
+def test_q2_does_not_get_wrong_post_material():
+    """Q2 题干带「画线句」也不该收到跨站拼来的假块。"""
+    # 各站材料已挂在对应题上（真实卷子里 Q3=第二站/Q4=第三站…），题后钩子按
+    # already 规则跳过这些块，不该再往带「画线句」的 Q2 上追加任何一块。
+    questions = [
+        fake_q(1, "你审核资料中标注的字音。", "## 第一站 清华园车站旧址\n清华园车站旧址是京张铁路上的地标。"),
+        fake_q(2, "文段中的画线句存在问题，请你修改。", "## 第一站 清华园车站旧址\n清华园车站旧址是京张铁路上的地标。"),
+        fake_q(3, "拟写一副对联。", "## 第二站 颐和园益寿堂\n颐和园益寿堂是清光绪年间修建的四合院。"),
+        fake_q(4, "检查成语使用。", "## 第三站 双清别墅\n双清别墅位于海淀区香山公园南部山腰。"),
+        fake_q(5, "革故鼎新是什么意思。", "## 第四站 香山革命纪念馆\n香山革命纪念馆6000平方米的展厅里陈列着文物。"),
+    ]
+    attach_post_material(questions, HAIDIAN_LINES, paper_stem="海淀模拟一")
+    q2 = questions[1]
+    assert q2.post_material_appended is None, "Q2 不该被追加上「②铸魂育人+第三站」假块"
+    assert "第三站" not in (q2.material_text or "")

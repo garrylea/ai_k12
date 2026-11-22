@@ -386,3 +386,14 @@ def test_section_header_repeated_is_not_running_title():
     )
     out = clean(doc)
     assert out.count("## 一、基础运用（共10分）") == 2
+
+
+def test_do_not_join_paragraph_start_after_footer():
+    """页脚后是①开头的新段落：不能拼进上一段（2026-11-22 并段事故）。"""
+    text = "…一桥一水一第5页（共8页）\n\n①下一段开头"
+    assert clean(text) == "…一桥一水一\n\n①下一段开头"
+
+
+def test_do_not_join_parenthesized_number_paragraph():
+    text = "…一桥一水一第5页（共8页）\n\n（1）下一段开头"
+    assert clean(text) == "…一桥一水一\n\n（1）下一段开头"

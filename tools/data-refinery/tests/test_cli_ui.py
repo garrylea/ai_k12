@@ -127,3 +127,23 @@ def test_interrupt_handler_restores_default_and_raises(monkeypatch):
         raise AssertionError("处理器应该抛 KeyboardInterrupt")
 
     assert installs and installs[0][1] == signal.SIG_DFL
+
+
+def test_block_wraps_long_line_without_middle_truncation(capsys):
+    """长段落必须完整显示：折行而不是中间省略。"""
+    c = Console(stream=None, color=False, width=30)
+    long_line = "这是一段很长的文章正文，" * 6
+    c.block("文章", long_line, max_lines=2)
+    out = capsys.readouterr().out
+    assert "…" not in out, "正文不能被中间截断"
+    # 所有可见行的显示宽度不超过终端宽度
+    for line in out.splitlines():
+        assert display_width(line) <= c.width
+
+
+def test_block_keeps_blank_lines_as_paragraph_boundary(capsys):
+    c = Console(stream=None, color=False, width=40)
+    c.block("文章", "第一段。\n\n第二段。", max_lines=5)
+    out = capsys.readouterr().out.splitlines()
+    # 中间要有一条只有竖线的空行
+    assert any(line.strip() == "│" for line in out), out

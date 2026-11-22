@@ -59,12 +59,18 @@ def strip_section_instruction(text: str) -> str:
 
 
 def is_heading_only(text: str) -> bool:
-    """去标题/图片/页码后没有正文 → 纯小节标题（如「## (一)默写。(共4分)」）。"""
+    """去标题/图片/页码后没有正文 → 纯小节标题（如「## (一)默写。(共4分)」）。
+
+    裸小节标题（无 `##`，如库里存的「(一)默写。(共4分)」）也算标题：旧实现只跳过
+    `#` 开头的行，导致 publish 清理救不了它，标题一直留着当材料（东城模拟一 Q6）。
+    """
     for raw in (text or "").splitlines():
         line = raw.strip()
         if not line:
             continue
         if line.startswith("#"):
+            continue
+        if _SECTION_INSTRUCTION_RE.match(line):
             continue
         if _IMAGE_REF_RE.fullmatch(line):
             continue

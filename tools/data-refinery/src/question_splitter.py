@@ -1014,14 +1014,14 @@ def split_page(text: str, md_path: Path,
 
         # 语文小节标题（`## （三）阅读《岳阳楼记》，完成 12-14 题`）：新小节 = 新材料域。
         # 旧逻辑只认「第X部分」「一、」，导致上一篇的诗文一直累加到下一篇
-        # （2026-11-21 实测 5175/5461/5475 三卷 8 题）。标题本身仍进 pending，
-        # 写文章时由 strip_section_instruction 去掉卷面题号/分值。
+        # （2026-11-21 实测 5175/5461/5475 三卷 8 题）。
+        # 标题只做边界：**不**进 pending —— 阅读小节有正文会盖过它，但默写等无文章
+        # 小节会把它当成唯一材料（东城模拟一 Q6「(一)默写。(共4分)」实测）。
         if policy.attach and not in_answer_section and is_section_header(line):
             if current is not None:
                 questions.append(current)
                 current = None
             _start_scope()
-            scope_pending.append(line)
             continue
 
         ok, gid = is_group_header(line)

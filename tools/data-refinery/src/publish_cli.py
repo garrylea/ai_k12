@@ -310,11 +310,17 @@ def main(argv=None):
                                 doc_cache[url] = None
                         return doc_cache[url]
 
+                    # 同卷所有已外置的文章正文：题内素材判重要跟整卷的文章比，
+                    # 不能只看本题的 material_url —— URL 分叉/为空时那段判重会失效，
+                    # 整篇文章就会被当题内素材注回去（2026-11-22 Q21 实测）。
+                    article_bodies = [b for b in (
+                        _doc_body(it.material_url) for it in items) if b]
+
                     def _inject(item, text, method):
-                        """写题内素材；若与文档是同段（Q5 类重复）则丢弃并记账。"""
+                        """写题内素材；若与同卷任一篇文章是同段（Q5 类重复）则丢弃并记账。"""
                         if not (text or "").strip():
                             return
-                        if same_article(text, _doc_body(item.material_url)):
+                        if any(same_article(text, body) for body in article_bodies):
                             heal_path = config.output_dir / "material_duplicate_healed.jsonl"
                             heal_path.parent.mkdir(parents=True, exist_ok=True)
                             with heal_path.open("a", encoding="utf-8") as f:

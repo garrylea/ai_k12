@@ -86,6 +86,8 @@ _STRUCTURAL_NEXT_RE = re.compile(
     r"|\s*[-*+]\s+"
     r"|\s*\d{1,3}\s*$"
     r"|\s*\d{1,2}[.．、]"
+    r"|\s*[①-⑳⑴-⒇]"
+    r"|\s*[（(]\s*\d+\s*[）)]"
     r"|\s*[（(][一二三四五六七八九十]+[）)]"
     r"|\s*[一二三四五六七八九十]+、"
     r"|\s*第[一二三四五六七八九十\d]+部分"
@@ -241,10 +243,14 @@ def strip_page_markers(text: str) -> tuple[str, list[PageMarkerHit]]:
             hits.append(PageMarkerHit(i + 1, frag, False, removed=False))
 
         if at_end and cleaned.strip(_WS) and not _SENTENCE_END_RE.search(cleaned):
+            # 页脚后常跟一个空行（MinerU 分段），最多跨一个空行找续行；
+            # 但下一行若是新段落（①/（1）/题号/标题等）绝不拼——
+            # 否则页码落在一段末尾时会把下一段整段粘上来（2026-11-22 用户报告）。
             j = i + 1
-            # 页脚后常跟一个空行（MinerU 分段），续行要跨过空行再判断
-            while j < len(lines) and not lines[j].strip(_WS):
+            blanks = 0
+            while j < len(lines) and not lines[j].strip(_WS) and blanks < 1:
                 j += 1
+                blanks += 1
             if j < len(lines) and _can_join(lines[j]):
                 cleaned = cleaned.rstrip(_WS) + lines[j].lstrip(_WS)
                 i = j  # 合并后跳过被吞掉的下一行

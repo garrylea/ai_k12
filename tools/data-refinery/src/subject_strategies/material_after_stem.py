@@ -25,6 +25,9 @@ _UNRESOLVED_RE = re.compile(
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _HEAD_RE = re.compile(r"^\s*#{1,6}\s*(.+?)\s*$")
 _PUNCT_RE = re.compile(r"[。！？；：:，,、0-9A-Za-z《》]")
+# 带圈数字（①②③…⑳）是选项/子项序号，绝不是材料标题（2026-11-22 海淀模拟一
+# 行45「②铸魂育人」被误认成《第三站》的标题，把整段串进 Q2 材料）。
+_CIRCLED_ITEM_RE = re.compile(r"^\s*[①-⑳]")
 MIN_BLOCK_CJK = 40
 MIN_BODY_CHARS = 30
 
@@ -64,7 +67,10 @@ def _title_at(lines: list[str], i: int) -> str | None:
     line = lines[i].strip()
     if not line or _is_boundary(line) or is_main_stem(line)[0]:
         return None
+    if _CIRCLED_ITEM_RE.match(line):       # ①②③ 序号行不是标题
+        return None
     m = _HEAD_RE.match(line)
+    is_heading = m is not None           # i 自身是 markdown 标题
     title = (m.group(1) if m else line).strip()
     if not (2 <= len(title) <= 12) or _PUNCT_RE.search(title):
         return None
@@ -73,6 +79,13 @@ def _title_at(lines: list[str], i: int) -> str | None:
         nxt = lines[j].strip()
         if not nxt:
             continue
+        if nxt.startswith("#"):
+            # 自身是标题时，紧随的下一个标题是作者/篇名子标题（如「## 行香子」
+            # 后的「## 秦观」），属同一材料块，跳过继续找正文。
+            if is_heading:
+                continue
+            # 普通小标题后遇到 markdown 标题 = 另一节，不能跨节认领正文。
+            return None
         if _is_boundary(nxt) or is_main_stem(nxt)[0]:
             return None
         if len(nxt) >= MIN_BODY_CHARS:
@@ -95,10 +108,23 @@ def find_post_material_blocks(lines: list[str]) -> list[dict]:
 
     for _number, stem_idx in stems:
         end = len(lines)
+        block_heading: int | None = None
         for j in range(stem_idx + 1, len(lines)):
+            stripped = lines[j].strip()
             if j in stem_indexes or _is_boundary(lines[j]):
                 end = j
                 break
+            if stripped.startswith("#"):
+                # 块内第一个 markdown 标题是材料标题本身（如「## 行香子」）。
+                if block_heading is None:
+                    block_heading = j
+                    continue
+                # 再遇到 # 标题：若中间夹过正文，说明是新的一节材料（如「## 第三站」），
+                # 块到此为止；若只是紧随的作者/篇名子标题（「## 秦观」），继续累积。
+                between = [lines[k].strip() for k in range(block_heading + 1, j)]
+                if any(b and not b.startswith("#") for b in between):
+                    end = j
+                    break
         for i in range(stem_idx + 1, end):
             title = _title_at(lines, i)
             if not title:

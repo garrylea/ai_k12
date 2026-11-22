@@ -8,6 +8,40 @@
 
 ---
 
+## 2026-11-22 语文小节标题被当成材料（默写题「(一)默写。(共4分)」）
+
+**问题**：东城模拟一 Q6（question_id 8027）页面把 `(一)默写。(共4分)` 当材料显示，真正的 6 句默写在题干里。根因是 2026-11-21 `4cf545e4` 修「上一篇诗文串进下一篇」时新增 `is_section_header` 分支，`_start_scope()` 的同时还把标题行 `scope_pending.append(line)`；阅读小节后面有正文会盖过它，**默写小节没有文章，标题就成了唯一材料**。同病还有海淀模拟二 5170/5171/5172（`(一)默写，完成 8-10题。(共 4 分)`）。旧逻辑（`_SECTION_HEADER_RE`）只 `_start_scope()` 不 append，所以 11-21 之前没有这个问题。另：`chinese_material_doc.is_heading_only` 只认 `##` 前缀标题，库里存的是裸标题，publish 兜底也没清掉。
+
+**改法**：
+- `question_splitter.split_page`：`is_section_header` 命中时只重置材料域，**删掉 `scope_pending.append(line)`**（标题只做边界，不进材料）。
+- `chinese_material_doc.is_heading_only`：增加 `_SECTION_INSTRUCTION_RE.match(line)` 跳过，裸小节标题也判为纯标题 → publish 能清存量。
+- 测试：新增 `test_section_heading_never_becomes_material`（同一 fixture 同时钉：默写无材料 / 阅读不串节 / 文言文裸子篇保留 / 任何材料不含小节标题行）与 `test_heading_only_true_for_bare_section_header`（裸标题 True、标题+正文 False）。
+
+**文件**：`question_splitter.py`、`chinese_material_doc.py`；测试 `test_question_splitter.py`、`test_chinese_material_doc.py`；约束 `constraints/数据管线.md`。无需 DB migration。存量 4 题（8027/5170/5171/5172）`material_text` 待清（SQL 或重跑 publish+db_loader），本次未改库。
+
+**验证**：改动前两个新 case 失败（`'(一)默写。(共4分)' is None` / `False is True`）；改动后相关 9 passed、两文件 160 passed、全量 2114 passed / 10 skipped（排除联网 `test_import_cli.py`）；真实东城/海淀 md 重切：Q6 材料 None、Q7/8 保留文章、Q13–15 两篇子篇都在；全库扫描命中且仅命中这 4 题。
+
+---
+
+## 2026-11-22 材料校对改三段式：没有材料也能补，整篇丢了可新建共享文章
+
+**问题**：西城 2026 模拟一 Q14 的题干引用「下面两则材料」和「后面语段」，PDF→MD 时这两段丢了；该题已有共享文章（《鱼我所欲也》），但 `_ask_material_only` 按「现有槽位」分支（`manual_fix.py` 旧 1596-1605），只问「共享文章全文」，**题内材料入口根本不出现**。把两则材料贴进共享文章又会污染同 URL 的 Q12/Q13。反方向同样死路：整篇共享文章丢失时没有 `material_url`，只能当题内素材，无法新建一篇给多题共用；而 `apply_fixes` 在无 URL 的 article 分支只回写 extracted、不写库，`publish_cli` 也不写库，所以就算硬写页面也读不到。
+
+**改法**：
+- `manual_fix._ask_verdict` 去掉「3 只改材料」；「1 有问题」后走新增 `_ask_slots`：**题干 → 共享材料 → 题内材料**，每段回车=不改，槽位不存在也照样问。题干=1 复用 `_ask_one`（选项/答案/图片原逻辑）；三段全回车等同「确认无问题」（`verdict=no_change`，不写库）。
+- 共享材料无 URL 时变为「新增」：收全文后问 `共用题号`（默认仅本题，可填 `12-14`；只列本题以外、尚无 URL 的题，工具不猜归属）。`material_share_with` 随记录落盘。
+- 题内材料永远出现；文章还在 `material_text` 里但没外置时，只补素材会自动记 `both`，防止 inline 把文章冲掉。
+- `apply_fixes._create_article_doc`：无 URL 的 `article/both` 按「试卷 + 正文」算 `doc_key`（算法不变，`paper_scope=rel_path/source`）写 `content.md`，把 `material_url` + `content_hash` **直接写库**并挂到本题 + `material_share_with`；extracted 同步正文，原有非文章素材挪到 `_post_material_text`。
+- 「主动重录」对语文且已有题时也走三段式；整题重录的「文章当题干」护栏提示同步改成「回上一菜单选 1，在共享材料那步粘」。
+- **折行粘贴护栏**：`looks_like_wrapped_copy` 检测行首 `│`（`Console.block` 左边框）和「标签被换行截断」（`<span clas` + 换行 + `s=`），命中就拒收并提示从原卷 md / 网页正文复制；`apply_fixes` 写库前也拦一道。共享材料/题内材料收集新增 `e=编辑当前正文`（走 `_line_edit`），改一两个标记时不用整段重粘。
+- **材料改为文件编辑（2026-11-22 用户提出）**：共享材料/题内材料默认 `1=在文件里改` —— 工具把当前正文落成 `output/manual_edits/<卷>/<题号>-<槽位>.md`，用户用自己的编辑器改，回车读取后再确认；**原文档不动，取消无副作用**。`2=粘贴文本` 保留。这样避免在 tty 里整段粘时把终端折行和 `│` 一起带进来。
+
+**文件**：`manual_fix.py`、`apply_fixes.py`；测试 `test_manual_fix.py`（新增：已有文章补素材 / 整篇丢失新建+共用题号 / 三槽全回车 / 未外置文章只补素材）、`test_apply_fixes.py`（新增：新建文章写 URL+共用题）；文档 `constraints/数据管线.md`、`data-refinery-管线总结与后续.md`。无需 DB migration。
+
+**验证**：`test_manual_fix.py + test_apply_fixes.py` 192 passed；data-refinery 全量 2170 passed / 10 skipped；真实 `西城-模拟一` Q14 槽位识别为 article(487 字) + 无 inline，符合预期。
+
+---
+
 ## 2026-11-22 人工校对材料按目标写入正确位置 + 语文材料文档卷内隔离
 
 **问题**：西城 2026 模拟二 Q5 同时有 `material_url` 和 `material_text`，且是同一段的新旧两版。根因是人工校对先把修正以「题内素材」写进 `material_text`，而该题材料其实是外置文章（`material_url`）；`apply_fixes` 的 inline 分支保留 URL 又写 text，真正的 `content.md` 没被改，`publish` 的 `_manual_inline_materials` 还会每次把这段重灌回 `material_text`。同卷 Q11/Q15 的 url+text 是「文章+题内补充」（内容不同，合法），不能一刀切禁止共存。

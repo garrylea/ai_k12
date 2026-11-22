@@ -215,6 +215,10 @@ def _read_block(first_chunk: str = "") -> str:
             lines.extend(body.splitlines())
             if len(lines) % 10 == 0:
                 c.info(f"已收到 {len(lines)} 行…")
+        elif not done and not chunk.strip():
+            # 空行是**段落边界**，必须原样留下；以前这里只收非空 body，
+            # 用户粘的段间空行被吃掉，两段就被连成一段（2026-11-22 实测）。
+            lines.append("")
     c.ok(f"已收到 {len(lines)} 行")
     return "\n".join(_restore_swallowed_option_label(lines)).strip()
 
@@ -452,7 +456,8 @@ def _from_clipboard(paper_md_dir: Path, *, silent: bool = False) -> str | None:
         return _from_file(paper_md_dir, str(path))
 
 
-_EDIT_HINT = "d N 删第N行 · c N 内容 改第N行 · i N 内容 在第N行后插入 · p 重看 · w 完成 · q 放弃"
+_EDIT_HINT = ("d N 删第N行 · c N 内容 改第N行（单行） · r N 整段替换（可多行） · "
+              "i N 内容 在第N行后插入 · p 重看 · w 完成 · q 放弃")
 
 
 def _line_edit(text: str) -> str | None:
@@ -467,11 +472,13 @@ def _line_edit(text: str) -> str | None:
 
     def show() -> None:
         numbered = "\n".join(f"{i:>3}  {line}" for i, line in enumerate(lines, 1))
-        c.block(f"题面（共 {len(lines)} 行）", numbered, max_lines=20)
+        c.block(f"题面（共 {len(lines)} 行）", numbered,
+                max_lines=max(len(lines), 1) + 1)
 
     show()
-    c.legend([("d N", "删第 N 行"), ("c N 内容", "改第 N 行"),
-              ("i N 内容", "第 N 行后插入"), ("p", "重看"), ("w", "完成"), ("q", "放弃")])
+    c.legend([("d N", "删第 N 行"), ("c N 内容", "改第 N 行（单行）"),
+              ("r N", "整段替换（多行，EOF 结束）"), ("i N 内容", "第 N 行后插入"),
+              ("p", "重看"), ("w", "完成"), ("q", "放弃")])
     while True:
         c.prompt("编辑› ")
         raw = _read_line()
@@ -489,6 +496,25 @@ def _line_edit(text: str) -> str | None:
         if cmd == "p":
             show()
             continue
+        if cmd == "r":
+            # 整段替换：一个长段落必须能整段粘进来（c N 只能输一行）。
+            try:
+                no = int(rest.strip())
+            except ValueError:
+                c.warn("用法：r 行号，然后粘贴整段（EOF 结束）")
+                continue
+            if not 1 <= no <= len(lines):
+                c.warn(f"行号超出范围（1–{max(len(lines), 1)}）")
+                continue
+            c.info(f"粘贴第 {no} 行的新内容（可多行；空行保留；EOF 结束）")
+            block = _read_block()
+            if not block.strip():
+                c.warn("没有收到内容，未改动")
+                continue
+            lines[no - 1:no] = block.splitlines()
+            c.ok(f"已用 {len(block.splitlines())} 行替换第 {no} 行，"
+                 f"现在共 {len(lines)} 行")
+            continue
         if cmd in ("d", "c", "i"):
             head, _, body = rest.partition(" ")
             try:
@@ -505,7 +531,7 @@ def _line_edit(text: str) -> str | None:
                 del lines[no - 1]
                 c.ok(f"已删除第 {no} 行，现在共 {len(lines)} 行")
             elif not body:
-                c.warn("缺少新内容，例如：c 3 新的这一行")
+                c.warn("缺少新内容，例如：c 3 新的这一行（整段请用 r 3）")
             elif cmd == "c":
                 lines[no - 1] = body
                 c.ok(f"已改第 {no} 行")
@@ -528,7 +554,8 @@ def _confirm_text(text: str, label: str = "题干") -> tuple[str, str]:
     is_answer = label == "答案"
     give_up = "留空（不填答案）" if is_answer else "放弃本题"
     while True:
-        c.block(f"{label}已收到", text, max_lines=6)
+        # 全文都给出来：确认前要能逐段核对，不能只显示前 6 行（2026-11-22 用户反馈）。
+        c.block(f"{label}已收到", text, max_lines=max(len(text.splitlines()), 1) + 1)
         c.legend([("1", "确认继续"), ("2", "逐行编辑"), ("3", "重新输入"), ("4", give_up)])
         c.prompt("选择 › ")
         raw = _read_line()
@@ -1302,6 +1329,46 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 if fresh and fresh.strip():
                     body = prep(fresh)
                 continue
+            # 护栏：粘贴内容如果就是本题的共享文章，绝不能写进题干。
+            # 整题重录以前没有这道门，整篇文章会被当成题干、把原题覆盖掉
+            # （2026-11-22 海淀 Q21 实测）。纯文章 → 自动按「只改材料」记录；
+            # 文章夹着题干 → 拒收，要求用户分开粘。
+            from chinese_material_doc import same_article
+
+            article = _question_article(issue)
+            if article and same_article(stem, article):
+                if _article_similarity(stem, article) >= 0.9:
+                    row = _current_question(issue) or {}
+                    c.warn("这段是本题的共享文章，不是题干；已自动按「只改材料」记录，题干保持原样")
+                    records.append({
+                        "source": issue["source"],
+                        "rel_path": issue["rel_path"],
+                        "group_order": target,
+                        "content": row.get("content") or "",
+                        "options": row.get("options"),
+                        "answer": row.get("answer") or "",
+                        "material_target": "article",
+                        "material_text": stem,
+                        "material_scope": "article",
+                        "issue_kind": issue.get("kind"),
+                        "issue_reasons": issue.get("reasons") or [],
+                        "expected_type": None,
+                        "pdf": issue.get("pdf"),
+                        "md": issue.get("md"),
+                        "created_at": datetime.now().isoformat(timespec="seconds"),
+                        "operator": getpass.getuser(),
+                        "status": "ready",
+                        "applied": False,
+                    })
+                    c.ok(f"已记录第 {target} 题的材料修订（{len(stem.strip())} 字）")
+                    break
+                c.err("这段里包含了本题的共享文章，不能当题干写入")
+                c.info("改文章请回到上一菜单选 1，在「共享材料」那一步粘；"
+                       "改题干请不要带文章，只粘题目本身")
+                fresh = _collect_content(paper_md_dir, allow_images=(mode == "ocr"))
+                if fresh and fresh.strip():
+                    body = prep(fresh)
+                continue
             mat_note = f" · 材料 {len(material)} 字" if material else ""
             if options:
                 c.ok(f"第 {target} 题 · 题干 {len(stem)} 字{mat_note} · 选项 "
@@ -1382,10 +1449,10 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
 
 
 def _ask_verdict(issue: dict) -> str:
-    """内容层问题先问「你看来有没有问题」：problem 整题改 / material 只改材料 / ok 保持原样 / skip 稍后再说。"""
+    """内容层问题先问「你看来有没有问题」：problem 进三槽位 / ok 保持原样 / skip 稍后再说。"""
     c = console()
     c.legend([("1", "有问题，我来修正"), ("2", "没有问题，保持原样（不写库）"),
-              ("3", "题干没问题，只改材料"), ("s", "跳过，下次再问"), ("q", "退出")])
+              ("s", "跳过，下次再问"), ("q", "退出")])
     while True:
         c.prompt(f"第 {issue['group_order']} 题你看来有问题吗 › ")
         raw = _read_line()
@@ -1396,119 +1463,461 @@ def _ask_verdict(issue: dict) -> str:
             return "problem"
         if ans in ("2", "n", "no"):
             return "ok"
-        if ans in ("3", "m", "material"):
-            return "material"
         if ans in ("s", "skip"):
             return "skip"
         if ans in ("q", "quit"):
             raise SystemExit(0)
-        c.warn("请按 1（整题改）/ 2（没问题）/ 3（只改材料）/ s（跳过）/ q（退出）选择")
+        c.warn("请按 1（有问题）/ 2（没问题）/ s（跳过）/ q（退出）选择")
+
+
+def _looks_like_article_text(text: str) -> bool:
+    """粗判一段文字像不像「整篇文章」（而不是题内小素材）。"""
+    from chinese_material_doc import material_group_reason
+
+    t = (text or "").strip()
+    if not t:
+        return False
+    if material_group_reason(t) is not None:
+        return False
+    if re.search(r"(?m)^\s*#{1,6}\s", t):
+        cjk = len(re.findall(r"[\u4e00-\u9fff]", t))
+        return cjk >= 40        # 只有标题、正文很短的是「材料一」这类素材，不是文章
+    return len(re.findall(r"[\u4e00-\u9fff]", t)) >= 100
+
+
+def _read_article_body(url: str | None) -> str | None:
+    if not url:
+        return None
+    p = ROOT / "output" / "assets" / url
+    try:
+        return p.read_text(encoding="utf-8").strip() if p.exists() else None
+    except OSError:
+        return None
+
+
+def _article_slots(issue: dict) -> tuple[str | None, str | None]:
+    """本题所在文章 (url, 正文)。
+
+    URL 不一定挂在当前题号上：同一篇文章在 published 里去重后只保留**最小题号**
+    作为代表（20/22/23 共用 8873 时代表是 20），只按 ``group_order == 本题`` 找
+    会得到 None，于是文章被误判成题内素材。这里按正文内容把 URL 认回来。
+    """
+    from chinese_material_doc import same_article
+
+    row = _current_question(issue) or {}
+    text = (row.get("material_text") or "").strip()
+    urls = _published_material_urls(issue)
+    go = issue.get("group_order")
+    exact = next((u for no, u in urls if no == go), None)
+    if exact:
+        return exact, _read_article_body(exact)
+    for _no, url in urls:
+        body = _read_article_body(url)
+        if body and text and same_article(text, body):
+            return url, body
+    return None, None
+
+
+def _question_article(issue: dict) -> str | None:
+    """本题所在文章的正文；没有/读不到返回 None。"""
+    return _article_slots(issue)[1]
+
+
+def _article_similarity(a: str | None, b: str | None) -> float:
+    """两段文字的相似度（归一化后，忽略标注/空白/图片）。"""
+    import difflib
+
+    from chinese_material_doc import normalize_for_group
+
+    x, y = normalize_for_group(a or ""), normalize_for_group(b or "")
+    if not x or not y:
+        return 0.0
+    return difflib.SequenceMatcher(None, x, y).ratio()
 
 
 def _material_slots(issue: dict) -> dict:
     """把一道题的现有材料拆成「文章槽 / 题内素材槽」，供人工按内容修订。
 
     用户不需要知道材料存在 md 还是 material_text —— 这里只是让「改哪段」明确。
+    **文章与素材按内容区分，不按字段/URL 区分**：URL 丢了、文章被误塞进
+    material_text/_post_material_text 时，这里要能按原文认回文章槽，否则同一篇
+    文章会被反复当成题内素材写回（2026-11-22 Q21 事故）。
     """
+    from chinese_material_doc import same_article
+
     row = _current_question(issue) or {}
-    url = next((u for no, u in _published_material_urls(issue)
-                if no == issue.get("group_order")), None)
-    article = None
-    if url:
-        p = ROOT / "output" / "assets" / url
-        try:
-            article = p.read_text(encoding="utf-8").strip() if p.exists() else None
-        except OSError:
-            article = None
+    url, article = _article_slots(issue)
     text = (row.get("material_text") or "").strip()
     inline = (row.get("_post_material_text") or "").strip()
-    if not url and text:
-        # 文本型题目（未外置）：material_text 就是唯一材料槽
-        inline = inline or text
+    # 与文章同段的内容一律归文章槽；素材槽只留真正的补充材料。
+    if inline and article and same_article(inline, article):
+        inline = ""
+    if text and article and same_article(text, article):
+        text = ""
+    if not url:
+        if text and _looks_like_article_text(text):
+            article = text          # 未外置的整篇 → 仍然走文章槽
+            text = ""
+        if text:
+            # 文本型题目（未外置的短素材）：material_text 就是唯一材料槽
+            inline = inline or text
     return {"article_url": url, "article": article, "inline": inline or None}
 
 
-def _collect_optional_block(paper_md_dir: Path, label: str, current: str | None) -> str | None:
-    """收「修正后的某段材料」；直接回车=这段不改。"""
+def looks_like_wrapped_copy(text: str) -> bool:
+    """判断一段材料是不是从终端/界面里带折行复制出来的。
+
+    典型痕迹：行首 ``│``（`Console.block` 的左边框）成片出现，或 HTML 标签
+    被硬换行截断（``<span clas`` + 换行 + ``s=...``）。这类文本直接入库会变成
+    一行一段、标签失效，页面排版全乱（2026-11-22 西城模拟一 Q19 实测）。
+    """
+    t = text or ""
+    lines = t.splitlines()
+    prefixed = sum(1 for line in lines if re.match(r"^\s*│", line))
+    split_tag = bool(re.search(r"<[a-zA-Z][^>\n]*\n\s*[a-zA-Z-]+=", t))
+    return prefixed >= 2 or split_tag
+
+
+def _collect_optional_block(paper_md_dir: Path, label: str, current: str | None,
+                            *, hint: str = "这段不改") -> str | None:
+    """收「修正后的某段材料」；直接回车=hint，有当前正文时可用 e 逐行编辑。"""
     c = console()
     if current:
         c.block(f"当前{label}", current, max_lines=8)
-    c.prompt(f"粘贴修正后的{label}（EOF 结束；直接回车=这段不改）› ")
-    first = _read_line()
-    if first is None or not first.strip():
+    edit_hint = "；e=编辑当前正文" if current else ""
+    while True:
+        c.prompt(f"粘贴{label}（EOF 结束；直接回车={hint}{edit_hint}）› ")
+        first = _read_line()
+        if first is None:
+            return None
+        raw = first.strip()
+        if not raw:
+            return None
+        if raw.lower() in ("e", "edit") and current:
+            edited = _line_edit(current)
+            if edited is None:
+                continue
+            action, text = _confirm_text(edited, label=label)
+            if action == "redo":
+                continue
+            if action in ("skip", "clear"):
+                return None
+            return text
+        text = _collect_content(paper_md_dir, allow_images=False, label=label,
+                                menu=False, first_line=first)
+        if text is None:
+            return None
+        if looks_like_wrapped_copy(text):
+            c.err("这段带终端折行痕迹（行首 │ / 标签被换行截断），写进去会一行一段、排版乱套")
+            c.info("请从原卷 md 或网页正文复制；有当前正文时也可输入 e 直接改，别整段重粘")
+            continue
+        return text
+
+
+def _ask_yes(c, prompt: str) -> bool:
+    """材料槽位的开关：回车=不改，1=改。"""
+    while True:
+        c.prompt(prompt)
+        raw = _read_line()
+        if raw is None:
+            return False
+        ans = raw.strip().lower()
+        if ans in ("", "n", "no"):
+            return False
+        if ans in ("1", "y", "yes"):
+            return True
+        c.warn("回车=不改，1=改")
+
+
+def _paper_question_rows(issue: dict) -> list[tuple[int, str]]:
+    """同卷所有题的 (题号, 题干)，供「这篇共享材料还给哪些题用」选择。"""
+    rel, source = issue.get("rel_path"), issue.get("source")
+    if not rel or not source:
+        return []
+    path = ROOT / "output" / "extracted" / rel / f"{source}.jsonl"
+    if not path.exists():
+        return []
+    out: list[tuple[int, str]] = []
+    for row in _read_jsonl(path):
+        no = row.get("group_order")
+        if isinstance(no, int):
+            out.append((no, (row.get("content") or "").replace("\n", " ")))
+    return sorted(out)
+
+
+def _parse_question_numbers(raw: str) -> list[int] | None:
+    """解析 12-14 / 12,13,14 / 12、13；认不出返回 None。"""
+    nums: list[int] = []
+    for part in re.split(r"[,，、\s]+", (raw or "").strip()):
+        if not part:
+            continue
+        m = re.fullmatch(r"(\d+)\s*[-~—–至]\s*(\d+)", part)
+        if m:
+            a, b = int(m.group(1)), int(m.group(2))
+            nums.extend(range(min(a, b), max(a, b) + 1))
+        elif part.isdigit():
+            nums.append(int(part))
+        else:
+            return None
+    return nums or None
+
+
+def _ask_choice(c, prompt: str, allowed: tuple[str, ...]) -> str | None:
+    """多选一：回车=None，命中 allowed 返回该选项。"""
+    while True:
+        c.prompt(prompt)
+        raw = _read_line()
+        if raw is None:
+            return None
+        ans = raw.strip().lower()
+        if not ans:
+            return None
+        if ans in allowed:
+            return ans
+        c.warn("请按 " + " / ".join(allowed) + " 选择，或回车不改")
+
+
+def _edit_material_file(issue: dict, label: str, current: str | None,
+                        *, slug: str, source_url: str | None = None) -> str | None:
+    """把当前正文写成项目内的普通文件，让用户用自己的编辑器改。
+
+    原文档不动：这里是副本，改坏/取消都不会污染线上。保存后回车读取，工具再按
+    原来的「重算 key → 同步同卷 → 回写库」流程处理。2026-11-22 用户提出：
+    在 tty 里整段粘特别容易把终端折行和 │ 一起带进来。
+    """
+    c = console()
+    source = re.sub(r'[\\/:*?"<>|\s]+', "_", str(issue.get("source") or "未命名"))
+    path = ROOT / "output" / "manual_edits" / source / f"{int(issue['group_order']):02d}-{slug}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(((current or "").rstrip() + "\n") if current else "",
+                    encoding="utf-8")
+    c.write("")
+    c.write(f"{label}副本（原文档不会被直接修改）：")
+    c.write(f"  {path}")
+    url = source_url
+    if url:
+        c.write(f"  （原文档：output/assets/{url}）")
+    if current:
+        c.info("用你自己的编辑器改这个文件，保存后回到这里")
+    else:
+        c.info("把文章正文（含标题）写进这个文件，保存后回到这里")
+    while True:
+        c.prompt("改好并保存后按回车读取（q=取消）› ")
+        raw = _read_line()
+        if raw is None or raw.strip().lower() in ("q", "quit"):
+            return None
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            c.warn(f"读不到文件：{exc}")
+            continue
+        if not text:
+            c.warn("文件是空的，没有收到正文")
+            continue
+        if looks_like_wrapped_copy(text):
+            c.err("文件里仍有终端折行痕迹（行首 │ / 标签被换行截断），请清理后再读")
+            continue
+        if current is not None and text == (current or "").strip():
+            c.warn("文件内容没有变化")
+            return None
+        c.block(f"{label}（{len(text.splitlines())} 行）", text,
+                max_lines=max(len(text.splitlines()), 1) + 1)
+        c.prompt("1=使用这份 / 2=重新读取 / 回车=取消 › ")
+        ans = (_read_line() or "").strip().lower()
+        if ans in ("1", "y", "yes"):
+            return text
+        if ans in ("2", "r"):
+            continue
         return None
-    return _collect_content(paper_md_dir, allow_images=False, label=label,
-                            menu=False, first_line=first)
 
 
-def _ask_material_only(issue: dict, paper_md_dir: Path) -> list[dict]:
-    """题干/选项/答案原样保留，只收修正后的材料。
+def _ask_share_with(issue: dict) -> list[int]:
+    """新建共享材料时问共用题号：默认仅本题，工具不猜归属。"""
+    c = console()
+    current = int(issue["group_order"])
+    taken = {no for no, _url in _published_material_urls(issue)}
+    candidates = [(no, text) for no, text in _paper_question_rows(issue)
+                  if no != current and no not in taken]
+    # 题号整段丢失的题不在 extracted 里，但常常和问题题共用同一篇也丢掉的文章。
+    # 把这些题号也列入候选，否则「19-22 一起丢」时给 Q19 挂文章根本填不进 20-22
+    # （校验当它们不存在而拒收），只能每题重粘一遍（2026-11-22 海淀模拟一）。
+    known = {no for no, _ in candidates} | {current} | taken
+    for it in _read_jsonl(ISSUES_FILE):
+        if (it.get("source") == issue.get("source")
+                and it.get("kind") == "missing"
+                and it.get("status") == "pending"):
+            no = int(it.get("group_order", -1))
+            if no > 0 and no not in known:
+                candidates.append((no, "（题号丢失，待补）"))
+                known.add(no)
+    candidates.sort(key=lambda x: x[0])
+    c.write("")
+    c.write("这篇共享材料还给哪些题用？（回车=仅本题；可填 12-14 或 12,13,14）")
+    for no, text in candidates[:15]:
+        c.write(f"  {no}  {text[:28]}")
+    if len(candidates) > 15:
+        c.write(f"  …还有 {len(candidates) - 15} 题")
+    allowed = {no for no, _ in candidates}
+    while True:
+        c.prompt("共用题号 › ")
+        raw = _read_line()
+        if raw is None or not raw.strip():
+            return [current]
+        nums = _parse_question_numbers(raw)
+        if nums is None:
+            c.warn("没认出题号，请输入如 12-14 或 12,13,14")
+            continue
+        bad = [n for n in nums if n not in allowed and n != current]
+        if bad:
+            c.warn(f"第 {'、'.join(map(str, bad))} 题不在可选范围"
+                   "（可能已有共享材料），请重输")
+            continue
+        return [current] + sorted({n for n in nums if n != current})
 
-    用户只改内容；系统按现有材料形态决定写哪里（文章→重写文档并同步同卷，素材→
-    material_text）。两者都有时先改文章、再改题内素材（可分别回车跳过）。
+
+def _ask_slots(issue: dict, paper_md_dir: Path) -> list[dict]:
+    """语文内容题：依次问题干 / 共享材料 / 题内材料，改哪段由人工当场决定。
+
+    槽位不存在也照样问 —— PDF→MD 丢材料时，没有入口就没法补。
+    题干走 `_ask_one`（保留选项/答案/图片处理）；材料按内容归位：文章进
+    content.md 并同步同卷，素材进 material_text；两者都改记 both。
     """
     c = console()
     original = _current_question(issue)
-    if original is None:
-        c.err("读不到本题当前题干（extracted 里没有这道题），不能只改材料；请选 1 整题重录")
-        return []
-    c.info("题干、选项、答案都保持原样，这里只收修正后的材料")
+    strategy = get_strategy(_subject_of(issue))
+    base = None
+    stem_changed = False
+
+    if original is not None:
+        c.info("题干只粘题目本身；整篇文章留到「共享材料」那一步")
+        stem_changed = _ask_yes(c, "题干要改吗？（1=改 / 回车=不改）› ")
+    elif issue.get("kind") == "missing":
+        # 题号丢失的题本来就没有「当前题干」，按整题补录处理，不是报错。
+        c.info("本题题号/正文整段丢失：下面先补题干，再补共享材料与题内素材")
+        stem_changed = True
+    else:
+        c.err("读不到本题当前题干（extracted 里没有这道题），只能整题重录")
+        stem_changed = True
+
+    if stem_changed:
+        recs = _ask_one(issue, issue["group_order"], "按原卷修正题干",
+                        paper_md_dir, strategy)
+        if not recs:
+            return []
+        if len(recs) > 1:
+            c.warn("这次录入了多道题，材料修改请对每道题分别再跑一次")
+            return recs
+        base = recs[0]
+    else:
+        base = {
+            "source": issue["source"],
+            "rel_path": issue["rel_path"],
+            "group_order": issue["group_order"],
+            "content": original.get("content") or "",
+            "options": original.get("options"),
+            # 带回原题答案：_patch_extracted 会把 answer 写回 extracted，留空会抹掉
+            "answer": original.get("answer") or "",
+            "issue_kind": issue["kind"],
+            "issue_reasons": issue.get("reasons") or [],
+            "expected_type": None,
+            "pdf": issue.get("pdf"),
+            "md": issue.get("md"),
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "operator": getpass.getuser(),
+            "status": "ready",
+            "applied": False,
+        }
 
     slots = _material_slots(issue)
+    has_article = bool(slots["article_url"] or slots["article"])
     article = inline = None
-    material_url = _KEEP_URL
-    if slots["article_url"] and slots["inline"]:
-        c.info("本题同时有共享文章和题内素材：先改文章、再改题内素材；不改的直接回车跳过")
-        article = _collect_optional_block(paper_md_dir, "共享文章全文", slots["article"])
-        inline = _collect_optional_block(paper_md_dir, "题内素材", slots["inline"])
-    elif slots["article_url"] or slots["article"]:
-        article = _collect_optional_block(paper_md_dir, "共享文章全文", slots["article"])
-    elif slots["inline"]:
-        inline = _collect_optional_block(paper_md_dir, "题内素材", slots["inline"])
-    else:
-        # 完全没有材料：只能认领同卷兄弟文章或确认无材料
-        url = _ask_material_url(c, issue)
-        if url is None:
-            c.warn("已确认本题无材料，未记录")
-            return []
-        if url is not _KEEP_URL:
-            material_url = url
-        inline = _collect_optional_block(paper_md_dir, "题内素材", "")
+    share_with: list[int] | None = None
 
-    target = ("both" if article and inline else
-              "article" if article else
-              "inline" if inline else None)
-    if target is None:
-        c.warn("没有要改的材料，已跳过")
+    c.write("")
+    if has_article:
+        if slots["article"]:
+            c.info(f"共享材料：当前 {len(slots['article'])} 字")
+        else:
+            c.info("共享材料：库里挂着文档但读不到正文")
+        choice = _ask_choice(
+            c, "共享材料要改吗？（1=在文件里改 / 2=粘贴文本 / 回车=不改）› ",
+            ("1", "2"))
+        if choice == "1":
+            article = _edit_material_file(issue, "共享材料", slots["article"],
+                                          slug="共享材料",
+                                          source_url=slots["article_url"])
+        elif choice == "2":
+            article = _collect_optional_block(paper_md_dir, "共享材料全文",
+                                              slots["article"])
+    else:
+        c.info("共享材料：本题没有（PDF 转换丢了可以在这里补）")
+        choice = _ask_choice(
+            c, "要新增共享材料吗？（1=在文件里写 / 2=粘贴文本 / 回车=不加）› ",
+            ("1", "2"))
+        if choice == "1":
+            article = _edit_material_file(issue, "共享材料", None, slug="共享材料")
+        elif choice == "2":
+            article = _collect_optional_block(paper_md_dir, "共享材料全文", None,
+                                              hint="取消")
+        if article:
+            share_with = _ask_share_with(issue)
+
+    c.write("")
+    inline_now = slots["inline"]
+    c.info(f"题内材料：{'当前 ' + str(len(inline_now)) + ' 字' if inline_now else '（无）'}")
+    choice = _ask_choice(
+        c, "题内材料要改/补吗？（1=在文件里改 / 2=粘贴文本 / 回车=不改）› ",
+        ("1", "2"))
+    if choice == "1":
+        inline = _edit_material_file(issue, "题内材料", inline_now, slug="题内材料")
+    elif choice == "2":
+        inline = _collect_optional_block(paper_md_dir, "题内材料", inline_now)
+
+    if article is None and inline is None:
+        if stem_changed:
+            return [base]
+        # 三段都没改：用户看过原卷后确认无事，按「确认无问题」收口
+        mark_issue(issue["source"], issue["group_order"], "resolved",
+                   note="人工确认无问题，未改动", kind=issue.get("kind"),
+                   verdict="no_change", content_sig=issue.get("content_sig"))
+        c.ok(f"第 {issue['group_order']} 题已标记「确认无问题」，题库未改动")
         return []
 
-    rec = {
-        "source": issue["source"],
-        "rel_path": issue["rel_path"],
-        "group_order": issue["group_order"],
-        "content": original.get("content") or "",
-        "options": original.get("options"),
-        # 带回原题答案：_patch_extracted 会把 answer 写回 extracted，留空会把答案抹掉
-        "answer": original.get("answer") or "",
-        "material_target": target,
-        "material_text": (article if target in ("article", "both") else inline),
-        "issue_kind": issue["kind"],
-        "issue_reasons": issue.get("reasons") or [],
-        "expected_type": None,
-        "pdf": issue.get("pdf"),
-        "md": issue.get("md"),
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "operator": getpass.getuser(),
-        "status": "ready",
-        "applied": False,
-    }
-    if target == "both":
-        rec["material_inline_text"] = inline
+    # 整题重录时若粘的是文章，_ask_one 已自动转成 material_target=article；
+    # 后面的槽位合并不能把这段新文章丢掉。
+    if article is None and base.get("material_target") in ("article", "both"):
+        article = base.get("material_text")
+
+    if (inline is not None and article is None
+            and not slots["article_url"] and slots["article"]):
+        # 文章还没外置、正文就在 material_text 里：只补题内素材也必须把文章一起
+        # 带出，否则 apply 会把 inline 当成唯一 material_text，把文章冲掉。
+        article = slots["article"]
+
+    if article is not None:
+        # 题号丢失题在 _ask_one 里答过「认领某篇已有文章 URL」，这里又粘了新正文。
+        # 两者同时进 apply_fixes 会被「指认 URL 与改文章正文不能同时进行」整条跳过
+        # （apply_fixes.py:781）。新建文档会算出新 URL 直接写库，丢掉旧 URL 才对。
+        if isinstance(base.get("material_url"), str) and base["material_url"].strip():
+            c.warn("本题已认领的旧 URL 被新粘的正文取代（正文会生成新文档）")
+            base.pop("material_url", None)
+
+    if article is not None and inline is not None:
+        base["material_target"] = "both"
+        base["material_text"] = article
+        base["material_inline_text"] = inline
+        base.pop("material_scope", None)
+    elif article is not None:
+        base["material_target"] = "article"
+        base["material_text"] = article
+        base["material_scope"] = "article"
     else:
-        rec["material_scope"] = target
-    if material_url is not _KEEP_URL:
-        rec["material_url"] = material_url
-    return [rec]
+        base["material_target"] = "inline"
+        base["material_text"] = inline
+        base["material_scope"] = "inline"
+    if share_with:
+        base["material_share_with"] = share_with
+    return [base]
 
 
 def _ask(issue: dict, paper_md_dir: Path,
@@ -1517,8 +1926,8 @@ def _ask(issue: dict, paper_md_dir: Path,
 
     内容层问题（不完整/前后题合并）多一道门：先问人工「有没有问题」。
     确认没问题 → 只把结论写进清单（verdict=no_change），一个字段都不改库；
-    确认有问题 → 走和缺题一样的录入流程，由 apply_fixes 原地更新；
-    题干没问题只是材料要改 → 只收材料，题干/选项/答案原样带出。
+    确认有问题 → 依次问「题干 / 共享材料 / 题内材料」，每段都能回车跳过，
+    槽位不存在也允许新增（PDF→MD 丢材料时这是唯一入口）。
     """
     strategy = get_strategy(_subject_of(issue))
     _print_context(issue, index, total)
@@ -1534,8 +1943,15 @@ def _ask(issue: dict, paper_md_dir: Path,
             return []
         if verdict == "skip":
             return []
-        if verdict == "material":
-            return _ask_material_only(issue, paper_md_dir)
+        # 有问题 → 依次问题干 / 共享材料 / 题内材料（三段都可不改）
+        return _ask_slots(issue, paper_md_dir)
+
+    # 题号整段丢失的语文题：PDF→MD 常把题干和跨题共享文章一起丢掉。这类题以前
+    # 走 _ask_one，只能补题干 + 认领一个已存在的 URL，没有录入共享文章正文的入口。
+    # 改成走三段式：题干仍由 _ask_one 录入（original 为空时它本来就做整题补录），
+    # 共享材料可新建/粘贴。这样和「内容不完整」题用同一套槽位，不再有盲区。
+    if issue.get("kind") == "missing" and _subject_of(issue) == "chinese":
+        return _ask_slots(issue, paper_md_dir)
 
     targets = _targets(issue)
     records: list[dict] = []
@@ -1855,8 +2271,13 @@ def review_by_numbers(subject: str | None, file: str | None,
                 "md": str(md_path),
                 "pdf": str(paper["pdf"]) if paper["pdf"] else None,
             }
-            records = _ask_one(issue, no, "用户主动指定这道题有问题，请录入完整内容",
-                               md_path.parent, strategy, i, len(nums))
+            records = (
+                _ask_slots(issue, md_path.parent)
+                if subject_code_for_path(Path(paper["rel_path"]), default="") == "chinese"
+                and _current_question(issue) is not None
+                else _ask_one(issue, no, "用户主动指定这道题有问题，请录入完整内容",
+                              md_path.parent, strategy, i, len(nums))
+            )
             if records:
                 _save_records(paper["source"], records, out_dir)
                 total += len(records)

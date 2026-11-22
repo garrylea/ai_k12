@@ -1088,6 +1088,54 @@ def test_bare_subheadings_stay_inside_material():
     assert "郭守敬" in q[13].material_text
 
 
+def test_section_heading_never_becomes_material():
+    """小节标题只做材料边界，绝不进 material_text —— 两个方向钉在同一份卷子上。
+
+    之前修「上一篇诗文串进下一篇」（2026-11-21 P0）时，让小节标题既重置材料域、
+    又把自己存进 material_text；阅读小节有正文会盖过它，但默写小节无正文，
+    标题就成了整道题的材料（东城模拟一 Q6 实测：「(一)默写。(共4分)」）。
+
+    同一 fixture 同时断言：
+    - 默写小节：没有材料，标题不能占位（新回归）
+    - 阅读小节：文章在、上一节不在（旧 P0）
+    - 文言文裸子篇：两篇都在（旧用例）
+    - 任何材料都不含小节标题行（保证方向一致，不会解 A 出 B）
+    """
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    text = (
+        "## 二、古诗文阅读(共17分)\n\n"
+        "(一)默写。(共4分)\n\n"
+        "6. 第(1)～(4)题任选两题作答。\n"
+        "(1)念天地之悠悠，____！(陈子昂《登幽州台歌》)\n\n"
+        "# (二)阅读下面两首诗,完成第7~8题。(共5分)\n\n"
+        "## 【甲】白雪歌送武判官归京\n北风卷地白草折。\n\n"
+        "7. 下列理解不正确的一项是(2分)\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n\n"
+        "## （三）阅读两篇文言文节选，完成9-10题。（共8分）\n"
+        "## （一）\n太行、王屋二山，方七百里，高万仞。\n"
+        "## （二）\n郭守敬字若思，顺德邢台人。\n"
+        "9. 下列加点词解释有误的一项是(2分)\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n"
+    )
+    questions = split_page(text, _Path("x.md"), strategy=get_strategy("chinese"))
+    q = {x.group_order: x for x in questions}
+
+    # 默写题：标题不能变成材料；默写内容本来就在题干里
+    assert q[6].material_text is None
+    assert "念天地之悠悠" in q[6].content
+    # 阅读题：文章在，上一节默写不在
+    assert "白雪歌" in q[7].material_text
+    assert "默写" not in q[7].material_text
+    # 文言文两篇子篇都在
+    assert "太行" in q[9].material_text and "郭守敬" in q[9].material_text
+    # 任何题的材料都不含小节标题行本身
+    for x in q.values():
+        assert "(一)默写。" not in (x.material_text or "")
+        assert "阅读下面两首诗" not in (x.material_text or "")
+        assert "阅读两篇文言文" not in (x.material_text or "")
+
+
 def test_incomplete_option_label_run_is_not_split():
     """OCR 丢了 B 的点号（A. ① B ② C. ③ D. ④）时不能拿 C/D 当选项：
     否则 C/D 被重编号成 A/B，A/B 的内容并进题干，学生看到错位选项。"""

@@ -36,6 +36,15 @@ def test_heading_only_true_for_mo_xie_heading():
     assert is_heading_only("## (一)默写。(共4分)") is True
 
 
+def test_heading_only_true_for_bare_section_header():
+    # 库里存的是无 `##` 的裸小节标题（东城模拟一 Q6 实测），旧实现只认 `##` 前缀，
+    # 导致 publish 清理救不了，标题一直留着当材料。
+    assert is_heading_only("(一)默写。(共4分)") is True
+    assert is_heading_only("（一）默写，完成 8-10题。（共4 分）") is True
+    # 标题下面有正文就不是纯标题，不能清
+    assert is_heading_only("(一)默写。(共4分)\n(1)念天地之悠悠") is False
+
+
 def test_heading_only_false_when_body_exists():
     assert is_heading_only("## 前言\n\n正文一段。") is False
 

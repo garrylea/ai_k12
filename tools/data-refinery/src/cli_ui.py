@@ -84,6 +84,25 @@ def wrap_items(items: list[str], width: int, sep: str = " · ") -> list[str]:
     return lines
 
 
+def wrap_text(text: str, width: int) -> list[str]:
+    """按显示宽度折行，不截断、不丢字（长段落要能完整看见）。"""
+    if width <= 0:
+        return [text]
+    out: list[str] = []
+    cur, cur_w = "", 0
+    for ch in text:
+        w = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if cur and cur_w + w > width:
+            out.append(cur)
+            cur, cur_w = ch, w
+        else:
+            cur += ch
+            cur_w += w
+    if cur:
+        out.append(cur)
+    return out or [""]
+
+
 class Console:
     def __init__(self, stream=None, color: bool | None = None, width: int | None = None):
         # 不缓存 stdout：pytest 的 capsys 会换掉 sys.stdout 并在用例结束时关闭旧句柄，
@@ -138,19 +157,33 @@ class Console:
             text = truncate_middle(value, room) if display_width(value) > room else value
             self.write(f"  {self.paint(label, 'dim')}{pad}  {text}")
 
-    def block(self, label: str, text: str, max_lines: int = 6) -> None:
-        """灰框片段：超过 max_lines 行折叠。"""
-        lines = [l for l in (text or "").splitlines() if l.strip()]
-        if not lines:
+    def block(self, label: str, text: str, max_lines: int = 6, *,
+              wrap: bool = True, keep_blank: bool = True) -> None:
+        """灰框片段：长行按宽度折行（不中截断），空行保留（段落边界看得见）。
+
+        max_lines 数的是**逻辑行**（段落数），不是折行后的视觉行；一个 240 字的
+        段落会完整显示成多行，不再被 ``truncate_middle`` 截成「头…尾」。
+        """
+        lines = (text or "").splitlines()
+        if not any(l.strip() for l in lines):
             return
         self.write(f"  {self.paint(label, 'dim')}")
         bar = self.paint("│ ", "grey")
+        body_width = max(10, self.width - 4)
         for line in lines[:max_lines]:
-            self.write(f"  {bar}{truncate_middle(_simplify_images(line.strip()), self.width - 4)}")
+            if not line.strip():
+                if keep_blank:
+                    self.write(f"  {bar}")
+                continue
+            text_line = _simplify_images(line.strip())
+            segments = (wrap_text(text_line, body_width) if wrap
+                        else [truncate_middle(text_line, body_width)])
+            for seg in segments:
+                self.write(f"  {bar}{seg}")
         if len(lines) > max_lines:
             more = len(lines) - max_lines
             self.write(f"  {self.paint('│', 'grey')} "
-                       f"{self.paint(f'… 还有 {more} 行，见上面的证据片段', 'dim')}")
+                       f"{self.paint(f'… 还有 {more} 行，输入 p 重看或直接编辑', 'dim')}")
 
     def step(self, index: int, total: int, title: str, note: str = "") -> None:
         head = f"▸ 第 {index}/{total} 步" if total > 1 else "▸ 本题"

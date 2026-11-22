@@ -97,7 +97,7 @@ def _looks_like_article(text: str | None) -> bool:
         return False
     has_title = bool(re.search(r"(?m)^\s*#{1,6}\s", t))
     cjk = len(re.findall(r"[\u4e00-\u9fff]", t))
-    return has_title or cjk >= 100
+    return cjk >= 100 or (has_title and cjk >= 40)
 
 
 def _patch_extracted(rec: dict, *, content: str, answer: str,
@@ -391,6 +391,148 @@ def _sync_applied_hashes(hash_map: dict, output_dir: Path,
             _write_jsonl(f, rows)
 
 
+def _sync_extracted_article(rec: dict, new_body: str, old_body: str | None,
+                            output_dir: Path) -> None:
+    """同卷 extracted 里同一篇文章的正文一起改。
+
+    publish 是按 extracted 的 material_text **分组**外置的：只改一道题，同一篇文
+    会被拆成两组（新旧正文各一组），谁后写谁覆盖 content.md。把同组的正文同步成
+    新正文后，publish 只会有一组、一个 URL（2026-11-22 Q21 实测）。
+    """
+    from chinese_material_doc import same_article
+    from manual_fix import _read_jsonl, _write_jsonl
+
+    rel, src = rec.get("rel_path"), rec.get("source")
+    if not rel or not src:
+        return
+    path = Path(output_dir) / "extracted" / rel / f"{src}.jsonl"
+    if not path.exists():
+        return
+    rows = _read_jsonl(path)
+    changed = False
+    for row in rows:
+        text = (row.get("material_text") or "").strip()
+        if text and (same_article(text, new_body)
+                     or (old_body and same_article(text, old_body))):
+            if row.get("material_text") != new_body:
+                row["material_text"] = new_body
+                changed = True
+        post = (row.get("_post_material_text") or "").strip()
+        if post and same_article(post, new_body):
+            row.pop("_post_material_text", None)
+            changed = True
+    if changed:
+        _write_jsonl(path, rows)
+
+
+def _sync_extracted_article_groups(rec: dict, new_body: str,
+                                   groups: set[int], output_dir: Path) -> None:
+    """新建共享文章：把正文写进共用题号的 extracted，保证 publish 只外置一组。
+
+    这些题原本没有文章（PDF→MD 丢了），material_text 可能是题内素材：不能覆盖，
+    挪到 ``_post_material_text``（题后素材通道），publish 会再注回 material_text。
+    """
+    from chinese_material_doc import same_article
+    from manual_fix import _read_jsonl, _write_jsonl
+
+    rel, src = rec.get("rel_path"), rec.get("source")
+    if not rel or not src:
+        return
+    path = Path(output_dir) / "extracted" / rel / f"{src}.jsonl"
+    if not path.exists():
+        return
+    rows = _read_jsonl(path)
+    changed = False
+    for row in rows:
+        if row.get("group_order") not in groups:
+            continue
+        text = (row.get("material_text") or "").strip()
+        if text and not same_article(text, new_body):
+            row.setdefault("_post_material_text", text)
+        if row.get("material_text") != new_body:
+            row["material_text"] = new_body
+            changed = True
+    if changed:
+        _write_jsonl(path, rows)
+
+
+def _create_article_doc(cur, rec, body: str, output_dir: Path, *,
+                        paper_id: int, paper_scope: str) -> tuple[str, str]:
+    """给「原本没有文章」的题新建共享文章，并挂到本题 + 人工指定的共用题号。
+
+    与 ``_correct_article_doc`` 的区别：没有 old_url，doc_key 直接按
+    试卷 + 正文算（算法不变）；publish 不写库，所以 material_url / content_hash
+    必须在这里直接落库，否则页面读不到。
+    """
+    from chinese_material_doc import same_article, write_material_doc
+    from image_rewrite import _resolve_src
+
+    assets_dir = output_dir / "assets"
+    md_images_dir = output_dir / "md" / Path(rec.get("rel_path", ""))
+    resolver = lambda ref: _resolve_src(ref, md_images_dir)
+    store = LocalAssetStore(assets_dir)
+    kwargs = dict(resolver=resolver, store=store, assets_dir=assets_dir,
+                  subject_code="chinese")
+    key, url = write_material_doc(body, dry_run=False,
+                                  paper_scope=paper_scope, **kwargs)
+
+    groups = {int(rec["group_order"])}
+    for g in rec.get("material_share_with") or []:
+        try:
+            groups.add(int(g))
+        except (TypeError, ValueError):
+            continue
+
+    cur.execute(
+        "SELECT pq.group_order, q.id, q.content, q.options, q.content_hash, "
+        "q.material_text, q.material_url "
+        "FROM paper_questions pq JOIN questions q ON q.id=pq.question_id "
+        "WHERE pq.paper_id=%s", (paper_id,))
+    rows = {int(go): (qid, content, opts, old_hash, text, old_url)
+            for go, qid, content, opts, old_hash, text, old_url in cur.fetchall()}
+    missing = sorted(g for g in groups if g not in rows)
+    targets = []
+    for go in sorted(groups):
+        if go not in rows:
+            continue
+        qid, content, opts, old_hash, text, old_url = rows[go]
+        if old_url and old_url != url:
+            print(f"[WARN] 第{go}题已有别的文章（{old_url}），未改挂到新文章", flush=True)
+            continue
+        # 旧 material_text 若就是这篇文章（URL 丢了但正文还在），不能当题内素材留库
+        keep = text if text and not same_article(text, body) else None
+        targets.append((go, qid, content, opts, old_hash, keep))
+
+    stamp = hashlib.sha256(datetime.now().isoformat().encode()).hexdigest()[:12]
+    hash_map: dict = {}
+    for idx, (_go, qid, *_rest) in enumerate(targets):
+        cur.execute("UPDATE questions SET content_hash=%s WHERE id=%s",
+                    (f"_tmp_{stamp}_{idx}", qid))
+    for _go, qid, content, opts_json, old_hash, text in targets:
+        try:
+            opts = json.loads(opts_json) if opts_json else None
+        except (TypeError, ValueError):
+            opts = None
+        final = content_hash(content or "", opts, text or None, url)
+        try:
+            cur.execute("UPDATE questions SET material_url=%s, material_text=%s, "
+                        "content_hash=%s WHERE id=%s", (url, text or None, final, qid))
+        except Exception:  # noqa: BLE001 - 哈希撞车不能拖垮整批
+            cur.execute("UPDATE questions SET material_url=%s, material_text=%s "
+                        "WHERE id=%s", (url, text or None, qid))
+            final = old_hash
+            _log_hash_conflict(output_dir, qid)
+        hash_map[old_hash] = final
+
+    _sync_extracted_article_groups(rec, body, {go for go, *_ in targets}, output_dir)
+    _sync_applied_hashes(hash_map, output_dir, source=rec.get("source"))
+    _unmark_publish_for_source(rec.get("source", ""), output_dir)
+    note = f"新建共享文章 {key}，挂到 {len(targets)} 题"
+    if missing:
+        note += f"（第 {'、'.join(map(str, missing))} 题不在此卷，已跳过）"
+    return url, note
+
+
 def _correct_article_doc(cur, rec, material_text: str, old_url: str,
                          output_dir: Path, *, paper_id: int | None = None,
                          paper_scope: str | None = None) -> tuple[str, str]:
@@ -415,46 +557,67 @@ def _correct_article_doc(cur, rec, material_text: str, old_url: str,
         material_text, dry_run=True, paper_scope=paper_scope, **kwargs)
     old_key = Path(old_url).parent.name
 
-    if new_key == old_key:
-        write_material_doc(material_text, dry_run=False, paper_scope=paper_scope, **kwargs)
-        note = "文章规范化后 doc_key 不变，已原地重写 content.md"
+    # 先读旧正文：key 不变时下面会原地覆盖 content.md，覆盖后就比不出来了。
+    from chinese_material_doc import same_article
+
+    old_body = _read_doc_body(output_dir, old_url)
+
+    # 无论 key 是否变化都要落盘：key 不变时是原地覆盖同一个 content.md。
+    write_material_doc(material_text, dry_run=False, paper_scope=paper_scope, **kwargs)
+
+    # 兄弟题要按**文章内容**认，不能只按旧 URL 认：URL 可能已经在之前的
+    # 卷内 key 迁移中分叉（同一篇文，20/22/23 一个文件、21 另一个文件），
+    # 只按 URL 匹配会漏掉它们（2026-11-22 Q21 实测）。
+    if paper_id is not None:
+        cur.execute(
+            "SELECT q.id, q.source, q.content, q.options, q.content_hash, q.material_url "
+            "FROM questions q JOIN paper_questions pq ON pq.question_id=q.id "
+            "WHERE pq.paper_id=%s", (paper_id,))
+        rows = []
+        for qid, source, content, opts_json, old_hash, url in cur.fetchall():
+            body = _read_doc_body(output_dir, url)
+            if url == old_url or (body and same_article(body, material_text)):
+                rows.append((qid, source, content, opts_json, old_hash, url))
     else:
-        write_material_doc(material_text, dry_run=False, paper_scope=paper_scope, **kwargs)
-        if paper_id is not None:
-            # 只改同一份卷里引用旧 URL 的题；不同卷各自有独立文档，不动它们。
-            cur.execute(
-                "SELECT q.id, q.source, q.content, q.options, q.content_hash "
-                "FROM questions q JOIN paper_questions pq ON pq.question_id=q.id "
-                "WHERE q.material_url=%s AND pq.paper_id=%s", (old_url, paper_id))
-        else:
-            cur.execute(
-                "SELECT id, source, content, options, content_hash FROM questions "
-                "WHERE material_url=%s", (old_url,))
-        rows = cur.fetchall()
-        stamp = hashlib.sha256(datetime.now().isoformat().encode()).hexdigest()[:12]
-        hash_map: dict = {}
-        for idx, (qid, source, content, opts_json, old_hash) in enumerate(rows):
-            # 两阶段更新，避开 UNIQUE(content_hash) 在批量换 URL 时的中间态冲突
-            cur.execute("UPDATE questions SET content_hash=%s WHERE id=%s",
-                        (f"_tmp_{stamp}_{idx}", qid))
-            try:
-                opts = json.loads(opts_json) if opts_json else None
-            except (TypeError, ValueError):
-                opts = None
-            final = content_hash(content or "", opts, None, new_url)
-            try:
-                cur.execute("UPDATE questions SET material_url=%s, content_hash=%s "
-                            "WHERE id=%s", (new_url, final, qid))
-                hash_map[old_hash] = final
-            except Exception:
-                cur.execute("UPDATE questions SET material_url=%s WHERE id=%s",
-                            (new_url, qid))
-                hash_map[old_hash] = old_hash
-                _log_hash_conflict(output_dir, qid)
-            if source:
-                _unmark_publish_for_source(source, output_dir)
-        _sync_applied_hashes(hash_map, output_dir, source=rec.get("source"))
-        note = (f"文章 doc_key {old_key}→{new_key}，已同步 {len(rows)} 道同卷题")
+        cur.execute(
+            "SELECT id, source, content, options, content_hash FROM questions "
+            "WHERE material_url=%s", (old_url,))
+        rows = [(qid, source, content, opts_json, old_hash, old_url)
+                for qid, source, content, opts_json, old_hash in cur.fetchall()]
+
+    stamp = hashlib.sha256(datetime.now().isoformat().encode()).hexdigest()[:12]
+    hash_map: dict = {}
+    changed = 0
+    for idx, (qid, source, content, opts_json, old_hash, url) in enumerate(rows):
+        if new_key == old_key and url == new_url:
+            continue                      # 原地改文，URL/hash 都不动
+        # 两阶段更新，避开 UNIQUE(content_hash) 在批量换 URL 时的中间态冲突
+        cur.execute("UPDATE questions SET content_hash=%s WHERE id=%s",
+                    (f"_tmp_{stamp}_{idx}", qid))
+        try:
+            opts = json.loads(opts_json) if opts_json else None
+        except (TypeError, ValueError):
+            opts = None
+        final = content_hash(content or "", opts, None, new_url)
+        try:
+            cur.execute("UPDATE questions SET material_url=%s, content_hash=%s "
+                        "WHERE id=%s", (new_url, final, qid))
+            hash_map[old_hash] = final
+        except Exception:
+            cur.execute("UPDATE questions SET material_url=%s WHERE id=%s",
+                        (new_url, qid))
+            hash_map[old_hash] = old_hash
+            _log_hash_conflict(output_dir, qid)
+        changed += 1
+        if source:
+            _unmark_publish_for_source(source, output_dir)
+    _sync_applied_hashes(hash_map, output_dir, source=rec.get("source"))
+    _sync_extracted_article(rec, material_text, old_body, output_dir)
+    if new_key == old_key:
+        note = (f"文章 doc_key 不变（{old_key}），已原地重写 content.md"
+                + (f"；并把 {changed} 道分叉到别的文档的同卷题并回本篇" if changed else ""))
+    else:
+        note = f"文章 doc_key {old_key}→{new_key}，已同步 {changed} 道同卷题"
 
     # publish 下次仍要从 extracted 读文章；override 保证修正不会被冲掉。
     # 匹配只按 old_key（跨卷兄弟题也要命中），source 仅作溯源。
@@ -473,10 +636,14 @@ def _correct_article_doc(cur, rec, material_text: str, old_url: str,
 
 def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None,
                  output_dir: Path | None = None) -> str:
-    from manual_fix import looks_like_ui_echo
+    from manual_fix import looks_like_ui_echo, looks_like_wrapped_copy
 
     if looks_like_ui_echo(rec.get("content") or ""):
         return "跳过：内容疑似终端界面文字（不是真题），请重新补录"
+    for field in ("content", "material_text", "material_inline_text"):
+        if looks_like_wrapped_copy(rec.get(field) or ""):
+            return ("跳过：材料带终端折行痕迹（行首 │ / 标签被换行截断），"
+                    "请从原卷 md 或网页正文复制后重新录入")
     found = _paper_row(cur, rec["rel_path"], rec["source"])
     if not found:
         return "跳过：库里没有这份卷（先跑 import_cli 入库）"
@@ -592,7 +759,7 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
                 and str(material_text).strip() and target_url
                 and not rec.get("material_scope")):
             return ("跳过：材料归属未标明（该题文章已外置为 md）。"
-                    "请重新校对时选择「1 题内素材」或「2 本节共享文章」")
+                    "请重新校对，明确这段是题内素材还是共享文章")
         if explicit_url is not _NO_URL_FIELD:
             if isinstance(explicit_url, str) and explicit_url.strip():
                 new_url = explicit_url.strip()
@@ -651,22 +818,38 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
                 heal_inline = True
 
             if record_target in ("article", "both") and article_rec:
+                # extracted 里的文章正文必须同步成**修正后**的正文：publish 是
+                # 按 extracted 外置的，若这里还留着旧文，下次重发会用旧文覆盖
+                # 刚写好的 content.md（2026-11-22 Q21 实测）。
+                extracted_material = article_rec
                 if target_url:
                     new_url, article_note = _correct_article_doc(
                         cur, rec, article_rec, target_url, out_dir,
                         paper_id=paper_id, paper_scope=_paper_scope_of(rec))
                 else:
-                    extracted_material = article_rec
-                    _unmark_publish_for_source(rec.get("source", ""), out_dir)
+                    # 原题没有文章：新建，并把 material_url/哈希直接写库
+                    # （publish 只写文档和 published，不回写库）
+                    new_url, article_note = _create_article_doc(
+                        cur, rec, article_rec, out_dir, paper_id=paper_id,
+                        paper_scope=_paper_scope_of(rec))
+                    if existing_text and not same_article(existing_text, article_rec):
+                        extracted_post = existing_text
                 if record_target == "both":
                     material_text = inline_rec or None
                     extracted_post = inline_rec or None
                 elif heal_inline:
                     material_text = None
                     drop_post = True
-                else:
+                elif target_url:
                     material_text = existing_text or None   # 保留合法题内补充
-                    preserve_existing = bool(target_url)
+                    preserve_existing = True
+                else:
+                    # 新建文章：旧 material_text 若就是这篇文章（URL 丢了但正文还在），
+                    # 不能当题内素材留在库里，否则文章会被重复注入。
+                    keep = bool(existing_text) and not same_article(existing_text, article_rec)
+                    material_text = existing_text if keep else None
+                    if keep:
+                        extracted_post = existing_text
             elif record_target == "inline" or (record_target is None and inline_rec):
                 val = inline_rec or article_rec or None
                 material_text = val
@@ -884,6 +1067,25 @@ def _rescan(applied: dict[str, dict[str, set[int]]]) -> None:
                       f"请对照原卷补全后再录一次", flush=True)
 
 
+def _publish_sources(sources: set[str]) -> None:
+    """补题/材料改完后同步 published（一条命令内完成，不让用户另跑 publish）。
+
+    页面读的是库，publish 失败不回滚已提交的库，只告警；但不跑这一步，
+    published 会和库长期分叉，下次导入又把旧内容带回来（2026-11-22 Q21 实测）。
+    """
+    if not sources:
+        return
+    from publish_cli import main as publish_main
+
+    print("\n[发布] 同步 published（改写过的卷）：", flush=True)
+    for src in sorted(sources):
+        try:
+            rc = publish_main(["--book", src])
+            print(f"  · {src}: {'ok' if rc in (None, 0) else f'返回 {rc}'}", flush=True)
+        except Exception as exc:            # noqa: BLE001 - 库已提交，发布失败不影响页面
+            print(f"  ! {src}: publish 失败（库已写入，不影响页面）：{exc}", flush=True)
+
+
 def run(argv=None, *, via_pipeline: bool = False) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fixes-dir", default=str(FIXES_DIR))
@@ -912,6 +1114,7 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
     applied_keys: list[tuple[str, int, str]] = []
     rejected_keys: list[tuple[str, int, str, str]] = []
     applied_sources: dict[str, dict[str, set[int]]] = {}   # 学科目录 -> 卷名 -> 题号
+    material_sources: set[str] = set()                     # 改过材料/题干的卷 → 需重发
     # 补题文件的 applied 标记必须在事务提交**之后**落盘。否则同一批里后面的记录
     # 抛异常 → conn.rollback()，但前面文件已写成 applied=True，库里却没写，
     # needing_replay 又认不出，题就永久丢了（2026-11-21 实测复现）。
@@ -974,6 +1177,10 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                     rec["applied_at"] = datetime.now().isoformat(timespec="seconds")
                     total += 1
                     applied_keys.append((rec["source"], go, str(f)))
+                    if (rec.get("material_target") or rec.get("material_scope")
+                            or "material_url" in rec
+                            or (rec.get("material_text") or "").strip()):
+                        material_sources.add(rec["source"])
                     subject_cn = Path(rec["rel_path"]).parts[0]
                     applied_sources.setdefault(subject_cn, {}).setdefault(
                         rec["source"], set()).add(go)
@@ -992,6 +1199,7 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                            fix_file=f)
             print(f"\n[ok] 已写入 {total} 题", flush=True)
             _rescan(applied_sources)
+            _publish_sources(material_sources)
         else:
             conn.rollback()
             if via_pipeline:

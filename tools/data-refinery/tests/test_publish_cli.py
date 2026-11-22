@@ -517,3 +517,37 @@ def test_manual_inline_materials_only_inline_targets(tmp_path):
     assert 1 not in out.get("卷A", {}), "article 目标不能进 material_text"
     assert out["卷A"][2] == "素材二"
     assert out["卷A"][3] == "素材三"
+
+
+def test_publish_drops_article_duplicate_when_question_has_no_url(tmp_path):
+    """本题 URL 为空、但同卷另一题已把同一篇文章外置：_post 素材要判重丢弃，
+    不能再把整篇文章当题内素材注回 material_text（2026-11-22 Q21 事故）。"""
+    out = tmp_path / "out"
+    ext = out / "extracted" / "语文" / "试卷"
+    ext.mkdir(parents=True)
+    article = "## 只此眉山\n" + "这是一篇文章的正文。" * 20
+    rows = [
+        {"subject_id": "chinese", "type": "short_answer", "difficulty": 2,
+         "content": "第一题", "answer": "甲", "material_text": article},
+        {"subject_id": "chinese", "type": "short_answer", "difficulty": 2,
+         "content": "第二题", "answer": "乙", "material_text": None,
+         "_post_material_text": article},
+    ]
+    (ext / "试卷.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8",
+    )
+    (out / "md" / "语文" / "试卷").mkdir(parents=True)
+
+    with patch("publish_cli.RefineryConfig") as mock_config:
+        mock_config.from_env.return_value = MagicMock(output_dir=out)
+        main(["--input-dir", str(out / "extracted"), "--output-dir", str(out / "published")])
+
+    got = [
+        json.loads(l) for l in
+        (out / "published" / "语文" / "试卷" / "试卷.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert got[0]["material_url"].startswith("materials/chinese/")
+    assert got[1]["material_url"] is None
+    assert got[1]["material_text"] is None, "与文章同段的 _post 素材必须被丢弃"
+    assert "duplicate_of_doc" in (out / "material_duplicate_healed.jsonl").read_text(encoding="utf-8")

@@ -17,7 +17,8 @@ class FakeCursor:
     def __init__(self, paper=None, existing=None, renumber_rows=None,
                  existing_active=1, hash_row=None, existing_hash=None, orphan_id=None,
                  material_url=None, siblings=None, existing_options_json=None,
-                 existing_material_text=None, siblings_by_paper=None):
+                 existing_material_text=None, siblings_by_paper=None,
+                 paper_question_rows=None):
         self.sql: list[tuple[str, tuple | None]] = []
         self.paper = paper                # (paper_id, subject_id)
         self.existing = existing          # question_id 或 None
@@ -30,6 +31,7 @@ class FakeCursor:
         self.existing_options_json = existing_options_json
         self.existing_material_text = existing_material_text
         self.siblings_by_paper = siblings_by_paper
+        self.paper_question_rows = paper_question_rows
         self.renumber_rows = renumber_rows or []
         self.rowcount = 1
         self.lastrowid = 777
@@ -50,6 +52,11 @@ class FakeCursor:
             self._rows = [(self.hash_row,)] if self.hash_row else []
         elif "SELECT question_id, group_order FROM paper_questions" in sql:
             self._rows = list(self.renumber_rows)
+        elif "SELECT pq.group_order, q.id" in sql:
+            self._rows = list(self.paper_question_rows or [])
+        elif ("FROM questions q JOIN paper_questions pq" in sql
+              and "pq.paper_id=%s" in sql and "q.material_url" in sql):
+            self._rows = list(self.paper_question_rows or [])
         elif "JOIN paper_questions pq" in sql and "q.material_url=%s" in sql:
             if self.siblings_by_paper is not None and self.paper:
                 self._rows = list(self.siblings_by_paper.get(self.paper[0], []))
@@ -617,6 +624,54 @@ def test_hash_uses_material_url(tmp_path, monkeypatch):
     assert seen and len(seen[0]) == 4 and seen[0][3] == "materials/chinese/x/content.md"
 
 
+def test_skips_terminal_wrapped_material(tmp_path):
+    """材料里带 │ 折行 / 标签被换行截断：拒收，不能写进库。"""
+    rec = {**REC, "content": "│ 第一行\n│ 第二行"}
+    cur = FakeCursor(paper=(17, 2))
+
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+
+    assert msg.startswith("跳过") and "折行" in msg
+    assert not any(sql.startswith(("INSERT", "UPDATE")) for sql, _ in cur.sql)
+
+
+def test_new_shared_article_writes_url_for_shared_groups(tmp_path, monkeypatch):
+    """原本没有文章：新建 content.md，并把 material_url/哈希直接挂到共用题号。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    written = []
+
+    def fake_write(body, *, dry_run, **kwargs):
+        written.append((body, dry_run, kwargs.get("paper_scope")))
+        return ("newkey", "materials/chinese/newkey/content.md")
+
+    import chinese_material_doc
+    monkeypatch.setattr(chinese_material_doc, "write_material_doc", fake_write)
+    rec = {**REC, "source": "语文-模拟一", "rel_path": "语文/初中/second/2026/模拟一",
+           "group_order": 14, "content": "阅读《鱼我所欲也》及下面两则材料…",
+           "material_target": "article", "material_scope": "article",
+           "material_text": "## 鱼我所欲也\n《孟子》\n鱼，我所欲也……",
+           "material_share_with": [12, 13, 14]}
+    cur = FakeCursor(
+        paper=(17, 2), existing=5171, material_url=None,
+        paper_question_rows=[
+            (12, 5169, "第十二题", None, "h12", None, None),
+            (13, 5170, "第十三题", None, "h13", None, None),
+            (14, 5171, "第十四题", None, "h14", None, None),
+        ],
+    )
+
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+
+    assert "新建共享文章" in msg and "3 题" in msg
+    assert written and written[-1][1] is False          # 真写盘
+    url_updates = [a for sql, a in cur.sql
+                   if sql.startswith("UPDATE questions SET material_url=")]
+    assert len(url_updates) == 3
+    assert {a[0] for a in url_updates} == {"materials/chinese/newkey/content.md"}
+
+
 def test_article_fix_new_doc_key_syncs_same_paper_siblings(tmp_path, monkeypatch):
     """正文真变了：换 doc_key，只同步**同一份卷**里引用旧 URL 的题（不同卷各自独立）。"""
     import apply_fixes as impl
@@ -634,10 +689,10 @@ def test_article_fix_new_doc_key_syncs_same_paper_siblings(tmp_path, monkeypatch
     cur = FakeCursor(
         paper=(17, 2), existing=5171,
         material_url="materials/chinese/oldkey/content.md",
-        siblings_by_paper={
-            17: [(5171, "语文-模拟二", "题干", None, "oldhash")],
-            99: [(9999, "语文-别的卷", "题干", None, "oldhash2")],
-        },
+        paper_question_rows=[
+            (5171, "语文-模拟二", "题干", None, "oldhash",
+             "materials/chinese/oldkey/content.md"),
+        ],
     )
     # 兄弟题补题记录里的 applied_hash 也要跟着换，否则 needing_replay 每次误报
     fixes = tmp_path / "manual_fixes"
@@ -698,7 +753,10 @@ def test_article_new_key_hash_collision_keeps_old_hash(tmp_path, monkeypatch):
     cur = FakeCursor(
         paper=(17, 2), existing=5171,
         material_url="materials/chinese/oldkey/content.md",
-        siblings=[(5171, "语文-模拟二", "题干", None, "oldhash")],
+        paper_question_rows=[
+            (5171, "语文-模拟二", "题干", None, "oldhash",
+             "materials/chinese/oldkey/content.md"),
+        ],
     )
     orig_exec = cur.execute
 
@@ -913,3 +971,84 @@ def test_duplicate_inline_text_is_healed_to_article(tmp_path, monkeypatch):
     args = _update_args(cur)
     assert args[5] is None, "重复的题内素材应被清空（不能 url+text 并存）"
     assert args[8] == "materials/chinese/new/content.md"
+
+
+def _write_doc(root: Path, url: str, body: str) -> None:
+    p = root / "assets" / url
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+
+
+def test_article_fix_syncs_forked_sibling_by_content(tmp_path, monkeypatch):
+    """同卷里同一篇文章被拆成两个 URL（分叉）：改文章时两处都要并到新 URL。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+
+    old_url = "materials/chinese/oldkey/content.md"
+    fork_url = "materials/chinese/forkkey/content.md"
+    new_url = "materials/chinese/newkey/content.md"
+    body = "## 同一篇\n正文一句。"
+    _write_doc(tmp_path, old_url, body)
+    _write_doc(tmp_path, fork_url, body)
+
+    def fake_write(body, *, dry_run, **kwargs):
+        return ("newkey", new_url)
+
+    import chinese_material_doc
+    monkeypatch.setattr(chinese_material_doc, "write_material_doc", fake_write)
+
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "group_order": 9, "content": "题干",
+           "material_text": "## 同一篇\n<u>正文一句。</u>", "material_scope": "article"}
+    cur = FakeCursor(
+        paper=(17, 2), existing=5171, material_url=old_url,
+        paper_question_rows=[
+            (5171, "语文-模拟二", "题干", None, "h1", old_url),
+            (5172, "语文-模拟二", "题干", None, "h2", fork_url),
+        ],
+    )
+
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+
+    assert "2 道同卷题" in msg
+    updated = [a for sql, a in cur.sql
+               if sql.startswith("UPDATE questions SET material_url=%s, content_hash=%s")]
+    assert {a[0] for a in updated} == {new_url}
+
+
+def test_article_fix_in_place_pulls_forked_sibling_back(tmp_path, monkeypatch):
+    """只改标注（doc_key 不变）：原地重写文档，同时把分叉的兄弟题并回同一个 URL。"""
+    import apply_fixes as impl
+
+    monkeypatch.setattr(impl, "_patch_extracted", lambda rec, **kw: None)
+    old_url = "materials/chinese/oldkey/content.md"
+    fork_url = "materials/chinese/forkkey/content.md"
+    body = "## 同一篇\n正文一句。"
+    _write_doc(tmp_path, old_url, body)
+    _write_doc(tmp_path, fork_url, body)
+
+    def fake_write(body, *, dry_run, **kwargs):
+        return ("oldkey", old_url)
+
+    import chinese_material_doc
+    monkeypatch.setattr(chinese_material_doc, "write_material_doc", fake_write)
+
+    rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二",
+           "group_order": 9, "content": "题干",
+           "material_text": "## 同一篇\n<u>正文一句。</u>", "material_scope": "article"}
+    cur = FakeCursor(
+        paper=(17, 2), existing=5171, material_url=old_url,
+        paper_question_rows=[
+            (5171, "语文-模拟二", "题干", None, "h1", old_url),
+            (5172, "语文-模拟二", "题干", None, "h2", fork_url),
+        ],
+    )
+
+    msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+
+    assert "doc_key 不变" in msg
+    updated = [(sql, a) for sql, a in cur.sql
+               if sql.startswith("UPDATE questions SET material_url=%s, content_hash=%s")]
+    assert len(updated) == 1 and updated[0][1][0] == old_url
+    assert updated[0][1][2] == 5172, "只应把分叉出去的那道题并回来"
