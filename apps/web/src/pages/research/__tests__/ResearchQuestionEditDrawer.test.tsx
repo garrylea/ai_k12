@@ -549,6 +549,11 @@ describe('ResearchQuestionEditDrawer 拖拽调宽', () => {
     }
   });
 
+  /** 草稿默认展开时左缘拖拽条让位给栏间分割条：先收起草稿再测抽屉宽度。 */
+  function collapseDraft() {
+    fireEvent.click(screen.getByRole('button', { name: '收起草稿' }));
+  }
+
   function dragSeparator(fromX: number, toX: number) {
     const sep = screen.getByRole('separator', { name: '调整抽屉宽度' });
     fireEvent.pointerDown(sep, { clientX: fromX, pointerId: 1, button: 0, pointerType: 'mouse' });
@@ -558,12 +563,14 @@ describe('ResearchQuestionEditDrawer 拖拽调宽', () => {
 
   it('左缘有竖向拖拽条', () => {
     renderDrawer();
+    collapseDraft();
     const sep = screen.getByRole('separator', { name: '调整抽屉宽度' });
     expect(sep).toHaveAttribute('aria-orientation', 'vertical');
   });
 
   it('向左拖变宽、向右拖变窄，并夹紧到 360..92vw', () => {
     renderDrawer();
+    collapseDraft();
     dragSeparator(500, 400); // 512 + (500-400) = 612
     expect(screen.getByRole('dialog', { name: /编辑题目/ }).style.width).toBe('612px');
     dragSeparator(500, 900); // 512 + (500-900) = -388 → 夹紧到下限 360
@@ -572,10 +579,12 @@ describe('ResearchQuestionEditDrawer 拖拽调宽', () => {
 
   it('会话记忆：拖拽后卸载再挂载仍保留宽度', () => {
     const first = renderDrawer();
+    collapseDraft();
     dragSeparator(500, 420); // 512 + 80 = 592
     expect(screen.getByRole('dialog', { name: /编辑题目/ }).style.width).toBe('592px');
     first.unmount();
     renderDrawer();
+    collapseDraft();
     // 模块级 lastWidthPx 在单文件内共享，重挂载读回上次宽度
     expect(screen.getByRole('dialog', { name: /编辑题目/ }).style.width).toBe('592px');
   });
@@ -647,11 +656,8 @@ describe('ResearchQuestionEditDrawer 选项卡片点选', () => {
 });
 
 describe('ResearchQuestionEditDrawer 草稿白板', () => {
-  it('默认不显示白板；点标题栏「展开草稿」后出现，且按题 ID 隔离、persist=false', () => {
+  it('默认展开草稿：白板按题 ID 隔离、persist=false', () => {
     renderDrawer(q({ id: 42 }));
-    expect(screen.queryByTestId('research-draft-whiteboard')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '展开草稿' }));
 
     const stub = screen.getByTestId('whiteboard-stub');
     expect(stub).toBeInTheDocument();
@@ -659,9 +665,8 @@ describe('ResearchQuestionEditDrawer 草稿白板', () => {
     expect(stub).toHaveAttribute('data-persist', 'false');
   });
 
-  it('展开草稿 → 抽屉加宽、出现可拖拽分割条；编辑字段仍在左栏', () => {
+  it('默认展开草稿 → 抽屉加宽、出现可拖拽分割条；编辑字段仍在左栏', () => {
     renderDrawer();
-    fireEvent.click(screen.getByRole('button', { name: '展开草稿' }));
 
     const aside = screen.getByRole('dialog', { name: /编辑题目/ }) as HTMLElement;
     expect(aside.className).toContain('w-[min(96vw,96rem)]');
@@ -672,12 +677,14 @@ describe('ResearchQuestionEditDrawer 草稿白板', () => {
     expect(field('题干')).toBeInTheDocument();
   });
 
-  it('再点「收起草稿」→ 白板卸载（关闭即清空）', () => {
+  it('点「收起草稿」→ 白板卸载；再点「展开草稿」→ 重新挂载（关闭即清空）', () => {
     renderDrawer();
-    fireEvent.click(screen.getByRole('button', { name: '展开草稿' }));
     expect(screen.getByTestId('whiteboard-stub')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '收起草稿' }));
     expect(screen.queryByTestId('research-draft-whiteboard')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '展开草稿' }));
+    expect(screen.getByTestId('whiteboard-stub')).toBeInTheDocument();
   });
 });

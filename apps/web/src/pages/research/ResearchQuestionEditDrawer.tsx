@@ -294,7 +294,8 @@ export default function ResearchQuestionEditDrawer({
   const [note, setNote] = useState('');
   const [uploadCount, setUploadCount] = useState(0);
   // 草稿白板开合：复用现成的手写白板组件；persist=false，关抽屉即卸载清空。
-  const [draftOpen, setDraftOpen] = useState(false);
+  // 默认展开：教研员改题时绝大多数都要对照草稿，免去每次手动点开。
+  const [draftOpen, setDraftOpen] = useState(true);
   const [draftWidthPct, setDraftWidthPct] = useState<number>(() =>
     lastDraftWidthPct === null
       ? DRAFT_W_DEFAULT_PCT
