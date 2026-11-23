@@ -26,3 +26,11 @@ export function formatPaperQuestionNo(
   if (questionNo == null) return null;
   return subNo ? `试卷第 ${questionNo} 题(${subNo})` : `试卷第 ${questionNo} 题`;
 }
+
+/** 题目标识键：同题号的小问必须可区分（26(1)/26(2)），作答 Map 与 React key 都用它。 */
+export function paperQuestionKey(
+  questionNo: number | null | undefined,
+  subNo?: number | null,
+): string {
+  return subNo ? `${questionNo}(${subNo})` : String(questionNo);
+}

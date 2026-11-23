@@ -120,6 +120,28 @@ describe('ExamRunPage 交卷发分交接', () => {
     expect(submitMock).not.toHaveBeenCalled();
   });
 
+  it('同题号两条小问：作答提交到各自 questionId，不串题', async () => {
+    const subSession: ExamSessionInfo = {
+      ...SESSION,
+      questions: [
+        { questionId: 201, questionNo: 26, subNo: 1, text: '(1) 甲', type: 'choice', options: ['A. 1', 'B. 2'], materialText: '材料一', materialUrl: null, materialPosition: 'before' },
+        { questionId: 202, questionNo: 26, subNo: 2, text: '(2) 乙', type: 'choice', options: ['A. 1', 'B. 2'], materialText: '材料二', materialUrl: null, materialPosition: 'before' },
+      ],
+    };
+    sessionMock.mockResolvedValue(subSession);
+    sessionStorage.setItem('exam:session', JSON.stringify(subSession));
+
+    renderPage();
+    await waitFor(() => expect(screen.getAllByRole('radio').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole('radio')[1]);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '提交' }));
+    });
+
+    await waitFor(() => expect(answerMock).toHaveBeenCalled());
+    expect(answerMock.mock.calls[0].slice(0, 3)).toEqual([77, 201, 'B']);
+  });
+
   it('题号用原始 questionNo：前序题被 is_active=0 隐藏时，不把题3显示成"第1题"', async () => {
     // 模拟题1/题2 被 needs_review 过滤，只剩题3（顺序第 1 位）
     const gapSession: ExamSessionInfo = {

@@ -11,6 +11,7 @@ import {
   preprocessMarkdown,
 } from '@/components/markdown';
 import { MaterialBlock } from './answer/MaterialBlock';
+import { materialSlots } from './answer/materialPlacement';
 import type { PracticeQuestion } from './AnswerModal';
 
 interface AnswerRecord {
@@ -183,6 +184,7 @@ export function AnswerResultList({
               const rec = a;
               const subjective = !!rec?.needsSelfAssess || rec?.method === 'self_assess';
               const noAnswer = rec?.method === 'unanswered';
+              const slots = materialSlots(q);
               return (
                 <div key={q.n} className="bg-[var(--bg-card)] rounded-xl border border-[var(--bg-subtle)] overflow-hidden">
                   <div className="p-3.5 flex items-start gap-3">
@@ -224,7 +226,7 @@ export function AnswerResultList({
                       {/* 材料位置固定规则：文章（material_url）在题干上方；题中素材（material_text）在题干下方 */}
                       <MaterialBlock
                         url={q.materialUrl}
-                        text={null}
+                        text={slots.above}
                         variant="result"
                         testId="result-material"
                       />
@@ -235,7 +237,7 @@ export function AnswerResultList({
                       </div>
                       <MaterialBlock
                         url={null}
-                        text={q.material}
+                        text={slots.below}
                         variant="result"
                         testId="result-material-text"
                       />

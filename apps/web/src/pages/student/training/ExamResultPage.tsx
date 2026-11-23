@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { paperQuestionKey } from '@/utils/questionSource';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AnswerResultList } from '@/components/business/AnswerResultList';
 import { CelebrationOverlay } from '@/components/business';
@@ -169,8 +170,10 @@ export default function ExamResultPage() {
 
   const resultQuestions = useMemo(
     () => (items ?? []).map((it) => ({
-      n: String(it.questionNo), text: it.text,
+      n: paperQuestionKey(it.questionNo, it.subNo), text: it.text,
       material: it.materialText, materialUrl: it.materialUrl,
+      materialPosition: it.materialPosition ?? null,
+      subNo: it.subNo ?? null,
     })),
     [items],
   );
@@ -178,7 +181,7 @@ export default function ExamResultPage() {
   // q.n（= questionNo）-> questionId 映射（单题刷新解析用）
   const questionIdByN = useMemo(() => {
     const map = new Map<string, number>();
-    for (const it of items ?? []) map.set(String(it.questionNo), it.questionId);
+    for (const it of items ?? []) map.set(paperQuestionKey(it.questionNo, it.subNo), it.questionId);
     return map;
   }, [items]);
 
@@ -197,7 +200,7 @@ export default function ExamResultPage() {
       }
     > = {};
     for (const it of items ?? []) {
-      map[String(it.questionNo)] = {
+      map[paperQuestionKey(it.questionNo, it.subNo)] = {
         isCorrect: it.isCorrect === 1,
         method: it.isCorrect === null ? 'self_assess' : '',
         studentAnswer: it.answerText ?? '',

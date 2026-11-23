@@ -256,6 +256,7 @@ describe('ResearchPapersService.detail', () => {
     expect(res.questions[0]).toEqual({
       id: 9,
       questionNo: 1,
+      subNo: 0,
       type: 'choice',
       content: '题干',
       options: [{ label: 'A', text: '甲' }],

@@ -51,6 +51,7 @@ export interface AdminPaperDeletePreview extends PaperImpact {
 export interface ResearchQuestionDetail {
   id: number;
   questionNo: number;
+  subNo: number;
   type: string;
   content: string;
   options: unknown[] | null;
@@ -95,6 +96,7 @@ function toQuestionDetail(row: Record<string, unknown>): ResearchQuestionDetail 
   return {
     id: Number(row.id),
     questionNo: Number(row.question_no),
+    subNo: Number(row.sub_no ?? 0),
     type: str(row.type),
     content: str(row.content),
     options: parseOptions(row.options == null ? null : String(row.options)),

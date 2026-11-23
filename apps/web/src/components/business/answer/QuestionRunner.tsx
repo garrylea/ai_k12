@@ -19,6 +19,7 @@ import {
   ANSWER_IMG_CLASS,
 } from '@/components/markdown';
 import { MaterialBlock } from './MaterialBlock';
+import { materialSlots } from './materialPlacement';
 import { LatexEditor } from '../LatexEditor';
 import { autoWrapMath, normalizeAnswerMath } from '../LatexPreview';
 import { PreviewDraftPanel } from '../PreviewDraftPanel';
@@ -202,6 +203,7 @@ export function QuestionRunner({
 
   const total = questions.length;
   const q = questions[idx];
+  const slots = materialSlots(q);
 
   // 当前题变化通知父层（页面级草稿抽屉依赖它拿 key 触发清空）；父层应 useCallback 稳定引用避免重跑
   const onQuestionChangeRef = useRef(onQuestionChange);
@@ -587,7 +589,7 @@ export function QuestionRunner({
               非理科去掉独立上限，交给上面这层统一滚动 —— 否则 38vh 会先卡住，题干区多出的空间白给 */}
           <MaterialBlock
             url={q.materialUrl}
-            text={null}
+            text={slots.above}
             variant="answer"
             draggable
             testId="question-material"
@@ -629,7 +631,7 @@ export function QuestionRunner({
           {/* 题中素材（material_text）：固定显示在题干下方（用户 2026-11-21 规则），如「题干在前、材料在后」的文段题 */}
           <MaterialBlock
             url={null}
-            text={q.material}
+            text={slots.below}
             variant="answer"
             draggable
             testId="question-material-text"

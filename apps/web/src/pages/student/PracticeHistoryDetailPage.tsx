@@ -14,6 +14,7 @@ import {
 } from '@/components/markdown';
 import { autoWrapMath, normalizeAnswerMath } from '@/components/business/LatexPreview';
 import { MaterialBlock } from '@/components/business/answer/MaterialBlock';
+import { materialSlots } from '@/components/business/answer/materialPlacement';
 import { formatPaperQuestionNo, formatQuestionSource } from '@/utils/questionSource';
 import {
   getMyPointRules,
@@ -170,6 +171,8 @@ function QuestionCard({
     setBusy(false);
   }, [q]);
 
+  const slots = materialSlots({ material: q.materialText, materialPosition: q.materialPosition });
+
   return (
     <li className="rounded-[var(--radius-md)] border border-[var(--bg-subtle)] bg-[var(--bg-card)] p-4">
       <div className="mb-3 flex items-center gap-2">
@@ -226,7 +229,7 @@ function QuestionCard({
       {/* 材料位置固定规则：文章 doc（material_url）在题干上方；题中素材（material_text）在题干下方 */}
       <MaterialBlock
         url={q.materialUrl}
-        text={null}
+        text={slots.above}
         variant="history"
         testId="history-material"
       />
@@ -243,7 +246,7 @@ function QuestionCard({
 
       <MaterialBlock
         url={null}
-        text={q.materialText}
+        text={slots.below}
         variant="history"
         testId="history-material-text"
       />

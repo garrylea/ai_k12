@@ -294,6 +294,19 @@ describe('ResearchPaperDetailPage 加载与表格', () => {
   });
 });
 
+describe('ResearchPaperDetailPage 小问题号', () => {
+  it('同题号小问显示 26(1)/26(2)', async () => {
+    detailMock.mockResolvedValueOnce(detail({ questions: [
+      question({ id: 1, questionNo: 26, subNo: 1 }),
+      question({ id: 2, questionNo: 26, subNo: 2 }),
+    ]}));
+    renderDetail();
+    const table = await screen.findByTestId('detail-table');
+    expect(within(table).getByText('26(1)')).toBeInTheDocument();
+    expect(within(table).getByText('26(2)')).toBeInTheDocument();
+  });
+});
+
 describe('ResearchPaperDetailPage 编辑入口契约', () => {
   it('点「编辑」→ 把该题完整五字段交给 Task 10 抽屉', async () => {
     const q = question({ id: 9, questionNo: 2, content: '第二题题干' });

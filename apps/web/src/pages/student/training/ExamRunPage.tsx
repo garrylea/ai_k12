@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { paperQuestionKey } from '@/utils/questionSource';
 import { QuestionRunner } from '@/components/business/answer/QuestionRunner';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
 import { DraftPanel, DraftIconButton } from '@/components/business/DraftPanel';
@@ -167,12 +168,14 @@ export default function ExamRunPage() {
   const questions = useMemo<RunnerQuestion[]>(
     () =>
       (session?.questions ?? []).map((q) => ({
-        n: String(q.questionNo),
+        n: paperQuestionKey(q.questionNo, q.subNo),
         text: q.text,
         type: q.type,
         options: normalizeOptions(q.options),
         material: q.materialText,
         materialUrl: q.materialUrl,
+        materialPosition: q.materialPosition ?? null,
+        subNo: q.subNo ?? null,
       })),
     [session],
   );
@@ -180,7 +183,7 @@ export default function ExamRunPage() {
   // n（= String(questionNo)）-> questionId 映射（提交答案用后端 questionId）
   const questionIdMap = useMemo(() => {
     const map = new Map<string, number>();
-    for (const q of session?.questions ?? []) map.set(String(q.questionNo), q.questionId);
+    for (const q of session?.questions ?? []) map.set(paperQuestionKey(q.questionNo, q.subNo), q.questionId);
     return map;
   }, [session]);
 
@@ -193,7 +196,7 @@ export default function ExamRunPage() {
     const map: Record<string, string> = {};
     for (const q of info.questions) {
       const a = info.answered[String(q.questionId)];
-      if (a?.answerText) map[String(q.questionNo)] = a.answerText;
+      if (a?.answerText) map[paperQuestionKey(q.questionNo, q.subNo)] = a.answerText;
     }
     return Object.keys(map).length > 0 ? map : undefined;
   }, [session]);

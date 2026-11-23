@@ -1151,6 +1151,8 @@ export interface ResearchPaperDeleteResult {
 export interface ResearchQuestionDetail {
   id: number;
   questionNo: number;
+  /** 小问序号（0=非小问）；旧响应可能没有 → 可选 */
+  subNo?: number;
   type: string;
   content: string;
   /** 无选项/坏 JSON 为 null（后端 parseOptions 口径）；填空/简答/证明题常为 null。 */

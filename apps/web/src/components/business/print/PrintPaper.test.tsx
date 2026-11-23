@@ -38,6 +38,13 @@ describe('PrintPaper', () => {
     expect(screen.getAllByTestId('print-material-text')).toHaveLength(2);
   });
 
+  it('materialPosition=before 的题中素材印在题干上方', () => {
+    render(<PrintPaper questions={[q({ n: '1', material: '道法材料', materialPosition: 'before' })]} />);
+    const above = screen.getByTestId('print-material-above');
+    const body = document.querySelector('.print-q-body') as HTMLElement;
+    expect(above.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('同 materialUrl 的连续题只印一次', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => '## 文章' }));
     render(<PrintPaper questions={[

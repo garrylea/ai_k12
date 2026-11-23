@@ -500,6 +500,34 @@ describe('QuestionRunner 题面高度比例（非理科 2/3 / 理科 1/3）', ()
   });
 });
 
+describe('QuestionRunner 材料位置（materialPosition）', () => {
+  it('before：材料渲染在题干上方；默认在题干下方', () => {
+    const before: RunnerQuestion[] = [{
+      n: '26(1)', text: '(1) 结合材料', type: 'short_answer',
+      material: '活动一材料', materialPosition: 'before',
+    }];
+    const { unmount } = render(
+      <QuestionRunner questions={before} subjectId={5} draftKeyPrefix="before"
+        variant="embedded" onSubmit={async () => ({ isCorrect: null, method: 'self_assess' })}
+        onFinish={async () => {}} />,
+    );
+    const stemText = screen.getByTestId('question-stem').textContent ?? '';
+    expect(stemText.indexOf('活动一材料')).toBeLessThan(stemText.indexOf('(1) 结合材料'));
+    unmount();
+
+    const after: RunnerQuestion[] = [{
+      n: '1', text: '题面', type: 'short_answer', material: '题中素材',
+    }];
+    render(
+      <QuestionRunner questions={after} subjectId={2} draftKeyPrefix="after"
+        variant="embedded" onSubmit={async () => ({ isCorrect: null, method: 'self_assess' })}
+        onFinish={async () => {}} />,
+    );
+    const stemText2 = screen.getByTestId('question-stem').textContent ?? '';
+    expect(stemText2.indexOf('题面')).toBeLessThan(stemText2.indexOf('题中素材'));
+  });
+});
+
 describe('QuestionRunner 文本作答形态（2026-10-28：理科两栏 / 文字学科单栏）', () => {
   const textQ: RunnerQuestion[] = [{ n: '1', text: '请谈谈你的理解', type: 'short_answer' }];
 

@@ -140,8 +140,10 @@ export default function TargetedRunPage() {
         options: normalizeOptions(e.options),
         material: e.materialText,
         materialUrl: e.materialUrl,
+        materialPosition: e.materialPosition ?? null,
         source: e.source ?? null,
         questionNo: e.questionNo ?? null,
+        subNo: e.subNo ?? null,
       })),
     [entries],
   );
@@ -151,6 +153,7 @@ export default function TargetedRunPage() {
     () => (entries ?? []).map((e) => ({
       n: String(e.questionId), text: e.text,
       material: e.materialText, materialUrl: e.materialUrl,
+      materialPosition: e.materialPosition ?? null,
     })),
     [entries],
   );

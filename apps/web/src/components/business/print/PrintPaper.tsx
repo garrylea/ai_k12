@@ -7,6 +7,7 @@ import {
   preprocessMarkdown,
 } from '@/components/markdown';
 import { MaterialBlock } from '@/components/business/answer/MaterialBlock';
+import { materialSlots } from '@/components/business/answer/materialPlacement';
 import type { RunnerQuestion } from '@/components/business/answer/types';
 
 export interface PrintMeta {
@@ -71,11 +72,13 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
 
       {questions.map((q, i) => {
         const url = q.materialUrl ?? null;
-        const text = q.material?.trim() ? q.material : null;
+        const slots = materialSlots(q);
         const showDoc = url !== null && url !== lastUrl;
-        const showText = text !== null && text !== lastText;
+        // 相邻题材料去重：above/below 共用 lastText，避免同一段材料重复印
+        const showAbove = slots.above !== null && slots.above !== lastText;
+        const showBelow = slots.below !== null && slots.below !== lastText;
         lastUrl = url;
-        lastText = text;
+        lastText = slots.above ?? slots.below;
         const options = optionsOf(q);
         const blank = answerSpaceClass(q.type);
 
@@ -85,6 +88,13 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
             {showDoc && (
               <div className="print-material md-prose" data-testid="print-material">
                 <MaterialBlock url={url} text={null} variant="print" />
+              </div>
+            )}
+
+            {/* 题内素材在题干上方（道法小问，materialPosition='before'） */}
+            {showAbove && (
+              <div className="print-material md-prose" data-testid="print-material-above">
+                <MaterialBlock url={null} text={slots.above} variant="print" />
               </div>
             )}
 
@@ -121,9 +131,9 @@ export const PrintPaper = forwardRef<HTMLDivElement, PrintPaperProps>(function P
             </div>
 
             {/* 题中素材（material_text）在题干下方 */}
-            {showText && (
+            {showBelow && (
               <div className="print-material md-prose" data-testid="print-material-text">
-                <MaterialBlock url={null} text={text} variant="print" />
+                <MaterialBlock url={null} text={slots.below} variant="print" />
               </div>
             )}
 

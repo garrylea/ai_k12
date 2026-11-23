@@ -593,7 +593,7 @@ export default function ResearchQuestionEditDrawer({
     <aside
       ref={drawerRef}
       role="dialog"
-      aria-label={`编辑题目 #${question.questionNo}`}
+      aria-label={`编辑题目 #${question.questionNo}${question.subNo ? `(${question.subNo})` : ''}`}
       data-status={status}
       style={{
         width: !draftOpen && widthPx !== null ? `${widthPx}px` : undefined,
@@ -623,7 +623,7 @@ export default function ResearchQuestionEditDrawer({
       <div className="flex h-full flex-col">
         <header className="flex shrink-0 items-center justify-between px-6 pt-6">
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-          {`编辑题目 #${question.questionNo}`}
+          {`编辑题目 #${question.questionNo}${question.subNo ? `(${question.subNo})` : ''}`}
         </h2>
         <div className="flex items-center gap-1">
         <button

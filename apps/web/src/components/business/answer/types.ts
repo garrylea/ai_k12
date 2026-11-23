@@ -21,7 +21,7 @@ export interface RunnerQuestion {
   /** 小问序号（0/空 = 无小问）；与 questionNo 组成唯一标识 */
   subNo?: number | null;
   /** 材料位置：'before'=题干上方；空=题干下方 */
-  materialPosition?: 'before' | 'after' | null;
+  materialPosition?: string | null;
 }
 
 /** 单题作答记录：onFinish 快照交给父层，由父层决定后续（结果页/错题本等）。 */

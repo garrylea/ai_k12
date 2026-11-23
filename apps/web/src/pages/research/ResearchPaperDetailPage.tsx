@@ -259,7 +259,7 @@ export default function ResearchPaperDetailPage() {
             <tbody style={{ color: 'var(--text-primary)' }}>
               {data.questions.map((q) => (
                 <tr key={q.id} className="border-t border-gray-100">
-                  <td className="px-4 py-3">{q.questionNo}</td>
+                  <td className="px-4 py-3">{q.questionNo}{q.subNo ? `(${q.subNo})` : ''}</td>
                   <td className="px-4 py-3">{q.type}</td>
                   <td className="px-4 py-3">
                     <MarkdownBody text={q.content} />
