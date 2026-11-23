@@ -464,8 +464,8 @@ export function QuestionRunner({
           className="shrink-0 -mt-2 truncate text-xs text-[var(--text-tertiary)]"
         >
           来源：{formatQuestionSource(selfAssess.question.source)}
-          {formatPaperQuestionNo(selfAssess.question.questionNo)
-            ? ` · ${formatPaperQuestionNo(selfAssess.question.questionNo)}`
+          {formatPaperQuestionNo(selfAssess.question.questionNo, (selfAssess.question as RunnerQuestion).subNo)
+            ? ` · ${formatPaperQuestionNo(selfAssess.question.questionNo, (selfAssess.question as RunnerQuestion).subNo)}`
             : ''}
         </p>
       )}
@@ -645,7 +645,7 @@ export function QuestionRunner({
               className="mt-3 truncate text-xs text-[var(--text-tertiary)]"
             >
               来源：{formatQuestionSource(q.source)}
-              {formatPaperQuestionNo(q.questionNo) ? ` · ${formatPaperQuestionNo(q.questionNo)}` : ''}
+              {formatPaperQuestionNo(q.questionNo, q.subNo) ? ` · ${formatPaperQuestionNo(q.questionNo, q.subNo)}` : ''}
             </p>
           )}
           {/* 提示抽屉 */}

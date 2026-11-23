@@ -122,7 +122,7 @@ export default function ExamRunPage() {
         new Set(
           info.questions
             .filter((q) => answeredKeys.has(String(q.questionId)))
-            .map((q) => String(q.questionNo)),
+            .map((q) => paperQuestionKey(q.questionNo, q.subNo)),
         ),
       );
     };

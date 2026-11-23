@@ -98,7 +98,7 @@ export default function ExamResultPage() {
         const missingIds: number[] = [];
         for (const it of res.items) {
           const text = it.explanation ?? it.analysis;
-          base[String(it.questionNo)] = text;
+          base[paperQuestionKey(it.questionNo, it.subNo)] = text;
           // 客观题答错 + 自评做错的主观题都要补拉解析
           if (
             text == null &&
@@ -119,7 +119,7 @@ export default function ExamResultPage() {
               const next = { ...prev };
               for (const it of res.items) {
                 const v = fetched[it.questionId];
-                if (v != null && next[String(it.questionNo)] == null) next[String(it.questionNo)] = v;
+                if (v != null && next[paperQuestionKey(it.questionNo, it.subNo)] == null) next[paperQuestionKey(it.questionNo, it.subNo)] = v;
               }
               return next;
             });
@@ -215,7 +215,7 @@ export default function ExamResultPage() {
   // 参考答案映射（key = q.n）：主观题自评时对照展示
   const referenceAnswers = useMemo(() => {
     const map: Record<string, string | null> = {};
-    for (const it of items ?? []) map[String(it.questionNo)] = it.answer ?? null;
+    for (const it of items ?? []) map[paperQuestionKey(it.questionNo, it.subNo)] = it.answer ?? null;
     return map;
   }, [items]);
 
@@ -246,7 +246,7 @@ export default function ExamResultPage() {
     });
     setItems((prev) =>
       (prev ?? []).map((it) =>
-        String(it.questionNo) === n ? { ...it, selfAssessment: assessment, needsSelfAssessment: false } : it,
+        paperQuestionKey(it.questionNo, it.subNo) === n ? { ...it, selfAssessment: assessment, needsSelfAssessment: false } : it,
       ),
     );
   };
