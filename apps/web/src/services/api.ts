@@ -1528,6 +1528,10 @@ export interface TargetedPracticeQuestion {
   materialText: string | null;
   /** 文章文档（Markdown）地址；无文章为 null */
   materialUrl: string | null;
+  /** 小问序号（0=非小问）；旧交接体可能没有 → 可选 */
+  subNo?: number;
+  /** 材料位置：'before'=题干上方；null/缺省=题干下方 */
+  materialPosition?: string | null;
   /** 题目来源（questions.source）；旧交接体可能没有 → 可选 */
   source?: string | null;
   /** 该题在原试卷中的题号（paper_questions.question_no）；旧交接体/无卷关联可能没有 → 可选 */
@@ -2295,6 +2299,8 @@ export type ExamQuestionOptions = Array<{ label: string; text: string }> | strin
 export interface ExamQuestion {
   questionId: number;
   questionNo: number;
+  /** 小问序号（0=非小问）；旧响应可能没有 → 可选 */
+  subNo?: number;
   text: string;
   type: string;
   options: ExamQuestionOptions;
@@ -2302,6 +2308,8 @@ export interface ExamQuestion {
   materialText: string | null;
   /** 文章文档（Markdown）地址；无文章为 null */
   materialUrl: string | null;
+  /** 材料位置：'before'=题干上方；null=题干下方 */
+  materialPosition?: string | null;
 }
 
 /** 试卷详情：题目元数据 + 推荐时长（不含 answer/explanation，防答案泄露）。 */
@@ -2352,6 +2360,8 @@ export interface ExamSummary {
 export interface ExamResultItem {
   questionId: number;
   questionNo: number;
+  /** 小问序号（0=非小问）；旧响应可能没有 → 可选 */
+  subNo?: number;
   text: string;
   type: string;
   options: ExamQuestionOptions;
@@ -2359,6 +2369,8 @@ export interface ExamResultItem {
   materialText: string | null;
   /** 文章文档（Markdown）地址；无文章为 null */
   materialUrl: string | null;
+  /** 材料位置：'before'=题干上方；null=题干下方 */
+  materialPosition?: string | null;
   answerText: string | null;
   /** null = 主观题待自评 */
   isCorrect: number | null;
@@ -4044,6 +4056,8 @@ export interface PracticeHistoryQuestion {
   materialText: string | null;
   /** 文章文档（Markdown）地址；无文章为 null */
   materialUrl: string | null;
+  /** 材料位置：'before'=题干上方；null=题干下方 */
+  materialPosition?: string | null;
   questionAnswer: string | null;
   questionAnalysis: string | null;
   /** 题目来源（questions.source）：专项记录页展示，便于溯源。 */
