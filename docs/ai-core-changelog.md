@@ -17,11 +17,11 @@
 - `split_page` 末尾新增可选钩子 `expand_subquestions`（`getattr`，内核无学科判断）；`questions` 加 `sub_no TINYINT UNSIGNED NOT NULL DEFAULT 0`、`material_position VARCHAR(8) NULL`（迁移 `2026-11-23_politics_subquestion.sql`，schema.sql 同步）。
 - 入库按 `(paper_id, group_order, sub_no)` 匹配；重排 `ORDER BY group_order, sub_no`；查重按 `(question_no, sub_no)`；`--reload-paper` 一条命令删旧题+考试作答后重导（非交互终端拒绝执行）。
 - 补题链路：扫描 issue/manual_fix 记录带 `sub_no`，`apply_fixes` 定位/extracted 回写按 `(group_order, sub_no)`；同号多小问且记录缺 `sub_no` 时**拒绝盲写**。
-- 前端：`materialPosition='before'` 材料渲染在题干上方（作答/结果/历史/打印 + 打印独立 above 块）；题号显示 `26(1)`，考试/结果页的作答键改用 `paperQuestionKey`（同题号小问不再串题）。
+- 前端：`materialPosition='before'` 材料渲染在题干上方（作答/结果/历史/打印 + 打印独立 above 块）；题号显示 `26(1)`，考试/结果页的作答/解析/自评键全部改用 `paperQuestionKey`（审查时发现续考恢复、解析、参考答案、自评仍有 5 处按纯题号取值，已一并修掉，否则两个小问串数据）。
 
 **数据**：35 中卷 28 → **33 题**（26=8/4、27=6/9/4、28=6/3/10；均 `material_position='before'`、`is_active=1`），`paper_questions` 33 行、`question_no=26` 两行；重导前备份 `_bak_35_q/_bak_35_pq/_bak_35_ea`，考试作答 28 条已清（session 862 空壳删除）。海淀卷**未动**（sub_no=0、材料仍在下方）。扫描不再把拆出的小问报成「小问从 (2) 起」。
 
-**验证**：同一素材上新旧代码快照对比**仅 35 中道法变化**（28→33），语文/数学/物理/化学零差异；data-refinery 2207 passed / 10 skipped，server 2882 passed，web 1934 passed + build。注意：`split_snapshot` 原基线本身已滞后于素材（旧代码 vs 旧基线 58 处，属存量漂移），本次已用旧代码 worktree 核对后重写基线。
+**验证**：同一素材上新旧代码快照对比**仅 35 中道法变化**（28→33），语文/数学/物理/化学零差异；data-refinery 2208 passed / 10 skipped，server 2882 passed，web 1934 passed + build。注意：`split_snapshot` 原基线本身已滞后于素材（旧代码 vs 旧基线 58 处，属存量漂移），本次已用旧代码 worktree 核对后重写基线。
 
 **遗留**：spec 7.7 阶段 B（扫描/补题身份键全面升级为三元组）未做；当前道法小问补题依赖 `sub_no` 记录，缺 `sub_no` 的旧记录会被守卫拒绝。
 
