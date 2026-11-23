@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS questions (
   subject_id BIGINT NOT NULL,
   group_id VARCHAR(50) DEFAULT NULL,
   group_order SMALLINT DEFAULT NULL,
+  sub_no TINYINT UNSIGNED NOT NULL DEFAULT 0,        -- 小问序号（0=非小问；2026-11-23）
   type VARCHAR(20) NOT NULL,
   difficulty SMALLINT NOT NULL,
   full_score SMALLINT DEFAULT NULL,
@@ -233,6 +234,7 @@ CREATE TABLE IF NOT EXISTS questions (
   material_text TEXT DEFAULT NULL,
   material_url TEXT DEFAULT NULL,
   material_method VARCHAR(8) DEFAULT NULL,          -- 材料抽取方式：rule|llm|manual；NULL=未抽取（2026-11-02）
+  material_position VARCHAR(8) DEFAULT NULL,        -- 材料显示位置：before=题干上方；NULL=题干下方（2026-11-23）
   grade_band VARCHAR(20) DEFAULT NULL,
   source VARCHAR(200) DEFAULT NULL,
   source_year SMALLINT DEFAULT NULL,
