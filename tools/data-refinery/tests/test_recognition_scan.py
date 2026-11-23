@@ -578,3 +578,13 @@ class TestRedoPrune:
         records = [{"source": "卷A", "group_order": 3, "kind": "incomplete_content"}]
         kept, n = R._prune_records_for_redo(records, [])
         assert n == 0 and kept == records
+
+
+def test_issue_carries_sub_no(tmp_path):
+    md = _md(tmp_path, "26. 甲\n")
+    rows = [
+        {"group_order": 26, "sub_no": 1, "content": "命题人：张三", "type": "short_answer"},
+        {"group_order": 26, "sub_no": 2, "content": "命题人：李四", "type": "short_answer"},
+    ]
+    issues = R.scan_paper("卷A", Path("道法/x/卷A"), md, rows, None, [])
+    assert {i["sub_no"] for i in issues if i["kind"] == "junk_question"} == {1, 2}

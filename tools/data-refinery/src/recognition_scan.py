@@ -288,10 +288,12 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
     issues: list[dict] = []
 
     def add(no: int | None, kind: str, reasons: list[str], excerpt: str = "", **extra):
+        sub_no = extra.pop("sub_no", by_no.get(no, {}).get("sub_no", 0))
         issues.append({
             "source": source,
             "rel_path": str(rel_path),
             "group_order": no,
+            "sub_no": sub_no,
             "kind": kind,
             "reasons": reasons,
             "excerpt": _excerpt(excerpt),
@@ -357,7 +359,7 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
         body = (r.get("content") or "").strip()
         if body and len(body) <= 60 and _JUNK_RE.search(body) and not r.get("options"):
             add(r.get("group_order"), "junk_question",
-                ["content_looks_like_page_chrome"], body)
+                ["content_looks_like_page_chrome"], body, sub_no=r.get("sub_no", 0))
 
     # ③ 修复步骤删过内容：把被删片段留档（原文还能在这里找回）
     for rec in labeling_issues:
@@ -442,7 +444,7 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
                 re.match(r"body_(contains|belongs_to)_stem_", x) for x in reasons)
                 else "incomplete_content")
             add(no, kind, reasons, full_text, suspect_group_order=suspect,
-                content_sig=content_sig(body))
+                content_sig=content_sig(body), sub_no=r.get("sub_no", 0))
 
     # ⑥ 题型与同大题不一致：选择题区里冒出「简答题」= 选项丢了（2026-11-01 人大附题9/10：
     #    单项选择 14 题里 12 题 choice，只有 9/10 是 short_answer，实际是图片选项没拆出来）
@@ -500,11 +502,13 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
             continue
         reason = f"options_{len(opts)}of{min_options}"
         # 同一题已经有内容层问题时，把「选项缺失」并进那条记录，不重复占一条
-        existing = next((i for i in issues if i.get("group_order") == no), None)
+        existing = next((i for i in issues if i.get("group_order") == no
+                         and i.get("sub_no") == r.get("sub_no", 0)), None)
         if existing is not None:
             existing.setdefault("reasons", []).append(reason)
             continue
-        add(no, "options_incomplete", [reason], r.get("content") or "")
+        add(no, "options_incomplete", [reason], r.get("content") or "",
+            sub_no=r.get("sub_no", 0))
 
     # ⑨ 答案缺失：以题库为准（答案在第 6 步才回填，JSONL 里的不一定是最新）。
     #    只在「md 自带答案区」时检查：答案靠第 6 步答案回填的卷，这里本来就会空，
@@ -517,7 +521,8 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
                 continue
             if (db_answers.get(no) or "").strip():
                 continue
-            add(no, "answer_missing", ["answer_empty"], r.get("content") or "")
+            add(no, "answer_missing", ["answer_empty"], r.get("content") or "",
+                sub_no=r.get("sub_no", 0))
 
     return issues
 

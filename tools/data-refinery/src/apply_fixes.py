@@ -125,13 +125,21 @@ def _patch_extracted(rec: dict, *, content: str, answer: str,
 
     rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
     go = int(rec["group_order"])
-    pos = next((i for i, r in enumerate(rows) if int(r.get("group_order") or -1) == go), None)
+    sub_no = int(rec.get("sub_no") or 0)
+
+    def _same_number(r: dict) -> bool:
+        return (int(r.get("group_order") or -1) == go
+                and int(r.get("sub_no") or 0) == sub_no)
+
+    pos = next((i for i, r in enumerate(rows) if _same_number(r)), None)
     existing = rows[pos] if pos is not None else None
     # 题型/难度以原行为准：无选项不等于简答题——填空/计算/证明题同样没有选项，
     # 补内容时若按「有选项=choice、否则 short_answer」重算，会把填空题降级
     # （2026-11-19 北师大实验第 14 题：补图后变 short_answer，被扫描报题型不一致）。
     payload = {
         "group_order": go,
+        "sub_no": sub_no,
+        "material_position": (existing or {}).get("material_position"),
         "type": rec.get("expected_type") or (
             "choice" if options else (existing or {}).get("type") or "short_answer"),
         "difficulty": (existing or {}).get("difficulty") or 2,
@@ -147,7 +155,9 @@ def _patch_extracted(rec: dict, *, content: str, answer: str,
     if post_material_text:
         payload["_post_material_text"] = post_material_text
     if pos is None:
-        pos = next((i for i, r in enumerate(rows) if int(r.get("group_order") or 0) > go), len(rows))
+        pos = next((i for i, r in enumerate(rows)
+                    if (int(r.get("group_order") or 0), int(r.get("sub_no") or 0))
+                    > (go, sub_no)), len(rows))
         sibling = rows[pos] if pos < len(rows) else (rows[-1] if rows else {})
         rows.insert(pos, {
             "subject_id": sibling.get("subject_id") or subject_code_for_parts(Path(rel).parts, default=""),
@@ -194,9 +204,11 @@ def _patch_extracted_answer(rec: dict, answer: str, output_dir: Path) -> None:
         return
     rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
     go = int(rec["group_order"])
+    sub_no = int(rec.get("sub_no") or 0)
     changed = False
     for row in rows:
-        if int(row.get("group_order") or -1) == go:
+        if (int(row.get("group_order") or -1) == go
+                and int(row.get("sub_no") or 0) == sub_no):
             row["answer"] = answer
             changed = True
             break
@@ -250,15 +262,23 @@ def _paper_row(cur, rel_path: str, source: str) -> tuple[int, int] | None:
     return None
 
 
-def _existing_question(cur, paper_id: int, group_order: int) -> int | None:
+def _no_label(go: int, sub_no: int | None) -> str:
+    """题号展示：26(1) / 26。"""
+    return f"{go}({sub_no})" if sub_no else str(go)
+
+
+def _existing_question(cur, paper_id: int, group_order: int, sub_no: int = 0) -> int | None:
     cur.execute(
-        "SELECT question_id FROM paper_questions WHERE paper_id=%s AND group_order=%s",
-        (paper_id, group_order))
+        "SELECT pq.question_id FROM paper_questions pq "
+        "JOIN questions q ON q.id = pq.question_id "
+        "WHERE pq.paper_id=%s AND pq.group_order=%s AND q.sub_no=%s",
+        (paper_id, group_order, sub_no))
     row = cur.fetchone()
     return int(row[0]) if row else None
 
 
-def _orphan_question(cur, paper_id: int, source: str, group_order: int) -> int | None:
+def _orphan_question(cur, paper_id: int, source: str, group_order: int,
+                     sub_no: int = 0) -> int | None:
     """同一份卷、同一题号、当前没挂在卷上的旧行（人工补的第一版 / 上一轮导入的残行）。
 
     为什么要找它：题号已经存在于库、只是关联被重导摘掉了。这时必须**更新那一行**，
@@ -267,19 +287,25 @@ def _orphan_question(cur, paper_id: int, source: str, group_order: int) -> int |
     """
     cur.execute(
         "SELECT q.id FROM questions q "
-        "WHERE q.source=%s AND q.group_order=%s "
+        "WHERE q.source=%s AND q.group_order=%s AND q.sub_no=%s "
         "  AND NOT EXISTS (SELECT 1 FROM paper_questions pq WHERE pq.question_id=q.id) "
         "ORDER BY q.id LIMIT 1",
-        (source, group_order))
+        (source, group_order, sub_no))
     row = cur.fetchone()
     return int(row[0]) if row else None
 
 
 def _duplicate_numbers(cur, paper_id: int) -> list[int]:
-    """同一份卷里挂了两个以上 question_no 的题号（组卷会出现同号题，必须为 0）。"""
+    """同一份卷里挂了两个以上 question_no 的题号（组卷会出现同号题，必须为 0）。
+
+    小问共用卷面题号是合法的，按 (question_no, sub_no) 判重。
+    """
     cur.execute(
-        "SELECT question_no FROM paper_questions WHERE paper_id=%s "
-        "GROUP BY question_no HAVING COUNT(*) > 1 ORDER BY question_no",
+        "SELECT pq.question_no FROM paper_questions pq "
+        "JOIN questions q ON q.id = pq.question_id "
+        "WHERE pq.paper_id=%s "
+        "GROUP BY pq.question_no, q.sub_no HAVING COUNT(*) > 1 "
+        "ORDER BY pq.question_no",
         (paper_id,))
     return [int(r[0]) for r in cur.fetchall()]
 
@@ -291,11 +317,15 @@ def _renumber(cur, paper_id: int) -> int:
     所以补回缺题后题号会对上（而不是把空缺挤掉、整卷顺序错位）。
     """
     cur.execute(
-        "UPDATE paper_questions pq JOIN ("
-        "  SELECT question_id, ROW_NUMBER() OVER (ORDER BY group_order, question_no) rn"
-        "  FROM paper_questions WHERE paper_id=%s) t"
+        "UPDATE paper_questions pq "
+                    "JOIN questions q ON q.id = pq.question_id "
+                    "JOIN ("
+        "  SELECT pq2.question_id, "
+        "         ROW_NUMBER() OVER (ORDER BY q2.group_order, q2.sub_no, pq2.question_no) rn"
+        "  FROM paper_questions pq2 JOIN questions q2 ON q2.id = pq2.question_id"
+        "  WHERE pq2.paper_id=%s) t"
         " ON t.question_id = pq.question_id "
-        "SET pq.question_no = COALESCE(pq.group_order, t.rn) "
+        "SET pq.question_no = COALESCE(q.group_order, t.rn) "
         "WHERE pq.paper_id=%s",
         (paper_id, paper_id))
     return cur.rowcount
@@ -649,19 +679,28 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         return "跳过：库里没有这份卷（先跑 import_cli 入库）"
     paper_id, subject_id = found
     go = int(rec["group_order"])
-    qid = _existing_question(cur, paper_id, go)
+    sub_no = int(rec.get("sub_no") or 0)
+    qid = _existing_question(cur, paper_id, go, sub_no)
     orphan = False
     if qid is None:
         # 题号在库、只是关联被摘掉（重导/旧版补题）：更新那一行，别新建同号题
-        qid = _orphan_question(cur, paper_id, rec.get("source", ""), go)
+        qid = _orphan_question(cur, paper_id, rec.get("source", ""), go, sub_no)
         orphan = qid is not None
+    if qid is None and not sub_no:
+        # 同号多小问时，没有 sub_no 的旧记录无法确定目标：宁可拒写，不能写到另一个小问
+        cur.execute(
+            "SELECT COUNT(*) FROM paper_questions pq "
+            "JOIN questions q ON q.id = pq.question_id "
+            "WHERE pq.paper_id=%s AND pq.group_order=%s", (paper_id, go))
+        if int(cur.fetchone()[0]) > 1:
+            return f"跳过：第{go}题有多个小问，记录缺少 sub_no，无法确定写哪一条"
 
     # 只补答案：不碰题面/材料，必须放在材料归属护栏之前。旧版 answer_only 记录
     # 曾复制 material_text，若先过护栏会被误拦（2026-11-21 实测缺口）。
     if rec.get("answer_only"):
         answer = (rec.get("answer") or "").strip()
         if not apply:
-            return (f"只补答案：paper={paper_id} 第{go}题"
+            return (f"只补答案：paper={paper_id} 第{_no_label(go, sub_no)}题"
                     f"（question_id={qid or '—'}）· 题面不动")
         if qid is None:
             return "跳过：题库里找不到这道题，无法只补答案"
@@ -671,7 +710,7 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         _patch_extracted_answer(
             rec, answer, output_dir or RefineryConfig.from_env().output_dir,
         )
-        return f"更新答案：paper={paper_id} 第{go}题 -> question_id={qid}"
+        return f"更新答案：paper={paper_id} 第{_no_label(go, sub_no)}题 -> question_id={qid}"
 
     # ---- 材料路由：按「内容实际存在哪」写入正确位置，不再让人选存储通道 ----
     # 语文材料有两种载位：外置文章（material_url）与题内素材（material_text）。
@@ -707,7 +746,7 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
 
     if not apply:
         # 预览要能判断"内容对不对"，只报更新/新增没用（用户 2026-10-31 指出）
-        detail = (f"{action}：paper={paper_id} 第{go}题（question_id={qid or '—'}）"
+        detail = (f"{action}：paper={paper_id} 第{_no_label(go, sub_no)}题（question_id={qid or '—'}）"
                   f" · 新内容 {len(rec.get('content') or '')} 字{url_note}")
         if qid:
             cur.execute("SELECT CHAR_LENGTH(content) FROM questions WHERE id=%s", (qid,))
@@ -932,11 +971,11 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
             "UPDATE questions SET content=%s, options=%s, "
             "type=COALESCE(%s, IF(%s,'choice',type)), "
             "answer=COALESCE(NULLIF(%s,''), answer), material_text=%s, "
-            "material_method=%s, content_hash=%s, material_url=%s, is_active=1 WHERE id=%s",
+            "material_method=%s, content_hash=%s, material_url=%s, sub_no=%s, is_active=1 WHERE id=%s",
             (content,
              json.dumps(options, ensure_ascii=False) if options else None,
              forced_type, 1 if options else 0,
-             answer, material_text, method_value, chash, new_url, qid))
+             answer, material_text, method_value, chash, new_url, sub_no, qid))
         if orphan:
             # 旧行没挂在卷上：把卷内的题号关系补回来（内容已更新，不新建行）
             cur.execute(
@@ -957,11 +996,11 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
                 "UPDATE questions SET content=%s, options=%s, "
                 "type=COALESCE(%s, IF(%s,'choice',type)), "
                 "answer=COALESCE(NULLIF(%s,''), answer), material_text=%s, "
-                "material_method=%s, is_active=1, material_url=%s WHERE id=%s",
+                "material_method=%s, is_active=1, material_url=%s, sub_no=%s WHERE id=%s",
                 (content,
                  json.dumps(options, ensure_ascii=False) if options else None,
                  forced_type, 1 if options else 0,
-                 answer, material_text, method_value, new_url, qid))
+                 answer, material_text, method_value, new_url, sub_no, qid))
             cur.execute(
                 "INSERT IGNORE INTO paper_questions "
                 "(paper_id, question_id, question_no, group_order) VALUES (%s,%s,%s,%s)",
@@ -969,11 +1008,12 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         else:
             action = "新增"
             cur.execute(
-                "INSERT INTO questions (subject_id, group_order, type, difficulty, content, options, "
+                "INSERT INTO questions (subject_id, group_order, sub_no, type, difficulty, content, options, "
                 "answer, material_text, material_method, grade_band, source, source_year, "
                 "content_hash, is_active, material_url) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s)",
-                (subject_id, go, forced_type or ("choice" if options else "short_answer"), 2,
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s)",
+                (subject_id, go, sub_no,
+                 forced_type or ("choice" if options else "short_answer"), 2,
                  content,
                  json.dumps(options, ensure_ascii=False) if options else None,
                  answer, material_text, method_value,
@@ -993,7 +1033,7 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
     # 记下写入时的内容哈希：下次重导若把这道题的内容换回旧的，能立刻发现并重放
     rec["applied_hash"] = chash
     suffix = f" · {article_note}" if article_note else ""
-    return f"{action}：paper={paper_id} 第{go}题 -> question_id={qid}{suffix}"
+    return f"{action}：paper={paper_id} 第{_no_label(go, sub_no)}题 -> question_id={qid}{suffix}"
 
 
 def _replay_reason(cur, rec: dict) -> str | None:
@@ -1016,7 +1056,8 @@ def _replay_reason(cur, rec: dict) -> str | None:
     cur.execute(
         "SELECT q.id, q.is_active, q.content_hash FROM paper_questions pq "
         "JOIN questions q ON q.id = pq.question_id "
-        "WHERE pq.paper_id=%s AND pq.group_order=%s", (found[0], go))
+        "WHERE pq.paper_id=%s AND pq.group_order=%s AND q.sub_no=%s",
+        (found[0], go, int(rec.get("sub_no") or 0)))
     row = cur.fetchone()
     if not row:
         return "库中已无此题"

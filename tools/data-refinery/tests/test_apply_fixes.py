@@ -18,7 +18,7 @@ class FakeCursor:
                  existing_active=1, hash_row=None, existing_hash=None, orphan_id=None,
                  material_url=None, siblings=None, existing_options_json=None,
                  existing_material_text=None, siblings_by_paper=None,
-                 paper_question_rows=None):
+                 paper_question_rows=None, group_order_count=1):
         self.sql: list[tuple[str, tuple | None]] = []
         self.paper = paper                # (paper_id, subject_id)
         self.existing = existing          # question_id 或 None
@@ -33,6 +33,7 @@ class FakeCursor:
         self.siblings_by_paper = siblings_by_paper
         self.paper_question_rows = paper_question_rows
         self.renumber_rows = renumber_rows or []
+        self.group_order_count = group_order_count
         self.rowcount = 1
         self.lastrowid = 777
         self._rows: list = []
@@ -43,7 +44,9 @@ class FakeCursor:
             self._rows = [self.paper] if self.paper else []
         elif "SELECT q.id FROM questions q WHERE q.source" in sql:
             self._rows = [(self.orphan_id,)] if self.orphan_id else []
-        elif "SELECT question_id FROM paper_questions" in sql:
+        elif "SELECT COUNT(*) FROM paper_questions pq" in sql:
+            self._rows = [(self.group_order_count,)]
+        elif "SELECT pq.question_id FROM paper_questions pq" in sql:
             self._rows = [(self.existing,)] if self.existing else []
         elif "SELECT q.id, q.is_active, q.content_hash FROM paper_questions" in sql:
             self._rows = ([(self.existing, self.existing_active, self.existing_hash)]
@@ -109,8 +112,9 @@ def test_inserts_new_question_when_group_order_absent():
     assert msg.startswith("新增")
     # 题号、题干、选项 JSON 都要落到 INSERT 参数里
     assert inserts[0][1] == 28
-    assert inserts[0][4] == "题干"
-    assert '"A"' in inserts[0][5]
+    assert inserts[0][2] == 0          # sub_no
+    assert inserts[0][5] == "题干"
+    assert '"A"' in inserts[0][6]
     # 新题必须挂到卷上
     assert any("INSERT IGNORE INTO paper_questions" in sql for sql, _ in cur.sql)
 
@@ -367,7 +371,7 @@ def test_write_back_keeps_raw_md_refs(tmp_path):
     row = next(r for r in written if r["group_order"] == 4)
     assert "images/q4.jpg" in row["content"]
     sql, args = next((s, a) for s, a in cur.sql if s.startswith("INSERT INTO questions"))
-    assert "questions/physics/" in args[4] and "images/q4.jpg" not in args[4]
+    assert "questions/physics/" in args[5] and "images/q4.jpg" not in args[5]
 
 
 # ---------- 已入库的补题被重导冲掉：自动重放判据（2026-11-01）----------
@@ -604,7 +608,7 @@ def test_legacy_inline_without_url_is_written(tmp_path, monkeypatch):
     msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
     assert "跳过" not in msg
     ins = [a for sql, a in cur.sql if sql.startswith("INSERT INTO questions")]
-    assert ins and ins[0][8] == "manual"             # material_method
+    assert ins and ins[0][9] == "manual"             # material_method
 
 
 def test_hash_uses_material_url(tmp_path, monkeypatch):
@@ -1083,3 +1087,36 @@ def test_publish_sources_reloads_db_from_published(monkeypatch):
     assert "--load-cards" in load_argv, "回灌必须用增量，绝不能全量 delete"
     assert "--questions-only" in load_argv
     assert "--file" in load_argv and src in load_argv
+
+
+def test_apply_refuses_ambiguous_group_order_without_sub_no():
+    """同号多小问、记录没有 sub_no → 不写库，返回跳过原因。"""
+    cur = FakeCursor(paper=(862, 3), existing=None, orphan_id=None,
+                     group_order_count=2)
+    rec = {"source": "35中", "rel_path": "道法/初中/first/2026/35中",
+           "group_order": 26, "content": "补的题干", "answer": ""}
+    msg = A.apply_record(cur, rec, apply=True)
+    assert "多个小问" in msg
+    assert not any(sql.startswith("INSERT INTO questions") for sql, _ in cur.sql)
+
+
+def test_patch_extracted_matches_sub_no(tmp_path):
+    """同号两条小问时，补题只改 rec.sub_no 那一条。"""
+    out = tmp_path / "output"
+    rel, src = "道法/初中/first/2026/卷A", "卷A"
+    p = out / "extracted" / rel / f"{src}.jsonl"
+    p.parent.mkdir(parents=True)
+    p.write_text(
+        json.dumps({"group_order": 26, "sub_no": 1, "content": "旧1", "answer": ""},
+                   ensure_ascii=False) + "\n"
+        + json.dumps({"group_order": 26, "sub_no": 2, "content": "旧2", "answer": ""},
+                     ensure_ascii=False) + "\n",
+        encoding="utf-8")
+
+    _impl._patch_extracted(
+        {"rel_path": rel, "source": src, "group_order": 26, "sub_no": 2},
+        content="新2", answer="", material_text=None, options=None, output_dir=out)
+
+    rows = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert [r["content"] for r in rows] == ["旧1", "新2"]
+    assert [r["sub_no"] for r in rows] == [1, 2]

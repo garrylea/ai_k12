@@ -1093,7 +1093,7 @@ def _print_context(issue: dict, index: int | None = None, total: int | None = No
     c = console()
     kind = _KIND_TEXT.get(issue.get("kind"), issue.get("kind") or "识别问题")
     counter = f"[{index}/{total}]" if index and total else ""
-    no_text = f"第 {issue['group_order']} 题"
+    no_text = f"第 {_issue_no(issue)} 题"
     tail = f"  {c.paint(counter, 'grey')}" if counter else ""
     c.write("")
     c.write(f"{c.paint(no_text, 'bold')}{c.paint(' · ' + kind, 'cyan')}{tail}")
@@ -1214,6 +1214,7 @@ def _ask_answer_only(issue: dict, target_no: int, original: dict,
         "source": issue["source"],
         "rel_path": issue["rel_path"],
         "group_order": target_no,
+        "sub_no": issue.get("sub_no", 0),
         "content": original.get("content") or "",
         "options": original.get("options"),
         # 只补答案时不碰材料：复制原 material_text 会让答案修正被材料归属判定误拦
@@ -1230,6 +1231,12 @@ def _ask_answer_only(issue: dict, target_no: int, original: dict,
         "status": "ready",
         "applied": False,
     }]
+
+
+def _issue_no(issue: dict) -> str:
+    """题号展示：26(1) / 26（扫描 issue 带 sub_no）。"""
+    sub = issue.get("sub_no") or 0
+    return f"{issue['group_order']}({sub})" if sub else str(issue["group_order"])
 
 
 def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
@@ -1344,6 +1351,7 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                         "source": issue["source"],
                         "rel_path": issue["rel_path"],
                         "group_order": target,
+                        "sub_no": issue.get("sub_no", 0),
                         "content": row.get("content") or "",
                         "options": row.get("options"),
                         "answer": row.get("answer") or "",
@@ -1421,6 +1429,7 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 "source": issue["source"],
                 "rel_path": issue["rel_path"],
                 "group_order": target,
+                "sub_no": issue.get("sub_no", 0),
                 "content": stem.strip(),
                 "options": options,
                 "answer": answer,
@@ -1454,7 +1463,7 @@ def _ask_verdict(issue: dict) -> str:
     c.legend([("1", "有问题，我来修正"), ("2", "没有问题，保持原样（不写库）"),
               ("s", "跳过，下次再问"), ("q", "退出")])
     while True:
-        c.prompt(f"第 {issue['group_order']} 题你看来有问题吗 › ")
+        c.prompt(f"第 {_issue_no(issue)} 题你看来有问题吗 › ")
         raw = _read_line()
         if raw is None:                 # 输入流结束：当作跳过，别卡死
             return "skip"
@@ -1813,6 +1822,7 @@ def _ask_slots(issue: dict, paper_md_dir: Path) -> list[dict]:
             "source": issue["source"],
             "rel_path": issue["rel_path"],
             "group_order": issue["group_order"],
+            "sub_no": issue.get("sub_no", 0),
             "content": original.get("content") or "",
             "options": original.get("options"),
             # 带回原题答案：_patch_extracted 会把 answer 写回 extracted，留空会抹掉
@@ -1880,7 +1890,7 @@ def _ask_slots(issue: dict, paper_md_dir: Path) -> list[dict]:
         mark_issue(issue["source"], issue["group_order"], "resolved",
                    note="人工确认无问题，未改动", kind=issue.get("kind"),
                    verdict="no_change", content_sig=issue.get("content_sig"))
-        c.ok(f"第 {issue['group_order']} 题已标记「确认无问题」，题库未改动")
+        c.ok(f"第 {_issue_no(issue)} 题已标记「确认无问题」，题库未改动")
         return []
 
     # 整题重录时若粘的是文章，_ask_one 已自动转成 material_target=article；
@@ -1939,7 +1949,7 @@ def _ask(issue: dict, paper_md_dir: Path,
                        note="人工确认无问题，未改动", kind=issue.get("kind"),
                        verdict="no_change",
                        content_sig=issue.get("content_sig"))
-            console().ok(f"第 {issue['group_order']} 题已标记「确认无问题」，题库未改动")
+            console().ok(f"第 {_issue_no(issue)} 题已标记「确认无问题」，题库未改动")
             return []
         if verdict == "skip":
             return []
@@ -2114,7 +2124,7 @@ def _review_loop(todo: list[dict], all_issues: list[dict], out_dir: Path,
             continue
         paper_md_dir = Path(issue["md"]).parent if issue.get("md") else None
         if paper_md_dir is None:
-            c.warn(f"第 {issue['group_order']} 题缺少 md 路径，已跳过")
+            c.warn(f"第 {_issue_no(issue)} 题缺少 md 路径，已跳过")
             result["skipped"] += 1
             continue
         records = _ask(issue, paper_md_dir, n, total_now)
@@ -2266,6 +2276,7 @@ def review_by_numbers(subject: str | None, file: str | None,
                 "source": paper["source"],
                 "rel_path": str(paper["rel_path"]),
                 "group_order": no,
+                "sub_no": 0,
                 "kind": "manual_override",
                 "reasons": ["用户主动指定重录"],
                 "md": str(md_path),
