@@ -221,9 +221,13 @@ def _print_split_preview(source: MarkdownSource, *, detailed: bool) -> None:
         answer = _preview_text(q.answer or "", head=24)
         material_mark = "材料✓" if (q.material_text or "").strip() else "材料✗"
         body = _preview_text(q.content or "", head=40, tail=10)
-        no = f"{q.group_order:>3}" if q.group_order is not None else "  ?"
-        print(f"    {no}  选{len(opts)}  答：{answer or '—'}  {material_mark}  │ {body}",
-              flush=True)
+        if q.sub_no:
+            no = f"{q.group_order}({q.sub_no})"
+        else:
+            no = f"{q.group_order:>3}" if q.group_order is not None else "  ?"
+        score = f"{q.score}分" if q.score else ""
+        print(f"    {no}  {score:<4}选{len(opts)}  答：{answer or '—'}  "
+              f"{material_mark}  │ {body}", flush=True)
 
 
 def _last_lesson_id(jsonl_path: Path) -> str | None:

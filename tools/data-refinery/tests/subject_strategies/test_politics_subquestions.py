@@ -1,6 +1,9 @@
 """道法小问拆分：26/27/28 的结构、材料归属、分值缺失仍拆。"""
 
-from question_splitter import RawQuestion
+from pathlib import Path
+
+from question_splitter import RawQuestion, split_page
+from subject_strategies import get_strategy
 from subject_strategies.politics_subquestions import expand
 
 
@@ -116,3 +119,12 @@ def test_existing_material_position_is_set_for_single_question():
     assert len(out) == 1
     assert out[0].material_text.startswith("（10分）阅读材料")
     assert out[0].material_position == "before"
+
+
+def test_split_page_applies_politics_expansion():
+    qs = split_page("26. " + Q26, Path("35中.md"), strategy=get_strategy("politics"))
+    assert [(q.group_order, q.sub_no) for q in qs] == [(26, 1), (26, 2)]
+
+
+def test_generic_strategy_has_no_subquestion_hook():
+    assert not hasattr(get_strategy("math"), "expand_subquestions")

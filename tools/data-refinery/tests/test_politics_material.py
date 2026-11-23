@@ -1,7 +1,8 @@
-"""道法材料题切分：材料 + 小问编号 / 材料 + 末句设问 两种形态。"""
+"""道法材料题：末句设问规则 + 不再复用物化 split_material。"""
 
-from subject_strategies.material_split import split_tail_question_rule
+from question_splitter import RawQuestion
 from subject_strategies.politics import PoliticsStrategy
+from subject_strategies.politics_subquestions import expand, split_tail_question_rule
 
 MATERIAL = (
     "【研学目的】通过参观中国共产党历史展览馆，依托红色资源上一堂“行走的思政课”，"
@@ -14,26 +15,10 @@ MATERIAL = (
     "推荐理由：因为这份责任书是党团结带领人民创造新时代中国特色社会主义伟大成就的一个缩影。"
 )
 
-SUBQ_TAIL = "(1) 参考示例, 请从展品一、展品二、展品三中任选两件最触动你的展品, 完成推荐理由。(8 分)\n" \
-            "(2) 结合活动内容和所学, 以“民族复兴的领路人”为题, 撰写一份观展心得。(6 分)"
 
-
-def test_split_material_with_sub_questions_reuses_science_rule():
-    content = MATERIAL + "\n" + SUBQ_TAIL
-    material, rest = PoliticsStrategy().split_material(content)
-    assert material is not None
-    assert rest.lstrip().startswith("(1)")
-    assert material + rest == content
-
-
-def test_split_material_with_tail_question():
-    """27/29：材料后只有一句「结合材料…」，没有小问编号。"""
-    tail = "结合材料，运用所学，谈谈“三双鞋”中蕴含的“变”与“不变”。"
-    content = "27.（10分）学校组织“寻访老物件 感悟精神力量”实践探究活动。\n" + MATERIAL + "\n" + tail
-    material, rest = PoliticsStrategy().split_material(content)
-    assert material is not None
-    assert rest.strip() == tail
-    assert material + rest == content
+def test_politics_does_not_override_split_material():
+    """道法的小问拆分在 expand_subquestions；不能再实现 split_material 造成二次切。"""
+    assert "split_material" not in PoliticsStrategy.__dict__
 
 
 def test_tail_rule_rejects_choice_question():
@@ -50,7 +35,7 @@ def test_tail_rule_rejects_short_material():
 
 
 def test_tail_rule_ignores_sub_question_numbering():
-    """有 (1) 小问编号的交给 split_material_rule，末句规则不插手。"""
+    """有 (1) 小问编号的交给小问拆分，末句规则不插手。"""
     content = MATERIAL + "\n(1) 小问\n(2) 小问"
     material, rest = split_tail_question_rule(content)
     assert material is None and rest == content
@@ -58,13 +43,16 @@ def test_tail_rule_ignores_sub_question_numbering():
 
 def test_plain_statement_is_not_split():
     content = "伟大建党精神是全党全国各族人民攻坚克难、奋勇前行的强大精神动力。"
-    assert PoliticsStrategy().split_material(content) == (None, content)
+    q = RawQuestion(group_order=30, group_id="二", content=content)
+    out = expand([q])
+    assert len(out) == 1
+    assert out[0].material_text is None
+    assert out[0].content == content
 
 
 def test_split_inline_material_skips_strategy_without_hook():
     """语文/英语没有 split_material：重抽时不能 AttributeError（暗雷护栏）。"""
     from question_extract import _split_inline_material
-    from question_splitter import RawQuestion
 
     q = RawQuestion(group_order=1, group_id=None, content="材料" * 100)
     _split_inline_material(object(), [q])          # 没有 split_material 时静默跳过

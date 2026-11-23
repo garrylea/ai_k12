@@ -1359,6 +1359,12 @@ def split_page(text: str, md_path: Path,
     if callable(attach_post):
         attach_post(questions, lines, md_path.stem)
 
+    # 题内小问拆分（道法）：把「材料→(1)→材料→(2)」拆成多条题。
+    # 可选钩子，数学/语文/英语/物化都没有这个方法，行为不变。
+    expand_subs = getattr(strategy, "expand_subquestions", None)
+    if callable(expand_subs):
+        questions = expand_subs(questions)
+
     if jump_warnings:
         detail = "、".join(f"{a}→{b}@{line}" for a, b, line in jump_warnings[:8])
         more = "…" if len(jump_warnings) > 8 else ""
