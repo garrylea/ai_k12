@@ -273,11 +273,13 @@ export class ExamsService {
     const items = rows.map((row) => ({
       questionId: row.question_id,
       questionNo: row.question_order,
+      subNo: Number(row.sub_no ?? 0),
       text: row.text,
       type: row.type,
       options: parseOptions(row.options),
       materialText: row.material_text ?? null,
       materialUrl: row.material_url ?? null,
+      materialPosition: row.material_position ?? null,
       answerText: row.answer_text,
       isCorrect: row.is_correct,               // null = 主观题待自评
       analysis: row.analysis,
@@ -496,17 +498,20 @@ export class ExamsService {
   }
 
   private toSessionQuestion(q: {
-    questionId: number; questionNo: number; text: string; type: string;
+    questionId: number; questionNo: number; subNo: number; text: string; type: string;
     options: string | null; materialText: string | null; materialUrl: string | null;
+    materialPosition: string | null;
   }): SessionQuestionDto {
     return {
       questionId: q.questionId,
       questionNo: q.questionNo,
+      subNo: q.subNo ?? 0,
       text: q.text,
       type: q.type,
       options: parseOptions(q.options),
       materialText: q.materialText ?? null,
       materialUrl: q.materialUrl ?? null,
+      materialPosition: q.materialPosition ?? null,
     };
   }
 

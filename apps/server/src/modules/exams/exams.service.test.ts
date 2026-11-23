@@ -152,8 +152,24 @@ describe('ExamsService.getPaperDetail', () => {
     expect(r.id).toBe(1);
     expect(r.title).toBe('2025 年期末卷');
     expect(r.questions).toHaveLength(3);
-    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null, materialUrl: null });
+    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, subNo: 0, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null, materialUrl: null, materialPosition: null });
     expect(r.questions[2].options).toBeNull();
+  });
+
+  it('道法小问：subNo/materialPosition 透传', async () => {
+    const deps = mk({
+      examPapersRepo: {
+        findById: vi.fn().mockResolvedValue(paperRow),
+        findQuestionsByPaperId: vi.fn().mockResolvedValue([
+          { questionId: 30, questionNo: 26, subNo: 1, text: '(1) 甲', type: 'short_answer',
+            options: null, materialText: '材料一', materialUrl: null, materialPosition: 'before' },
+        ]),
+      },
+    });
+    const r = await mkSvc(deps).getPaperDetail(1);
+    expect(r.questions[0]).toMatchObject({
+      questionNo: 26, subNo: 1, materialText: '材料一', materialPosition: 'before',
+    });
   });
 
   it('40 道客观题 -> 45 分钟', async () => {
@@ -181,7 +197,7 @@ describe('ExamsService.getPaperDetail', () => {
     });
     const r = await mkSvc(deps).getPaperDetail(1);
     const q = r.questions[0];
-    expect(Object.keys(q).sort()).toEqual(['materialText', 'materialUrl', 'options', 'questionId', 'questionNo', 'text', 'type']);
+    expect(Object.keys(q).sort()).toEqual(['materialPosition', 'materialText', 'materialUrl', 'options', 'questionId', 'questionNo', 'subNo', 'text', 'type']);
     expect(JSON.stringify(r)).not.toContain('answer');
     expect(JSON.stringify(r)).not.toContain('explanation');
   });
@@ -227,7 +243,7 @@ describe('ExamsService.createSession', () => {
     expect(arg.deadlineAt.getTime()).toBeGreaterThan(Date.now() + 29 * 60000);
     expect(r.sessionId).toBe(1);
     expect(r.questions).toHaveLength(3);
-    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null, materialUrl: null });
+    expect(r.questions[0]).toEqual({ questionId: 10, questionNo: 1, subNo: 0, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'], materialText: null, materialUrl: null, materialPosition: null });
     expect(r.remainingSeconds).toBeGreaterThanOrEqual(1790);
     expect(r.remainingSeconds).toBeLessThanOrEqual(1800);
   });
@@ -882,8 +898,8 @@ describe('ExamsService.getResults', () => {
     expect(r.accuracy).toBe(50);
     expect(r.subjectiveCount).toBe(0);
     expect(r.items[0]).toEqual({
-      questionId: 10, questionNo: 1, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'],
-      materialText: null, materialUrl: null,
+      questionId: 10, questionNo: 1, subNo: 0, text: '选择题 1', type: 'choice', options: ['A. 1', 'B. 2'],
+      materialText: null, materialUrl: null, materialPosition: null,
       answerText: 'A', isCorrect: 1, analysis: null, explanation: '选 A 因为...',
       answer: 'A', needsSelfAssessment: false, selfAssessment: null,
     });

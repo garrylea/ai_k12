@@ -122,6 +122,10 @@ export class SpecialAnswerRecordsRepository {
     question_paper_no: number | null;
     /** 题目在架标记（详情判断 canRedo / canSimilar）；题目无关联时为 null。 */
     question_is_active: number | null;
+    /** 材料位置：'before'=题干上方；null=题干下方。 */
+    question_material_position: string | null;
+    /** 题中材料（道法小问的材料）；语文专项的材料走 passage。 */
+    question_material_text: string | null;
   }>> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       // 题号取值口径与专项抽题一致（questions.repo 的 PAPER_QUESTION_NO_SQL）：
@@ -129,7 +133,8 @@ export class SpecialAnswerRecordsRepository {
       // 关联时退回 questions.group_order（入库时的卷面题号）。
       `SELECT sar.*, q.content AS question_content, q.answer AS question_answer,
               q.explanation AS question_analysis, q.is_active AS question_is_active,
-              q.source AS question_source,
+              q.source AS question_source, q.material_position AS question_material_position,
+              q.material_text AS question_material_text,
               COALESCE((SELECT pq.question_no FROM paper_questions pq
                  JOIN exam_papers ep ON ep.id = pq.paper_id
                 WHERE pq.question_id = q.id

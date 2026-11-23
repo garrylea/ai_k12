@@ -974,6 +974,10 @@ export class TrainingService {
     questions: Array<{
       questionId: number; text: string; type: string;
       options: unknown[] | null; materialText: string | null; materialUrl: string | null;
+      /** 小问序号（0=非小问）。 */
+      subNo: number;
+      /** 材料位置：'before'=题干上方；null=题干下方。 */
+      materialPosition: string | null;
       /** 题目来源（questions.source）：专项作答页展示，便于溯源。 */
       source: string | null;
       /** 该题在原试卷中的题号（paper_questions.question_no；无卷关联时退回 questions.group_order）。 */
@@ -1040,6 +1044,8 @@ export class TrainingService {
       options: parseOptions(q.options),
       materialText: q.material_text ?? null,
       materialUrl: q.material_url ?? null,
+      subNo: Number(q.sub_no ?? 0),
+      materialPosition: q.material_position ?? null,
       source: q.source ?? null,
       questionNo: q.question_no ?? null,
     }));

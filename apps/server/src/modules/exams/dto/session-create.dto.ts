@@ -23,6 +23,8 @@ export interface SubmitAnswerDto {
 export interface SessionQuestionDto {
   questionId: number;
   questionNo: number;
+  /** 小问序号（0=非小问）。 */
+  subNo: number;
   text: string;
   type: string;
   options: unknown[] | null;
@@ -30,6 +32,8 @@ export interface SessionQuestionDto {
   materialText: string | null;
   /** 整段材料在素材库中的路径（语文阅读等整篇材料题）；题中材料为 null。 */
   materialUrl: string | null;
+  /** 材料位置：'before'=题干上方；null=题干下方。 */
+  materialPosition: string | null;
 }
 
 /** POST /api/exams/sessions 响应（新建/续考同构；续考不重置时长）。
@@ -68,6 +72,8 @@ export interface ExamSummaryDto {
 export interface ExamResultItemDto {
   questionId: number;
   questionNo: number;
+  /** 小问序号（0=非小问）。 */
+  subNo: number;
   text: string;
   type: string;
   options: unknown[] | null;
@@ -75,6 +81,8 @@ export interface ExamResultItemDto {
   materialText: string | null;
   /** 整段材料在素材库中的路径（语文阅读等整篇材料题）；题中材料为 null。 */
   materialUrl: string | null;
+  /** 材料位置：'before'=题干上方；null=题干下方。 */
+  materialPosition: string | null;
   answerText: string | null;
   isCorrect: number | null; // 0 | 1；null = 主观题待自评（self_assess 模式不判对错）
   analysis: string | null;

@@ -478,6 +478,16 @@ describe('TrainingService.startTargetedPractice', () => {
     created_at: new Date('2026-09-01'),
   };
 
+  it('道法小问：subNo/materialPosition 透传', async () => {
+    const deps = mk({
+      questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([
+        { ...questionRow, sub_no: 1, material_position: 'before' },
+      ]) },
+    });
+    const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: 'choice', count: 5 });
+    expect(r.questions[0]).toMatchObject({ subNo: 1, materialPosition: 'before' });
+  });
+
   it('透传抽题参数给 repo（studentId 首参 + type=null 不过滤题型）', async () => {
     const deps = mk();
     await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: null, count: 5 });
@@ -500,10 +510,12 @@ describe('TrainingService.startTargetedPractice', () => {
     expect(q).toEqual({
       questionId: 10, text: '题面文本', type: 'choice',
       options: ['A. 1', 'B. 2'], materialText: null, materialUrl: null,
+      subNo: 0, materialPosition: null,
       source: 'paper', questionNo: 12,
     });
     expect(Object.keys(q).sort()).toEqual(
-      ['materialText', 'materialUrl', 'options', 'questionId', 'questionNo', 'source', 'text', 'type'],
+      ['materialPosition', 'materialText', 'materialUrl', 'options', 'questionId',
+       'questionNo', 'source', 'subNo', 'text', 'type'],
     );
     expect(JSON.stringify(r)).not.toContain('answer');
     expect(JSON.stringify(r)).not.toContain('explanation');

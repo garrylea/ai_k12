@@ -19,6 +19,8 @@ export interface ExamPaperRow {
 export interface PaperQuestionRow {
   questionId: number;
   questionNo: number;
+  /** 小问序号（0=非小问）；道法 26(1)/26(2)。 */
+  subNo: number;
   text: string;
   type: string;
   options: string | null;
@@ -26,6 +28,8 @@ export interface PaperQuestionRow {
   materialText: string | null;
   /** 整段材料在素材库中的路径（语文阅读等整篇材料题）；题中材料为 null。 */
   materialUrl: string | null;
+  /** 材料位置：'before'=题干上方；null=题干下方。 */
+  materialPosition: string | null;
   /** 1 = 有参考答案；0 = 空答案（判不了分，交卷时不入错题本）。 */
   hasAnswer: number;
 }
@@ -93,10 +97,11 @@ export class ExamPapersRepository {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT q.id AS questionId, pq.question_no AS questionNo, q.content AS text, q.type,
               q.options, q.material_text AS materialText, q.material_url AS materialUrl,
+              q.sub_no AS subNo, q.material_position AS materialPosition,
               (q.answer IS NOT NULL AND TRIM(q.answer) <> '') AS hasAnswer
        FROM paper_questions pq JOIN questions q ON q.id = pq.question_id
        WHERE pq.paper_id = ? AND q.is_active = 1 AND pq.in_exam = 1
-       ORDER BY pq.question_no`,
+       ORDER BY pq.question_no, q.sub_no`,
       [paperId],
     );
     return rows as unknown as PaperQuestionRow[];

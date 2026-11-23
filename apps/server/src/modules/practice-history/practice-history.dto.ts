@@ -40,6 +40,8 @@ export interface PracticeHistoryQuestion {
   materialText: string | null;
   /** 整段材料在素材库中的路径（语文阅读等整篇材料题）；无整篇材料为 null。 */
   materialUrl: string | null;
+  /** 材料位置：'before'=题干上方；null=题干下方。 */
+  materialPosition: string | null;
   /** 标准答案（考试取自 questions.answer；语文含义专项按句回查题库重建）。 */
   questionAnswer: string | null;
   questionAnalysis: string | null;
