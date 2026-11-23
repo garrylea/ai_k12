@@ -178,23 +178,50 @@ _LOST_LABEL_HEAD_RE = re.compile(r"^(\s*)([.．、]\s*\S)")
 
 
 def _restore_swallowed_option_label(lines: list[str]) -> list[str]:
-    """修 TTY 粘贴时长行之后下一行首字母被吞（`C.` → `.`）。
+    """修 TTY 粘贴/编辑时选项字母被吞（`C.` → `.`）。
 
-    只在「上一行是 A–F 选项、这一行以裸点号开头」时按序补回下一个字母；
-    其它情况一律不动，避免误伤以点号开头的正文。补回会打 WARN 让用户看见。
+    两条线索合用（2026-11-23 补）：
+    1. 上一非空行是 A–F 选项 → 按序补下一个字母（原逻辑）；
+    2. 整段里 A–F 中恰好缺一个字母 → 裸点号行补这个缺的字母。
+       场景：选项行后面夹了说明行（A./说明/B./说明/./说明/D.），
+       上一行不是选项，原逻辑救不回来，实测 35 中物理卷就是这么丢的 C。
+    ".5 分" 这类小数/编号不补；补回会打 WARN 让用户看见。
     """
+    seen = {m.group(1).upper() for line in lines
+            if (m := _OPTION_LINE_HEAD_RE.match(line))}
+    missing = [ch for ch in "ABCDEF" if ch not in seen]
+
     out: list[str] = []
     prev: str | None = None
+    last_letter: str | None = None
     for line in lines:
+        if pm := _OPTION_LINE_HEAD_RE.match(line):
+            last_letter = pm.group(1).upper()
         lost = _LOST_LABEL_HEAD_RE.match(line)
-        if lost and prev and not lost.group(2)[1:2].isdigit():
-            # ".5 分" 这类小数/编号不是吞字母，别误补
-            pm = _OPTION_LINE_HEAD_RE.match(prev)
-            if pm:
+        if lost and not lost.group(2)[1:2].isdigit():
+            candidates: list[str] = []
+            # 线索一：上一行就是选项（紧挨着丢字母）
+            if prev and (pm := _OPTION_LINE_HEAD_RE.match(prev)):
                 nxt = chr(ord(pm.group(1).upper()) + 1)
                 if nxt <= "F":
-                    line = f"{lost.group(1)}{nxt}{lost.group(2)}"
-                    console().warn(f"粘贴时选项字母被终端吞掉，已按序补回「{nxt}」")
+                    candidates.append(nxt)
+            # 线索二：这段里最后一个见到的选项的下一个字母（选项与说明交替时）
+            if last_letter:
+                nxt = chr(ord(last_letter) + 1)
+                if nxt <= "F":
+                    candidates.append(nxt)
+            # 线索三：A–F 里恰好缺一个
+            if len(missing) == 1:
+                candidates.insert(0, missing[0])
+            for cand in candidates:
+                if cand not in seen:
+                    line = f"{lost.group(1)}{cand}{lost.group(2)}"
+                    seen.add(cand)
+                    last_letter = cand
+                    if cand in missing:
+                        missing.remove(cand)
+                    console().warn(f"粘贴/编辑时选项字母被终端吞掉，已补回「{cand}」")
+                    break
         out.append(line)
         if line.strip():
             prev = line
@@ -483,14 +510,14 @@ def _line_edit(text: str) -> str | None:
         c.prompt("编辑› ")
         raw = _read_line()
         if raw is None:
-            return "\n".join(lines)
+            return "\n".join(_restore_swallowed_option_label(lines))
         raw = raw.strip()
         if not raw:
             continue
         cmd, _, rest = raw.partition(" ")
         cmd = cmd.lower()
         if cmd in ("w", "save"):
-            return "\n".join(lines)
+            return "\n".join(_restore_swallowed_option_label(lines))
         if cmd in ("q", "quit"):
             return None
         if cmd == "p":

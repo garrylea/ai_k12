@@ -1979,3 +1979,29 @@ def test_confirm_text_shows_all_lines(monkeypatch, capsys):
     assert action == "ok"
     assert "还有" not in out
     assert "第19段。" in out
+
+
+def test_restore_swallowed_option_label_with_interleaved_descriptions():
+    """选项行和说明行交替时，上一行不是选项，仍要靠「A–F 缺谁」补回 C。"""
+    lines = [
+        "如图所示的光现象中, 由于光的折射形成的是",
+        "A. ![](a.jpg)", "群山在水中形成的倒影",
+        "B. ![](b.jpg)", "树叶在地面形成的影子",
+        ". ![](c.jpg)", "透过眼镜看到的景物",
+        "D. ![](d.jpg)", "汽车观后镜中看到的路况",
+    ]
+    out = manual_fix._restore_swallowed_option_label(lines)
+    assert out[5].startswith("C. ")
+    assert out[1].startswith("A. ") and out[3].startswith("B. ") and out[7].startswith("D. ")
+
+
+def test_line_edit_restores_swallowed_label_in_edited_line(monkeypatch):
+    """逐行编辑 c N 时被吞成 `. xxx`，按 A–F 缺字母补回。"""
+    text = "\n".join([
+        "题", "A. ![](a.jpg)", "说明A", "B. ![](b.jpg)", "说明B",
+        ". ![](c.jpg)", "说明C", "D. ![](d.jpg)", "说明D",
+    ])
+    seq = iter(["c 6 . ![](c.jpg)", "w"])
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
+    out = manual_fix._line_edit(text)
+    assert out.splitlines()[5].startswith("C. ")
