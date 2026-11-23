@@ -1303,20 +1303,31 @@ class DbLoader:
         （人工核验过/答案回填过的题不会被空值清空）。`answer_verified` 不动。
         """
         self._exec(
-            "UPDATE questions SET subject_id=%s, group_id=%s, group_order=%s, type=%s, "
+            "UPDATE questions SET subject_id=%s, group_id=%s, group_order=%s, sub_no=%s, type=%s, "
             "difficulty=%s, full_score=%s, content=%s, options=%s, "
             "answer=COALESCE(NULLIF(%s,''), answer), explanation=%s, approach=%s, "
-            "material_text=%s, material_url=%s, material_method=%s, grade_band=%s, source=%s, "
-            "source_year=%s, content_hash=%s, is_active=%s WHERE id=%s",
-            (sid, q.get("group_id"), q.get("group_order"), q.get("type"),
+            "material_text=%s, material_url=%s, material_method=%s, material_position=%s, "
+            "grade_band=%s, source=%s, source_year=%s, content_hash=%s, is_active=%s WHERE id=%s",
+            (sid, q.get("group_id"), q.get("group_order"), q.get("sub_no") or 0,
+             q.get("type"),
              q.get("difficulty"), q.get("full_score"), content,
              json.dumps(opts, ensure_ascii=False) if opts is not None else None,
              q.get("answer") or "", q.get("explanation"), q.get("approach"),
              q.get("material_text"), q.get("material_url"), q.get("material_method"),
+             q.get("material_position"),
              q.get("grade_band"),
              q.get("source"), q.get("source_year"), chash,
              0 if q.get("needs_review") else 1, qid),
         )
+
+    def _check_duplicate_numbers(self, paper_id: int) -> list[int]:
+        """卷内重复题号；小问共号合法，按 (question_no, sub_no) 判重。"""
+        dup = self._query(
+            "SELECT pq.question_no FROM paper_questions pq "
+            "JOIN questions q ON q.id = pq.question_id "
+            "WHERE pq.paper_id=%s GROUP BY pq.question_no, q.sub_no "
+            "HAVING COUNT(*) > 1", (paper_id,))
+        return [int(r[0]) for r in dup]
 
     @staticmethod
     def _in_exam_for(sid: int, content: str) -> int:
@@ -1377,16 +1388,16 @@ class DbLoader:
                         "SELECT q.id, q.content_hash, q.answer_verified, q.type, "
                         "q.difficulty, q.is_active, q.material_text, q.source FROM paper_questions pq "
                         "JOIN questions q ON q.id = pq.question_id "
-                        "WHERE pq.paper_id=%s AND pq.group_order=%s",
-                        (paper[1], go),
+                        "WHERE pq.paper_id=%s AND pq.group_order=%s AND q.sub_no=%s",
+                        (paper[1], go, q.get("sub_no") or 0),
                     )
                 else:
                     exist = self._query(
                         "SELECT q.id, q.content_hash, q.answer_verified, q.type, "
                         "q.difficulty, q.is_active, q.material_text, q.source FROM paper_questions pq "
                         "JOIN questions q ON q.id = pq.question_id "
-                        "WHERE pq.paper_id=%s AND pq.question_no=%s",
-                        (paper[1], i),
+                        "WHERE pq.paper_id=%s AND pq.question_no=%s AND q.sub_no=%s",
+                        (paper[1], i, q.get("sub_no") or 0),
                     )
                 # 跨卷共用行：同题号的旧行属于**别的卷**（题干通用、材料不同被旧哈希
                 # 合并）→ 不能原址更新，否则 9 份卷共用一行、材料/答案互相覆盖。
@@ -1424,10 +1435,12 @@ class DbLoader:
                         # 题21：difficulty 2→3、is_active 1→0 都没写进库）。
                         self._exec(
                             "UPDATE questions SET type=%s, difficulty=%s, is_active=%s, "
-                            "material_text=%s, material_url=%s, material_method=%s WHERE id=%s",
+                            "sub_no=%s, material_text=%s, material_url=%s, material_method=%s, "
+                            "material_position=%s WHERE id=%s",
                             (q.get("type"), q.get("difficulty"), new_active,
+                             q.get("sub_no") or 0,
                              q.get("material_text"), q.get("material_url"),
-                             q.get("material_method"), qid))
+                             q.get("material_method"), q.get("material_position"), qid))
                         updated += 1
                     if old_hash != chash:
                         other = self._reusable_question(chash, opts, exclude_id=qid)
@@ -1490,16 +1503,18 @@ class DbLoader:
                 qid = self._reusable_question(chash, opts)
                 if qid is None:
                     self._exec(
-                        "INSERT INTO questions (subject_id, group_id, group_order, type, difficulty, full_score, "
+                        "INSERT INTO questions (subject_id, group_id, group_order, sub_no, type, difficulty, full_score, "
                         "content, options, answer, explanation, material_text, material_url, material_method, "
-                        "grade_band, source, source_year, content_hash, is_active) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                        (sid, q.get("group_id"), q.get("group_order"), q.get("type"), q.get("difficulty"),
+                        "material_position, grade_band, source, source_year, content_hash, is_active) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (sid, q.get("group_id"), q.get("group_order"), q.get("sub_no") or 0,
+                         q.get("type"), q.get("difficulty"),
                          q.get("full_score"),
                          content,
                          json.dumps(opts, ensure_ascii=False) if opts is not None else None,
                          q.get("answer") or "", q.get("explanation"), q.get("material_text"),
                          q.get("material_url"), q.get("material_method"),
+                         q.get("material_position"),
                          q.get("grade_band"), q.get("source"), q.get("source_year"),
                          chash,
                          # LLM 补全/修复过的内容默认不进抽题池，人工复核后再置 1
@@ -1547,23 +1562,27 @@ class DbLoader:
                     f"AND question_id NOT IN ({ph})",
                     (paper[1], *linked_ids))
                 # question_no 以卷面题号为准（缺题时才用行序兜底），删掉历史行后会重排，
-                # 否则会出现「第一题编号是 2」这种错位。
+                # 否则会出现「第一题编号是 2」这种错位。小问共用一个卷面题号，
+                # 排序时用 sub_no 保证 26(1) 在 26(2) 前。
                 self._exec(
-                    "UPDATE paper_questions pq JOIN ("
-                    "  SELECT question_id, ROW_NUMBER() OVER (ORDER BY group_order, question_no) rn"
-                    "  FROM paper_questions WHERE paper_id=%s) t"
+                    "UPDATE paper_questions pq "
+                    "JOIN questions q ON q.id = pq.question_id "
+                    "JOIN ("
+                    "  SELECT pq2.question_id, "
+                    "         ROW_NUMBER() OVER (ORDER BY q2.group_order, q2.sub_no, pq2.question_no) rn"
+                    "  FROM paper_questions pq2 JOIN questions q2 ON q2.id = pq2.question_id"
+                    "  WHERE pq2.paper_id=%s) t"
                     " ON t.question_id = pq.question_id "
-                    "SET pq.question_no = COALESCE(pq.group_order, t.rn) "
+                    "SET pq.question_no = COALESCE(q.group_order, t.rn) "
                     "WHERE pq.paper_id=%s",
                     (paper[1], paper[1]))
             self._exec(
                 "UPDATE exam_papers SET question_count=%s WHERE id=%s", (linked, paper[1]))
-            # 组卷守卫：同一份卷不允许出现两个同号题（会出现「两道 18 题」）
-            dup = self._query(
-                "SELECT question_no FROM paper_questions WHERE paper_id=%s "
-                "GROUP BY question_no HAVING COUNT(*) > 1", (paper[1],))
+            # 组卷守卫：同一份卷不允许出现两个同号题（会出现「两道 18 题」）。
+            # 小问共用卷面题号是合法的，按 (question_no, sub_no) 判重。
+            dup = self._check_duplicate_numbers(paper[1])
             if dup:
-                print(f"[WARN] paper={paper[1]} 卷内题号重复：{[int(r[0]) for r in dup]}"
+                print(f"[WARN] paper={paper[1]} 卷内题号重复：{dup}"
                       f"（组卷会出现同号题，请检查）", flush=True)
         self._conn.commit()
         if updated:
@@ -1714,5 +1733,10 @@ class DbLoader:
             dph = ",".join(["%s"] * len(to_delete))
             out["deleted_questions"] = self._delete(
                 f"DELETE FROM questions WHERE id IN ({dph})", to_delete)
+        # 重导后只剩空壳的考试会话（answers 已清）一并删，避免历史里出现 0 题记录
+        if purge_paper_data:
+            out["purged"]["exam_sessions"] = self._delete(
+                "DELETE FROM exam_sessions WHERE paper_id=%s AND id NOT IN "
+                "(SELECT DISTINCT session_id FROM exam_answers)", (paper_id,))
         self._conn.commit()
         return out
