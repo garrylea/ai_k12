@@ -6,7 +6,8 @@
 
 一次交互的输入约定（2026-10-31 改为显式菜单）：
 - 修已有题时先问**图怎么处理**：`1` 保留原图（只改文字）、`2` 换图（给图片路径，
-  原样拷入 images/，不走 MinerU）、`3` 重新截图识别（MinerU，可能再认错）；
+  原样拷入 images/，不走 MinerU）、`3` 重新截图识别（MinerU，可能再认错）、
+  `4` 只改文本（原题材料/选项/图片/文章一律不留，只用新粘的纯文本）；
   原题没有图时跳过这一步；
 - 再选文字录入方式：`1` 粘贴文本 / `2` 图片路径（走 MinerU）/ `3` 本地文件 /
   `4` 剪贴板图片；直接粘贴正文也行；
@@ -735,15 +736,16 @@ def _current_question(issue: dict) -> dict | None:
 
 
 def _ask_image_mode(count: int) -> str:
-    """修复已有题时先问图片怎么处理，返回 keep / replace / ocr。"""
+    """修复已有题时先问图片怎么处理，返回 keep / replace / ocr / text。"""
     c = console()
     c.write("")
     c.write(f"这一题原有 {count} 张图，怎么处理？")
     c.legend([("1", "保留原图（只改文字）"),
               ("2", "换图/配图（给图片路径，正文可写 [图1][图2]，不识别文字）"),
-              ("3", "重新截图识别（MinerU，可能再认错）")])
+              ("3", "重新截图识别（MinerU，可能再认错）"),
+              ("4", "只改文本（原题内容一律不留）")])
     while True:
-        c.prompt("选择 1/2/3（回车=1）› ")
+        c.prompt("选择 1/2/3/4（回车=1）› ")
         raw = _read_line()
         if raw is None:
             return "keep"
@@ -754,7 +756,9 @@ def _ask_image_mode(count: int) -> str:
             return "replace"
         if raw == "3":
             return "ocr"
-        c.warn("请输入 1、2 或 3")
+        if raw == "4":
+            return "text"
+        c.warn("请输入 1、2、3 或 4")
 
 
 def _natural_key(p: Path):
@@ -1300,6 +1304,8 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
         ocr 模式下：选了多图流程 → 用刚收的图替换 [图N]；或正文写了 [图N] 但没走
         多图流程 → 这时才问图片路径、拷图并替换。没写占位符就完全走原 ocr 流程。
         """
+        if mode == "text":
+            return text
         if mode == "keep":
             out = _append_missing_images(text, orig_refs)
             if out != text:
@@ -1412,8 +1418,8 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
                 c.ok(f"第 {target} 题 · 题干 {len(stem)} 字{mat_note} · 无选项（按简答题处理）")
             # 材料：自动拆出的题内素材直接记 inline（不再问存储通道）。
             # 题号丢失且没材料时，可认领同卷兄弟文章（这是「归属哪篇」，不是「写哪列」）。
-            material_url = _KEEP_URL
-            if (sys.stdin.isatty() and not material
+            material_url = None if mode == "text" else _KEEP_URL
+            if (mode != "text" and sys.stdin.isatty() and not material
                     and issue.get("kind") in ("missing", "punct_stem", "repair_truncated")):
                 url = _ask_material_url(c, issue)
                 if url is not _KEEP_URL:
@@ -2281,7 +2287,7 @@ def review_by_numbers(subject: str | None, file: str | None,
              f"{paper['source']} · 输入题号（多个用逗号），回车结束 · q 退出")
     c.info("粘贴内容可以是「材料 + 题干 + 小问 + 选项 + 图片」一整段，"
            "程序会分别拆到材料/题干/选项；已有题会先问图怎么处理："
-           "保留原图只改文字 / 换图（不识别）/ 重新截图识别")
+           "保留原图只改文字 / 换图（不识别）/ 重新截图识别 / 只改文本（原内容全清）")
 
     total = 0
     while True:

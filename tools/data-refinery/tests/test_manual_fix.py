@@ -2005,3 +2005,10 @@ def test_line_edit_restores_swallowed_label_in_edited_line(monkeypatch):
     monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
     out = manual_fix._line_edit(text)
     assert out.splitlines()[5].startswith("C. ")
+
+
+def test_ask_image_mode_text_only(monkeypatch):
+    """菜单第 4 项 = 只改文本，原题图片/材料/选项一律不留。"""
+    seq = iter(["4"])
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
+    assert manual_fix._ask_image_mode(4) == "text"
