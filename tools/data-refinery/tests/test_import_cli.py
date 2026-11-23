@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 import import_cli
 from import_cli import (
     convert_argv, extract_argv, load_argv, parse_args, publish_argv,
@@ -939,3 +941,27 @@ def test_rebuild_flags_discard_old_fix_records(monkeypatch):
     seen.clear()
     import_cli.main(["--subject", "数学", "--file", "数学(9)", "--skip-review"])
     assert seen == []
+
+
+def test_reload_paper_uses_reload_source_and_purge():
+    a = parse_args(["--subject", "道法", "--file", "35中", "--reload-paper"])
+    argv = load_argv(a)
+    assert "--reload-source" in argv and "35中" in argv
+    assert "--purge-paper-data" in argv
+    assert "--load-cards" not in argv
+
+
+def test_reload_paper_conflicts_with_cards_only():
+    with pytest.raises(SystemExit):
+        parse_args(["--file", "35中", "--reload-paper", "--cards-only"])
+
+
+def test_reload_paper_conflicts_with_skip_load():
+    with pytest.raises(SystemExit):
+        parse_args(["--file", "35中", "--reload-paper", "--skip-load"])
+
+
+def test_reload_paper_aborts_without_tty(monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    a = parse_args(["--file", "35中", "--reload-paper"])
+    assert import_cli._confirm_reload(a) == 2

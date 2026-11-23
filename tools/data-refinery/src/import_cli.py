@@ -99,6 +99,9 @@ def parse_args(argv=None):
     parser.add_argument("--paper-id", type=int, default=None,
                         help="试卷 id：--answers 的答案定位不到唯一卷时直接指定（.md/.pdf 均可用），"
                              "优先于 --file 反查与 PDF 文件名去「答案」匹配")
+    parser.add_argument("--reload-paper", action="store_true",
+                        help="重导本卷：删该卷旧题与关联业务数据后从 published 重插"
+                             "（题数会变的场景；会删除该卷考试作答，不可恢复）")
     parser.add_argument("--skip-answers", action="store_true", help="跳过第 6 步答案回填")
     parser.add_argument("--skip-review", action="store_true",
                         help="发现缺题时不进入人工补题（只打印清单与补题命令）")
@@ -165,6 +168,13 @@ def parse_args(argv=None):
     if args.preview and (args.dry_run or args.fix_only):
         parser.error("--preview 不能与 --dry-run / --fix-only 同用"
                      "（--preview 自己就是「只预览切题」）")
+    if args.reload_paper:
+        if not (args.file or args.files):
+            parser.error("--reload-paper 需要 --file/--files 指定唯一一份卷")
+        for given, flag in ((args.cards_only, "--cards-only"),
+                            (args.skip_load, "--skip-load")):
+            if given:
+                parser.error(f"--reload-paper 不能与 {flag} 同用")
     return args
 
 
@@ -232,6 +242,12 @@ def meta_argv(args) -> list[str]:
 def load_argv(args) -> list[str]:
     """db_loader：固定增量（--load-cards），绝不隐式 full-reload。"""
     argv = _common(args)
+    if args.reload_paper:
+        # 题数会变（拆小问）时必须先删本卷旧题，否则旧行变孤儿留在题库
+        argv += ["--reload-source", Path(args.file or "").stem, "--purge-paper-data"]
+        if args.dry_run:
+            argv.append("--dry-run")
+        return argv
     if _stage_file(args):
         argv += ["--file", _stage_file(args)]
     argv.append("--load-cards")
@@ -639,6 +655,52 @@ def _answers_only(args) -> bool:
     return not any(scope_keys) and not rebuild
 
 
+def _paper_data_counts(cfg, source: str) -> tuple[int, int]:
+    """(该卷旧题数, 该卷考试作答数)：重导前给用户看清楚要删什么。"""
+    import pymysql
+
+    conn = pymysql.connect(
+        host=cfg.db_host, port=cfg.db_port, user=cfg.db_user,
+        password=cfg.db_pass, database=cfg.db_name, charset="utf8mb4",
+        connect_timeout=5,
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM questions WHERE source=%s", (source,))
+            qn = int(cur.fetchone()[0])
+            cur.execute(
+                "SELECT COUNT(*) FROM exam_answers ea "
+                "JOIN questions q ON q.id = ea.question_id WHERE q.source=%s",
+                (source,))
+            an = int(cur.fetchone()[0])
+        return qn, an
+    finally:
+        conn.close()
+
+
+def _confirm_reload(args) -> int | None:
+    """返回 2 = 中止；None = 继续。非交互终端直接拒绝（防 CI 误删）。"""
+    if not args.reload_paper or args.dry_run:
+        return None
+    if not sys.stdin.isatty():
+        print("[ERROR] --reload-paper 会删除该卷旧题与考试作答，非交互终端不允许执行",
+              flush=True)
+        return 2
+    source = Path(args.file or "").stem
+    try:
+        qn, an = _paper_data_counts(RefineryConfig.from_env(), source)
+        detail = f"（{qn} 道旧题、{an} 条考试作答）"
+    except Exception as exc:
+        detail = f"（统计失败：{exc}）"
+    print(f"\n[重导] 将删除「{source}」{detail}，再按 published 重新入库；不可恢复。")
+    print("是否继续？ y=继续 / 直接回车=取消 › ", end="", flush=True)
+    ans = (sys.stdin.readline() or "").strip().lower()
+    if ans not in ("y", "yes"):
+        print("[取消] 未做任何改动", flush=True)
+        return 2
+    return None
+
+
 def _execute(args) -> int:
     """按 args 里的范围跑完整管线（单卷/单批）。"""
     answers_only = _answers_only(args)
@@ -671,6 +733,10 @@ def _execute(args) -> int:
     resolve_rc = _resolve_file(args, RefineryConfig.from_env())
     if resolve_rc is not None:
         return resolve_rc
+
+    reload_rc = _confirm_reload(args)
+    if reload_rc is not None:
+        return reload_rc
 
     # 重转卷时是否清理旧补题，要等 extract 跑完才知道：只有「重抽后已经恢复」的题
     # 才作废旧补题；仍缺题的补录必须保留（上次在切题前无差别丢弃，导致 Q20 重录丢失）。
