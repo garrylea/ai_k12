@@ -53,6 +53,7 @@ def snapshot(md_root: Path) -> dict:
             "count": len(questions),
             "items": [
                 {"no": q.group_order,
+                 "sub": q.sub_no,
                  "hash": hashlib.sha1(q.content.encode("utf-8")).hexdigest()[:12],
                  "mat": hashlib.sha1((q.material_text or "").encode("utf-8")).hexdigest()[:12],
                  "gid": q.group_id,
@@ -64,7 +65,7 @@ def snapshot(md_root: Path) -> dict:
 
 
 # 差异行里字段的固定顺序（便于逐份对齐阅读）；不在此列的键排在后面。
-_ITEM_FIELDS = ("no", "gid", "score", "hash", "mat")
+_ITEM_FIELDS = ("no", "sub", "gid", "score", "hash", "mat")
 
 
 def _describe_item_diff(base_item: dict, cur_item: dict) -> str:

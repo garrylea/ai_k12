@@ -405,8 +405,9 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
         if not _norm_text(body) and not _norm_text(material):
             reasons.append("empty_stem")
 
-        # 内容不完整：小问从 (2) 起（丢了 (1)），或标注时 LLM 判过不完整
-        if _SUBQ2_RE.search(body) and not _SUBQ1_RE.search(body):
+        # 内容不完整：小问从 (2) 起（丢了 (1)），或标注时 LLM 判过不完整。
+        # 小问拆分后的题（sub_no>0）本来就只含自己那一问，不能按「缺 (1)」报。
+        if not r.get("sub_no") and _SUBQ2_RE.search(body) and not _SUBQ1_RE.search(body):
             reasons.append("subq_starts_at_2")
         rec = label_by_no.get(no)
         if report_llm_flag and r.get("needs_review"):

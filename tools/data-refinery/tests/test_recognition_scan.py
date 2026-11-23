@@ -588,3 +588,12 @@ def test_issue_carries_sub_no(tmp_path):
     ]
     issues = R.scan_paper("卷A", Path("道法/x/卷A"), md, rows, None, [])
     assert {i["sub_no"] for i in issues if i["kind"] == "junk_question"} == {1, 2}
+
+
+def test_subquestion_row_does_not_report_starts_at_2(tmp_path):
+    """道法拆出的 26(2) 只有 (2)，不能报「小问从 (2) 起」。"""
+    md = _md(tmp_path, "26. 甲\n")
+    rows = [{"group_order": 26, "sub_no": 2, "content": "(2) 结合材料，谈谈你的认识。",
+             "type": "short_answer"}]
+    issues = R.scan_paper("卷A", Path("道法/x/卷A"), md, rows, None, [])
+    assert not [i for i in issues if "subq_starts_at_2" in (i.get("reasons") or [])]
