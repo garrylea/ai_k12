@@ -2012,3 +2012,35 @@ def test_ask_image_mode_text_only(monkeypatch):
     seq = iter(["4"])
     monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
     assert manual_fix._ask_image_mode(4) == "text"
+
+
+def test_text_only_mode_drops_original_image_material_and_options(monkeypatch, tmp_path):
+    """菜单 4：新文本之外一律不留（原图/材料/选项/文章 URL 全清）。"""
+    from subject_strategies import get_strategy
+
+    original = {
+        "group_order": 1, "sub_no": 0,
+        "content": "原题 ![](images/old.jpg)",
+        "material_text": "旧材料", "material_url": "materials/chinese/old/content.md",
+        "options": [{"label": "A", "text": "![](images/old_opt.jpg)"}],
+        "answer": "",
+    }
+    issue = {"source": "卷A", "rel_path": "物理/x/卷A", "group_order": 1,
+             "kind": "junk_question", "sub_no": 0, "reasons": []}
+
+    seq = iter(["4"])  # 图片处理菜单：只改文本
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
+    monkeypatch.setattr(manual_fix, "_current_question", lambda _issue: original)
+    monkeypatch.setattr(manual_fix, "_collect_content",
+                        lambda *_a, **_kw: "只保留这一行纯文本")
+    monkeypatch.setattr(manual_fix, "_collect_answer", lambda *_a, **_kw: "")
+    monkeypatch.setattr(manual_fix, "_question_article", lambda _issue: None)
+
+    records = manual_fix._ask_one(issue, 1, "", tmp_path, get_strategy("physics"))
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["content"] == "只保留这一行纯文本"
+    assert "images/" not in rec["content"]
+    assert rec["material_url"] is None
+    assert not (rec.get("material_text") or "").strip()
+    assert not rec.get("options")
