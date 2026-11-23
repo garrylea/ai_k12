@@ -805,6 +805,8 @@ class RawQuestion:
     answer: str = ""                # 答案（答案对齐阶段填入）
     explanation: str | None = None  # 解析（答案对齐阶段填入）
     score: int | None = None        # 每题满分（分组标题解析），无则为 None
+    sub_no: int = 0
+    material_position: str | None = None
     material_text: str | None = None  # 同节共享材料（策略的 material_policy 开启时填）
     multi_choice: bool = False      # 所在大题标题写的是「多项选择题」→ 题型应为 multi_choice
     # 题后材料（题号之后的独立材料块）：标注时看合并视图，写 JSONL 时拆回两列

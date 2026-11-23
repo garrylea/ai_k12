@@ -9,6 +9,7 @@ class ExamQuestion(BaseModel):
     subject_id: str
     group_id: str | None = None
     group_order: int | None = None
+    sub_no: int = 0                    # 小问序号（0=非小问）
     type: Literal["choice", "multi_choice", "fill_blank", "true_false", "short_answer", "proof", "calculation"]
     difficulty: int = Field(..., ge=1, le=5)  # 难度 1-5
     full_score: int | None = None          # 每题满分（试卷分组标题解析）
@@ -19,6 +20,7 @@ class ExamQuestion(BaseModel):
     material_text: str | None = None
     material_url: str | None = None
     material_method: str | None = None  # rule|llm|manual；题中素材抽取方式
+    material_position: Literal["before", "after"] | None = None  # before=题干上方
     grade_band: str | None = None
     source: str | None = None
     source_year: int | None = None

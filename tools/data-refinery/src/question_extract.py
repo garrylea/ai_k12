@@ -456,6 +456,8 @@ def _write_exam_questions_jsonl(labeled: list, source, extracted_dir: Path,
                 "subject_id": subject_code,
                 "group_id": q.group_id,
                 "group_order": q.group_order,
+                "sub_no": q.sub_no,
+                "material_position": q.material_position,
                 # 大题标题写明「多项选择题」时以卷面为准（labeler 只会给 choice）
                 "type": "multi_choice" if getattr(q, "multi_choice", False) else q.type,
                 "difficulty": q.difficulty,
