@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import ExamResultPage from './ExamResultPage';
 import {
@@ -243,5 +243,78 @@ describe('ExamResultPage 交卷发分庆祝', () => {
     expect(screen.queryByText(/本次错了/)).toBeNull();
     // 无客观错题 → 槽位必须整块不渲染（不是渲染空 div），否则分数卡下方会多出 16px 空白条
     expect(screen.queryByTestId('remediation-offer-slot')).toBeNull();
+  });
+});
+
+
+describe('ExamResultPage 同题号小问不串数据', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('prefers-reduced-motion'),
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }));
+    sessionMock.mockReset();
+    resultsMock.mockReset();
+    explanationsMock.mockReset();
+    selfAssessMock.mockReset();
+    getMyPointsMock.mockReset();
+    sessionMock.mockResolvedValue(SESSION);
+    explanationsMock.mockResolvedValue({ explanations: {} });
+    getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
+    selfAssessMock.mockResolvedValue({ saved: true } as never);
+  });
+
+  it('两小问各自显示自己的解析', async () => {
+    const wrong = (id: number, sub: number, explanation: string): ExamResultItem => ({
+      ...ITEM, questionId: id, questionNo: 26, subNo: sub,
+      text: `(${sub}) 题`, isCorrect: 0, explanation, answer: 'B',
+    });
+    resultsMock.mockResolvedValue({
+      ...SUMMARY, correctCount: 0, totalCount: 2, accuracy: 0,
+      items: [wrong(201, 1, '解析甲'), wrong(202, 2, '解析乙')],
+    });
+
+    renderResult();
+    const buttons = await screen.findAllByRole('button', { name: '查看解析' });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]);
+    expect(screen.getByText('解析甲')).toBeTruthy();
+    expect(screen.queryByText('解析乙')).toBeNull();
+    fireEvent.click(buttons[1]);
+    expect(screen.getByText('解析乙')).toBeTruthy();
+    expect(screen.queryByText('解析甲')).toBeNull();
+  });
+
+  it('两小问各自显示参考答案，自评只改被点的那一问', async () => {
+    const subjective = (id: number, sub: number, answer: string): ExamResultItem => ({
+      ...ITEM, questionId: id, questionNo: 26, subNo: sub,
+      text: `(${sub}) 题`, type: 'short_answer', options: null,
+      isCorrect: null, needsSelfAssessment: true, selfAssessment: null,
+      answerText: '我的作答', answer,
+    });
+    resultsMock.mockResolvedValue({
+      ...SUMMARY, items: [subjective(201, 1, '参考答案甲'), subjective(202, 2, '参考答案乙')],
+    });
+
+    renderResult();
+    const explainButtons = await screen.findAllByRole('button', { name: '查看解析' });
+    fireEvent.click(explainButtons[0]);
+    expect(screen.getByText('参考答案甲')).toBeTruthy();
+    expect(screen.queryByText('参考答案乙')).toBeNull();
+
+    const agreeButtons = screen.getAllByRole('button', { name: '我做对了' });
+    expect(agreeButtons).toHaveLength(2);
+    fireEvent.click(agreeButtons[0]);
+    await waitFor(() => expect(selfAssessMock).toHaveBeenCalledWith(
+      expect.objectContaining({ questionId: 201, assessment: 'correct' }),
+    ));
+    await waitFor(() => expect(screen.getByText(/已自评：做对了/)).toBeTruthy());
+    expect(screen.getAllByRole('button', { name: '我做对了' })).toHaveLength(1);
   });
 });

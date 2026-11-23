@@ -923,3 +923,26 @@ describe('作答图上传结果按发起题号写回（切题后迟到的上传�
     expect(submitBtn().title).toBe('有图片上传失败，请删除标记后重新粘贴');
   });
 });
+
+describe('QuestionRunner 来源行的题号', () => {
+  it('小问显示「试卷第 26 题(1)」，两条小问不显示成同一个题号', () => {
+    const q: RunnerQuestion[] = [
+      { n: '26(1)', text: '(1) 甲', type: 'short_answer', source: '35中道法', questionNo: 26, subNo: 1 },
+      { n: '26(2)', text: '(2) 乙', type: 'short_answer', source: '35中道法', questionNo: 26, subNo: 2 },
+    ];
+    const { unmount } = render(
+      <QuestionRunner questions={q} subjectId={9} draftKeyPrefix="sub-src"
+        variant="embedded" onSubmit={async () => ({ isCorrect: null, method: 'self_assess' })}
+        onFinish={async () => {}} />,
+    );
+    expect(screen.getByText(/试卷第 26 题\(1\)/)).toBeTruthy();
+    unmount();
+
+    render(
+      <QuestionRunner questions={[q[1]]} subjectId={9} draftKeyPrefix="sub-src2"
+        variant="embedded" onSubmit={async () => ({ isCorrect: null, method: 'self_assess' })}
+        onFinish={async () => {}} />,
+    );
+    expect(screen.getByText(/试卷第 26 题\(2\)/)).toBeTruthy();
+  });
+});

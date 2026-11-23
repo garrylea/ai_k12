@@ -200,3 +200,32 @@ describe('ExamRunPage 家长解锁后的返回入口（spec 2026-11-12）', () =
     expect(router.state.location.search).toBe('?subjectId=2');
   });
 });
+
+describe('ExamRunPage 续考恢复的同题号小问', () => {
+  beforeEach(() => {
+    sessionMock.mockReset();
+    answerMock.mockReset();
+    submitMock.mockReset();
+    answerMock.mockResolvedValue({ saved: true });
+  });
+
+  it('两小问的已答状态各自保留：显示「已答 2/2」而不是 1/2', async () => {
+    const subSession: ExamSessionInfo = {
+      ...SESSION,
+      questions: [
+        { questionId: 201, questionNo: 26, subNo: 1, text: '(1) 甲', type: 'short_answer', options: null, materialText: null, materialUrl: null, materialPosition: 'before' },
+        { questionId: 202, questionNo: 26, subNo: 2, text: '(2) 乙', type: 'short_answer', options: null, materialText: null, materialUrl: null, materialPosition: 'before' },
+      ],
+      answered: {
+        201: { answerText: '答一' },
+        202: { answerText: '答二' },
+      },
+    };
+    sessionMock.mockResolvedValue(subSession);
+    sessionStorage.setItem('exam:session', JSON.stringify(subSession));
+
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/已答 2\/2/)).toBeTruthy());
+    expect(screen.queryByText(/已答 1\/2/)).toBeNull();
+  });
+});

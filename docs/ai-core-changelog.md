@@ -37,7 +37,7 @@
 
 **数据**：35 中卷 28 → **33 题**（26=8/4、27=6/9/4、28=6/3/10；均 `material_position='before'`、`is_active=1`），`paper_questions` 33 行、`question_no=26` 两行；重导前备份 `_bak_35_q/_bak_35_pq/_bak_35_ea`，考试作答 28 条已清（session 862 空壳删除）。海淀卷**未动**（sub_no=0、材料仍在下方）。扫描不再把拆出的小问报成「小问从 (2) 起」。
 
-**验证**：同一素材上新旧代码快照对比**仅 35 中道法变化**（28→33），语文/数学/物理/化学零差异；data-refinery 2208 passed / 10 skipped，server 2882 passed，web 1934 passed + build。注意：`split_snapshot` 原基线本身已滞后于素材（旧代码 vs 旧基线 58 处，属存量漂移），本次已用旧代码 worktree 核对后重写基线。
+**验证**：同一素材上新旧代码快照对比**仅 35 中道法变化**（28→33），语文/数学/物理/化学零差异；data-refinery 2208 passed / 10 skipped，server 2882 passed，web 1938 passed + build（含 5 条同题号小问不串数据用例：提交、续考已答、解析、参考答案/自评、来源题号）。注意：`split_snapshot` 原基线本身已滞后于素材（旧代码 vs 旧基线 58 处，属存量漂移），本次已用旧代码 worktree 核对后重写基线。
 
 **遗留**：spec 7.7 阶段 B（扫描/补题身份键全面升级为三元组）未做；当前道法小问补题依赖 `sub_no` 记录，缺 `sub_no` 的旧记录会被守卫拒绝。
 
