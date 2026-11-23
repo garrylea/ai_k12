@@ -8,6 +8,25 @@
 
 ---
 
+## 2026-11-23 道法大题按小问拆题（sub_no / material_position）
+
+**问题**：道法大题（材料 → `(1)` → 材料 → `(2)`）被切成一条题：`material_text` 只有第一段材料，第二条小问的材料塞在 `content` 里，两个小问共用答案/分值/知识点；前端又把 `material_text` 渲染在题干下方，顺序正好反了（35 中 26 题实测）。
+
+**改法**：
+- 新增 `subject_strategies/politics_subquestions.py`：`(1)(2)…` 连续编号时拆成多条题（`group_order` 不变、`sub_no=1..n`），正文切到该小问分值行、材料归对应小问；无自有材料但正文指代「结合材料/两个活动」的小问继承前序材料；`+学科观点` 整行丢弃。**分值只展示，不参与能否拆的判定**（用户 2026-11-23 裁决）。单小问/末句设问走 `split_tail_question_rule`（从物化模块搬到道法模块）。`politics.py` 不再 import `material_split`，物化规则只服务物理/化学。
+- `split_page` 末尾新增可选钩子 `expand_subquestions`（`getattr`，内核无学科判断）；`questions` 加 `sub_no TINYINT UNSIGNED NOT NULL DEFAULT 0`、`material_position VARCHAR(8) NULL`（迁移 `2026-11-23_politics_subquestion.sql`，schema.sql 同步）。
+- 入库按 `(paper_id, group_order, sub_no)` 匹配；重排 `ORDER BY group_order, sub_no`；查重按 `(question_no, sub_no)`；`--reload-paper` 一条命令删旧题+考试作答后重导（非交互终端拒绝执行）。
+- 补题链路：扫描 issue/manual_fix 记录带 `sub_no`，`apply_fixes` 定位/extracted 回写按 `(group_order, sub_no)`；同号多小问且记录缺 `sub_no` 时**拒绝盲写**。
+- 前端：`materialPosition='before'` 材料渲染在题干上方（作答/结果/历史/打印 + 打印独立 above 块）；题号显示 `26(1)`，考试/结果页的作答键改用 `paperQuestionKey`（同题号小问不再串题）。
+
+**数据**：35 中卷 28 → **33 题**（26=8/4、27=6/9/4、28=6/3/10；均 `material_position='before'`、`is_active=1`），`paper_questions` 33 行、`question_no=26` 两行；重导前备份 `_bak_35_q/_bak_35_pq/_bak_35_ea`，考试作答 28 条已清（session 862 空壳删除）。海淀卷**未动**（sub_no=0、材料仍在下方）。扫描不再把拆出的小问报成「小问从 (2) 起」。
+
+**验证**：同一素材上新旧代码快照对比**仅 35 中道法变化**（28→33），语文/数学/物理/化学零差异；data-refinery 2207 passed / 10 skipped，server 2882 passed，web 1934 passed + build。注意：`split_snapshot` 原基线本身已滞后于素材（旧代码 vs 旧基线 58 处，属存量漂移），本次已用旧代码 worktree 核对后重写基线。
+
+**遗留**：spec 7.7 阶段 B（扫描/补题身份键全面升级为三元组）未做；当前道法小问补题依赖 `sub_no` 记录，缺 `sub_no` 的旧记录会被守卫拒绝。
+
+---
+
 ## 2026-11-22 爬虫支持「跨区大汇总表」页（shitiku/86887）
 
 **问题**：`--url https://www.zgkao.com/shitiku/86887.html` 解析出 0 条目，整页一份 PDF 也下不到，同站其他页正常。

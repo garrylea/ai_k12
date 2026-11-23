@@ -1,7 +1,7 @@
 # 道法大题按小问拆题设计（sub_no / material_position）
 
 **日期**：2026-11-23
-**状态**：待评审
+**状态**：已批准（2026-11-23）；实施计划见 `docs/superpowers/plans/2026-11-23-politics-subquestion-split.md`
 **范围**：道法（politics）试卷题；语文 / 数学 / 物理 / 化学本期不动
 **试点卷**：2026 北京市第三十五中学 初三 期中（DB paper 862，35 中道法卷）
 
