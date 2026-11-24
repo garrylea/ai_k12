@@ -51,10 +51,15 @@ function HistoryRow({ item, state }: { item: PracticeHistoryItem; state: unknown
             {formatDate(item.startedAt)}
           </span>
         </div>
-        <div className="mt-2 flex items-center gap-3 text-sm text-[var(--text-secondary)]">
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-[var(--text-secondary)]">
           <span>
             {`共 ${item.totalCount} 题 · 对 ${item.correctCount}/${item.totalCount}`}
           </span>
+          {item.unscoredCount > 0 && (
+            <span className="text-xs text-[var(--text-tertiary)]">
+              {`无参考答案 ${item.unscoredCount} 题 · 不计分`}
+            </span>
+          )}
           <span className="rounded-[var(--radius-pill)] bg-[var(--bg-subtle)] px-2 py-0.5 text-xs text-[var(--text-tertiary)]">
             {item.source === 'exam' ? '考试' : '专项'}
           </span>

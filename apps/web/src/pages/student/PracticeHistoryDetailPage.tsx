@@ -108,8 +108,23 @@ function parseStructured(answerText: string | null): Array<{ label: string; valu
   }
 }
 
-/** 「未作答」优先于三态判定：未答的题 isCorrect 为 null，不能显示成「未判定」。 */
-function StatusBadge({ isCorrect, answered }: { isCorrect: boolean | null; answered: boolean }) {
+/** 「无参考答案」优先于未作答/三态判定：method='no_standard_answer' 不判不计，不能显示成「未判定」。 */
+function StatusBadge({
+  isCorrect,
+  answered,
+  method,
+}: {
+  isCorrect: boolean | null;
+  answered: boolean;
+  method: string | null;
+}) {
+  if (method === 'no_standard_answer') {
+    return (
+      <span className="inline-flex items-center rounded-[var(--radius-pill)] bg-[var(--bg-subtle)] px-2 py-0.5 text-xs text-[var(--text-tertiary)]">
+        无参考答案
+      </span>
+    );
+  }
   if (!answered) {
     return (
       <span className="inline-flex items-center rounded-[var(--radius-pill)] bg-[var(--bg-subtle)] px-2 py-0.5 text-xs text-[var(--warning)]">
@@ -177,7 +192,7 @@ function QuestionCard({
     <li className="rounded-[var(--radius-md)] border border-[var(--bg-subtle)] bg-[var(--bg-card)] p-4">
       <div className="mb-3 flex items-center gap-2">
         <span className="text-sm text-[var(--text-tertiary)]">{`第 ${q.questionOrder} 题`}</span>
-        <StatusBadge isCorrect={q.isCorrect} answered={answered} />
+        <StatusBadge isCorrect={q.isCorrect} answered={answered} method={q.method} />
         {(q.canRedo || (q.canSimilar && similarCounts.length > 0)) && (
           <div className="ml-auto flex items-center gap-1">
             {q.canRedo && (
@@ -499,6 +514,11 @@ export default function PracticeHistoryDetailPage() {
               {`${session.correctCount}/${session.totalCount}`}
             </p>
             <p className="text-xs text-[var(--text-tertiary)]">答对</p>
+            {session.unscoredCount > 0 && (
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                {`无参考答案 ${session.unscoredCount} 题 · 不计分`}
+              </p>
+            )}
           </div>
         </div>
       </Card>

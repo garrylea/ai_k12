@@ -472,7 +472,7 @@ CREATE TABLE IF NOT EXISTS exam_sessions (
   CONSTRAINT fk_es_paper FOREIGN KEY (paper_id) REFERENCES exam_papers (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 考试逐题作答（is_correct NULL = 在途/未判；method: exact|ai|self_assess|unanswered|failed）
+-- 考试逐题作答（is_correct NULL = 在途/未判；method: exact|ai|self_assess|unanswered|failed|no_standard_answer）
 CREATE TABLE IF NOT EXISTS exam_answers (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   session_id BIGINT NOT NULL,
@@ -481,7 +481,7 @@ CREATE TABLE IF NOT EXISTS exam_answers (
   answer_text TEXT,
   is_correct TINYINT(1) DEFAULT NULL,
   score DECIMAL(3,2) DEFAULT NULL COMMENT '客观题得分比例：1=全对 0.5=选对不全 0=错；主观题 NULL',
-  method VARCHAR(20) DEFAULT NULL,         -- 折回自 migrations/2026-09-09_widen_method_columns.sql：容纳 'self_assess'（11 字符）
+  method VARCHAR(20) DEFAULT NULL,         -- 'exact'|'ai'|'self_assess'|'unanswered'|'failed'|'no_standard_answer'；折回自 migrations/2026-09-09_widen_method_columns.sql：容纳 'self_assess'（11 字符）
   analysis TEXT,
   error_type VARCHAR(20) DEFAULT NULL,
   judged_at DATETIME(3) DEFAULT NULL,
@@ -1612,7 +1612,7 @@ CREATE TABLE IF NOT EXISTS special_practice_sessions (
   session_uid    CHAR(36)     NOT NULL,
   student_id     BIGINT       NOT NULL,
   subject_id     BIGINT       NOT NULL,
-  module         VARCHAR(32)  NOT NULL COMMENT 'chinese_dictation|chinese_interpretation|chinese_meaning|en_vocabulary|math_targeted|physics_targeted|chemistry_targeted',
+  module         VARCHAR(32)  NOT NULL COMMENT 'chinese_dictation|chinese_interpretation|chinese_meaning|en_vocabulary|math_targeted|cn_targeted|en_targeted|physics_targeted|chemistry_targeted|politics_targeted',
   title          VARCHAR(120) DEFAULT NULL,
   question_count SMALLINT     NOT NULL DEFAULT 0,
   started_at     DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -1627,7 +1627,7 @@ CREATE TABLE IF NOT EXISTS special_practice_sessions (
 CREATE TABLE IF NOT EXISTS special_answer_records (
   id              BIGINT AUTO_INCREMENT PRIMARY KEY,
   session_id      BIGINT      NOT NULL,
-  question_id     BIGINT      DEFAULT NULL COMMENT '数学/物理/化学非空；语文三专项/英语背词为 NULL',
+  question_id     BIGINT      DEFAULT NULL COMMENT '数学/物理/化学/英语专项非空；语文三专项/英语背词为 NULL',
   ref_type        VARCHAR(24) DEFAULT NULL COMMENT 'question|passage|word',
   ref_id          BIGINT      DEFAULT NULL COMMENT 'passage_id / word_id',
   sentence_index  SMALLINT    DEFAULT NULL COMMENT '解释/含义专项逐句',

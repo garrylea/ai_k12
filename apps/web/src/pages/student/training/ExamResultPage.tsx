@@ -161,8 +161,10 @@ export default function ExamResultPage() {
       title: `${subjectName(subjectId)}测验`,
       celebrate: {
         title: '本套试卷已交卷！',
-        subtitle: `客观题 ${summary.correctCount}/${summary.totalCount} · 正确率 ${summary.accuracy}%`
-          + ((summary.partialCount ?? 0) > 0 ? `（含 ${summary.partialCount} 题部分得分）` : ''),
+        subtitle: summary.totalCount === 0
+          ? `本次无可计分题${(summary.unscoredCount ?? 0) > 0 ? ` · 无参考答案 ${summary.unscoredCount} 题` : ''}`
+          : `客观题 ${summary.correctCount}/${summary.totalCount} · 正确率 ${summary.accuracy}%`
+            + ((summary.partialCount ?? 0) > 0 ? `（含 ${summary.partialCount} 题部分得分）` : ''),
         primaryLabel: '查看成绩',
       },
     });
@@ -324,29 +326,51 @@ export default function ExamResultPage() {
                   return null;
                 })()}
                 <div className="flex items-center justify-center gap-10 py-5">
-                  <div className="text-center">
-                    <div className="font-mono text-4xl font-bold leading-none text-[var(--success)]">{summary.correctCount}</div>
-                    <div className="mt-1.5 text-xs text-[var(--text-secondary)]">客观题答对</div>
-                  </div>
-                  <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
-                  <div className="text-center">
-                    <div className="font-mono text-4xl font-bold leading-none text-[var(--text-primary)]">
-                      {summary.totalCount - (summary.subjectiveCount ?? 0)}
+                  {summary.totalCount === 0 ? (
+                    <div className="text-center">
+                      <div className="text-base font-semibold text-[var(--text-secondary)]">本次无可计分题</div>
+                      {(summary.unscoredCount ?? 0) > 0 && (
+                        <div className="mt-1.5 text-xs text-[var(--text-tertiary)]">
+                          {`无参考答案 ${summary.unscoredCount} 题 · 不计分`}
+                        </div>
+                      )}
                     </div>
-                    <div className="mt-1.5 text-xs text-[var(--text-secondary)]">客观题总数</div>
-                  </div>
-                  <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
-                  <div className="text-center">
-                    <div className="font-mono text-4xl font-bold leading-none text-[var(--brand-500)]">{summary.accuracy}%</div>
-                    <div className="mt-1.5 text-xs text-[var(--text-secondary)]">客观题正确率</div>
-                  </div>
-                  {(summary.subjectiveCount ?? 0) > 0 && (
+                  ) : (
                     <>
+                      <div className="text-center">
+                        <div className="font-mono text-4xl font-bold leading-none text-[var(--success)]">{summary.correctCount}</div>
+                        <div className="mt-1.5 text-xs text-[var(--text-secondary)]">客观题答对</div>
+                      </div>
                       <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
                       <div className="text-center">
-                        <div className="font-mono text-4xl font-bold leading-none text-[var(--brand-500)]">{summary.subjectiveCount}</div>
-                        <div className="mt-1.5 text-xs text-[var(--text-secondary)]">主观题（自评）</div>
+                        <div className="font-mono text-4xl font-bold leading-none text-[var(--text-primary)]">
+                          {summary.totalCount - (summary.subjectiveCount ?? 0)}
+                        </div>
+                        <div className="mt-1.5 text-xs text-[var(--text-secondary)]">客观题总数</div>
                       </div>
+                      <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
+                      <div className="text-center">
+                        <div className="font-mono text-4xl font-bold leading-none text-[var(--brand-500)]">{summary.accuracy}%</div>
+                        <div className="mt-1.5 text-xs text-[var(--text-secondary)]">客观题正确率</div>
+                      </div>
+                      {(summary.subjectiveCount ?? 0) > 0 && (
+                        <>
+                          <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
+                          <div className="text-center">
+                            <div className="font-mono text-4xl font-bold leading-none text-[var(--brand-500)]">{summary.subjectiveCount}</div>
+                            <div className="mt-1.5 text-xs text-[var(--text-secondary)]">主观题（自评）</div>
+                          </div>
+                        </>
+                      )}
+                      {(summary.unscoredCount ?? 0) > 0 && (
+                        <>
+                          <div className="h-10 w-px bg-[var(--bg-subtle)]" aria-hidden="true" />
+                          <div className="text-center">
+                            <div className="font-mono text-4xl font-bold leading-none text-[var(--text-tertiary)]">{summary.unscoredCount}</div>
+                            <div className="mt-1.5 text-xs text-[var(--text-secondary)]">无参考答案（不计分）</div>
+                          </div>
+                        </>
+                      )}
                     </>
                   )}
                 </div>

@@ -175,6 +175,12 @@ export function AnswerResultList({
                 <span className="text-[13px] text-[var(--text-secondary)]">主观 {subjectiveCount}</span>
               </div>
             )}
+            {unscoredCount > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-[var(--text-tertiary)]" />
+                <span className="text-[13px] text-[var(--text-secondary)]">无参考答案 {unscoredCount} 题</span>
+              </div>
+            )}
           </div>
         </div>
 

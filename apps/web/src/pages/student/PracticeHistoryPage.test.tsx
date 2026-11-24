@@ -32,6 +32,7 @@ const EXAM_ITEM = {
   completedAt: '2026-11-01T06:40:00.000Z',
   totalCount: 10,
   correctCount: 7,
+  unscoredCount: 0,
 };
 
 afterEach(() => cleanup());
@@ -60,6 +61,24 @@ describe('PracticeHistoryPage', () => {
     });
     render(<MemoryRouter><PracticeHistoryPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getAllByText('北师大物理实验卷')).toHaveLength(2));
+  });
+
+  it('整卷无参考答案（974 形状）：显示「对 0/0」+「无参考答案 32 题」，不把无答案题算进分母', async () => {
+    getPracticeHistoryMock.mockResolvedValue({
+      items: [{
+        ...EXAM_ITEM,
+        title: '2026 西城初三期末英语',
+        totalCount: 0,
+        correctCount: 0,
+        unscoredCount: 32,
+      }],
+      total: 1, page: 1, pageSize: 20,
+    });
+    render(<MemoryRouter><PracticeHistoryPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('2026 西城初三期末英语')).toBeInTheDocument());
+    expect(screen.getByText('共 0 题 · 对 0/0')).toBeInTheDocument();
+    expect(screen.getByText('无参考答案 32 题 · 不计分')).toBeInTheDocument();
+    expect(screen.queryByText(/对 0\/32/)).toBeNull();
   });
 
   it('空态引导去训练轨', async () => {

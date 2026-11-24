@@ -53,6 +53,7 @@ const EXAM_SESSION = {
   completedAt: '2026-11-01T06:40:00.000Z',
   totalCount: 2,
   correctCount: 1,
+  unscoredCount: 0,
 };
 
 const SPECIAL_SESSION = {
@@ -65,6 +66,7 @@ const SPECIAL_SESSION = {
   completedAt: '2026-10-31T11:35:00.000Z',
   totalCount: 1,
   correctCount: 0,
+  unscoredCount: 0,
 };
 
 /** 未作答 + 可重做/可同类型（数学卷）。 */
@@ -321,6 +323,29 @@ describe('PracticeHistoryDetailPage', () => {
     renderAt('exam', '1');
     await waitFor(() => expect(screen.getByText('解析未生成')).toBeInTheDocument());
     expect(screen.getByText('未判定')).toBeInTheDocument();
+  });
+
+  it('无参考答案题：徽章显示「无参考答案」，不是「未判定/未作答」；汇总用排除后的分母', async () => {
+    getDetailMock.mockResolvedValue({
+      session: { ...EXAM_SESSION, totalCount: 0, correctCount: 0, unscoredCount: 1 },
+      questions: [{
+        ...UNANSWERED_QUESTION,
+        answerText: '我的作答',
+        isCorrect: null,
+        method: 'no_standard_answer',
+        questionAnswer: null,
+        canRedo: false,
+        canSimilar: false,
+      }],
+    });
+    renderAt('exam', '1');
+    await waitFor(() => expect(screen.getByText('0/0')).toBeInTheDocument());
+    // 徽章文字（汇总那条是「无参考答案 1 题 · 不计分」，不含精确匹配）
+    expect(screen.getByText('无参考答案')).toBeInTheDocument();
+    expect(screen.getByText('无参考答案 1 题 · 不计分')).toBeInTheDocument();
+    expect(screen.queryByText('未判定')).toBeNull();
+    expect(screen.queryByText('未作答')).toBeNull();
+    expect(screen.queryByText('0/1')).toBeNull();
   });
 
   it('source 非法显示不存在 + 返回入口', async () => {

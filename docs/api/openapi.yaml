@@ -13216,7 +13216,7 @@ components:
         answer:
           type: string
           nullable: true
-          description: 参考答案（主观题自评对照展示；无参考答案为 null）
+          description: 参考答案（主观题自评对照展示；无参考答案时可能为空字符串或 null）
         needsSelfAssessment:
           type: boolean
           description: 待自评 = hasStandardAnswer && method='self_assess'（不能由 isCorrect=null 推断——无参考答案题同样为 null）

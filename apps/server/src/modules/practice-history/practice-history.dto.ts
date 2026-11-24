@@ -20,8 +20,11 @@ export interface PracticeHistoryItem {
   module: string | null;
   startedAt: Date;
   completedAt: Date | null;
+  /** 计分题数（已排除 method='no_standard_answer' 的无参考答案题）。 */
   totalCount: number;
   correctCount: number;
+  /** 无参考答案、不判不计的题数（974 卷整卷无答案时 totalCount=0、unscoredCount=35）。 */
+  unscoredCount: number;
 }
 
 /** 详情里的一题（考试与专项统一为这一形状）。 */

@@ -97,6 +97,7 @@ export class PracticeHistoryService {
         completedAt: e.submitted_at,
         totalCount: c.total,
         correctCount: c.correct,
+        unscoredCount: c.unscored,
       };
     }));
     const specialItems = await Promise.all(specials.map(async (s): Promise<PracticeHistoryItem> => {
@@ -111,6 +112,7 @@ export class PracticeHistoryService {
         completedAt: s.completed_at,
         totalCount: c.total,
         correctCount: c.correct,
+        unscoredCount: 0,
       };
     }));
 
@@ -159,6 +161,7 @@ export class PracticeHistoryService {
           source: 'exam', sessionId: session.id, subjectId: session.subject_id,
           title: session.title, module: null, startedAt: session.started_at,
           completedAt: session.submitted_at, totalCount: count.total, correctCount: count.correct,
+          unscoredCount: count.unscored,
         },
         questions: answers.map((a): PracticeHistoryQuestion => {
           const qid = a.question_id;
@@ -291,6 +294,7 @@ export class PracticeHistoryService {
         source: 'special', sessionId: session.id, subjectId: session.subject_id,
         title: session.title, module: session.module, startedAt: session.started_at,
         completedAt: session.completed_at, totalCount: count.total, correctCount: count.correct,
+        unscoredCount: 0,
       },
       questions,
     };

@@ -207,14 +207,28 @@ export class ExamSessionsRepository {
     return Number((rows[0] as { cnt: number | string }).cnt ?? 0);
   }
 
-  /** 某会话作答数与正确数（列表"对 x/y"用）。 */
-  async countAnswersBySession(sessionId: number): Promise<{ total: number; correct: number }> {
+  /**
+   * 某会话的计分题数 / 正确数 / 无参考答案题数（列表「对 x/y」用）。
+   *
+   * `total` **排除** `method='no_standard_answer'`（无参考答案不判不计），单独用
+   * `unscored` 返回，避免 974 卷 35 道无答案题被显示成「对 0/35」。
+   * `COALESCE(method,'')` 兜住历史 NULL 行（旧行 method 可能为空）。
+   */
+  async countAnswersBySession(
+    sessionId: number,
+  ): Promise<{ total: number; correct: number; unscored: number }> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) AS total, COALESCE(SUM(is_correct = 1), 0) AS correct
+      `SELECT COALESCE(SUM(COALESCE(method,'') <> 'no_standard_answer'),0) AS total,
+              COALESCE(SUM(is_correct = 1),0) AS correct,
+              COALESCE(SUM(method = 'no_standard_answer'),0) AS unscored
        FROM exam_answers WHERE session_id = ?`, [sessionId],
     );
-    const r = rows[0] as { total: number | string; correct: number | string };
-    return { total: Number(r.total ?? 0), correct: Number(r.correct ?? 0) };
+    const r = rows[0] as { total: number | string; correct: number | string; unscored: number | string };
+    return {
+      total: Number(r.total ?? 0),
+      correct: Number(r.correct ?? 0),
+      unscored: Number(r.unscored ?? 0),
+    };
   }
 
   /** 单个会话归属校验 + 带卷名（防 IDOR）。 */

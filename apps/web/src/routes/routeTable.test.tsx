@@ -417,7 +417,7 @@ describe('路由表：积分相关页面', () => {
       session: {
         source: 'exam', sessionId: 1, subjectId: 4, title: '物理卷', module: null,
         startedAt: '2026-11-01T06:00:00.000Z', completedAt: '2026-11-01T06:40:00.000Z',
-        totalCount: 1, correctCount: 1,
+        totalCount: 1, correctCount: 1, unscoredCount: 0,
       },
       questions: [{
         questionId: 100, questionOrder: 1, answerText: 'A', isCorrect: true, score: 1,

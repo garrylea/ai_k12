@@ -21,7 +21,7 @@ function make() {
   const examSessionsRepo = {
     listSubmittedByStudent: vi.fn().mockResolvedValue([]),
     countSubmittedByStudent: vi.fn().mockResolvedValue(0),
-    countAnswersBySession: vi.fn().mockResolvedValue({ total: 0, correct: 0 }),
+    countAnswersBySession: vi.fn().mockResolvedValue({ total: 0, correct: 0, unscored: 0 }),
     findAnswersWithQuestions: vi.fn().mockResolvedValue([]),
     findAnswersBySession: vi.fn().mockResolvedValue([]),
     findByIdOwned: vi.fn().mockResolvedValue(null),
@@ -59,7 +59,7 @@ describe('PracticeHistoryService.list', () => {
   it('考试 + 专项合并按开始时间倒序', async () => {
     h.examSessionsRepo.listSubmittedByStudent.mockResolvedValue([mkExamSession()]);
     h.specialSessionsRepo.listByStudent.mockResolvedValue([mkSpecialSession()]);
-    h.examSessionsRepo.countAnswersBySession.mockResolvedValue({ total: 10, correct: 7 });
+    h.examSessionsRepo.countAnswersBySession.mockResolvedValue({ total: 10, correct: 7, unscored: 0 });
     h.specialAnswersRepo.countBySession.mockResolvedValue({ total: 1, correct: 0 });
     h.examSessionsRepo.countSubmittedByStudent.mockResolvedValue(1);
     h.specialSessionsRepo.countByStudent.mockResolvedValue(1);
@@ -70,11 +70,23 @@ describe('PracticeHistoryService.list', () => {
     expect(r.items[0].title).toBe('北师大物理实验卷'); // 11-01 在前
     expect(r.items[0].source).toBe('exam');
     expect(r.items[0].correctCount).toBe(7);
+    expect(r.items[0].unscoredCount).toBe(0);
     expect(r.items[1].title).toBe('默写专项·静夜思'); // 10-31 在后
     expect(r.items[1].source).toBe('special');
+    expect(r.items[1].unscoredCount).toBe(0);
     expect(r.total).toBe(2);
     expect(r.page).toBe(1);
     expect(r.pageSize).toBe(20);
+  });
+
+  it('整卷无参考答案：计数块透传 total/correct/unscored（total 已排除无答案题）', async () => {
+    h.examSessionsRepo.listSubmittedByStudent.mockResolvedValue([mkExamSession()]);
+    h.examSessionsRepo.countAnswersBySession.mockResolvedValue({ total: 0, correct: 0, unscored: 32 });
+    h.examSessionsRepo.countSubmittedByStudent.mockResolvedValue(1);
+
+    const r = await h.service.list({ studentId: 7 });
+
+    expect(r.items[0]).toMatchObject({ totalCount: 0, correctCount: 0, unscoredCount: 32 });
   });
 
   it('带 subjectId 时两端都筛选', async () => {
@@ -144,7 +156,7 @@ describe('PracticeHistoryService.getDetail', () => {
 
   it('考试详情：逐题作答映射', async () => {
     h.examSessionsRepo.findByIdOwned.mockResolvedValue(mkExamSession());
-    h.examSessionsRepo.countAnswersBySession.mockResolvedValue({ total: 2, correct: 1 });
+    h.examSessionsRepo.countAnswersBySession.mockResolvedValue({ total: 2, correct: 1, unscored: 0 });
     h.examSessionsRepo.findAnswersWithQuestions.mockResolvedValue([
       {
         question_id: 100, question_order: 1, answer_text: 'B', is_correct: 0, score: '0.00',
@@ -157,6 +169,7 @@ describe('PracticeHistoryService.getDetail', () => {
     ]);
     const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });
     expect(r!.session.source).toBe('exam');
+    expect(r!.session).toMatchObject({ totalCount: 2, correctCount: 1, unscoredCount: 0 });
     expect(r!.questions[0]).toMatchObject({
       questionId: 100, answerText: 'B', isCorrect: false, questionContent: '第1题题面',
       questionAnswer: 'C', method: 'exact', refType: 'question',
@@ -261,7 +274,7 @@ describe('PracticeHistoryService.getDetail', () => {
       analysis: null, method: 'exact', judged_at: null, text: '题干', type: 'choice',
       options: null, explanation: null, answer: 'A', material_text: null, is_active: 1,
     }]);
-    h.examSessionsRepo.countAnswersBySession.mockResolvedValue({ total: 1, correct: 0 });
+    h.examSessionsRepo.countAnswersBySession.mockResolvedValue({ total: 1, correct: 0, unscored: 0 });
     h.questionsRepo.findKpIdsByQuestionIds.mockResolvedValue(new Map([[100, 28]]));
 
     const r = await h.service.getDetail({ studentId: 7, source: 'exam', sessionId: 1 });

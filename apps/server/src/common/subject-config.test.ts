@@ -89,6 +89,11 @@ describe('英语学科配置', () => {
     expect(targetedSessionModule(5)).toBe('chemistry_targeted');
     expect(targetedSessionModule(9)).toBe('politics_targeted');
   });
+  it('六学科：task code 与 session module 逐项相等（防两张表漂移）', () => {
+    for (const id of [1, 2, 3, 4, 5, 9]) {
+      expect(targetedTaskCode(id)).toBe(targetedSessionModule(id));
+    }
+  });
   it('英语非客观题显式自评，但不吞 fill_blank', () => {
     expect(isExplicitSelfAssessType(3, 'short_answer')).toBe(true);
     expect(isExplicitSelfAssessType(3, 'proof')).toBe(true);

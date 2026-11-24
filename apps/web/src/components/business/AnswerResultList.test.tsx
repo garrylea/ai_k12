@@ -110,6 +110,8 @@ describe('AnswerResultList 无参考答案（method=no_standard_answer）', () =
       />,
     );
     expect(screen.getByText('无参考答案 · 不计分')).toBeTruthy();
+    // 顶部统计单列无参考答案题数
+    expect(screen.getByText('无参考答案 1 题')).toBeTruthy();
     // 不计分：不渲染自评按钮，也不出「查看解析」的对错分支
     expect(screen.queryAllByRole('button', { name: /自评|做对|做错/ })).toHaveLength(0);
     // 计数：题面 2 道，只算 1 道答对，无错题/主观题

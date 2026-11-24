@@ -299,6 +299,48 @@ describe('ExamResultPage 交卷发分庆祝', () => {
   });
 
   /**
+   * 全卷无参考答案（974 卷形状，32 道在架无答案）：没有可计分题。
+   * 顶部不能出现「客观题 0/0 · 正确率 0%」这种像考砸了的读数，改为中性文案。
+   */
+  it('全卷无答案：显示「本次无可计分题」+「无参考答案 32 题」；不出现正确率 0%', async () => {
+    const unscored = (n: number): ExamResultItem => ({
+      ...ITEM, questionId: 300 + n, questionNo: n, type: 'short_answer', options: null,
+      isCorrect: null, method: 'no_standard_answer', hasStandardAnswer: false,
+      needsSelfAssessment: false, selfAssessment: null, answerText: `作答 ${n}`, answer: null,
+    });
+    resultsMock.mockResolvedValue({
+      correctCount: 0, totalCount: 0, accuracy: 0, unscoredCount: 32,
+      items: Array.from({ length: 32 }, (_, i) => unscored(i + 1)),
+    });
+
+    renderResult();
+
+    expect(await screen.findByText('本次无可计分题')).toBeTruthy();
+    expect(screen.getByText('无参考答案 32 题 · 不计分')).toBeTruthy();
+    // AnswerResultList 顶部统计也单列无参考答案题数
+    expect(screen.getByText('无参考答案 32 题')).toBeTruthy();
+    expect(screen.queryByText(/正确率 0%/)).toBeNull();
+    expect(screen.queryByText('客观题答对')).toBeNull();
+  });
+
+  it('全卷无答案 + 有交卷积分：庆祝副标题同样走「本次无可计分题」分支', async () => {
+    const unscored: ExamResultItem = {
+      ...ITEM, type: 'short_answer', options: null, isCorrect: null,
+      method: 'no_standard_answer', hasStandardAnswer: false,
+      needsSelfAssessment: false, selfAssessment: null, answerText: '作答', answer: null,
+    };
+    resultsMock.mockResolvedValue({
+      correctCount: 0, totalCount: 0, accuracy: 0, unscoredCount: 32, items: [unscored],
+    });
+
+    renderResult({ points: { awarded: 12, balance: 612, levelUp: null } });
+
+    expect(await screen.findByRole('dialog', { name: '本套试卷已交卷！' })).toBeTruthy();
+    expect(screen.getByText(/本次无可计分题 · 无参考答案 32 题/)).toBeTruthy();
+    expect(screen.queryByText(/正确率 0%/)).toBeNull();
+  });
+
+  /**
    * 错题补偿套题询问卡（2026-09-21 批）：结果页有客观错题时才出现。
    * 一正一反两条：只断言「出现」证明不了 wrongCount 是从 items 算的——还得证明没错题时不出现。
    */
