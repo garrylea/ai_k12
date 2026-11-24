@@ -374,3 +374,27 @@ def test_case4b_logs_paper_replaced(tmp_path, capsys):
     assert "只有题干" not in out
     log = capsys.readouterr().out
     assert "case 4b" in log and "试卷 md 不参与切题" in log
+
+
+def test_case4b_copies_answer_images(tmp_path, capsys):
+    """case 4b 用答案文件全文时，答案侧图片同样要复制到试卷 images 目录。"""
+    stem = "物理-西城-模拟一"
+    paper_dir = tmp_path / f"{stem}-试卷"
+    answer_dir = tmp_path / f"{stem}-答案"
+    paper_dir.mkdir()
+    (answer_dir / "images").mkdir(parents=True)
+    (answer_dir / "images" / "a1.jpg").write_bytes(b"answer-img")
+
+    paper = paper_dir / f"{stem}-试卷.md"
+    paper.write_text("1. 只有题干\n", encoding="utf-8")
+    answer_text = (
+        "1. 题干 (A) 甲 (B) 乙 (C) 丙 (D) 丁\n"
+        "参考答案\n1. B\n"
+        "![](images/a1.jpg)\n"
+    )
+    (answer_dir / f"{stem}-答案.md").write_text(answer_text, encoding="utf-8")
+
+    result = maybe_merge_answer_md(paper, paper.read_text(encoding="utf-8"))
+    assert result == answer_text
+    assert (paper_dir / "images" / "a1.jpg").read_bytes() == b"answer-img"
+    assert "复制答案图片 1 张" in capsys.readouterr().out

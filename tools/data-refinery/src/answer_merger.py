@@ -5,10 +5,13 @@ zgkao 命名反向：'试卷.pdf' 通常是有答案版，'答案.pdf' 通常是
 """
 
 import re
+import shutil
 from pathlib import Path
 from question_splitter import _find_option_marks, is_answer_keyword
 
 _SOLUTION_RE = re.compile(r'解[：:]|证明[：:]')
+# 合并文本中形如 `images/xxx.jpg` 的图片引用（答案 md 多为 `![](images/xxx.jpg)`）
+_IMAGE_REF_RE = re.compile(r'images/[^\s\)\]"\'<>]+')
 # case 4a 合并纯答案时补的答案区标题（无标题的答案文件，见 maybe_merge_answer_md）
 _ANSWER_SECTION_HEADER = "# 参考答案\n\n"
 # 独立答案文件的强标题词：只在首屏出现、且整篇没有选择题选项序列时才算答案
@@ -123,6 +126,28 @@ def _derive_answer_path(md_path: Path) -> Path:
     return candidates[0] if candidates else md_path
 
 
+def _copy_answer_images(md_path: Path, answer_path: Path, text: str) -> None:
+    """把合并文本里答案侧的图片同步到试卷 md 的 images 目录。
+
+    case 4a/4b 只把答案**文本**拼进/替换试卷文本，图片引用仍是 `images/xxx`；
+    publish 解析图片时只在试卷 md 的 images 目录找，找不到就保留原引用，
+    db_loader 会拒绝未物化路径（西城物理模拟一 paper 899 题 23 即因此失败）。
+
+    文件名是内容哈希，同名即同内容；目标已存在则跳过、不覆盖。
+    """
+    copied = 0
+    for ref in dict.fromkeys(_IMAGE_REF_RE.findall(text)):  # 去重、保序
+        src = answer_path.parent / ref
+        dst = md_path.parent / ref
+        if src.is_file() and not dst.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            copied += 1
+    if copied:
+        print(f"[merge] 复制答案图片 {copied} 张 → {md_path.parent / 'images'}",
+              flush=True)
+
+
 def maybe_merge_answer_md(md_path: Path, text: str) -> str:
     """根据两份文件的内容组合，决定合并或选择。
 
@@ -164,10 +189,13 @@ def maybe_merge_answer_md(md_path: Path, text: str) -> str:
                 answer_text = _ANSWER_SECTION_HEADER + answer_text
             print(f"[merge] {md_path.name} ← {answer_path.name}"
                   f"（case 4a 纯答案拼接，{len(answer_text.strip())} 字）", flush=True)
-            return text + "\n\n" + answer_text
+            merged = text + "\n\n" + answer_text
+            _copy_answer_images(md_path, answer_path, merged)
+            return merged
         # case 4b: 答案是试卷+答案版本 → 用答案文件（它有完整题干+答案），丢弃试卷
         print(f"[merge] {md_path.name} ← {answer_path.name}"
               f"（case 4b 用答案文件全文，试卷 md 不参与切题）", flush=True)
+        _copy_answer_images(md_path, answer_path, answer_text)
         return answer_text
 
     # case 5: 两份都无答案 → 处理试卷文件（答案留空，做题时大模型补）
