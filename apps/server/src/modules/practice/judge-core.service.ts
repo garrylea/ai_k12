@@ -163,6 +163,8 @@ export interface JudgeDictationOutput {
  * 语文自 2026-10-28 起如此（语文填空/简答的参考答案多为「示例：…」句式，归一化全等几乎不可能；
  * 且 AI 判题模板目前只有数学 prompts，走 AI 会被数学提示词误判）；
  * 物理/化学/道法沿用同一口径（spec 2026-10-31 §3.5）。选择题/判断题仍走 exact。
+ * 英语（2026-11-24）走 `isExplicitSelfAssessType` 的**显式**自评：只放 short_answer/proof，
+ * fill_blank 仍先做归一化比对（相等判对、不等交 AI 复核），防止辨析填空被无判据甩给自评。
  */
 function isSelfAssessNonObjective(q: { subject_id?: number | null; type: string }): boolean {
   const sid = Number(q.subject_id);
@@ -351,7 +353,8 @@ export class JudgeCoreService {
     } else if ((q.type === 'fill_blank' || q.type === 'calculation')
                && compareAnswer(input.studentAnswer, q.answer, q.options)) {
       // 路由 1b：fill_blank/calculation 归一化相等 -> exact 判对（省 AI）；不等走 AI 复核。
-      // 语文/物理/化学/道法已在上面两个分支处理（自评或先比对），走到这里的只有数学（等表外学科）。
+      // 语文/物理/化学/道法/英语已在上面分支处理（自评或先比对）；走到这里的分支会有
+      // 英语/数学的 fill_blank（归一化不等）与表外学科（无训练入口，口径回落数学）。
       isCorrect = true;
       method = 'exact';
     } else {

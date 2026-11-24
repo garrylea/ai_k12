@@ -398,6 +398,81 @@ describe('judgeQuestion 语文（subject_id=2）非客观题自评（2026-10-28 
   });
 });
 
+describe('judgeQuestion 英语（subject_id=3）闸门②显式自评（2026-11-24）', () => {
+  const en = (type: string, answer = '示例答案') => ({ ...q(type, answer), subject_id: 3 });
+
+  it('JUDGE_SUBJECTIVE_MODE=ai 时 short_answer 仍自评（闸门②先于主观题模式开关）', async () => {
+    process.env.JUDGE_SUBJECTIVE_MODE = 'ai';
+    const { svc, mainError } = makeService({
+      questions: { findById: vi.fn(async () => en('short_answer', 'He goes to school.')) },
+    });
+    (svc as any).judgment = { judge: vi.fn() };
+
+    const out = await svc.judgeQuestion({
+      studentId: 7, subjectId: 3, questionId: 10, studentAnswer: 'He go to school.', source: 'targeted',
+    });
+
+    expect(out).toMatchObject({
+      questionId: 10,
+      isCorrect: null,
+      method: 'self_assess',
+      needsSelfAssessment: true,
+      referenceAnswer: 'He goes to school.',
+      explanation: '解析文本',
+    });
+    expect((svc as any).judgment.judge).not.toHaveBeenCalled();
+    expect(mainError.create).not.toHaveBeenCalled();
+  });
+
+  it('proof 同样显式自评（闸门②不依赖 JUDGE_SUBJECTIVE_MODE）', async () => {
+    delete process.env.JUDGE_SUBJECTIVE_MODE;
+    const { svc } = makeService({
+      questions: { findById: vi.fn(async () => en('proof', 'Because it is raining.')) },
+    });
+    (svc as any).judgment = { judge: vi.fn() };
+
+    const out = await svc.judgeQuestion({
+      studentId: 7, subjectId: 3, questionId: 10, studentAnswer: 'It rains.', source: 'exam',
+    });
+
+    expect(out).toMatchObject({ isCorrect: null, method: 'self_assess', needsSelfAssessment: true });
+    expect((svc as any).judgment.judge).not.toHaveBeenCalled();
+  });
+
+  it('fill_blank 不落自评：归一化相等 -> exact 判对', async () => {
+    process.env.JUDGE_SUBJECTIVE_MODE = 'ai';
+    const { svc } = makeService({
+      questions: { findById: vi.fn(async () => en('fill_blank', 'important')) },
+    });
+    (svc as any).judgment = { judge: vi.fn() };
+
+    const out = await svc.judgeQuestion({
+      studentId: 7, subjectId: 3, questionId: 10, studentAnswer: ' Important ', source: 'targeted',
+    });
+
+    expect(out).toMatchObject({ isCorrect: true, method: 'exact' });
+    expect(out.needsSelfAssessment).toBeUndefined();
+    expect((svc as any).judgment.judge).not.toHaveBeenCalled();
+  });
+
+  it('fill_blank 不落自评：归一化不等 -> 交 AI 复核', async () => {
+    const { svc } = makeService({
+      questions: { findById: vi.fn(async () => en('fill_blank', 'important')) },
+    });
+    (svc as any).judgment = { judge: vi.fn(async () => ({ isCorrect: false, errorType: 'missing' })) };
+
+    const out = await svc.judgeQuestion({
+      studentId: 7, subjectId: 3, questionId: 10, studentAnswer: 'importantly', source: 'targeted',
+    });
+
+    expect(out.method).toBe('ai');
+    expect(out.method).not.toBe('self_assess');
+    expect((svc as any).judgment.judge).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: 'english', studentAnswer: 'importantly' }),
+    );
+  });
+});
+
 describe('judgeQuestion 空答案守卫（路由 0）', () => {
   it('空答案题（error_practice 重抽不过滤）-> 不计对错早退，不入错题本不触发解析', async () => {
     const { svc, mainError } = makeService({
