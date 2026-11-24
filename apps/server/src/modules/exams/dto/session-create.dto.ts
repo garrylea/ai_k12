@@ -90,7 +90,8 @@ export interface ExamResultItemDto {
   isCorrect: number | null; // 0 | 1；null = 主观题待自评（self_assess 模式不判对错）或无参考答案
   /** 该题最终落库 method：exact/ai/self_assess/unanswered/failed/no_standard_answer。 */
   method: string | null;
-  /** 是否有标准答案（method='no_standard_answer' 的题为 false）。 */
+  /** 是否有标准答案：按最终落库 method 判定——method='no_standard_answer' 为 false
+   *  （即使答案列后来补了内容）；答案列为空同样为 false。 */
   hasStandardAnswer: boolean;
   analysis: string | null;
   explanation: string | null;

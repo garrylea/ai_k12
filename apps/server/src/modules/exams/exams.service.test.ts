@@ -1044,6 +1044,67 @@ describe('ExamsService.finalizeSession 无答案题（no_standard_answer）', ()
     expect(summary.subjectiveCount).toBe(0);
   });
 
+  it('38 题（35 有答案 + 3 道空答案 short_answer）：totalCount=35、unscoredCount=3，空答案题不进主观题', async () => {
+    // 英语真实形状（1008 卷）：题单 38 题，其中 3 道 short_answer 无参考答案。
+    // 其中 1 道学生写了作文（有作答文本但无答案）——同样落 no_standard_answer 且保留 answerText。
+    const answeredQuestions = Array.from({ length: 35 }, (_, i) => ({
+      questionId: 900 + i, questionNo: i + 1, subNo: 0, text: `选择 ${i + 1}`, type: 'choice',
+      options: null, materialText: null, materialUrl: null, subjectId: 3, hasAnswer: 1,
+    }));
+    const noAnswerQuestions = Array.from({ length: 3 }, (_, i) => ({
+      questionId: 980 + i, questionNo: 36 + i, subNo: 0, text: `作文 ${i + 1}`, type: 'short_answer',
+      options: null, materialText: null, materialUrl: null, subjectId: 3, hasAnswer: 0,
+    }));
+    const correctRow = (q: { questionId: number; questionNo: number }) => ({
+      id: q.questionId, session_id: 77, question_id: q.questionId, question_order: q.questionNo,
+      answer_text: 'A', is_correct: 1, score: null, method: 'exact', analysis: null, error_type: null, judged_at: new Date(),
+    });
+    const deps = mk({
+      examPapersRepo: {
+        findPapers: vi.fn().mockResolvedValue([]),
+        findById: vi.fn().mockResolvedValue({ ...paperRow, subject_id: 3 }),
+        findQuestionsByPaperId: vi.fn().mockResolvedValue([...answeredQuestions, ...noAnswerQuestions]),
+      },
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ subject_id: 3 })),
+        findAnswersBySession: vi.fn()
+          // 收卷前：35 题已判对 + 第 36 题（无答案）在途且有作答文本
+          .mockResolvedValueOnce([
+            ...answeredQuestions.map(correctRow),
+            { id: 980, session_id: 77, question_id: 980, question_order: 36, answer_text: '我的作文',
+              is_correct: null, score: null, method: null, analysis: null, error_type: null, judged_at: null },
+          ])
+          // 收卷后终态：35 题判对 + 3 道无答案题全部 no_standard_answer
+          .mockResolvedValue([
+            ...answeredQuestions.map(correctRow),
+            { id: 980, session_id: 77, question_id: 980, question_order: 36, answer_text: '我的作文',
+              is_correct: null, score: null, method: 'no_standard_answer', analysis: null, error_type: null, judged_at: new Date() },
+            { id: 981, session_id: 77, question_id: 981, question_order: 37, answer_text: null,
+              is_correct: null, score: null, method: 'no_standard_answer', analysis: null, error_type: null, judged_at: new Date() },
+            { id: 982, session_id: 77, question_id: 982, question_order: 38, answer_text: null,
+              is_correct: null, score: null, method: 'no_standard_answer', analysis: null, error_type: null, judged_at: new Date() },
+          ]),
+      },
+    });
+
+    const summary = await mkSvc(deps).submit(1, 77);
+
+    // 3 道空答案题：即使 1 道有作答文本，也保留文本并落 no_standard_answer（不判不计）
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      questionId: 980, answerText: '我的作文', isCorrect: null, score: null, method: 'no_standard_answer',
+    }));
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      questionId: 981, answerText: null, isCorrect: null, score: null, method: 'no_standard_answer',
+    }));
+    expect(deps.judgeCore.judgeQuestion).not.toHaveBeenCalled();
+    expect(deps.mainErrorRepo.create).not.toHaveBeenCalled();
+    // 分母 35（=38-3）；3 道空答案题 is_correct=NULL 但不得混进 subjectiveCount
+    expect(summary).toEqual({
+      correctCount: 35, totalCount: 35, accuracy: 100, subjectiveCount: 0, partialCount: 0, unscoredCount: 3,
+    });
+  });
+
   it('未作答但有参考答案 -> 仍按未答计错并写错题本（旧行为）', async () => {
     const deps = mk();
     deps.examPapersRepo.findById.mockResolvedValue(paperRow);
@@ -1056,6 +1117,56 @@ describe('ExamsService.finalizeSession 无答案题（no_standard_answer）', ()
     await mkSvc(deps).submit(1, 77);
 
     expect(deps.mainErrorRepo.create).toHaveBeenCalled();
+  });
+});
+
+describe('ExamsService.summarize 统计范围（题单变更边界）', () => {
+  it('已交卷重提：answers 残留题单外（停用题）的 no_standard_answer 行不计 unscored，totalCount 不为负', async () => {
+    const staleRow = (questionId: number) => ({
+      id: questionId, session_id: 77, question_id: questionId, question_order: 1,
+      answer_text: null, is_correct: null, score: null, method: 'no_standard_answer',
+      analysis: null, error_type: null, judged_at: new Date(),
+    });
+    const deps = mk({
+      examPapersRepo: {
+        findPapers: vi.fn().mockResolvedValue([]),
+        findById: vi.fn().mockResolvedValue(paperRow),
+        // 交卷后 q99 被停用（is_active=0 / in_exam=0）：题单只剩 q10
+        findQuestionsByPaperId: vi.fn().mockResolvedValue([
+          { questionId: 10, questionNo: 1, text: '无答案题', type: 'choice', options: null, hasAnswer: 0 },
+        ]),
+      },
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
+        findAnswersBySession: vi.fn().mockResolvedValue([staleRow(10), staleRow(99)]),
+      },
+    });
+
+    const r = await mkSvc(deps).submit(1, 77);
+
+    // 只统计题单内的 q10：unscored=1、有效题数=0（不限定范围会得到 unscored=2 / total=-1）
+    expect(r).toMatchObject({ totalCount: 0, unscoredCount: 1, correctCount: 0, accuracy: 0 });
+    expect(r.totalCount).toBeGreaterThanOrEqual(0);
+  });
+
+  it('hasAnswer 缺字段（undefined）不按「无答案」处理：宁可入错题本，也不静默抹题', async () => {
+    const deps = mk();
+    deps.examPapersRepo.findById.mockResolvedValue(paperRow);
+    deps.examPapersRepo.findQuestionsByPaperId.mockResolvedValue([
+      // 数据不完整：hasAnswer 缺失
+      { questionId: 10, questionNo: 1, text: '正常题', type: 'choice', options: null, materialText: null },
+    ]);
+    deps.examSessionsRepo.findById.mockResolvedValue(sessionRow());
+    deps.examSessionsRepo.findAnswersBySession.mockResolvedValue([]);
+
+    const r = await mkSvc(deps).submit(1, 77);
+
+    expect(deps.examSessionsRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      questionId: 10, isCorrect: 0, method: 'unanswered',
+    }));
+    expect(deps.mainErrorRepo.create).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ totalCount: 1, unscoredCount: 0 });
   });
 });
 
@@ -1085,6 +1196,28 @@ describe('ExamsService.getResults 无参考答案题', () => {
     expect(res.items.find((i) => i.questionId === 10)!.hasStandardAnswer).toBe(true);
     // 汇总从分母剔除无答案题：有效 1 题、答对 1 题 -> 100%
     expect(res).toMatchObject({ totalCount: 1, unscoredCount: 1, correctCount: 1, accuracy: 100 });
+  });
+
+  it('hasStandardAnswer 以落库 method 为准：答案列后来补了内容，method=no_standard_answer 仍为 false', async () => {
+    const deps = mk({
+      examSessionsRepo: {
+        ...mk().examSessionsRepo,
+        findById: vi.fn().mockResolvedValue(sessionRow({ status: 'submitted' })),
+        findAnswersWithQuestions: vi.fn().mockResolvedValue([
+          { question_id: 11, question_order: 2, answer_text: '写了点东西', is_correct: null, method: 'no_standard_answer', analysis: null,
+            text: '无参考答案题', type: 'short_answer', options: null, explanation: null, answer: '后来补录的参考答案' },
+        ]),
+      },
+    });
+
+    const res = await mkSvc(deps).getResults(1, 77);
+
+    const item = res.items[0];
+    expect(item.hasStandardAnswer).toBe(false);
+    expect(item.needsSelfAssessment).toBe(false);
+    // 参考答案本身仍透出（结果页展示），只是不当作可自评的标准答案
+    expect(item.answer).toBe('后来补录的参考答案');
+    expect(res).toMatchObject({ totalCount: 0, unscoredCount: 1 });
   });
 });
 

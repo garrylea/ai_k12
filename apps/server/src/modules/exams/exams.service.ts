@@ -253,7 +253,9 @@ export class ExamsService {
     if (session.status === 'submitted') {
       const questions = await this.examPapersRepo.findQuestionsByPaperId(session.paper_id);
       const answers = await this.examSessionsRepo.findAnswersBySession(sessionId);
-      return this.summarize(questions.length, answers);
+      // 分母来自 questions（只含 active+in_exam），统计同样限定在这批题内——
+      // 题被停用后 answers 仍有历史行，不限定会算出 unscored > total。
+      return this.summarize(questions.length, answers, new Set(questions.map((q) => q.questionId)));
     }
     return this.finalizeSession(session);
   }
@@ -272,7 +274,9 @@ export class ExamsService {
         .map((r) => r.question_id),
     );
     const items = rows.map((row) => {
-      const hasStandardAnswer = !!row.answer && String(row.answer).trim() !== '';
+      const answerPresent = !!row.answer && String(row.answer).trim() !== '';
+      // 契约以落库 method 为准：答案列后来补了内容、但交卷时已判「无参考答案」，仍为 false
+      const hasStandardAnswer = answerPresent && row.method !== 'no_standard_answer';
       return {
         questionId: row.question_id,
         questionNo: row.question_order,
@@ -297,7 +301,13 @@ export class ExamsService {
     });
     const summary = this.summarize(
       items.length,
-      items.map((i) => ({ is_correct: i.isCorrect, score: null, method: i.method }) as ExamAnswerRow),
+      rows.map((row) => ({
+        question_id: row.question_id,
+        is_correct: row.is_correct,
+        // findAnswersWithQuestions 未 SELECT ea.score，保持原 earned 口径（按 is_correct 折算）
+        score: null,
+        method: row.method,
+      })),
     );
     return { ...summary, items };
   }
@@ -329,10 +339,12 @@ export class ExamsService {
     const byQuestion = new Map(answers.map((a) => [a.question_id, a]));
 
     for (const q of questions) {
-      // 1. 无参考答案（q.hasAnswer=0，如英语 974 卷 35 题全无答案）：优先级最高——
+      // 1. 无参考答案（hasAnswer=0，如英语 974 卷 35 题全无答案）：优先级最高——
       //    既不能按错计，也不能落 self_assess 让学生对着空白答案自评。
       //    is_correct/score 均为 NULL，统计时从分母剔除（method 是唯一判据）。
-      if (!q.hasAnswer) {
+      //    缺字段（undefined）按「有答案」处理（Number(undefined) !== 0），与
+      //    writeExamErrorBookIfAnswerable 的「宁可入本」一致，避免数据不完整时静默抹题。
+      if (Number(q.hasAnswer) === 0) {
         const a0 = byQuestion.get(q.questionId);
         await this.examSessionsRepo.upsertAnswer({
           sessionId: session.id,
@@ -432,7 +444,10 @@ export class ExamsService {
       refId: session.id,
       props: { paperId: session.paper_id },
     });
-    return { ...this.summarize(questions.length, finalAnswers), points };
+    return {
+      ...this.summarize(questions.length, finalAnswers, new Set(questions.map((q) => q.questionId))),
+      points,
+    };
   }
 
   /** 交卷发分（学完一张卷）。刻意吞掉异常：积分是激励层，发分失败绝不能挡住交卷。
@@ -495,21 +510,32 @@ export class ExamsService {
 
   /** 汇总：主观题（is_correct NULL 且 method!='no_standard_answer'）不计入对错；
    *  无参考答案题（method='no_standard_answer'）既不进对错、也不进主观题，直接从分母剔除。
-   *  correctCount/accuracy 只算客观题，subjectiveCount/unscoredCount 单列。 */
-  private summarize(totalCount: number,
-                    answers: Array<Pick<ExamAnswerRow, 'is_correct' | 'score' | 'method'>>): ExamSummaryDto {
-    const unscoredCount = answers.filter((a) => a.method === 'no_standard_answer').length;
-    const effectiveTotal = totalCount - unscoredCount;
-    const subjectiveCount = answers.filter(
+   *  correctCount/accuracy 只算客观题，subjectiveCount/unscoredCount 单列。
+   *
+   *  `scopedQuestionIds` 存在时只统计这批题（= 当前题单）的答案：题交卷后被停用
+   *  （is_active=0 / in_exam=0）时 exam_answers 仍有终态行，而分母 questions.length
+   *  不含它——不限定范围会出现 unscored/subjective 大于 total、有效题数算成负数。
+   *  `Math.max(0, …)` 只是兜底护栏，正常情况下范围内一题一行不会越界。 */
+  private summarize(
+    totalCount: number,
+    answers: Array<Pick<ExamAnswerRow, 'question_id' | 'is_correct' | 'score' | 'method'>>,
+    scopedQuestionIds?: Set<number>,
+  ): ExamSummaryDto {
+    const scoped = scopedQuestionIds
+      ? answers.filter((a) => scopedQuestionIds.has(a.question_id))
+      : answers;
+    const unscoredCount = scoped.filter((a) => a.method === 'no_standard_answer').length;
+    const effectiveTotal = Math.max(0, totalCount - unscoredCount);
+    const subjectiveCount = scoped.filter(
       (a) => a.is_correct === null && a.method !== 'no_standard_answer',
     ).length;
     const objectiveTotal = effectiveTotal - subjectiveCount;
-    const correctCount = answers.filter((a) => a.is_correct === 1).length;
+    const correctCount = scoped.filter((a) => a.is_correct === 1).length;
     // 正确率按「得分比例」算：多选选对不全记 0.5（旧行没有 score 时退回 is_correct）
-    const earned = answers
+    const earned = scoped
       .filter((a) => a.is_correct !== null)
       .reduce((sum, a) => sum + (a.score == null ? (a.is_correct === 1 ? 1 : 0) : Number(a.score)), 0);
-    const partialCount = answers.filter(
+    const partialCount = scoped.filter(
       (a) => a.score != null && Number(a.score) > 0 && Number(a.score) < 1,
     ).length;
     const accuracy = objectiveTotal > 0 ? Math.round((earned / objectiveTotal) * 1000) / 10 : 0;
