@@ -65,6 +65,9 @@ export interface ExamSummaryDto {
   subjectiveCount: number; // 主观题题数（self_assess 模式不判对错，单独计数）
   /** 多选「选对不全」的题数（各记 0.5 分，已计入 accuracy）。 */
   partialCount?: number;
+  /** 无参考答案、不判不计的题数（method='no_standard_answer'）；不计入 totalCount/subjectiveCount，
+   *  也不进 accuracy 分母。 */
+  unscoredCount: number;
   points?: PointsAwardDto;
 }
 
@@ -84,11 +87,15 @@ export interface ExamResultItemDto {
   /** 材料位置：'before'=题干上方；null=题干下方。 */
   materialPosition: string | null;
   answerText: string | null;
-  isCorrect: number | null; // 0 | 1；null = 主观题待自评（self_assess 模式不判对错）
+  isCorrect: number | null; // 0 | 1；null = 主观题待自评（self_assess 模式不判对错）或无参考答案
+  /** 该题最终落库 method：exact/ai/self_assess/unanswered/failed/no_standard_answer。 */
+  method: string | null;
+  /** 是否有标准答案（method='no_standard_answer' 的题为 false）。 */
+  hasStandardAnswer: boolean;
   analysis: string | null;
   explanation: string | null;
   answer?: string | null; // 参考答案（主观题自评对照展示）
-  needsSelfAssessment?: boolean; // true = is_correct NULL，结果页待自评
+  needsSelfAssessment?: boolean; // true = 有标准答案且 method='self_assess'，结果页待自评
   selfAssessment?: 'correct' | 'incorrect' | null; // 该生该题最近一次自评（恢复自评状态）
 }
 

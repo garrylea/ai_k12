@@ -265,30 +265,40 @@ export class ExamsService {
       throw new HttpException({ code: 4103, message: '考试尚未交卷，暂无成绩' }, 409);
     }
     const rows = await this.examSessionsRepo.findAnswersWithQuestions(sessionId);
-    // 自评状态恢复：is_correct NULL（主观题 self_assess）的题查该生最近一次自评
+    // 自评状态恢复：主观题 self_assess 的题查该生最近一次自评；无参考答案的题不能自评，排除
     const selfAssessed = await this.selfAssessRepo.findLatestByStudentAndQuestionIds(
       studentId,
-      rows.filter((r) => r.is_correct === null).map((r) => r.question_id),
+      rows.filter((r) => r.is_correct === null && r.method !== 'no_standard_answer')
+        .map((r) => r.question_id),
     );
-    const items = rows.map((row) => ({
-      questionId: row.question_id,
-      questionNo: row.question_order,
-      subNo: Number(row.sub_no ?? 0),
-      text: row.text,
-      type: row.type,
-      options: parseOptions(row.options),
-      materialText: row.material_text ?? null,
-      materialUrl: row.material_url ?? null,
-      materialPosition: materialPositionFor(row.subject_id),
-      answerText: row.answer_text,
-      isCorrect: row.is_correct,               // null = 主观题待自评
-      analysis: row.analysis,
-      explanation: row.explanation,
-      answer: row.answer,                       // 参考答案（自评展示）
-      needsSelfAssessment: row.is_correct === null,
-      selfAssessment: selfAssessed.get(row.question_id) ?? null,
-    }));
-    const summary = this.summarize(items.length, items.map((i) => ({ is_correct: i.isCorrect }) as ExamAnswerRow));
+    const items = rows.map((row) => {
+      const hasStandardAnswer = !!row.answer && String(row.answer).trim() !== '';
+      return {
+        questionId: row.question_id,
+        questionNo: row.question_order,
+        subNo: Number(row.sub_no ?? 0),
+        text: row.text,
+        type: row.type,
+        options: parseOptions(row.options),
+        materialText: row.material_text ?? null,
+        materialUrl: row.material_url ?? null,
+        materialPosition: materialPositionFor(row.subject_id),
+        answerText: row.answer_text,
+        isCorrect: row.is_correct, // null = 主观题待自评 或 无参考答案
+        method: row.method ?? null,
+        hasStandardAnswer,
+        analysis: row.analysis,
+        explanation: row.explanation,
+        answer: row.answer, // 参考答案（自评展示）
+        // 不能由 isCorrect===null 推断：无参考答案的题同样为 NULL，但不该让学生对空白自评
+        needsSelfAssessment: hasStandardAnswer && row.method === 'self_assess',
+        selfAssessment: selfAssessed.get(row.question_id) ?? null,
+      };
+    });
+    const summary = this.summarize(
+      items.length,
+      items.map((i) => ({ is_correct: i.isCorrect, score: null, method: i.method }) as ExamAnswerRow),
+    );
     return { ...summary, items };
   }
 
@@ -309,6 +319,7 @@ export class ExamsService {
   }
 
   /** 收卷核心（手动交卷与超时自动收卷共用）：
+   *  无参考答案题落 no_standard_answer（不判不计、不入错题本、不要求自评）；
    *  未作答题直接判错入错题本（不走 judgeCore，无答案可判）；
    *  在途题（answer_text 非空、is_correct NULL）judgeCore 补判，失败按错计 method='failed' 仍入错题本；
    *  最后 markSubmitted 并汇总。 */
@@ -318,7 +329,24 @@ export class ExamsService {
     const byQuestion = new Map(answers.map((a) => [a.question_id, a]));
 
     for (const q of questions) {
-      // 自评（数学主观题 / 语文非客观题）：不判题不按错计（无论是否作答），统一落
+      // 1. 无参考答案（q.hasAnswer=0，如英语 974 卷 35 题全无答案）：优先级最高——
+      //    既不能按错计，也不能落 self_assess 让学生对着空白答案自评。
+      //    is_correct/score 均为 NULL，统计时从分母剔除（method 是唯一判据）。
+      if (!q.hasAnswer) {
+        const a0 = byQuestion.get(q.questionId);
+        await this.examSessionsRepo.upsertAnswer({
+          sessionId: session.id,
+          questionId: q.questionId,
+          questionOrder: q.questionNo,
+          answerText: a0?.answer_text ?? null,
+          isCorrect: null,
+          score: null,
+          method: 'no_standard_answer',
+          judgedAt: new Date(),
+        });
+        continue;
+      }
+      // 2. 自评（数学主观题 / 语文非客观题）：不判题不按错计（无论是否作答），统一落
       // is_correct=NULL + method='self_assess'，结果页对照参考答案自评。
       if (shouldSelfAssess(session.subject_id, q.type)) {
         const a0 = byQuestion.get(q.questionId);
@@ -432,7 +460,8 @@ export class ExamsService {
 
   /** 未作答按错计入错题本；**无参考答案的题不入本**——否则错题练习再遇到它走空答案守卫，
    *  既不自评也不清零，学生在 App 里永远清不掉（物理 51/52/53 号卷即此情况）。
-   *  `hasAnswer` 是 MySQL 0/1 数；测试 fixture 缺该字段时 `=== 0` 不成立，保持旧行为。 */
+   *  finalizeSession 已在前置分支拦掉 `!hasAnswer` 的题，这里的 `hasAnswer === 0` 是二道防线：
+   *  `hasAnswer` 是 MySQL 0/1 数，缺字段时不等于 0（宁可入本也不误伤有答案的题）。 */
   private async writeExamErrorBookIfAnswerable(
     session: ExamSessionRow,
     q: { questionId: number; hasAnswer?: number },
@@ -464,12 +493,17 @@ export class ExamsService {
     });
   }
 
-  /** 汇总：主观题（is_correct NULL，self_assess 模式）不计入对错——correctCount/accuracy
-   *  只算客观题，subjectiveCount 单列（结果页展示「客观题 X/Y · 主观题 N 题」）。 */
+  /** 汇总：主观题（is_correct NULL 且 method!='no_standard_answer'）不计入对错；
+   *  无参考答案题（method='no_standard_answer'）既不进对错、也不进主观题，直接从分母剔除。
+   *  correctCount/accuracy 只算客观题，subjectiveCount/unscoredCount 单列。 */
   private summarize(totalCount: number,
-                    answers: Array<Pick<ExamAnswerRow, 'is_correct' | 'score'>>): ExamSummaryDto {
-    const subjectiveCount = answers.filter((a) => a.is_correct === null).length;
-    const objectiveTotal = totalCount - subjectiveCount;
+                    answers: Array<Pick<ExamAnswerRow, 'is_correct' | 'score' | 'method'>>): ExamSummaryDto {
+    const unscoredCount = answers.filter((a) => a.method === 'no_standard_answer').length;
+    const effectiveTotal = totalCount - unscoredCount;
+    const subjectiveCount = answers.filter(
+      (a) => a.is_correct === null && a.method !== 'no_standard_answer',
+    ).length;
+    const objectiveTotal = effectiveTotal - subjectiveCount;
     const correctCount = answers.filter((a) => a.is_correct === 1).length;
     // 正确率按「得分比例」算：多选选对不全记 0.5（旧行没有 score 时退回 is_correct）
     const earned = answers
@@ -479,7 +513,7 @@ export class ExamsService {
       (a) => a.score != null && Number(a.score) > 0 && Number(a.score) < 1,
     ).length;
     const accuracy = objectiveTotal > 0 ? Math.round((earned / objectiveTotal) * 1000) / 10 : 0;
-    return { correctCount, totalCount, accuracy, subjectiveCount, partialCount };
+    return { correctCount, totalCount: effectiveTotal, accuracy, subjectiveCount, partialCount, unscoredCount };
   }
 
   /** 剩余秒数（deadline - now；超时为 0 或负值，由调用方决定收卷语义）。 */
