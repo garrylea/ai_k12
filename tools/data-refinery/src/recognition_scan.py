@@ -90,7 +90,8 @@ def _is_llm_only_reasons(reasons: list | None) -> bool:
 
 
 def _auto_close_stale(records: list[dict], current: set, scanned: set,
-                      *, answers_checked: bool = False) -> int:
+                      *, answers_checked: bool = False,
+                      present: dict[str, set[int]] | None = None) -> int:
     """自动收口本次不再检出的旧记录，返回条数。
 
     - junk_question：噪声题已被切题过滤修掉（该行不再被当成题目）；
@@ -107,7 +108,13 @@ def _auto_close_stale(records: list[dict], current: set, scanned: set,
         key_lf = (rec["source"], rec.get("group_order"), "label_failed")
         key_opts = (rec["source"], rec.get("group_order"), "options_incomplete")
         key_ans = (rec["source"], rec.get("group_order"), "answer_missing")
-        if rec.get("kind") == "junk_question" and key_junk not in current:
+        if (rec.get("kind") in ("missing", "punct_stem")
+                and rec.get("group_order") in (present or {}).get(rec["source"], set())):
+            rec["status"] = "resolved"
+            rec["note"] = "重抽后该题号已恢复，自动收口"
+            rec["auto_closed"] = True
+            closed += 1
+        elif rec.get("kind") == "junk_question" and key_junk not in current:
             rec["status"] = "resolved"
             rec["note"] = "已由切题过滤修复（该行不再被当成题目）"
             rec["auto_closed"] = True
@@ -732,8 +739,11 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
             print(f"[redo] 清除 {pruned} 条旧 issue 记录（本次重扫的卷，旧快照已失效）", flush=True)
     current = {(i["source"], i["group_order"], i["kind"]) for i in all_issues}
     scanned = {i["source"] for i in all_issues}
-    closed = _auto_close_stale(records, current, scanned,
-                               answers_checked=answers_by_source is not None)
+    closed = _auto_close_stale(
+        records, current, scanned,
+        answers_checked=answers_by_source is not None,
+        present=present_by_source,
+    )
     # 老记录里 pdf 为空（早期版本路径算错）时，用这次算出来的补上
     by_key = {(i["source"], i["group_order"], i["kind"]): i for i in all_issues}
     filled = 0

@@ -164,6 +164,21 @@ class EnglishStrategy:
     def is_stem(self, line: str) -> tuple[bool, int | None]:
         return is_main_stem(line)
 
+    def repair_duplicate_stem(self, n, last_stem_no, group_id, current, line):
+        """完形题号被 OCR 砍掉十位时按文章空格标记恢复（15 → 5）。"""
+        if group_id != "二" or current is None or n >= 10:
+            return None
+        expected = last_stem_no + 1
+        if n != expected % 10:
+            return None
+        material = (getattr(current, "material_text", None) or "").replace("\\", "")
+        if not re.search(rf"(?<!\d)_{expected}_(?!\d)", material):
+            return None
+        _, opts = self.split_options(line)
+        if not opts or len(opts) != 4 or not all((o.get("text") or "").strip() for o in opts):
+            return None
+        return expected
+
     def split_options(self, content: str) -> tuple[str, list[dict] | None]:
         return _split_options(content)
 

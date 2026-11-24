@@ -225,3 +225,59 @@ def test_five_parts_material_assignment():
     assert (by[38].content or "").startswith("从下面两个题目中任选一题")
     assert "题目①" in (by[38].material_text or "")
     assert "题目②" in (by[38].material_text or "")
+
+
+def test_cloze_truncated_duplicate_number_is_restored_from_blank_marker():
+    """完形题号 15 OCR 成 5：前文已有 5 时，按文章里的 _15_ 恢复题号。"""
+    from question_splitter import split_page
+
+    text = """# 英语试卷
+
+## 一、单项填空
+5. Earlier question
+A. a B. b C. c D. d
+
+## 二、完形填空
+The passage has blanks \\_13\\_, \\_14\\_ and \\_15\\_.
+
+13. A. simply B. hopelessly C. mainly D. properly
+
+14. A. action B. policy C. words D. spirit
+
+5. A. suffered B. recorded C. examined D. followed
+
+16. A. stories B. ideas C. experiences D. records
+"""
+
+    questions = split_page(text, Path("x.md"), strategy=get_strategy("english"))
+    by_no = {q.group_order: q for q in questions}
+
+    assert [q.group_order for q in questions] == [5, 13, 14, 15, 16]
+    assert by_no[15].content.startswith("A. suffered")
+    assert "\\_15\\_" in (by_no[15].material_text or "")
+
+
+def test_cloze_truncated_number_is_not_restored_without_blank_marker():
+    """文章没有 _15_ 时，重复的 5 仍是 OCR 重复，不能顺延成 15。"""
+    from question_splitter import split_page
+
+    text = """# 英语试卷
+
+## 一、单项填空
+5. Earlier question
+A. a B. b C. c D. d
+
+## 二、完形填空
+The passage has blanks \\_13\\_ and \\_14\\_.
+
+13. A. simply B. hopelessly C. mainly D. properly
+
+14. A. action B. policy C. words D. spirit
+
+5. A. suffered B. recorded C. examined D. followed
+
+16. A. stories B. ideas C. experiences D. records
+"""
+
+    questions = split_page(text, Path("x.md"), strategy=get_strategy("english"))
+    assert [q.group_order for q in questions] == [5, 13, 14, 16]

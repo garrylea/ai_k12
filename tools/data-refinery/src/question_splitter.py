@@ -1269,11 +1269,21 @@ def split_page(text: str, md_path: Path,
             # 保留第一次出现的真题。**不能顺延**：OCR 把大段内容识别成重复题号时，
             # 顺延会连锁撞上后面的真实题号，题号一路膨胀（一零一 2024 从 4 溢到 29）。
             if n in seen_stems:
-                if not warned_dup:
-                    print(f"[WARN] 题号重复（{n} 起），重复段已跳过；缺的题请看缺号告警",
+                repair = getattr(strategy, "repair_duplicate_stem", None)
+                repaired = (
+                    repair(n, last_stem_no, current_group_id, current, line)
+                    if callable(repair) else None
+                )
+                if repaired is not None and repaired not in seen_stems:
+                    print(f"[WARN] 题号重复（{n}），按完形空格标记恢复为 {repaired}",
                           flush=True)
-                    warned_dup = True
-                continue
+                    n = repaired
+                else:
+                    if not warned_dup:
+                        print(f"[WARN] 题号重复（{n} 起），重复段已跳过；缺的题请看缺号告警",
+                              flush=True)
+                        warned_dup = True
+                    continue
             seen_stems.add(n)
             # OCR 十位错认：22 之后写成 33、再往后又是 24 → 33 实际是 23
             # （清华附中 2024 题23 实测）。只在前跳一位且个位吻合时纠正，

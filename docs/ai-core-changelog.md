@@ -8,6 +8,33 @@
 
 ---
 
+## 2026-11-24 英语试卷材料化解析：本地 main 验收
+
+**范围**：新导入英语卷按五大题归位材料；三帆 2026 初三期末试点卷（35 题）不写库验收。
+
+**实现**：组一清卷面说明；组二/三/四文章在 publish 外置为 `materials/english/{key}/content.md`，
+同篇题共用 `material_url`；组五第一段留题干、题目①②进 `material_text`；英语组二空题干且 4 项完整时
+不再判缺题干。
+
+**验收补修**：三帆卷 Markdown 把完形 `15.` OCR 成 `5.`，且前文已有第 5 题。通用重复题号规则仍跳过；
+只给英语组二加可选恢复：当前文章含 `_15_`、本行可拆 4 项时恢复题号。`recognition_scan` 同时新增
+`missing/punct_stem` 自动收口：题号已在本次 extracted 中出现时，旧 pending 记录转 resolved。
+
+**验证**：三个功能提交已快进合入本地 `main`。`pytest -q` 为 **2255 passed / 10 skipped**；
+一条 E2E 命令（`--skip-load --skip-answers`）抽出 35 题：
+
+- Q15 已恢复，与 13/14/16–20 共用组二文章 URL，`content` 为空、4 选项完整；
+- Q24–26、27–29、30–33、34–37 各共用 URL，四组互不相同；
+- Q38 题干只剩首段指令，`material_text` 含题目①/②；
+- Q1–12 的 `material_text`、`material_url` 均为空；
+- 当前三帆卷 `labeling_issues.jsonl` 无 Q15/Q38 记录；旧 Q15 `missing` 已自动收口；
+- Q21–23 仍缺，按设计继续人工补题；`--skip-answers` 产生的 `answer_missing` 不在本次验收范围。
+
+**环境**：worktree 未复制被 `.gitignore` 的 `output/`，且沙箱禁止访问本机 MySQL，E2E 必须在本地 `main`
+的非沙箱环境执行；sandbox 内 `import_cli` 可返回 0 但 extract 会失败，不能仅凭退出码判成功。
+
+---
+
 ## 2026-11-24 试卷+配套答案成对导入：答案自动转换并合并
 
 **问题**：`--file` 解析出精确试卷名后，`convert --materials` 按这个名字过滤素材，同目录的

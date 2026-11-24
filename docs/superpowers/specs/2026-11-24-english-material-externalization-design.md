@@ -49,7 +49,7 @@
 | 大题 | 题号 | `content` | `options` | 材料归位 |
 |---|---|---|---|---|
 | 一 单项填空 | 1–12 | 原样保留 | 4 项照旧 | `material_text`、`material_url` 都清空 |
-| 二 完形填空 | 13/14/16–20 | **保持为空** | 每题 4 项照旧，空格标记 `_13_` 保留在文章里 | 整篇短文 → 1 份 md；同组各题共用 1 个 `material_url`，`material_text` 清空 |
+| 二 完形填空 | 13/14/15/16–20 | **保持为空** | 每题 4 项照旧，空格标记 `_13_` 保留在文章里 | 整篇短文 → 1 份 md；同组各题共用 1 个 `material_url`，`material_text` 清空 |
 | 三 阅读理解 | B:24–26 / C:27–29 / D:30–33 | 原样保留 | 每题 4 项照旧 | 每篇短文各 1 份 md；同篇题共用 URL，跨篇不同 URL |
 | 四 阅读表达 | 34–37 | 原样保留 | 无（简答） | "Be Smart About Your Smartphone" → 1 份 md，4 题共用 URL |
 | 五 文段表达 | 38 | 只留第一段指令句 | 无 | 其余全部 → `material_text`；**不外置**（英语 `material_text` 按既有口径显示在题干下方，正好符合「题干在前、材料在后」） |
@@ -70,6 +70,7 @@
 2. **组二/三/四**：剥掉 `q.material_text` 开头的卷面指令行，正文原样保留；`_13_` 这类空格标记不动（它是完形题的关键信息）。若剥完只剩标题/空，置空。
 3. **组五**：把 `q.content` 按第一个空行切成两段：第一段留 `q.content`，其余含空行整体进 `q.material_text`。切不出两段时 `content` 保留原文、`material_text` 留空并打印 warn，不抛错。
 4. 其它组 / `group_id` 缺失：不动。
+5. 三帆卷 md 第 78 行把完形 `15.` OCR 成 `5.`，而第 5 题已在前文出现。通用重复题号规则继续跳过重复号；仅英语组二在“当前文章含 `_15_` + 该行可拆出 4 项”时，由 `EnglishStrategy.repair_duplicate_stem()` 恢复为 15。不能放宽为通用顺延，否则会重现一零一 2024 的题号连锁膨胀。
 
 **卷面指令判定**（纯结构，开头行匹配，按整行删，不按字数猜）：
 
@@ -105,6 +106,9 @@
 
 convert、db_loader、服务端（material-doc / judge-core / explanation-cache）、前端（MaterialBlock / QuestionRunner 等）、语文及其它学科策略、schema。
 
+验收补修只动两个窄边界：英语题号恢复走 `EnglishStrategy.repair_duplicate_stem()` 可选钩子；`recognition_scan`
+在 `missing/punct_stem` 对应题号已出现在本次 extracted 时自动收口旧 pending 记录。没有改通用题号顺延规则。
+
 ---
 
 ## 5. 数据流
@@ -134,6 +138,7 @@ convert、db_loader、服务端（material-doc / judge-core / explanation-cache�
 | `group_id` 缺失或非一~五 | 不套规则，保持原样 |
 | 完形选项不足 4 项 | 豁免不生效，仍标待复核 |
 | 21–23 匹配题缺题 | 不在范围；扫描阶段照旧报缺号，走人工补题 |
+| 完形题号 OCR 砍十位 | 仅在英语组二、文章空格标记与 4 选项同时吻合时恢复；其它重复题号仍跳过 |
 
 ---
 
@@ -157,7 +162,7 @@ convert、db_loader、服务端（material-doc / judge-core / explanation-cache�
    - 英语外置函数：只外置组二/三/四；同卷同文多题共用 URL；`material_text` 清空；组五不外置；文档首行不含「阅读短文 / 本部分共 / 四、阅读表达」；材料内图片路径被改写。
 3. `tools/data-refinery/tests/test_question_labeler.py`
    - 完形豁免正例（题干空 + 材料 + 4 选项 → `is_complete=True`）与反例（选项不足 → 不放行）。
-4. 回归：`cd tools/data-refinery && pytest -q`（现有基线约 1563 通过）。
+4. 回归：`cd tools/data-refinery && pytest -q`。最终实测 `2255 passed / 10 skipped`。
 
 ---
 
@@ -176,5 +181,7 @@ cd tools/data-refinery && python src/import_cli.py --subject 英语 --year 2026 
 - 1–12 号两列都空；
 - `labeling_issues.jsonl` 不再出现 Q15「题干为空」与 Q38「缺两个题目选项」；
 - 21–23 仍缺（已知不在范围）。
+- Q15 必须存在且 `content` 为空、4 个选项完整；`recognition_issues.jsonl` 中旧的 Q15 `missing` 记录应自动收口为 `resolved`。
+- `--skip-answers` 下出现 `answer_missing` 属预期，不在本次题目材料化验收范围。
 
 本次验收只覆盖新导入路径；要看到学生端效果仍需以后正式重新导入卷子。

@@ -500,6 +500,18 @@ def test_auto_close_stale_label_failed():
     assert records[0]["auto_closed"] is True
 
 
+def test_auto_close_stale_missing_record_when_question_is_present():
+    """重抽后缺失题号已出现 → 旧的 missing 记录自动收口。"""
+    records = [{"source": "卷A", "group_order": 15, "kind": "missing",
+                "status": "pending", "reasons": ["missing_stem"]}]
+    closed = R._auto_close_stale(
+        records, current=set(), scanned={"卷A"}, present={"卷A": {15}},
+    )
+    assert closed == 1
+    assert records[0]["status"] == "resolved"
+    assert records[0]["auto_closed"] is True
+
+
 # ⑧/⑨ 选项缺失、答案缺失（2026-11-17）
 
 
