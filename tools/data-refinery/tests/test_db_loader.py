@@ -841,14 +841,65 @@ class TestLoadQuestionsPaperGrouping:
         loader, queries = _make_loader_seq({
             "FROM subjects WHERE code": [[(1,)]],
             "FROM paper_questions pq JOIN questions q": [
-                [(501, chash, 0, "choice", 2, 1, "旧文段", q["source"] if "source" in q else None)]
+                # 列序 6=material_text 7=answer 8=source；本题库里答案也为空，
+                # 保证这是纯材料变化（answer_changed=False）。
+                [(501, chash, 0, "choice", 2, 1, "旧文段", "",
+                  q["source"] if "source" in q else None)]
             ],
         })
         loader.load_questions([q], paper=(_paper_meta(), 9))
         upd = [a for sql, a in queries if sql.startswith("UPDATE questions SET type=")]
         assert len(upd) == 1
-        assert upd[0][-3] == "新文段"  # material_text 参数（其后是 material_url、id）
+        # 参数尾部依次是 material_text, material_url, answer, id
+        assert upd[0][-4] == "新文段"
         assert upd[0][-1] == 501
+
+    def test_answer_only_change_writes_answer_to_existing_row(self):
+        """题干/选项/材料都没变、只有答案从空变有，也必须原址写进 answer。
+
+        paper 899 实测：published 28 行都有 answer，库里只有 5 题有答案——
+        content_hash 不含 answer，旧逻辑仅在 type/difficulty/is_active/material
+        变化时走部分 UPDATE，纯答案变化被整行跳过。
+        """
+        from db_loader import content_hash
+
+        q = {"subject_id": "math", "content": "题干一", "type": "choice",
+             "group_id": "一", "group_order": 1, "difficulty": 2,
+             "options": [{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"}],
+             "material_text": "同一文段", "answer": "A", "needs_review": False}
+        chash = content_hash(q["content"], q["options"], q["material_text"])
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],
+            "FROM paper_questions pq JOIN questions q": [
+                [(501, chash, 0, "choice", 2, 1, "同一文段", "", None)]
+            ],
+        })
+        loader.load_questions([q], paper=(_paper_meta(), 9))
+        upd = [(sql, a) for sql, a in queries
+               if sql.startswith("UPDATE questions SET type=")]
+        assert len(upd) == 1
+        assert "answer=%s" in upd[0][0]
+        assert upd[0][1][-2] == "A"  # answer 参数（其后只剩 id）
+
+    def test_verified_row_answer_is_not_overwritten(self):
+        """answer_verified=1 的行即使答案不同，也绝不写 published 的答案。"""
+        from db_loader import content_hash
+
+        q = {"subject_id": "math", "content": "题干一", "type": "choice",
+             "group_id": "一", "group_order": 1, "difficulty": 2,
+             "options": [{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"}],
+             "material_text": "同一文段", "answer": "B", "needs_review": False}
+        chash = content_hash(q["content"], q["options"], q["material_text"])
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],
+            "FROM paper_questions pq JOIN questions q": [
+                # verified=1、库里旧答案='A'、published 给 'B'；其它字段全同，
+                # 因此本不该有任何 UPDATE 发出，答案保持库里的 'A'。
+                [(501, chash, 1, "choice", 2, 1, "同一文段", "A", None)]
+            ],
+        })
+        loader.load_questions([q], paper=(_paper_meta(), 9))
+        assert not [sql for sql, _ in queries if sql.startswith("UPDATE questions")]
 
     def test_writes_knowledge_points_from_extracted(self):
         """extract 已标的 knowledge_points 必须落 question_knowledge_points。
@@ -1048,7 +1099,7 @@ def test_cross_paper_shared_row_is_split():
     loader, queries = _make_loader_seq({
         "FROM subjects WHERE code": [[(2,)]],
         "FROM paper_questions pq JOIN questions q":
-            [[(501, "旧hash", 0, "short_answer", 2, 1, "海淀的趣味创新材料", "海淀卷")]],
+            [[(501, "旧hash", 0, "short_answer", 2, 1, "海淀的趣味创新材料", "", "海淀卷")]],
         "SELECT LAST_INSERT_ID()": [[(999,)]],
     })
     loader.load_questions([q], paper=(_paper_meta(), 667))
@@ -1095,17 +1146,19 @@ def test_verified_row_with_changed_hash_still_syncs_metadata():
     loader, queries = _make_loader_seq({
         "FROM subjects WHERE code": [[(1,)]],
         "FROM paper_questions pq JOIN questions q": [
-            [(501, "旧hash", 1, "choice", 2, 0, "旧文段", None)]
+            [(501, "旧hash", 1, "choice", 2, 0, "旧文段", "旧答案", None)]
         ],
     })
     loader.load_questions([q], paper=(_paper_meta(), 9))
 
     ups = [a for sql, a in queries if sql.startswith("UPDATE questions SET type=")]
     assert len(ups) == 1
-    assert ups[0][-5] == 1            # is_active 跟 needs_review=False 放行
-    assert ups[0][-3] == "新文段"      # 材料同步
+    # 参数尾部依次是 is_active, sub_no, material_text, material_url, answer, id
+    assert ups[0][-6] == 1            # is_active 跟 needs_review=False 放行
+    assert ups[0][-4] == "新文段"      # 材料同步
+    assert ups[0][-2] == "旧答案"      # 核验过的答案不被 published 的空答案覆盖
     assert ups[0][-1] == 501
-    # 内容/答案/hash 不能被覆盖
+    # 内容/hash 不能被覆盖
     assert not any("UPDATE questions SET subject_id" in sql for sql, _ in queries)
     assert not any(sql.startswith("UPDATE questions") and "content_hash=%s" in sql
                    for sql, _ in queries)

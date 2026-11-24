@@ -1385,7 +1385,7 @@ class DbLoader:
                 if go is not None:
                     exist = self._query(
                         "SELECT q.id, q.content_hash, q.answer_verified, q.type, "
-                        "q.difficulty, q.is_active, q.material_text, q.source FROM paper_questions pq "
+                        "q.difficulty, q.is_active, q.material_text, q.answer, q.source FROM paper_questions pq "
                         "JOIN questions q ON q.id = pq.question_id "
                         "WHERE pq.paper_id=%s AND pq.group_order=%s AND q.sub_no=%s",
                         (paper[1], go, q.get("sub_no") or 0),
@@ -1393,7 +1393,7 @@ class DbLoader:
                 else:
                     exist = self._query(
                         "SELECT q.id, q.content_hash, q.answer_verified, q.type, "
-                        "q.difficulty, q.is_active, q.material_text, q.source FROM paper_questions pq "
+                        "q.difficulty, q.is_active, q.material_text, q.answer, q.source FROM paper_questions pq "
                         "JOIN questions q ON q.id = pq.question_id "
                         "WHERE pq.paper_id=%s AND pq.question_no=%s AND q.sub_no=%s",
                         (paper[1], i, q.get("sub_no") or 0),
@@ -1401,8 +1401,10 @@ class DbLoader:
                 # 跨卷共用行：同题号的旧行属于**别的卷**（题干通用、材料不同被旧哈希
                 # 合并）→ 不能原址更新，否则 9 份卷共用一行、材料/答案互相覆盖。
                 # 走 else 另建独立行；末尾按 linked_ids 清掉本卷对旧行的关联。
-                same_paper = (not exist or len(exist[0]) <= 7 or not exist[0][7]
-                              or not q.get("source") or exist[0][7] == q.get("source"))
+                # 列序：0=id 1=hash 2=verified 3=type 4=difficulty 5=is_active
+                # 6=material_text 7=answer 8=source（answer 插在 material 与 source 之间）
+                same_paper = (not exist or len(exist[0]) <= 8 or not exist[0][8]
+                              or not q.get("source") or exist[0][8] == q.get("source"))
                 if exist and same_paper:
                     qid = int(exist[0][0])
                     old_hash = exist[0][1]
@@ -1411,11 +1413,16 @@ class DbLoader:
                     old_difficulty = exist[0][4]
                     old_active = int(exist[0][5] or 0)
                     old_material = exist[0][6]
+                    old_answer = exist[0][7] or ""
                     new_active = 0 if q.get("needs_review") else 1
                     # material_text 不在 content_hash 里：切题逻辑只改材料归属时
                     # hash 不变，旧逻辑会静默保留旧材料（2026-11-07 海淀语文
                     # 题2/题3：JSONL 已挂「发言稿一」，库里仍是小节导语）。
                     material_changed = (old_material or "") != (q.get("material_text") or "")
+                    # content_hash 不含 answer：题干/材料没变、只有答案从空变有时，
+                    # 旧逻辑不会走下面的部分 UPDATE，答案永远写不进库（paper 899
+                    # 实测：published 28 行都有 answer，库里只有 5 题有答案）。
+                    answer_changed = (q.get("answer") or "") != old_answer
                     # answer_verified=1 保护的是**人工核验过的题干/答案**，不是
                     # is_active / 材料字段。published 的 needs_review=False 才是
                     # 放行信号；即使内容 hash 变了（如补材料导致），这些非内容字段
@@ -1425,19 +1432,23 @@ class DbLoader:
                         or old_difficulty != q.get("difficulty")
                         or old_active != new_active
                         or material_changed
+                        or (answer_changed and not verified)
                     ):
-                        # 内容没变、但 type/difficulty/is_active/material_text 变了
-                        # （重抽纠正 metadata、needs_review 状态变化如缺图题从兜底
+                        # 内容没变、但 type/difficulty/is_active/material_text/answer
+                        # 变了（重抽纠正 metadata、needs_review 状态变化如缺图题从兜底
                         # needs_review=False 改为只报告 needs_review=True；或切题
-                        # 只调整材料归属）。旧逻辑只在 type 变时更 type，
-                        # difficulty/is_active/material 变了不更新（2026-11-03 汇文
-                        # 题21：difficulty 2→3、is_active 1→0 都没写进库）。
+                        # 只调整材料归属；或只补了答案）。旧逻辑只在 type 变时更 type，
+                        # difficulty/is_active/material/answer 变了不更新（2026-11-03
+                        # 汇文题21：difficulty 2→3、is_active 1→0 都没写进库）。
+                        # answer_verified=1 的行即使因其它字段进入本 UPDATE，也写回
+                        # 库中旧答案，绝不被 published 的答案覆盖（人工核验保护）。
                         self._exec(
                             "UPDATE questions SET type=%s, difficulty=%s, is_active=%s, "
-                            "sub_no=%s, material_text=%s, material_url=%s WHERE id=%s",
+                            "sub_no=%s, material_text=%s, material_url=%s, answer=%s WHERE id=%s",
                             (q.get("type"), q.get("difficulty"), new_active,
                              q.get("sub_no") or 0,
-                             q.get("material_text"), q.get("material_url"), qid))
+                             q.get("material_text"), q.get("material_url"),
+                             old_answer if verified else (q.get("answer") or ""), qid))
                         updated += 1
                     if old_hash != chash:
                         other = self._reusable_question(chash, opts, exclude_id=qid)
@@ -1476,7 +1487,7 @@ class DbLoader:
                             updated += 1
                 elif exist:
                     print(f"[split] paper={paper[1]} 题{go if go is not None else i} "
-                          f"旧行 #{exist[0][0]} 属于「{exist[0][7]}」，本卷「{q.get('source')}」"
+                          f"旧行 #{exist[0][0]} 属于「{exist[0][8]}」，本卷「{q.get('source')}」"
                           f"另建独立题（材料/答案不再共用）", flush=True)
 
             # 2) 同卷同题号、只是关联被摘掉的旧行：**更新它**，绝不新建同号题
