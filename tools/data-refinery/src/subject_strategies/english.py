@@ -20,7 +20,9 @@
 import re
 from pathlib import Path
 
-from question_splitter import is_main_stem, split_options as split_options_kernel
+from question_splitter import (
+    is_answer_keyword, is_main_stem, split_options as split_options_kernel,
+)
 from subject_strategies.generic import extract_generic_answers
 from subject_strategies.types import ExtractedAnswer, MaterialPolicy
 
@@ -28,6 +30,12 @@ _PASSAGE_LABELS = {"A", "B", "C", "D", "E"}
 
 # 竖排选项标记行：整行只有字母，可带 . 、 ． （与内核 `_BARE_LINE_RE` 同义）
 _OPTION_LABEL_LINE_RE = re.compile(r"^\s*([A-D])\s*[.、．]?\s*$")
+
+# 英语答案区常用区间压缩格式：`1-5 CBBCD` / `11-12 BB`。
+_GROUPED_ANSWER_RE = re.compile(
+    r"^\s*#{0,6}\s*(\d{1,2})\s*[-–—~～至]\s*(\d{1,2})\s*[:：]?\s*"
+    r"([A-Ha-h](?:[\s,，、]*[A-Ha-h])*)\s*$"
+)
 
 # 英语卷面指令：开头整行删，不按字数猜；`## B` / 文章标题不会命中
 _ENGLISH_INSTRUCTION_RE = re.compile(
@@ -53,6 +61,36 @@ def _split_writing(content: str) -> tuple[str, str]:
     """第一行留给题干，其余整体作为作文材料。"""
     lines = (content or "").strip().split("\n")
     return lines[0].strip(), "\n".join(lines[1:]).strip()
+
+
+def _extract_grouped_answers(text: str) -> tuple[dict[int, str], list[str]]:
+    """展开答案区的 `起始-结束 答案串`，答案数必须与题号区间严格相等。"""
+    out: dict[int, str] = {}
+    issues: list[str] = []
+    in_answers = False
+    for line in (text or "").splitlines():
+        if not in_answers:
+            if is_answer_keyword(line):
+                in_answers = True
+            continue
+        m = _GROUPED_ANSWER_RE.match(line)
+        if not m:
+            continue
+        start, end = int(m.group(1)), int(m.group(2))
+        values = re.findall(r"[A-Ha-h]", m.group(3))
+        expected = end - start + 1
+        if start > end:
+            issues.append(f"英语区间答案题号倒序，未展开：{line.strip()}")
+            continue
+        if len(values) != expected:
+            issues.append(
+                f"英语区间答案 {start}-{end} 声明 {expected} 题，"
+                f"实际 {len(values)} 个答案，未展开：{line.strip()}"
+            )
+            continue
+        for no, value in zip(range(start, end + 1), values):
+            out[no] = value.upper()
+    return out, issues
 
 
 def _bare_label_run(lines, index: int) -> int:
@@ -192,9 +230,22 @@ class EnglishStrategy:
         return EnglishMaterialPolicy(attach=True)
 
     def extract_answers(self, text: str, md_path: Path) -> list[ExtractedAnswer]:
-        # 答案与其余学科同一份实现（整卷对齐）；英语目前没有答案段的特殊规则。
-        # 仍然显式传 self：答案与题干必须按同一套材料/选项规则切。
-        return extract_generic_answers(text, md_path, strategy=self)
+        # 整卷对齐负责 `34. answer` 与长文本；区间压缩答案由英语策略单独展开。
+        answers = extract_generic_answers(text, md_path, strategy=self)
+        by_no = {item.no: item for item in answers}
+        grouped, issues = _extract_grouped_answers(text)
+        for no, answer in grouped.items():
+            item = by_no.get(no)
+            if item is None:
+                item = ExtractedAnswer(no=no, answer=answer)
+                answers.append(item)
+                by_no[no] = item
+            elif not item.answer:
+                item.answer = answer
+        if issues:
+            answers.append(ExtractedAnswer(no=0, issues=issues))
+        answers.sort(key=lambda item: (item.no == 0, item.no))
+        return answers
 
     def attach_post_material(self, questions, lines, md_path_stem):
         """按大题号规整英语材料：一~四去卷面指令、五切题干与材料。"""

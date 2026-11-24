@@ -662,6 +662,8 @@ card 分析发现的、目录页没有的新小节（如 `26.1.1`）由 `toc_mer
 
 > **从试卷自动生成答案文档（2026-10-28）**：`import_cli` 第 5 步已自动完成这一步（默认只补空答案）；需要单独重跑或人工修正时，再按本节两段式操作：先跑 `python src/answer_extract_cli.py --file "<试卷关键词，如 2026 海淀>"`，按学科 case 从「参考答案」段提取（纯程序，不调 LLM），产出 `output/answers/<卷名>.md`，再用本文档的 `--doc --paper-id` 回写。语文/数学走各自 case；提取不到的答案留空并记 `output/answer_issues.jsonl`，绝不猜。完整命令见 `docs/data-refinery-管线总结与后续.md` §4。
 
+> **英语区间答案（2026-11-24）**：`answer_extract_cli` 支持英语答案区的 `1-5 CBBCD`、`6-10 CBABC`、`11-12 BB` 形式，按区间逐题展开并要求答案数严格匹配。答案数不匹配时整行不展开，issue 写入 `output/answer_issues.jsonl`。答案解析独立于切题：即使某题号因题干未切出而不在 questions 中，区间里的答案仍保留在答案文档里，交给 importer 时明确报告为定位失败。
+
 **输入一：JSONL（推荐，可编程批量）** 每行一条记录：
 
 ```jsonl

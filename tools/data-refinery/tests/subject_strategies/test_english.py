@@ -281,3 +281,88 @@ The passage has blanks \\_13\\_ and \\_14\\_.
 
     questions = split_page(text, Path("x.md"), strategy=get_strategy("english"))
     assert [q.group_order for q in questions] == [5, 13, 14, 16]
+
+
+_GROUPED_ANSWERS_PAPER = """# 英语试卷
+
+## 一、单项填空
+1. Question 1
+2. Question 2
+3. Question 3
+4. Question 4
+5. Question 5
+6. Question 6
+7. Question 7
+8. Question 8
+9. Question 9
+10. Question 10
+11. Question 11
+12. Question 12
+
+## 参考答案
+
+1-5 CBBCD
+6-10 CBABC
+11-12 BB
+"""
+
+
+def test_english_expands_grouped_choice_answers_to_printed_question_numbers():
+    """英语答案区的 `1-5 CBBCD` 必须展开成 1:C、2:B…5:D，而不是整行丢弃。"""
+    answers = get_strategy("english").extract_answers(
+        _GROUPED_ANSWERS_PAPER,
+        Path("english/初中/first/2026/卷-试卷.md"),
+    )
+    by_no = {a.no: a.answer for a in answers}
+
+    assert [by_no[no] for no in range(1, 13)] == [
+        "C", "B", "B", "C", "D",
+        "C", "B", "A", "B", "C",
+        "B", "B",
+    ]
+
+
+def test_english_grouped_answer_count_mismatch_is_reported_without_guessing():
+    """`1-3 AB` 只有两个答案：不能猜第 3 题，必须留下可人工处理的 issue。"""
+    text = """# 英语试卷
+
+## 一、单项填空
+1. Question 1
+2. Question 2
+3. Question 3
+
+## 参考答案
+
+1-3 AB
+"""
+    answers = get_strategy("english").extract_answers(
+        text,
+        Path("english/初中/first/2026/卷-试卷.md"),
+    )
+
+    assert all(not item.answer for item in answers)
+    issues = [issue for item in answers for issue in item.issues]
+    assert any("1-3" in issue and "2" in issue and "3" in issue for issue in issues)
+
+
+def test_english_grouped_answers_survive_missing_split_question():
+    """答案区解析独立于切题：21–23 题干没切出时，区间答案仍不能被静默吞掉。"""
+    text = """# 英语试卷
+
+## 三、阅读理解
+1. Question 1
+3. Question 3
+
+## 参考答案
+
+1-3 ABC
+"""
+    answers = get_strategy("english").extract_answers(
+        text,
+        Path("english/初中/first/2026/卷-试卷.md"),
+    )
+    by_no = {item.no: item.answer for item in answers}
+
+    assert by_no[1] == "A"
+    assert by_no[2] == "B"
+    assert by_no[3] == "C"
