@@ -32,7 +32,7 @@ const SUPPORTED_SUBJECTS = new Set([
 ]);
 
 /**
- * 数学薄弱点图谱（API 文档 §4.5）。
+ * 薄弱点图谱（含英语，API 文档 §4.5）。
  *
  * **只读**：两个 GET 都不写库、不发分。归属校验用「URL 段 studentId 必须等于 JWT sub」，
  * 不符一律 403 —— ⚠️ **必须显式传 `code: 1005`**：`HttpExceptionFilter.httpStatusToCode`

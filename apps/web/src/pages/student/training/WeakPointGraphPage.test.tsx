@@ -214,6 +214,34 @@ describe('WeakPointGraphPage 推荐条', () => {
     expect(screen.queryByRole('button', { name: '开始补这个' })).toBeNull();
   });
 
+  it('无候选（数学）：「去专项练习」不带 subjectId', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue({ subjectId: 1, candidates: [], recommendation: null, reason: 'no_qualified_candidate' });
+
+    const { router } = await renderSettled();
+
+    fireEvent.click(screen.getByRole('button', { name: '去专项练习' }));
+    await waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        '/student/training/targeted',
+      ),
+    );
+  });
+
+  it('无候选（数学）：「去考试」不带 subjectId', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery());
+    getWeakPoints.mockResolvedValue({ subjectId: 1, candidates: [], recommendation: null, reason: 'no_qualified_candidate' });
+
+    const { router } = await renderSettled();
+
+    fireEvent.click(screen.getByRole('button', { name: '去考试' }));
+    await waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        '/student/training/exam',
+      ),
+    );
+  });
+
   it('推荐拉取失败：推荐条整条不渲染，但树照常渲染', async () => {
     getKnowledgeGraphMastery.mockResolvedValue(mastery());
     getWeakPoints.mockRejectedValue(new Error('boom'));
@@ -244,6 +272,8 @@ describe('WeakPointGraphPage 推荐条', () => {
     await waitFor(() =>
       expect(router.state.location.pathname).toBe('/student/training/targeted/run'),
     );
+    // 数学不带 subjectId（subjectQuery 为空）
+    expect(router.state.location.search).toBe('');
   });
 
   it('抽到空题单：留在本页并提示，不跳转', async () => {
@@ -382,6 +412,30 @@ describe('WeakPointGraphPage 页脚与错误态', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '去错题页看' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/student/training/errors'));
+    // 数学不带 subjectId
+    expect(router.state.location.search).toBe('');
+  });
+
+  it('页脚「去错题页看」在英语图谱下带 subjectId=3（无 kpId）', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery({ subjectId: 3 }));
+    getWeakPoints.mockResolvedValue({
+      subjectId: 3,
+      candidates: [],
+      recommendation: null,
+      reason: 'no_qualified_candidate',
+    });
+    getMyPointRules.mockResolvedValue({
+      tasks: [{ taskCode: 'en_targeted', taskName: '英语专项', tiers: [{ tierKey: '3' }] }],
+    });
+
+    const { router } = renderPage('/student/training/weak-points?subjectId=3');
+
+    fireEvent.click(await screen.findByRole('button', { name: '去错题页看' }));
+    await waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        '/student/training/errors?subjectId=3',
+      ),
+    );
   });
 
   it('未标注错题为 0 时不渲染页脚那半句', async () => {

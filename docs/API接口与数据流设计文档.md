@@ -234,8 +234,8 @@
 | 方法 | 路径 | 说明 | 阶段 |
 |---|---|---|---|
 | GET | `/api/knowledge-graph/knowledge-points/{id}/relations` | 知识点前置/包含关系（`knowledge_relations` 表零数据，**降级 P1**） | P1 |
-| GET | `/api/knowledge-graph/students/{studentId}/mastery` | 学生知识点掌握度 overlay：全树 + 掌握度，`?subjectId=1|4|5|9` | MVP |
-| GET | `/api/knowledge-graph/students/{studentId}/weak-points` | 薄弱点候选 + 一条推荐，`?subjectId=1|4|5|9&limit=1`（limit 1–10） | MVP |
+| GET | `/api/knowledge-graph/students/{studentId}/mastery` | 学生知识点掌握度 overlay：全树 + 掌握度，`?subjectId=1|3|4|5|9` | MVP |
+| GET | `/api/knowledge-graph/students/{studentId}/weak-points` | 薄弱点候选 + 一条推荐，`?subjectId=1|3|4|5|9&limit=1`（limit 1–10） | MVP |
 | GET | `/api/knowledge-graph/students/{studentId}/learning-path` | 基于薄弱点的建议复习路径 | P1 |
 
 **`mastery` 返回**：`{ subjectId, nodes[], coverage }`。`nodes[]` 每项含 `id / name / parentId / masteryScore / level / correctCount / errorCount / lastSeenAt / sampleSize / confidence / availableQuestionCount`。
