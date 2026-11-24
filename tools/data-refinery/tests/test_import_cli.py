@@ -1052,6 +1052,7 @@ def test_files_batch_pairs_each_keyword(monkeypatch):
     for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
         monkeypatch.setattr(import_cli, name, lambda argv, n=name: seen.append((n, argv)))
     monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
+    monkeypatch.setattr(import_cli, "paper_meta_main", lambda argv: 0)
     monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
         Path("物理/初中/second/2026/A-试卷"),
         Path("物理/初中/second/2026/A-答案"),
