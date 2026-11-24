@@ -1926,7 +1926,7 @@ def test_whole_question_paste_of_article_auto_routes_to_material(tmp_path, monke
     article = "## 第三站\n" + "这是一篇完整的文章正文。" * 12
     _write_article_doc(tmp_path, article)
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "1\n1\n" + article + "\nEOF\n1\n"))
+        "1\n1\n2\n" + article + "\nEOF\n1\n"))   # 有问题 → 改题干 → 重新录入 → 粘文章
 
     recs = manual_fix._ask(issue, md_dir)
 
@@ -2028,7 +2028,7 @@ def test_text_only_mode_drops_original_image_material_and_options(monkeypatch, t
     issue = {"source": "卷A", "rel_path": "物理/x/卷A", "group_order": 1,
              "kind": "junk_question", "sub_no": 0, "reasons": []}
 
-    seq = iter(["4"])  # 图片处理菜单：只改文本
+    seq = iter(["2", "4"])  # 怎么改=重新录入 → 图片处理菜单=只改文本
     monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
     monkeypatch.setattr(manual_fix, "_current_question", lambda _issue: original)
     monkeypatch.setattr(manual_fix, "_collect_content",
@@ -2044,3 +2044,279 @@ def test_text_only_mode_drops_original_image_material_and_options(monkeypatch, t
     assert rec["material_url"] is None
     assert not (rec.get("material_text") or "").strip()
     assert not rec.get("options")
+
+
+# ---------- 同一题多条 flag + 自动修复砍短（2026-11-23） ----------
+
+def _prep_repair(tmp_path, monkeypatch, *, with_original=True, swap=False):
+    """第18题同时命中 repair_truncated + incomplete_content 的清单。"""
+    md_dir = tmp_path / "md" / "物理" / "初中" / "first" / "2024" / "卷A"
+    md_dir.mkdir(parents=True, exist_ok=True)
+    (md_dir / "卷A.md").write_text("", encoding="utf-8")
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+
+    if with_original:
+        lab = tmp_path / "output" / "labeling_issues.jsonl"
+        lab.parent.mkdir(parents=True, exist_ok=True)
+        _write(lab, [{"source": "物理-卷A-试卷", "group_order": 18,
+                      "original_content": "修复前原文，完整段落。" * 12,
+                      "regenerated": {"content": "短版"}}])
+    ext = tmp_path / "output" / "extracted" / "物理" / "初中" / "first" / "2024" / "卷A" / "物理-卷A-试卷.jsonl"
+    ext.parent.mkdir(parents=True, exist_ok=True)
+    _write(ext, [{"source": "物理-卷A-试卷", "group_order": 18, "sub_no": 0,
+                  "content": "短版", "options": None, "answer": "旧答案",
+                  "material_text": "题内材料"}])
+
+    base = {"source": "物理-卷A-试卷", "rel_path": "物理/初中/first/2024/卷A",
+            "group_order": 18, "sub_no": 0, "excerpt": "", "pdf": None,
+            "md": str(md_dir / "卷A.md"), "status": "pending"}
+    repair = dict(base, kind="repair_truncated",
+                  reasons=["repair_shrank_631_to_437"])
+    incomplete = dict(base, kind="incomplete_content",
+                      reasons=["llm_marked_incomplete"], content_sig="sig-1")
+    rows = [repair, incomplete]
+    if swap:
+        rows.reverse()
+    path = tmp_path / "issues.jsonl"
+    _write(path, rows)
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    return path
+
+
+def test_confirm_ok_closes_every_flag_of_same_question(tmp_path, monkeypatch):
+    """答一次「没问题」按卷+题号收口：同题另一个 kind 不再冒出来问第二遍。"""
+    path = _prep_repair(tmp_path, monkeypatch, swap=True)
+    monkeypatch.setattr("sys.stdin", io.StringIO("2\n"))
+
+    res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    assert res["confirmed_ok"] == 1 and res["skipped"] == 0
+    rows = [_json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()]
+    assert [r["status"] for r in rows] == ["resolved", "resolved"]
+    assert all(r["verdict"] == "no_change" for r in rows)
+
+
+def _repair_issue_from(path):
+    return next(_json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()
+                if _json.loads(l)["kind"] == "repair_truncated")
+
+
+def test_repair_truncated_keep_both_versions_closes_all_flags(tmp_path, monkeypatch, capsys):
+    """砍短类摆出原文+修复后，选保留修复后 → 不重录、不写库、两 flag 全关。"""
+    path = _prep_repair(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n"))
+    issue = _repair_issue_from(path)
+
+    recs = manual_fix._ask(issue, Path(issue["md"]).parent, 1, 2)
+
+    assert recs == []
+    rows = [_json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()]
+    assert [r["status"] for r in rows] == ["resolved", "resolved"]
+    out = capsys.readouterr().out
+    assert "自动修复前原文" in out and "修复前原文，完整段落" in out
+    assert "录入第 18 题" not in out, "不该再强制整题重录"
+
+
+def test_repair_truncated_restore_records_content_only(tmp_path, monkeypatch):
+    """选恢复原文 → 只记 content_only 题干，原文必须完整（不能用 600 字截断的 excerpt）。"""
+    path = _prep_repair(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("2\n"))
+    issue = _repair_issue_from(path)
+
+    recs = manual_fix._ask(issue, Path(issue["md"]).parent, 1, 2)
+
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec["content"] == "修复前原文，完整段落。" * 12
+    assert rec["content_only"] is True
+    assert "options" not in rec and "material_text" not in rec and "answer" not in rec
+
+
+def test_repair_original_missing_returns_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    issue = {"source": "物理-卷A-试卷", "group_order": 18}
+    assert manual_fix._repair_original(issue) is None
+
+
+# ---------- 截图 OCR 配图不能丢（2026-11-23 题19） ----------
+
+def test_one_question_body_does_not_split_off_leading_text():
+    """单题录入：题号上方的配图/说明不能拆成一条会覆盖正文的伪题。"""
+    from subject_strategies import get_strategy
+
+    text = r"""![](images/aaa.jpg)
+19题图
+
+19. 小华利用如图所示的装置进行实验，他在音叉的叉股一端贴一个小镜片，用一束激光照射到镜面上，镜片将激光反射到右侧的光屏上。
+
+(1) 敲击音叉, 由于发声的音叉在 , 于是观察到光屏上的光点位置发生变化。
+
+(2) 举出一个相同研究方法的实例: \_\_\_\_。"""
+    strategy = get_strategy("physics")
+
+    parts = manual_fix.split_questions(text, strategy)
+    merged = manual_fix._one_question_body(parts)
+
+    assert merged is not None and len(merged) == 1
+    no, body = merged[0]
+    assert no == 19
+    assert "images/aaa.jpg" in body, "前置配图必须原样留在这一题里，不能被拆走"
+    material, stem, _ = manual_fix.split_material_and_options(strategy, body)
+    assert "images/aaa.jpg" in (material or ""), "图应落在题内材料，写库后由前端渲染"
+
+
+def test_one_question_body_keeps_multi_question_split():
+    """两个及以上不同题号时保持逐题拆分，不合并。"""
+    parts = [(27, "甲题"), (28, "乙题")]
+    assert manual_fix._one_question_body(parts) is None
+
+
+def test_confirm_menu_option_5_uses_file_edit(monkeypatch):
+    """确认菜单新增文件编辑：改完读回后仍可确认。"""
+    monkeypatch.setattr(manual_fix, "_file_edit",
+                        lambda text, label="题干", **kw: ("文件里改好的题干", Path("/tmp/x.md")))
+    monkeypatch.setattr("sys.stdin", io.StringIO("5\n1\n"))
+
+    action, text = manual_fix._confirm_text("原题干")
+
+    assert (action, text) == ("ok", "文件里改好的题干")
+
+
+def test_file_edit_reads_back_saved_file(tmp_path, monkeypatch):
+    """没有编辑器时打印路径、回车后读回文件内容。"""
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    monkeypatch.setattr(manual_fix, "_find_editor", lambda: None)
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: "")
+
+    got, _path = manual_fix._file_edit("原始题干")
+
+    assert got == "原始题干", "没有改动时应原样读回"
+
+
+def test_file_edit_cancel_returns_none(tmp_path, monkeypatch):
+    """编辑后按 c 取消：不读内容，返回 None 交给调用方处理。"""
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    monkeypatch.setattr(manual_fix, "_find_editor", lambda: None)
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: "c")
+
+    got, path = manual_fix._file_edit("原始题干")
+
+    assert got is None and path.exists()
+
+
+def test_same_number_overwrite_carries_prior_image():
+    """同批粘贴里同题号的后一条没图时，不许把前一条的图覆盖掉。"""
+    old = {"group_order": 19, "content": "![](images/aaa.jpg)", "material_text": None}
+    new = {"group_order": 19, "content": "题干正文", "material_text": None}
+
+    manual_fix._keep_prior_images(old, new)
+
+    assert "images/aaa.jpg" in new["content"]
+
+
+def test_same_number_overwrite_keeps_new_image_untouched():
+    old = {"group_order": 19, "content": "![](images/old.jpg)"}
+    new = {"group_order": 19, "content": "![](images/new.jpg)\n题干"}
+
+    manual_fix._keep_prior_images(old, new)
+
+    assert "images/new.jpg" in new["content"] and "images/old.jpg" not in new["content"]
+
+
+# ---------- 已有内容直接用编辑器改（2026-11-24） ----------
+
+def test_editable_body_includes_options_and_inline_material():
+    body = manual_fix._editable_body({
+        "content": "题干正文", "options": [{"label": "A", "text": "甲"}],
+        "material_text": "题内材料", "material_url": None,
+    })
+    assert "题干正文" in body and "A. 甲" in body and "题内材料" in body
+
+
+def test_editable_body_skips_external_article():
+    body = manual_fix._editable_body({
+        "content": "题干正文", "material_text": "整篇共享文章",
+        "material_url": "materials/chinese/x/content.md",
+    })
+    assert "题干正文" in body and "整篇共享文章" not in body
+
+
+def test_ask_one_editor_edits_existing_body_without_reappending_images(tmp_path, monkeypatch):
+    """已有内容选编辑器：打开的就是现有正文，删掉的图不能被自动补回。"""
+    from subject_strategies import get_strategy
+
+    original = {
+        "group_order": 1, "sub_no": 0,
+        "content": "原题正文\n![](images/old.jpg)",
+        "material_text": None, "material_url": None, "options": None, "answer": "",
+    }
+    issue = {"source": "卷A", "rel_path": "物理/x/卷A", "group_order": 1,
+             "kind": "incomplete_content", "sub_no": 0, "reasons": []}
+    seen = {}
+
+    def fake_file_edit(text, label="题干", **kwargs):
+        seen["body"] = text
+        return "编辑后的正文（图已删）", Path("/tmp/x.md")
+
+    monkeypatch.setattr(manual_fix, "_file_edit", fake_file_edit)
+    monkeypatch.setattr(manual_fix, "_current_question", lambda _i: original)
+    monkeypatch.setattr(manual_fix, "_collect_answer", lambda *_a, **_k: "")
+    monkeypatch.setattr(manual_fix, "_question_article", lambda _i: None)
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: "1")
+
+    recs = manual_fix._ask_one(issue, 1, "", tmp_path, get_strategy("physics"))
+
+    assert "原题正文" in seen["body"] and "images/old.jpg" in seen["body"]
+    assert recs[0]["content"] == "编辑后的正文（图已删）"
+    assert "images/old.jpg" not in recs[0]["content"], "编辑器里删掉的图不能被自动补回"
+
+
+def _prep_editor_issue(monkeypatch):
+    original = {"group_order": 1, "sub_no": 0, "content": "原题正文",
+                "material_text": None, "material_url": None,
+                "options": None, "answer": ""}
+    issue = {"source": "卷A", "rel_path": "物理/x/卷A", "group_order": 1,
+             "kind": "incomplete_content", "sub_no": 0, "reasons": []}
+    monkeypatch.setattr(manual_fix, "_current_question", lambda _i: original)
+    monkeypatch.setattr(manual_fix, "_collect_answer", lambda *_a, **_k: "")
+    monkeypatch.setattr(manual_fix, "_question_article", lambda _i: None)
+    return issue
+
+
+def test_ask_one_editor_cancel_then_skip(tmp_path, monkeypatch):
+    """编辑后取消 → 选跳过：本题不产记录。"""
+    from subject_strategies import get_strategy
+
+    issue = _prep_editor_issue(monkeypatch)
+    monkeypatch.setattr(manual_fix, "_file_edit",
+                        lambda *a, **k: (None, Path("/tmp/x.md")))
+    seq = iter(["1", "2"])
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
+
+    recs = manual_fix._ask_one(issue, 1, "", tmp_path, get_strategy("physics"))
+
+    assert recs == []
+
+
+def test_ask_one_editor_cancel_then_retry_reopens_same_file(tmp_path, monkeypatch):
+    """取消后选重试：复用同一个文件，不覆盖用户刚改的内容。"""
+    from subject_strategies import get_strategy
+
+    issue = _prep_editor_issue(monkeypatch)
+    calls = []
+
+    def fake_file_edit(text, label="题干", *, path=None):
+        calls.append((text, path))
+        if len(calls) == 1:
+            return None, Path("/tmp/x.md")
+        return "改好了", Path("/tmp/x.md")
+
+    monkeypatch.setattr(manual_fix, "_file_edit", fake_file_edit)
+    seq = iter(["1", "1"])
+    monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
+
+    recs = manual_fix._ask_one(issue, 1, "", tmp_path, get_strategy("physics"))
+
+    assert calls[1][0] is None, "重试时不应重写文件"
+    assert calls[1][1] == Path("/tmp/x.md")
+    assert recs[0]["content"] == "改好了"

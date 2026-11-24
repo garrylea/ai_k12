@@ -258,6 +258,10 @@ def split_questions(text: str, strategy) -> list[tuple[int | None, str]]:
     """把一段粘贴按题号拆成多道题；没有题号就整段当一道。
 
     返回 [(题号 or None, 去掉题号前缀的正文)]。
+
+    注意：配图在题号行上方时，工具**不判断它归谁**——题号上方的图可能是上一题的，
+    按位置猜归属会把 18题图 并进 19 题（2026-11-23 用户裁决）。这里只按题号切；
+    单题编辑时由 `_one_question_body` 把前置文字仍留在同一题里，绝不丢内容。
     """
     parts: list[tuple[int | None, list[str]]] = []
     cur_no: int | None = None
@@ -274,6 +278,25 @@ def split_questions(text: str, strategy) -> list[tuple[int | None, str]]:
         parts.append((cur_no, cur))
     out = [(no, "\n".join(lines).strip()) for no, lines in parts if "\n".join(lines).strip()]
     return out or [(None, text.strip())]
+
+
+def _one_question_body(parts: list[tuple[int | None, str]]) -> list[tuple[int | None, str]] | None:
+    """整段粘贴里至多只有一个题号时，不要拆出「无题号」的伪题。
+
+    截图 OCR 常把配图/前置说明排在题号行前面。按题号切会切出 `(None, 前置段)` +
+    `(19, 正文)` 两条；若两条都落到第 19 题，后一条会覆盖前一条、图就丢了。
+    题号至多一个时把整段原样当成这一题（不做归属猜测，也不丢任何行）。
+
+    返回 None 表示不该合并（有 2 个及以上不同题号，按原逻辑逐题拆）。
+    """
+    numbers = {no for no, _ in parts if no is not None}
+    if len(numbers) > 1:
+        return None
+    if len(parts) <= 1:
+        return parts
+    no = next(iter(numbers), None)
+    body = "\n\n".join(text for _, text in parts if text.strip())
+    return [(no, body)]
 
 
 def split_material_and_options(strategy, body: str) -> tuple[str | None, str, list[dict] | None]:
@@ -570,6 +593,86 @@ def _line_edit(text: str) -> str | None:
         c.warn("指令不认识；" + _EDIT_HINT)
 
 
+def _find_editor() -> tuple[list[str], bool] | None:
+    """返回 (命令, 是否 VS Code)；VS Code 用 --reuse-window 打开、不阻塞。
+
+    为什么不对 VS Code 用 `--wait`：它要等**标签页关闭**才返回，用户往往只保存不关闭，
+    终端就永远停在「没下文」。改成打开后由下面统一等回车（2026-11-24 用户反馈）。
+    """
+    code = shutil.which("code")
+    if not code:
+        mac = Path("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code")
+        if mac.exists():
+            code = str(mac)
+    if code:
+        return [code, "--reuse-window"], True
+    for name in ("vim", "vi", "nano"):
+        p = shutil.which(name)
+        if p:
+            return [p], False
+    return None
+
+
+def _file_edit(text: str | None, label: str = "题干",
+               *, path: Path | None = None) -> tuple[str | None, Path]:
+    """把内容写到 output/edits/ 下的文件并打开编辑器，返回 (编辑后正文或 None, 文件路径)。
+
+    flow（2026-11-24 用户裁决）：
+    - VS Code 非阻塞打开 → 提示「改完保存后按回车」；vim/vi 退出后同样提示回车确认；
+    - 回车=确认并读回；`c`=取消，返回 None，由调用方决定跳过/重试/退出；
+    - `path` 传入时复用已有文件（取消后重试不覆盖用户刚才的修改）。
+    """
+    c = console()
+    if path is None:
+        edits = ROOT / "output" / "edits"
+        edits.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        path = edits / f"{label}_{stamp}.md"
+        path.write_text((text or "").rstrip() + "\n", encoding="utf-8")
+    c.info(f"编辑文件：{path}")
+
+    # 非交互环境（管道/测试）不拉起图形编辑器，避免 code --wait 之类把管道挂住
+    editor = _find_editor() if sys.stdin.isatty() else None
+    if editor:
+        argv, is_code = editor
+        try:
+            if is_code:
+                subprocess.Popen([*argv, str(path)],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                c.info("已在 VS Code 打开；改完保存后回到终端继续")
+            else:
+                subprocess.call([*argv, str(path)])
+                c.info("编辑器已退出；确认后继续")
+        except OSError as exc:
+            c.warn(f"编辑器启动失败：{exc}")
+            c.info(f"请手动打开这个文件改：{path}")
+    else:
+        c.warn("没找到 VS Code / vim / vi，请手动打开这个文件改：")
+        c.write(f"  {path}")
+
+    while True:
+        c.prompt("改完按回车确认 / c 取消 › ")
+        raw = _read_line()
+        if raw is None:
+            return None, path
+        ans = raw.strip().lower()
+        if ans in ("", "1", "y", "yes"):
+            break
+        if ans in ("c", "cancel", "2", "n", "no"):
+            return None, path
+        c.warn("回车=确认这版；c=取消")
+
+    try:
+        new = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        c.warn(f"读不回文件：{exc}")
+        return None, path
+    if not new.strip():
+        c.warn("文件是空的，未采用")
+        return None, path
+    return new.rstrip("\n"), path
+
+
 def _confirm_text(text: str, label: str = "题干") -> tuple[str, str]:
     """录入后必须显式选号确认；返回 (动作, 正文)，动作 ∈ ok / redo / clear / skip。
 
@@ -584,7 +687,8 @@ def _confirm_text(text: str, label: str = "题干") -> tuple[str, str]:
     while True:
         # 全文都给出来：确认前要能逐段核对，不能只显示前 6 行（2026-11-22 用户反馈）。
         c.block(f"{label}已收到", text, max_lines=max(len(text.splitlines()), 1) + 1)
-        c.legend([("1", "确认继续"), ("2", "逐行编辑"), ("3", "重新输入"), ("4", give_up)])
+        c.legend([("1", "确认继续"), ("2", "逐行编辑"), ("3", "重新输入"),
+                  ("4", give_up), ("5", "用编辑器打开文件改")])
         c.prompt("选择 › ")
         raw = _read_line()
         if raw is None:                 # 输入流结束：当作放弃，避免死等
@@ -610,10 +714,18 @@ def _confirm_text(text: str, label: str = "题干") -> tuple[str, str]:
             return "redo", ""
         if ans == "4" or low in ("s", "skip"):
             return ("clear" if is_answer else "skip"), ""
-        if re.match(r"^[dci]\s+\d+", ans):
-            c.warn("要删/改行，请先按 2 进入编辑")
+        if ans == "5" or low in ("f", "file"):
+            edited, _path = _file_edit(text, label)
+            if edited is None:
+                c.warn("没有改内容，保留原样")
+                continue
+            text = edited
             continue
-        c.warn("请按 1/2/3/4 选择（1 确认 / 2 编辑 / 3 重新输入 / 4 " + give_up + "）")
+        if re.match(r"^[dci]\s+\d+", ans):
+            c.warn("要删/改行，请先按 2 进入编辑（或按 5 用文件编辑）")
+            continue
+        c.warn("请按 1/2/3/4/5 选择（1 确认 / 2 逐行编辑 / 3 重新输入 / "
+               "4 " + give_up + " / 5 文件编辑）")
 
 
 _IMG_REF_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
@@ -673,6 +785,27 @@ def _apply_image_placeholders(text: str, refs: list[str]) -> str:
     if rest:
         text = text.rstrip() + "\n\n" + "\n".join(f"![]({r})" for r in rest)
     return text
+
+
+def _keep_prior_images(old: dict | None, new: dict) -> None:
+    """同一批粘贴里同题号的后一条覆盖前一条时，别把前一条的配图吞掉。
+
+    截图 OCR 常把配图排在题号行之前，旧版会被切成两条同号记录；第二条没图，
+    覆盖后图就没了（2026-11-23 西城模拟一题19）。现在带图的那条被覆盖时，
+    把图补回新记录，宁可多一张图，也不要静默丢图。
+    """
+    if old is None:
+        return
+    old_imgs = _image_refs(old.get("content") or "", old.get("material_text") or "")
+    new_imgs = _image_refs(new.get("content") or "", new.get("material_text") or "")
+    if not old_imgs or new_imgs:
+        return
+    block = "\n\n" + "\n".join(f"![]({r})" for r in old_imgs)
+    if (new.get("material_text") or "").strip():
+        new["material_text"] = new["material_text"].rstrip() + block
+    else:
+        new["content"] = (new.get("content") or "").rstrip() + block
+    console().warn("同题号的后一条记录没有配图，已把前一条的图补回（避免图被覆盖丢失）")
 
 
 def discard_fixes_for_source(source_file: str, *, fixes_dir: Path | None = None) -> int:
@@ -1028,8 +1161,10 @@ _KIND_TEXT = {
 }
 
 # 内容层问题：先问「你看来有没有问题」，确认没问题就只落结论、不写库
+# repair_truncated 也在此列（2026-11-23）：它走自己的「双版本校对」分支，
+# 绝不再按「缺失/被吞」直接强制整题重录。
 _CONTENT_KINDS = ("incomplete_content", "merged_content", "type_mismatch",
-                  "options_incomplete", "answer_missing")
+                  "options_incomplete", "answer_missing", "repair_truncated")
 
 
 def _copyable_question_text(issue: dict) -> str:
@@ -1270,6 +1405,73 @@ def _issue_no(issue: dict) -> str:
     return f"{issue['group_order']}({sub})" if sub else str(issue["group_order"])
 
 
+def _editable_body(original: dict) -> str:
+    """把当前题拼成可编辑的 Markdown（题干 + 选项 + 题内材料）。
+
+    外置共享文章不拼进来：那是另一份文档，改题干时会把它整篇当正文写回去。
+    """
+    lines = [(original.get("content") or "").strip()]
+    for opt in original.get("options") or []:
+        label = (opt.get("label") or "").strip()
+        text = (opt.get("text") or "").strip()
+        if label:
+            lines.append(f"{label}. {text}".rstrip())
+    if not (original.get("material_url") or "").strip():
+        mat = (original.get("material_text") or "").strip()
+        if mat:
+            lines += ["", mat]
+    inline = (original.get("_post_material_text") or "").strip()
+    if inline:
+        lines += ["", inline]
+    return "\n".join(lines).strip()
+
+
+def _ask_edit_mode() -> str:
+    """已有内容时怎么改：直接在编辑器里改现有内容 / 重新录入。"""
+    c = console()
+    c.write("")
+    c.write("这一题已有内容，怎么改？")
+    c.legend([("1", "用编辑器打开现有内容改（推荐）"),
+              ("2", "重新录入（粘贴/截图识别）"),
+              ("s", "跳过本题"), ("q", "退出")])
+    while True:
+        c.prompt("选择 › ")
+        raw = _read_line()
+        if raw is None:
+            return "skip"
+        ans = raw.strip().lower()
+        if ans in ("", "1", "e", "edit"):
+            return "edit"
+        if ans in ("2", "r", "redo", "reinput"):
+            return "reinput"
+        if ans in ("s", "skip"):
+            return "skip"
+        if ans in ("q", "quit"):
+            raise SystemExit(0)
+        c.warn("请按 1（编辑器改）/ 2（重新录入）/ s（跳过）/ q（退出）选择")
+
+
+def _ask_cancel_action(target_no: int) -> str:
+    """取消编辑后怎么办：跳过本题 / 重新打开编辑器 / 结束程序。"""
+    c = console()
+    c.write("")
+    c.warn(f"第 {target_no} 题未确认修改")
+    c.legend([("1", "重新打开编辑器"), ("2", "跳过本题"), ("q", "结束程序")])
+    while True:
+        c.prompt("选择 › ")
+        raw = _read_line()
+        if raw is None:
+            return "skip"
+        ans = raw.strip().lower()
+        if ans in ("", "1", "r", "retry", "e", "edit"):
+            return "retry"
+        if ans in ("2", "s", "skip"):
+            return "skip"
+        if ans in ("q", "quit"):
+            return "quit"
+        c.warn("请按 1（重新编辑）/ 2（跳过）/ q（结束）选择")
+
+
 def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
              strategy, index: int = 1, total: int = 1) -> list[dict]:
     """引导录入一道题（允许粘贴里带多个题号，但提示按一题一录）。"""
@@ -1288,13 +1490,40 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
             original.get("material_text") or "",
             *(str((o or {}).get("text") or "") for o in opts_old),
         )
-    mode = _ask_image_mode(len(orig_refs)) if orig_refs else "ocr"
-    new_refs: list[str] = []
-    if mode == "replace":
-        new_refs = _ask_new_images(paper_md_dir)
-        if not new_refs:
-            c.warn(f"第 {target_no} 题没有换图，已跳过")
+
+    mode: str | None = None
+    content: str | None = None
+    if original is not None and (original.get("content") or "").strip():
+        pick = _ask_edit_mode()
+        if pick == "skip":
             return []
+        if pick == "edit":
+            body = _editable_body(original)
+            edit_path = None
+            while True:
+                edited, edit_path = _file_edit(
+                    body if edit_path is None else None,
+                    f"第{target_no}题题干", path=edit_path)
+                if edited is not None and edited.strip():
+                    content = edited
+                    # 编辑器里删掉的图不能被 prep 自动补回：编辑路径一律不追加原图
+                    mode = "text"
+                    break
+                choice = _ask_cancel_action(target_no)
+                if choice == "retry":
+                    continue
+                if choice == "skip":
+                    return []
+                raise SystemExit(0)
+
+    new_refs: list[str] = []
+    if mode is None:
+        mode = _ask_image_mode(len(orig_refs)) if orig_refs else "ocr"
+        if mode == "replace":
+            new_refs = _ask_new_images(paper_md_dir)
+            if not new_refs:
+                c.warn(f"第 {target_no} 题没有换图，已跳过")
+                return []
     # ocr 模式选「多图+题干」（菜单 5）时，图片引用会从 _collect_content 回填到这里
     multi_refs: list[str] = []
 
@@ -1323,26 +1552,30 @@ def _ask_one(issue: dict, target_no: int, note: str, paper_md_dir: Path,
             c.warn("正文写了 [图N] 但没配图，占位符保留原样")
         return text
 
-    if mode != "ocr":
-        c.legend([("1", "粘贴文本"), ("3", "文件路径"),
-                  ("s", "跳过本题"), ("q", "退出")])
-    else:
-        c.legend([("1", "粘贴文本"), ("2", "图片路径"), ("3", "文件路径"),
-                  ("4", "剪贴板图片"), ("5", "多图+题干（逐张裁剪配图）"),
-                  ("s", "跳过本题"), ("q", "退出")])
-
-    content = _collect_content(paper_md_dir, allow_images=(mode == "ocr"),
-                               out_refs=multi_refs)
     if content is None:
-        c.warn(f"第 {target_no} 题未录入，已跳过")
-        return []
-    if not content.strip():
-        c.warn("内容为空，未记录")
-        return []
-    content = prep(content)
+        if mode != "ocr":
+            c.legend([("1", "粘贴文本"), ("3", "文件路径"),
+                      ("s", "跳过本题"), ("q", "退出")])
+        else:
+            c.legend([("1", "粘贴文本"), ("2", "图片路径"), ("3", "文件路径"),
+                      ("4", "剪贴板图片"), ("5", "多图+题干（逐张裁剪配图）"),
+                      ("s", "跳过本题"), ("q", "退出")])
+        content = _collect_content(paper_md_dir, allow_images=(mode == "ocr"),
+                                   out_refs=multi_refs)
+        if content is None:
+            c.warn(f"第 {target_no} 题未录入，已跳过")
+            return []
+        if not content.strip():
+            c.warn("内容为空，未记录")
+            return []
+        content = prep(content)
 
     parts = split_questions(content, strategy)
-    if len(parts) > 1:
+    merged = _one_question_body(parts)
+    if merged is not None:
+        # 只有一个题号：前置配图/说明和正文是同一条，别拆成会互相覆盖的两条
+        parts = merged
+    elif len(parts) > 1:
         c.warn(f"这段里出现了 {len(parts)} 个题号，已分别记录（建议下次一题一录）")
 
     records: list[dict] = []
@@ -1510,6 +1743,108 @@ def _ask_verdict(issue: dict) -> str:
         if ans in ("q", "quit"):
             raise SystemExit(0)
         c.warn("请按 1（有问题）/ 2（没问题）/ s（跳过）/ q（退出）选择")
+
+
+def _repair_original(issue: dict) -> str | None:
+    """取自动修复前的完整原文。
+
+    issue 的 excerpt 被 recognition_scan._excerpt 截到 600 字，不能直接拿来恢复；
+    完整原文只在 labeling_issues.jsonl 的 original_content 里。
+    """
+    path = ROOT / "output" / "labeling_issues.jsonl"
+    if not path.exists():
+        return None
+    source, go = issue.get("source"), issue.get("group_order")
+    for rec in _read_jsonl(path):
+        if rec.get("source") != source or rec.get("group_order") != go:
+            continue
+        regen = (rec.get("regenerated") or {}).get("content") or ""
+        original = (rec.get("original_content") or "").strip()
+        if original and regen and len(regen) < len(original) * 0.7:
+            return original
+    return None
+
+
+def _ask_repair_verdict() -> str:
+    """砍短类专用门：两版摆在眼前，人工决定丢哪一版（不再强制重录）。"""
+    c = console()
+    c.legend([("1", "修复后没问题，保留现状"),
+              ("2", "原文才对，恢复原文（丢弃修复）"),
+              ("3", "两版都不对，我来改一次"),
+              ("s", "跳过，下次再问"), ("q", "退出")])
+    while True:
+        c.prompt("修复后还是原文对 › ")
+        raw = _read_line()
+        if raw is None:
+            return "skip"
+        ans = raw.strip().lower()
+        if ans in ("1", "ok", "y", "yes"):
+            return "keep"
+        if ans in ("2", "restore", "r"):
+            return "restore"
+        if ans in ("3", "fix", "problem", "n"):
+            return "fix"
+        if ans in ("s", "skip"):
+            return "skip"
+        if ans in ("q", "quit"):
+            raise SystemExit(0)
+        c.warn("请按 1（保留修复后）/ 2（恢复原文）/ 3（我来改）/ s（跳过）/ q（退出）选择")
+
+
+def _restore_original_record(issue: dict, original: str) -> dict:
+    """只带题干的写回记录：由 apply_fixes 的 content_only 分支原地恢复原文。"""
+    return {
+        "source": issue["source"],
+        "rel_path": issue["rel_path"],
+        "group_order": issue["group_order"],
+        "sub_no": issue.get("sub_no", 0),
+        "content": original.strip(),
+        "content_only": True,
+        "issue_kind": "repair_truncated",
+        "issue_reasons": issue.get("reasons") or [],
+        "pdf": issue.get("pdf"),
+        "md": issue.get("md"),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "operator": getpass.getuser(),
+        "status": "ready",
+        "applied": False,
+    }
+
+
+def _ask_repair_truncated(issue: dict, paper_md_dir: Path,
+                          index: int | None, total: int | None) -> list[dict]:
+    """自动修复砍短：把「修复前原文」和「当前修复后」一起摆出来，人工校对一次。
+
+    旧逻辑把它当「题缺失/被吞」强制整题重录，导致同一道题换个 kind 再问一遍
+    （2026-11-23 西城模拟一题18）。现在两版并列，人工只做一次裁决：
+    保留修复后 / 恢复原文（丢弃修复）/ 两版都不对才录入一次。
+    """
+    c = console()
+    _print_context(issue, index, total)
+    original = _repair_original(issue)
+    if not original:
+        c.warn("找不到自动修复前的原文，只能人工录入本题")
+        return _ask_slots(issue, paper_md_dir)
+    c.write("")
+    c.write(f"  {c.paint('自动修复前原文（完整，可整段拷贝）', 'dim')}")
+    for line in original.splitlines():
+        c.write(f"  {line}")
+    c.write("")
+    c.info("两版请对照原卷看：修复后常被 LLM 删掉真内容，也可能正是它清掉了脏字符/邻题图")
+    verdict = _ask_repair_verdict()
+    if verdict == "skip":
+        return []
+    if verdict == "keep":
+        # 修复后没问题：按卷+题号关掉该题所有 flag，一个字段都不写库
+        mark_issue(issue["source"], issue["group_order"], "resolved",
+                   note="人工校对：保留修复后版本", verdict="no_change",
+                   content_sig=issue.get("content_sig"))
+        c.ok(f"第 {_issue_no(issue)} 题已标记「确认无问题」，题库未改动")
+        return []
+    if verdict == "restore":
+        c.ok(f"已记录第 {_issue_no(issue)} 题：写回自动修复前原文（写库时仅改题干）")
+        return [_restore_original_record(issue, original)]
+    return _ask_slots(issue, paper_md_dir)
 
 
 def _looks_like_article_text(text: str) -> bool:
@@ -1921,7 +2256,7 @@ def _ask_slots(issue: dict, paper_md_dir: Path) -> list[dict]:
             return [base]
         # 三段都没改：用户看过原卷后确认无事，按「确认无问题」收口
         mark_issue(issue["source"], issue["group_order"], "resolved",
-                   note="人工确认无问题，未改动", kind=issue.get("kind"),
+                   note="人工确认无问题，未改动",
                    verdict="no_change", content_sig=issue.get("content_sig"))
         c.ok(f"第 {_issue_no(issue)} 题已标记「确认无问题」，题库未改动")
         return []
@@ -1971,7 +2306,11 @@ def _ask(issue: dict, paper_md_dir: Path,
     确认没问题 → 只把结论写进清单（verdict=no_change），一个字段都不改库；
     确认有问题 → 依次问「题干 / 共享材料 / 题内材料」，每段都能回车跳过，
     槽位不存在也允许新增（PDF→MD 丢材料时这是唯一入口）。
+
+    repair_truncated 单独走双版本校对（_ask_repair_truncated），不再强制整题重录。
     """
+    if issue.get("kind") == "repair_truncated":
+        return _ask_repair_truncated(issue, paper_md_dir, index, total)
     strategy = get_strategy(_subject_of(issue))
     _print_context(issue, index, total)
 
@@ -1979,7 +2318,7 @@ def _ask(issue: dict, paper_md_dir: Path,
         verdict = _ask_verdict(issue)
         if verdict == "ok":
             mark_issue(issue["source"], issue["group_order"], "resolved",
-                       note="人工确认无问题，未改动", kind=issue.get("kind"),
+                       note="人工确认无问题，未改动",
                        verdict="no_change",
                        content_sig=issue.get("content_sig"))
             console().ok(f"第 {_issue_no(issue)} 题已标记「确认无问题」，题库未改动")
@@ -2006,7 +2345,11 @@ def _ask(issue: dict, paper_md_dir: Path,
 def mark_issue(source: str, group_order: int, status: str, *,
                note: str | None = None, fix_file: str | None = None,
                kind: str | None = None, **extra) -> int:
-    """把某卷某题（可限定 kind）的识别问题切到指定状态；返回改动条数。
+    """把某卷**某题**的所有识别问题切到指定状态；返回改动条数。
+
+    2026-11-23 起不再按 kind 过滤（`kind` 参数仅为兼容旧调用保留、已忽略）：
+    人工对同一道题答一次「没问题」或一次成功写库，就必须关掉该题**全部** flag，
+    否则同一道题会换个 kind 再问一遍（西城模拟一题18 实测）。
 
     状态语义（2026-10-31 修订）：
     - pending  ：待人工补录
@@ -2017,8 +2360,6 @@ def mark_issue(source: str, group_order: int, status: str, *,
     changed = 0
     for rec in rows:
         if rec.get("source") != source or int(rec.get("group_order", -1)) != int(group_order):
-            continue
-        if kind is not None and rec.get("kind") != kind:
             continue
 
         if rec.get("status") == status and note is None:
@@ -2176,9 +2517,12 @@ def _review_loop(todo: list[dict], all_issues: list[dict], out_dir: Path,
             continue
         out_file = out_dir / f"{issue['source']}.jsonl"
         rows = _read_jsonl(out_file)
+        batch: dict[int, dict] = {}
         for record in records:
+            _keep_prior_images(batch.get(record["group_order"]), record)
             rows = [r for r in rows if r["group_order"] != record["group_order"]]
             rows.append(record)
+            batch[record["group_order"]] = record
         _write_jsonl(out_file, rows)
 
         # 本次补到的题号（含一次粘贴里带出来的其它题）对同卷同题的 issue 一并收口
@@ -2228,9 +2572,12 @@ def _save_records(source: str, records: list[dict], out_dir: Path) -> None:
     """把补题记录并入 manual_fixes/<source>.jsonl（同题号覆盖）。"""
     out_file = out_dir / f"{source}.jsonl"
     rows = _read_jsonl(out_file)
+    batch: dict[int, dict] = {}
     for record in records:
+        _keep_prior_images(batch.get(record["group_order"]), record)
         rows = [r for r in rows if r["group_order"] != record["group_order"]]
         rows.append(record)
+        batch[record["group_order"]] = record
     _write_jsonl(out_file, rows)
 
 
