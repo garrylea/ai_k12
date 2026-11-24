@@ -896,6 +896,7 @@ def test_file_matching_paper_and_answer_pair_resolves_to_paper(monkeypatch, caps
     for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
         monkeypatch.setattr(import_cli, name, lambda argv, n=name: seen.append((n, argv)))
     monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
+    monkeypatch.setattr(import_cli, "paper_meta_main", lambda argv: 0)
     monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
         Path("语文/初中/second/2026/海淀九年级语文（上）期中语文试题"),
         Path("语文/初中/second/2026/海淀九年级语文（上）期中语文试题_答案"),
