@@ -415,3 +415,44 @@ def externalize_chinese_materials(
         with review_path.open("a", encoding="utf-8") as f:
             for rec in review:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def externalize_english_materials(
+    items,
+    *,
+    md_images_dir: Path,
+    assets_dir: Path,
+    store,
+    subject_code: str = "english",
+    paper_scope: str | None = None,
+) -> None:
+    """publish 阶段（仅英语）：组二/三/四的共享文章 → md + material_url。
+
+    复用语文的 doc_key / 写文档 / 图片物化；英语特有的只有「哪些组算文章」。
+    组五的作文材料留在 material_text（显示在题干下方），不外置。
+    """
+    groups: dict[str, list] = {}
+    for item in items:
+        if (item.group_id or "").strip() not in ("二", "三", "四"):
+            continue
+        text = item.material_text or ""
+        if not text.strip() or is_heading_only(text):
+            continue
+        groups.setdefault(normalize_for_group(text), []).append(item)
+
+    resolver = _resolver_for(Path(md_images_dir))
+    for members in groups.values():
+        canonical = choose_canonical([m.material_text or "" for m in members])
+        _, url = write_material_doc(
+            canonical, resolver=resolver, store=store,
+            assets_dir=Path(assets_dir), subject_code=subject_code,
+            paper_scope=paper_scope,
+        )
+        for m in members:
+            m.material_url = url
+            m.material_text = None
+
+    # 只剩标题的材料：文章不存在，清掉（组一/五的普通文本不受影响）
+    for item in items:
+        if item.material_text and is_heading_only(item.material_text):
+            item.material_text = None

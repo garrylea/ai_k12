@@ -220,3 +220,46 @@ def test_same_article_tolerates_typo_and_annotations():
     assert same_article(fixed, doc)
     assert same_article(marked, doc)
     assert not same_article(other, doc)
+
+
+def test_externalize_english_materials(tmp_path):
+    from chinese_material_doc import externalize_english_materials
+    from models import ExamQuestion
+
+    assets = tmp_path / "assets"
+    md_dir = tmp_path / "md"
+    md_dir.mkdir()
+
+    def q(no, gid, material):
+        return ExamQuestion(
+            subject_id="english", group_id=gid, group_order=no,
+            type="choice", content=f"q{no}", answer="A",
+            difficulty=3,  # ExamQuestion 必填字段（简报示例省略，补上以通过建模校验）
+            material_text=material,
+            options=[{"label": "A", "text": "a"}] * 4,
+        )
+
+    items = [
+        # 简报示例给组一填了卷面指令原文；但本函数消费的是 Task 1 产出，
+        # Task 1 的 attach_post_material 已把该指令剥成 None，按真实契约构造。
+        q(1, "一", None),
+        q(13, "二", "## Passage\nText"),
+        q(14, "二", "## Passage\nText"),
+        q(24, "三", "## B\nText B"),
+        q(38, "五", None),
+    ]
+    items[4].material_text = "题目①\n…\n题目②\n…"
+
+    externalize_english_materials(
+        items, md_images_dir=md_dir, assets_dir=assets,
+        store=_Store(assets), paper_scope="英语/初中/first/2026/paper",
+    )
+
+    assert items[0].material_text is None and items[0].material_url is None
+    assert items[1].material_text is None and items[1].material_url
+    assert items[1].material_url == items[2].material_url       # 同文共用 URL
+    assert items[3].material_url != items[1].material_url       # 不同篇不同 URL
+    assert items[4].material_url is None and "题目①" in items[4].material_text
+    assert items[1].material_url.startswith("materials/english/")
+    body = (assets / items[1].material_url).read_text(encoding="utf-8")
+    assert body.startswith("## Passage")

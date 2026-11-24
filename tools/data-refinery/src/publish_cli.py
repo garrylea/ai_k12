@@ -16,7 +16,9 @@ from pathlib import Path
 
 from asset_store import LocalAssetStore
 from checkpoint import RefineryCheckpoint
-from chinese_material_doc import externalize_chinese_materials, same_article
+from chinese_material_doc import (
+    externalize_chinese_materials, externalize_english_materials, same_article,
+)
 from config import RefineryConfig
 from image_rewrite import rewrite_item
 from material_kind import SCOPE_KIND, kind_of_jsonl
@@ -343,6 +345,15 @@ def main(argv=None):
                         override = manual_inline.get(item.source, {}).get(item.group_order)
                         if override:
                             _inject(item, override)
+                elif subject_code == "english":
+                    externalize_english_materials(
+                        items,
+                        md_images_dir=md_images_dir,
+                        assets_dir=assets_dir,
+                        store=store,
+                        subject_code=subject_code,
+                        paper_scope=rel_file.as_posix(),
+                    )
                 out_items = []
                 for idx, item in enumerate(items, start=1):
                     asset_prefix = f"questions/{subject_code}/{source_key}/{idx}"
