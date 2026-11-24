@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from answer_merger import maybe_merge_answer_md
 from question_splitter import split_page
 from subject_strategies import get_strategy
@@ -44,6 +42,7 @@ def test_merged_answer_reaches_each_question(tmp_path):
 
 def test_missing_answer_number_does_not_shift(tmp_path):
     qs = _run(tmp_path, answer_text="# 参考答案\n1. B\n")
+    assert len(qs) == 2, f"应切出两题，实际 {len(qs)} 题"
     assert qs[0].answer == "B"
     assert qs[1].answer == ""
 
