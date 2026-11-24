@@ -908,8 +908,13 @@ def test_file_matching_paper_and_answer_pair_resolves_to_paper(monkeypatch, caps
     assert "含配对答案" in out
     assert "先选一份" not in out
     for name, argv in seen:
-        flag = "--materials" if name == "convert_main" else ("--book" if name == "publish_main" else "--file")
-        assert argv[argv.index(flag) + 1] == "语文/初中/second/2026/海淀九年级语文（上）期中语文试题"
+        if name == "convert_main":
+            value = argv[argv.index("--materials") + 1]
+            assert value == ("语文/初中/second/2026/海淀九年级语文（上）期中语文试题,"
+                             "语文/初中/second/2026/海淀九年级语文（上）期中语文试题_答案")
+        else:
+            flag = "--book" if name == "publish_main" else "--file"
+            assert argv[argv.index(flag) + 1] == "语文/初中/second/2026/海淀九年级语文（上）期中语文试题"
 
 
 def test_scan_entry_passes_redo_to_scan_run(monkeypatch):
@@ -1023,3 +1028,40 @@ def test_two_papers_are_not_auto_paired():
     """两份试卷（不是试卷+答案）不能被当成一对。"""
     hits = [Path("物理/初中/second/2026/A-试卷"), Path("物理/初中/second/2026/B-试卷")]
     assert import_cli._pick_paired_paper(hits) is None
+
+
+def test_convert_includes_paired_answer():
+    a = parse_args(["--subject", "物理", "--file", "X-试卷"])
+    a._resolved_rel = "物理/初中/second/2026/X-试卷"
+    a._paired_answer_rel = "物理/初中/second/2026/X-答案"
+    argv = convert_argv(a)
+    value = argv[argv.index("--materials") + 1]
+    assert value == "物理/初中/second/2026/X-试卷,物理/初中/second/2026/X-答案"
+
+
+def test_convert_without_pair_keeps_single_material():
+    a = parse_args(["--subject", "物理", "--file", "X-试卷"])
+    a._resolved_rel = "物理/初中/second/2026/X-试卷"
+    a._paired_answer_rel = None
+    argv = convert_argv(a)
+    assert argv[argv.index("--materials") + 1] == "物理/初中/second/2026/X-试卷"
+
+
+def test_files_batch_pairs_each_keyword(monkeypatch):
+    seen = []
+    for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
+        monkeypatch.setattr(import_cli, name, lambda argv, n=name: seen.append((n, argv)))
+    monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("物理/初中/second/2026/A-试卷"),
+        Path("物理/初中/second/2026/A-答案"),
+        Path("物理/初中/second/2026/B-试卷"),
+    ], []))
+
+    import_cli.main(["--subject", "物理", "--files", "A-试卷,B-试卷", "--skip-review"])
+    materials = [argv[argv.index("--materials") + 1]
+                 for name, argv in seen if name == "convert_main"]
+    assert materials[0] == ("物理/初中/second/2026/A-试卷,"
+                            "物理/初中/second/2026/A-答案")
+    assert materials[1] == "物理/初中/second/2026/B-试卷"
+    assert "A-答案" not in materials[1]          # 第二轮不能继承上一轮的答案

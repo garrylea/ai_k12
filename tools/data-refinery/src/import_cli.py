@@ -192,10 +192,13 @@ def _stage_file(args) -> str | None:
 
 
 def convert_argv(args) -> list[str]:
-    """convert：--file 映射为 --materials（同一套关键词匹配）。"""
+    """convert：--file 映射为 --materials（试卷 + 配对答案，逗号 OR）。"""
     argv = _common(args)
-    if _stage_file(args):
-        argv += ["--materials", _stage_file(args)]
+    entries = [
+        e for e in (_stage_file(args), getattr(args, "_paired_answer_rel", None)) if e
+    ]
+    if entries:
+        argv += ["--materials", ",".join(entries)]
     if args.dry_run:
         argv.append("--dry-run")
     if args.reconvert or args.redo:
