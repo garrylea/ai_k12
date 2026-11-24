@@ -164,10 +164,10 @@ convert、db_loader、服务端（material-doc / judge-core / explanation-cache�
 ## 9. 验收（不写库，一条命令）
 
 ```
-cd tools/data-refinery && python src/import_cli.py --subject 英语 --year 2026 --file "西城·三帆中学" --skip-load --skip-answers --skip-review
+cd tools/data-refinery && python src/import_cli.py --subject 英语 --year 2026 --file "西城·三帆中学" --re-extract --re-publish --skip-load --skip-answers --skip-review
 ```
 
-该命令会重跑切题/发布并覆盖 output 下该卷的派生 jsonl 与 assets，但**不写 MySQL**。跑完检查：
+`--re-extract --re-publish` 用来清掉该卷的提取/发布 checkpoint（否则会跳过，新规则不生效）；命令会覆盖 output 下该卷的派生 jsonl 与 assets，但**不写 MySQL**。跑完检查：
 
 - 13 / 24 / 27 / 30 / 34 号题有 `material_url`、`material_text` 为空；
 - 同篇题 URL 相同：24–26、27–29、30–33、34–37 各一组，且四组互不相同；
