@@ -15,6 +15,7 @@ export const SUBJECT_POLITICS = 9;
 const TARGETED_TASK_CODE: Readonly<Record<number, string>> = {
   [SUBJECT_MATH]: 'math_targeted',
   [SUBJECT_CHINESE]: 'cn_targeted',
+  [SUBJECT_ENGLISH]: 'en_targeted',
   [SUBJECT_PHYSICS]: 'physics_targeted',
   [SUBJECT_CHEMISTRY]: 'chemistry_targeted',
   [SUBJECT_POLITICS]: 'politics_targeted',
@@ -23,6 +24,7 @@ const TARGETED_TASK_CODE: Readonly<Record<number, string>> = {
 const PAPER_TASK_CODE: Readonly<Record<number, string>> = {
   [SUBJECT_MATH]: 'math_paper',
   [SUBJECT_CHINESE]: 'cn_paper',
+  [SUBJECT_ENGLISH]: 'en_paper',
   [SUBJECT_PHYSICS]: 'physics_paper',
   [SUBJECT_CHEMISTRY]: 'chemistry_paper',
   [SUBJECT_POLITICS]: 'politics_paper',
@@ -46,13 +48,33 @@ export function paperTaskCode(subjectId: number): string {
   return PAPER_TASK_CODE[Number(subjectId)] ?? 'math_paper';
 }
 
+/** 专项会话的 module 落点（旧内联映射会把英语/道法都写成 math_targeted）。 */
+const TARGETED_SESSION_MODULE: Readonly<Record<number, string>> = {
+  [SUBJECT_MATH]: 'math_targeted',
+  [SUBJECT_CHINESE]: 'cn_targeted',
+  [SUBJECT_ENGLISH]: 'en_targeted',
+  [SUBJECT_PHYSICS]: 'physics_targeted',
+  [SUBJECT_CHEMISTRY]: 'chemistry_targeted',
+  [SUBJECT_POLITICS]: 'politics_targeted',
+};
+export function targetedSessionModule(subjectId: number): string {
+  return TARGETED_SESSION_MODULE[Number(subjectId)] ?? 'math_targeted';
+}
+
 export function isSelfAssessSubject(subjectId: number): boolean {
   return SELF_ASSESS_SUBJECTS.has(Number(subjectId));
+}
+
+/** 英语显式自评类型：只放 short_answer/proof，不含 fill_blank（将来出现要先归一化比对）。 */
+const ENGLISH_SELF_ASSESS_TYPES = new Set(['short_answer', 'proof']);
+export function isExplicitSelfAssessType(subjectId: number, type: string): boolean {
+  return Number(subjectId) === SUBJECT_ENGLISH && ENGLISH_SELF_ASSESS_TYPES.has(type);
 }
 
 export function selfAssessSkipsJudging(subjectId: number, type: string): boolean {
   const id = Number(subjectId);
   if (id === SUBJECT_CHINESE) return !OBJECTIVE_TYPES.has(type);
+  if (isExplicitSelfAssessType(id, type)) return true;
   if (isSelfAssessSubject(id)) return NEW_SUBJECT_SKIP_JUDGE_TYPES.has(type);
   return false;
 }

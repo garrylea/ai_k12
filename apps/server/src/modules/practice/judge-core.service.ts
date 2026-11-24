@@ -9,7 +9,7 @@ import { PointsService, type AwardResult } from '../points/points.service.js';
 import { EventsService } from '../analytics/events.service.js';
 import { computeContentHash } from '../../common/utils/content-hash.util.js';
 import { evaluateDictation, type DictationDiffOp } from '../../common/utils/normalize-chinese.util.js';
-import { isSelfAssessSubject, prefersExactBeforeSelfAssess, subjectCodeOf } from '../../common/subject-config.js';
+import { isSelfAssessSubject, isExplicitSelfAssessType, prefersExactBeforeSelfAssess, subjectCodeOf } from '../../common/subject-config.js';
 import type { QuestionRow } from '../../database/repositories/types.js';
 
 /** 仅走 exact 比对的客观题：选项/判断标签形式固定，可靠，不等即判错。
@@ -165,7 +165,9 @@ export interface JudgeDictationOutput {
  * 物理/化学/道法沿用同一口径（spec 2026-10-31 §3.5）。选择题/判断题仍走 exact。
  */
 function isSelfAssessNonObjective(q: { subject_id?: number | null; type: string }): boolean {
-  return isSelfAssessSubject(Number(q.subject_id)) && !EXACT_ONLY_TYPES.has(q.type);
+  const sid = Number(q.subject_id);
+  return isExplicitSelfAssessType(sid, q.type)
+    || (isSelfAssessSubject(sid) && !EXACT_ONLY_TYPES.has(q.type));
 }
 
 @Injectable()

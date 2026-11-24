@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SUBJECT_ENGLISH,
+  isExplicitSelfAssessType,
   isSelfAssessSubject,
   materialPositionFor,
   paperTaskCode,
   prefersExactBeforeSelfAssess,
   selfAssessSkipsJudging,
   subjectCodeOf,
+  targetedSessionModule,
   targetedTaskCode,
 } from './subject-config.js';
 
@@ -70,5 +73,27 @@ describe('materialPositionFor 材料位置（2026-11-24：按学科推导，不�
     for (const id of [1, 2, 3, 6, 7, 8, Number.NaN, null, undefined]) {
       expect(materialPositionFor(id as never)).toBeNull();
     }
+  });
+});
+
+describe('英语学科配置', () => {
+  it('任务码不再回落数学', () => {
+    expect(targetedTaskCode(SUBJECT_ENGLISH)).toBe('en_targeted');
+    expect(paperTaskCode(SUBJECT_ENGLISH)).toBe('en_paper');
+  });
+  it('专项会话 module 六学科穷举', () => {
+    expect(targetedSessionModule(1)).toBe('math_targeted');
+    expect(targetedSessionModule(2)).toBe('cn_targeted');
+    expect(targetedSessionModule(3)).toBe('en_targeted');
+    expect(targetedSessionModule(4)).toBe('physics_targeted');
+    expect(targetedSessionModule(5)).toBe('chemistry_targeted');
+    expect(targetedSessionModule(9)).toBe('politics_targeted');
+  });
+  it('英语非客观题显式自评，但不吞 fill_blank', () => {
+    expect(isExplicitSelfAssessType(3, 'short_answer')).toBe(true);
+    expect(isExplicitSelfAssessType(3, 'proof')).toBe(true);
+    expect(isExplicitSelfAssessType(3, 'fill_blank')).toBe(false);
+    expect(selfAssessSkipsJudging(3, 'short_answer')).toBe(true);
+    expect(selfAssessSkipsJudging(3, 'choice')).toBe(false);
   });
 });
