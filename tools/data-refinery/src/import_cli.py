@@ -374,6 +374,22 @@ def _pick_paired_paper(hits: list[Path]) -> Path | None:
     return None
 
 
+def _answer_sibling(paper: Path, candidates: list[Path]) -> Path | None:
+    """同一目录下与 paper 配对的答案素材（只看文件名变体，不读内容）。"""
+    for cand in candidates:
+        if cand != paper and is_answer_pair(paper, cand):
+            return cand
+    return None
+
+
+def _paper_for_answer(answer: Path, candidates: list[Path]) -> Path | None:
+    """答案素材对应的试卷素材（is_answer_pair 反向）。"""
+    for cand in candidates:
+        if cand != answer and is_answer_pair(cand, answer):
+            return cand
+    return None
+
+
 def _resolve_file(args, cfg) -> int | None:
     """把用户写的 `--file` 关键词解析成唯一一份素材；返回非 None 表示要中止（值即 rc）。
 
@@ -421,9 +437,23 @@ def _resolve_file(args, cfg) -> int | None:
     else:
         chosen = hits[0]
 
+    answer_rel: Path | None = None
+    if _strip_answer_suffix(chosen.name) != chosen.name:
+        # 关键词命中的是答案：改选它的试卷，否则只转答案、extract 会跳过 → 0 题
+        paper = _paper_for_answer(chosen, candidates)
+        if paper is not None:
+            answer_rel, chosen = chosen, paper
+            paired_note = "（关键词命中的是答案，已改为导入其试卷）"
+
+    if answer_rel is None:
+        answer_rel = _answer_sibling(chosen, candidates)
+        if answer_rel is not None and not paired_note:
+            paired_note = "（含配对答案，切题时自动并入）"
+
     args.file = chosen.name                     # 卷名/书名：第 7/8/9 步与 paper_id 反查用
     args._resolved_rel = chosen.as_posix()      # 精确相对路径：五个路径阶段用
     args._resolved_subject = chosen.parts[0] if chosen.parts else None
+    args._paired_answer_rel = answer_rel.as_posix() if answer_rel else None
     print(f"[解析] {raw} → {args._resolved_rel}{paired_note}", flush=True)
     return None
 

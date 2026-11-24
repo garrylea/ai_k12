@@ -965,3 +965,44 @@ def test_reload_paper_aborts_without_tty(monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     a = parse_args(["--file", "35中", "--reload-paper"])
     assert import_cli._confirm_reload(a) == 2
+
+
+def test_file_resolves_paper_and_records_answer_sibling(monkeypatch):
+    """命中只有试卷时，也要主动找到同目录答案，不能等关键词同时命中两份。"""
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("物理/初中/second/2026/X-试卷"),
+        Path("物理/初中/second/2026/X-答案"),
+    ], []))
+    args = parse_args(["--subject", "物理", "--file", "X-试卷"])
+    assert import_cli._resolve_file(args, object()) is None
+    assert args.file == "X-试卷"
+    assert args._resolved_rel == "物理/初中/second/2026/X-试卷"
+    assert args._paired_answer_rel == "物理/初中/second/2026/X-答案"
+
+
+def test_file_without_answer_leaves_pair_empty(monkeypatch):
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("物理/初中/second/2026/Y-试卷"),
+    ], []))
+    args = parse_args(["--subject", "物理", "--file", "Y"])
+    assert import_cli._resolve_file(args, object()) is None
+    assert args._paired_answer_rel is None
+
+
+def test_file_answer_keyword_redirects_to_paper(monkeypatch, capsys):
+    """直接输入答案名时改选它的试卷；否则只转答案、extract 跳过，0 题入库。"""
+    monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
+        Path("物理/初中/second/2026/X-试卷"),
+        Path("物理/初中/second/2026/X-答案"),
+    ], []))
+    args = parse_args(["--subject", "物理", "--file", "X-答案"])
+    assert import_cli._resolve_file(args, object()) is None
+    assert args.file == "X-试卷"
+    assert args._paired_answer_rel == "物理/初中/second/2026/X-答案"
+    assert "命中的是答案" in capsys.readouterr().out
+
+
+def test_two_papers_are_not_auto_paired():
+    """两份试卷（不是试卷+答案）不能被当成一对。"""
+    hits = [Path("物理/初中/second/2026/A-试卷"), Path("物理/初中/second/2026/B-试卷")]
+    assert import_cli._pick_paired_paper(hits) is None
