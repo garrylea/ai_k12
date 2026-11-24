@@ -139,7 +139,6 @@ def _patch_extracted(rec: dict, *, content: str, answer: str,
     payload = {
         "group_order": go,
         "sub_no": sub_no,
-        "material_position": (existing or {}).get("material_position"),
         "type": rec.get("expected_type") or (
             "choice" if options else (existing or {}).get("type") or "short_answer"),
         "difficulty": (existing or {}).get("difficulty") or 2,
@@ -223,6 +222,39 @@ def _patch_extracted_answer(rec: dict, answer: str, output_dir: Path) -> None:
     checkpoint.load()
     checkpoint.unmark_published(f"{rel}/{src}")
     print(f"[INFO] 已回写 extracted 答案并标记重发：{path}", flush=True)
+
+
+def _patch_extracted_content(rec: dict, content: str, output_dir: Path) -> None:
+    """只回写题干：恢复 LLM 自动修复前原文时用，选项/材料/答案一律原样保留。"""
+    rel, src = rec.get("rel_path"), rec.get("source")
+    if not rel or not src:
+        return
+    path = output_dir / "extracted" / rel / f"{src}.jsonl"
+    if not path.exists():
+        print(f"[WARN] 找不到 extracted 产物，跳过题干回写：{path}", flush=True)
+        return
+    rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    go = int(rec["group_order"])
+    sub_no = int(rec.get("sub_no") or 0)
+    changed = False
+    for row in rows:
+        if (int(row.get("group_order") or -1) == go
+                and int(row.get("sub_no") or 0) == sub_no):
+            row["content"] = content
+            row["needs_review"] = False
+            changed = True
+            break
+    if not changed:
+        print(f"[WARN] extracted 里没有第 {go} 题，题干未回写", flush=True)
+        return
+    path.write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+        encoding="utf-8",
+    )
+    checkpoint = RefineryCheckpoint(output_dir / ".publish_checkpoint.json")
+    checkpoint.load()
+    checkpoint.unmark_published(f"{rel}/{src}")
+    print(f"[INFO] 已回写 extracted 题干并标记重发：{path}", flush=True)
 
 
 def _go_int(value) -> int | None:
@@ -718,19 +750,36 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
     # （重算 key/url、同步同卷、清 text），inline 写 material_text。
     explicit_url = rec.get("material_url", _NO_URL_FIELD)
     target_url = None
-    existing_method = None
     existing_options = None
     existing_text = None
     if qid:
         cur.execute(
-            "SELECT material_url, material_method, options, material_text "
+            "SELECT material_url, options, material_text "
             "FROM questions WHERE id=%s", (qid,))
         row = cur.fetchone()
         if row:
-            target_url, existing_method, existing_options = row[0], row[1], row[2]
-            existing_text = row[3] or ""
+            target_url, existing_options = row[0], row[1]
+            existing_text = row[2] or ""
     out_dir = output_dir or RefineryConfig.from_env().output_dir
     chinese = subject_code_for_parts(Path(rec["rel_path"]).parts, default="") == "chinese"
+
+    # 只恢复题干：丢弃 LLM 自动修复的砍短结果、把修复前原文写回去。
+    # 选项/材料/答案一律不碰，避免把题内素材或外置文章冲掉（2026-11-23）。
+    if rec.get("content_only"):
+        content = (rec.get("content") or "").strip()
+        if not content:
+            return "跳过：恢复的题干为空"
+        if qid is None:
+            return "跳过：题库里找不到这道题，无法恢复原文"
+        chash = content_hash(content, existing_options, existing_text, target_url)
+        if not apply:
+            return (f"恢复原文：paper={paper_id} 第{_no_label(go, sub_no)}题"
+                    f"（question_id={qid}）· {len(content)} 字；选项/材料/答案不动")
+        cur.execute(
+            "UPDATE questions SET content=%s, content_hash=%s, is_active=1, "
+            "needs_review=0 WHERE id=%s", (content, chash, qid))
+        _patch_extracted_content(rec, content, out_dir)
+        return f"已恢复原文：paper={paper_id} 第{_no_label(go, sub_no)}题（question_id={qid}）"
 
     # 没有挂到卷上时，可能是「新增」，也可能是「复用」一条同内容的遗留行（重导摘了关联、
     # 没删题）。真正的选择要等内容物化后算哈希才知道，预览先把这个可能说清楚。
@@ -782,7 +831,6 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
     article_note = ""
     new_url = target_url
     material_text = existing_text or None
-    method_value = existing_method
     extracted_material = None
     extracted_post = None
     drop_post = False
@@ -806,8 +854,6 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
                     return f"跳过：指认的材料文档不存在（{new_url}），请确认 URL 或先重发该卷"
             else:
                 new_url, material_text = None, None
-        method_value = ("manual" if material_text and str(material_text).strip()
-                        else existing_method)
         extracted_material = material_text
     else:
         from chinese_material_doc import same_article
@@ -831,12 +877,10 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
                 new_url = cu
                 if article_rec:            # URL + 题内素材（认领 + 补充）
                     material_text = article_rec
-                    method_value = "manual"
                     extracted_post = article_rec
                     preserve_existing = bool(cu)
                 else:                      # 仅认领/沿用 URL
                     material_text = existing_text or None
-                    method_value = existing_method if material_text else None
                     preserve_existing = bool(cu)
         else:
             if not record_target and article_rec:
@@ -902,11 +946,6 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
                 material_text = existing_text or None
                 preserve_existing = True
 
-            method_value = ("manual" if material_text and record_target in ("inline", "both")
-                            else (existing_method if material_text else None))
-            if record_target == "article":
-                method_value = existing_method if material_text else None
-
         skip_extracted = bool(target_url and record_target in ("article", "both")
                               and not extracted_post and not drop_post
                               and extracted_material is None)
@@ -971,11 +1010,11 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
             "UPDATE questions SET content=%s, options=%s, "
             "type=COALESCE(%s, IF(%s,'choice',type)), "
             "answer=COALESCE(NULLIF(%s,''), answer), material_text=%s, "
-            "material_method=%s, content_hash=%s, material_url=%s, sub_no=%s, is_active=1 WHERE id=%s",
+            "content_hash=%s, material_url=%s, sub_no=%s, is_active=1 WHERE id=%s",
             (content,
              json.dumps(options, ensure_ascii=False) if options else None,
              forced_type, 1 if options else 0,
-             answer, material_text, method_value, chash, new_url, sub_no, qid))
+             answer, material_text, chash, new_url, sub_no, qid))
         if orphan:
             # 旧行没挂在卷上：把卷内的题号关系补回来（内容已更新，不新建行）
             cur.execute(
@@ -996,11 +1035,11 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
                 "UPDATE questions SET content=%s, options=%s, "
                 "type=COALESCE(%s, IF(%s,'choice',type)), "
                 "answer=COALESCE(NULLIF(%s,''), answer), material_text=%s, "
-                "material_method=%s, is_active=1, material_url=%s, sub_no=%s WHERE id=%s",
+                "is_active=1, material_url=%s, sub_no=%s WHERE id=%s",
                 (content,
                  json.dumps(options, ensure_ascii=False) if options else None,
                  forced_type, 1 if options else 0,
-                 answer, material_text, method_value, new_url, sub_no, qid))
+                 answer, material_text, new_url, sub_no, qid))
             cur.execute(
                 "INSERT IGNORE INTO paper_questions "
                 "(paper_id, question_id, question_no, group_order) VALUES (%s,%s,%s,%s)",
@@ -1009,14 +1048,14 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
             action = "新增"
             cur.execute(
                 "INSERT INTO questions (subject_id, group_order, sub_no, type, difficulty, content, options, "
-                "answer, material_text, material_method, grade_band, source, source_year, "
+                "answer, material_text, grade_band, source, source_year, "
                 "content_hash, is_active, material_url) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s)",
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s)",
                 (subject_id, go, sub_no,
                  forced_type or ("choice" if options else "short_answer"), 2,
                  content,
                  json.dumps(options, ensure_ascii=False) if options else None,
-                 answer, material_text, method_value,
+                 answer, material_text,
                  "junior", rec["source"], 2024, chash, new_url))
             qid = int(cur.lastrowid)
             cur.execute(

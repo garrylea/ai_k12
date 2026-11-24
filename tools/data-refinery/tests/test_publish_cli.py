@@ -351,7 +351,6 @@ def test_chinese_publish_keeps_article_url_and_adds_inline_post_material(tmp_pat
     assert got[0]["material_url"].startswith("materials/chinese/")
     assert got[0]["material_text"] is None          # Q11 不受影响
     assert got[1]["material_text"] == inline         # Q12 题内素材
-    assert got[1]["material_method"] == "rule"
     assert "_post_material_text" not in got[1]
     md = out / "assets" / got[1]["material_url"]
     assert "游山西村" in md.read_text(encoding="utf-8")
@@ -396,7 +395,6 @@ def test_publish_manual_inline_fix_wins_and_survives_extract(tmp_path):
     assert got[0]["material_url"] == got[1]["material_url"]
     assert got[0]["material_text"] is None
     assert got[1]["material_text"] == "## 行香子\n人工修正后的题内素材"
-    assert got[1]["material_method"] == "manual"
     doc = (out / "assets" / got[1]["material_url"]).read_text(encoding="utf-8")
     assert "游山西村" in doc and "行香子" not in doc
 

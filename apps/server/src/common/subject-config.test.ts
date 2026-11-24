@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isSelfAssessSubject,
+  materialPositionFor,
   paperTaskCode,
   prefersExactBeforeSelfAssess,
   selfAssessSkipsJudging,
@@ -56,6 +57,18 @@ describe('subject-config AI 路由档位（2026-11-01）', () => {
   it('表外学科（6/7/8/NaN/null/undefined）回落 math', () => {
     for (const id of [6, 7, 8, Number.NaN, null, undefined]) {
       expect(subjectCodeOf(id as never)).toBe('math');
+    }
+  });
+});
+
+describe('materialPositionFor 材料位置（2026-11-24：按学科推导，不入库）', () => {
+  it('物理 4 / 化学 5 / 道法 9 → 题干上方', () => {
+    for (const id of [4, 5, 9]) expect(materialPositionFor(id)).toBe('before');
+  });
+
+  it('语文 2 / 英语 3 / 数学 1 / 表外学科 → 题干下方（null）', () => {
+    for (const id of [1, 2, 3, 6, 7, 8, Number.NaN, null, undefined]) {
+      expect(materialPositionFor(id as never)).toBeNull();
     }
   });
 });

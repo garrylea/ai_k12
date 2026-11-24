@@ -7,7 +7,7 @@ import {
   type PassageSentence,
 } from '../../database/repositories/chinese-passages.repo.js';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
-import { SUBJECT_CHINESE, SUBJECT_MATH, SUBJECT_PHYSICS } from '../../common/subject-config.js';
+import { SUBJECT_CHINESE, SUBJECT_MATH, SUBJECT_PHYSICS, materialPositionFor } from '../../common/subject-config.js';
 import { chineseSimilarKpId } from '../../common/chinese-similar.util.js';
 import type { HistoryRunQuestion, SimilarPracticeResult } from '../training/history-practice.service.js';
 import { HistoryPracticeService } from '../training/history-practice.service.js';
@@ -181,7 +181,7 @@ export class PracticeHistoryService {
             questionContent: a.text,
             materialText: a.material_text,
             materialUrl: a.material_url ?? null,
-            materialPosition: a.material_position ?? null,
+            materialPosition: materialPositionFor(a.subject_id),
             questionAnswer: a.answer,
             questionAnalysis: a.explanation,
             questionSource: a.question_source ?? null,
@@ -270,7 +270,7 @@ export class PracticeHistoryService {
         questionContent: a.question_content,
         // 语文专项的"材料"是篇名+句原文（passageTitle/passageSentence）；其余专项按题目字段
         materialText: a.question_material_text ?? null,
-        materialPosition: a.question_material_position ?? null,
+        materialPosition: materialPositionFor(a.question_subject_id),
         materialUrl: null,
         questionAnswer: standardAnswer ?? a.question_answer,
         questionAnalysis: a.question_analysis,

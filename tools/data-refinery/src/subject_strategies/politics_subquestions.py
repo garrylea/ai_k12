@@ -97,7 +97,6 @@ def _split_one(q):
             accumulated.append(material)
         out.append(replace(
             q, content=body, material_text=material or None,
-            material_position="before" if material else None,
             score=_score_of(body), sub_no=k + 1, answer="", explanation=None,
             post_material_base=None, post_material_appended=None,
             post_material_pending=None,
@@ -135,7 +134,7 @@ def split_tail_question_rule(content: str) -> tuple[str | None, str]:
 
 
 def expand(questions):
-    """入口：逐题拆小问；单小问材料题补 material_text 与 before 位置。"""
+    """入口：逐题拆小问；单小问材料题补 material_text（位置由后端按学科下发）。"""
     out = []
     for q in questions:
         parts = _split_one(q)
@@ -143,10 +142,7 @@ def expand(questions):
             material, rest = split_tail_question_rule(q.content)
             if material:
                 out.append(replace(q, content=rest.strip(),
-                                   material_text=material.strip(),
-                                   material_position="before"))
-            elif (q.material_text or "").strip():
-                out.append(replace(q, material_position="before"))
+                                   material_text=material.strip()))
             else:
                 out.append(q)
             continue

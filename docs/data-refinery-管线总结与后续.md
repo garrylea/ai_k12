@@ -329,11 +329,11 @@ python emphasis_cli.py --all-chinese          # 全部语文卷预演（--apply 
 - `apply_fixes` 按目标写库：
   - `article`/`both` + 已有 `material_url`：走 `_correct_article_doc` —— `doc_key` 用 `paper_scope` 卷维度重算；key 变就写新文档、把**同一份卷**里引用旧 URL 的题改到新 URL 并重算 hash，写 `output/material_doc_overrides.jsonl`。
   - `article`/`both` + **无 URL**：走 `_create_article_doc` —— 按「试卷+正文」算 key 写 `content.md`，把 `material_url`/`content_hash` **直接挂到本题 + `material_share_with` 题号**并回写 extracted。publish 只写文档和 published、不写库，所以 URL 必须在这里落库，否则页面读不到。
-  - `inline`/`both.inline`：写 `material_text` + `material_method='manual'`；extracted 里文章正文不动，素材走 `_post_material_text`。
+  - `inline`/`both.inline`：写 `material_text`；extracted 里文章正文不动，素材走 `_post_material_text`。
   - 无 target 的旧记录：`same_article`（归一化+去标题+相似度）判断；与文档同段的 `material_text` 直接清空按文章修（Q5 类），不再硬性拒收。
 - `publish`：`material_doc_overrides.jsonl` 保证 redo 不把文章冲回旧正文；只回注 `inline`/`both.inline`，**article 目标绝不写进 `material_text`**；注入前判重，重复写 `output/material_duplicate_healed.jsonl`。
 - **折行粘贴护栏**：行首成片 `│` 或标签被换行截断（`<span clas` + 换行 + `s=`）的文本一律拒收（`looks_like_wrapped_copy`，apply 写库前也拦），提示从原卷 md / 网页正文复制；材料收集支持 `e=编辑当前正文`，小改标记不必整段重粘。
 - **材料改为文件编辑**：共享材料/题内材料默认 `1=在文件里改`（`2=粘贴文本` 保留）。工具把当前正文落成 `output/manual_edits/<卷>/<题号>-<槽位>.md`，用户用自己的编辑器改，回车读取并确认；**原文档不动，取消无副作用**，改完仍走原来的重算 key / 同步同卷 / 回写库流程。
 - **卷内隔离**：同一段内容在不同试卷是不同文件（`paper_scope=rel_path/source`）；`PUBLISH_VERSION` 故意不 bump（避免全量迁移），旧文档不删。存量不动（回填仍用旧纯内容 key）。
-- 无需 DB migration（schema 已有 `material_text/material_url/material_method`）。`material_doc_overrides.jsonl` 是持久产物，不要随手删。
+- 无需 DB migration（schema 已有 `material_text/material_url`）。`material_doc_overrides.jsonl` 是持久产物，不要随手删。
 - 已知剩余项：`fix_page_markers_cli.py` / `emphasis_cli.py` 对 `material_url` 非空的行仍走「跳过」护栏（独立 CLI，不经 import_cli）。

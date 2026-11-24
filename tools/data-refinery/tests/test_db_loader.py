@@ -847,7 +847,7 @@ class TestLoadQuestionsPaperGrouping:
         loader.load_questions([q], paper=(_paper_meta(), 9))
         upd = [a for sql, a in queries if sql.startswith("UPDATE questions SET type=")]
         assert len(upd) == 1
-        assert upd[0][-5] == "新文段"  # material_text 参数（其后是 material_url、material_method、material_position）
+        assert upd[0][-3] == "新文段"  # material_text 参数（其后是 material_url、id）
         assert upd[0][-1] == 501
 
     def test_writes_knowledge_points_from_extracted(self):
@@ -1053,7 +1053,7 @@ def test_cross_paper_shared_row_is_split():
     })
     loader.load_questions([q], paper=(_paper_meta(), 667))
     inserts = [a for sql, a in queries if sql.startswith("INSERT INTO questions")]
-    assert inserts and inserts[0][18] == chash  # 新行用带材料指纹的 hash（material_method 在 13）
+    assert inserts and inserts[0][16] == chash  # 新行用带材料指纹的 hash
     assert not [a for sql, a in queries if sql.startswith("UPDATE questions")]  # 旧行没被覆盖
 
 
@@ -1102,8 +1102,8 @@ def test_verified_row_with_changed_hash_still_syncs_metadata():
 
     ups = [a for sql, a in queries if sql.startswith("UPDATE questions SET type=")]
     assert len(ups) == 1
-    assert ups[0][-7] == 1            # is_active 跟 needs_review=False 放行
-    assert ups[0][-5] == "新文段"      # 材料同步
+    assert ups[0][-5] == 1            # is_active 跟 needs_review=False 放行
+    assert ups[0][-3] == "新文段"      # 材料同步
     assert ups[0][-1] == 501
     # 内容/答案/hash 不能被覆盖
     assert not any("UPDATE questions SET subject_id" in sql for sql, _ in queries)
@@ -1131,18 +1131,16 @@ def test_in_exam_normalized_on_every_load():
     assert ups == [(1, 9, 601), (0, 9, 602)]
 
 
-def test_update_question_row_writes_sub_fields():
+def test_update_question_row_writes_sub_no():
     loader, queries = _make_loader({})
     loader._exec = lambda sql, args=None: queries.append((sql, args))
     loader._update_question_row(7, 3, {
         "group_order": 26, "type": "short_answer", "difficulty": 2,
         "content": "(1) x", "answer": "a", "sub_no": 1,
-        "material_position": "before",
     }, "(1) x", None, "hash")
     sql, args = queries[-1]
     assert "sub_no=%s" in sql
-    assert "material_position=%s" in sql
-    assert 1 in args and "before" in args
+    assert 1 in args
 
 
 def test_duplicate_check_groups_by_sub_no():

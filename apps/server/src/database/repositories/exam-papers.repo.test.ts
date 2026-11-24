@@ -29,13 +29,13 @@ describe('ExamPapersRepository.findQuestionsByPaperId', () => {
     expect(sql).toContain('q.material_url AS materialUrl');
   });
 
-  it('道法小问：带 subNo/materialPosition，按 (题号, 小问) 排序', async () => {
+  it('道法小问：带 subNo/subjectId，按 (题号, 小问) 排序', async () => {
     const pool = mockPool([]);
     const repo = new ExamPapersRepository(pool as any);
     await repo.findQuestionsByPaperId(17);
     const [sql] = pool.execute.mock.calls[0];
     expect(sql).toContain('q.sub_no AS subNo');
-    expect(sql).toContain('q.material_position AS materialPosition');
+    expect(sql).toContain('q.subject_id AS subjectId');
     expect(sql).toContain('ORDER BY pq.question_no, q.sub_no');
   });
 });

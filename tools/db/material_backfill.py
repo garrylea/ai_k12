@@ -5,7 +5,6 @@
 
     material_text  ← 材料段（含图/表）
     content        ← 小问段
-    material_method← 'rule'
 
 ## 一条命令完成：备份 → 切分 → 写库 → 复查
 
@@ -16,7 +15,7 @@
 ## 安全边界（项目铁律）
 
 - **只处理 `material_text IS NULL` 的题**：语文/英语已有人工/管线材料的一律不动。
-- **只写三列**：`material_text` / `content` / `material_method`；其他列前后 MD5 必须一致。
+- **只写两列**：`material_text` / `content`；其他列前后 MD5 必须一致。
 - **拼接自校验**：`material + rest == 原 content`（不 rstrip，构造上恒成立），不成立整题跳过。
 - **备份**：写库前把受影响行的原值导出到 `tools/db/backups/`，可直接回滚。
 
@@ -182,7 +181,7 @@ def _locate_stem(lines: list[str], n: int, first_line: str) -> int | None:
 def backfill_pre_material(conn, cur, dry_run: bool) -> int:
     """第二阶段：把「请在题号前、由『请阅读《…》并回答第 N 题』引导」的材料挂到题目上。
 
-    只写 `material_text` / `material_method`，**不动 content**（材料本来就不在 content 里，
+    只写 `material_text`，**不动 content**（材料本来就不在 content 里，
     而是在切题时被整段丢弃）。
     """
     cur.execute("""
@@ -226,7 +225,7 @@ def backfill_pre_material(conn, cur, dry_run: bool) -> int:
     with backup.open("w", encoding="utf-8") as f:
         f.write("-- 回滚：清空本阶段写入的题前材料\n")
         for qid, _block in plans:
-            f.write(f"UPDATE questions SET material_text=NULL, material_method=NULL WHERE id={qid};\n")
+            f.write(f"UPDATE questions SET material_text=NULL WHERE id={qid};\n")
     print(f"备份已写入 {backup}")
 
     ids = [qid for qid, _ in plans]
@@ -240,7 +239,7 @@ def backfill_pre_material(conn, cur, dry_run: bool) -> int:
 
     for qid, block in plans:
         cur.execute(
-            "UPDATE questions SET material_text=%s, material_method='rule' WHERE id=%s",
+            "UPDATE questions SET material_text=%s WHERE id=%s",
             (block, qid),
         )
 
@@ -249,7 +248,7 @@ def backfill_pre_material(conn, cur, dry_run: bool) -> int:
                if before.get(r[0]) != md5("|".join("" if v is None else str(v) for v in r[1:]))]
     cur.execute("""
         SELECT COUNT(*) FROM questions
-         WHERE id IN (%s) AND material_text IS NOT NULL AND material_method='rule'
+         WHERE id IN (%s) AND material_text IS NOT NULL
     """ % ",".join(["%s"] * len(ids)), ids)
     written = cur.fetchone()[0]
     conn.commit()
@@ -306,13 +305,13 @@ def main() -> int:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         backup = BACKUP_DIR / "20261102_material_backfill_rollback.sql"
         with backup.open("w", encoding="utf-8") as f:
-            f.write("-- 回滚：把 content 还原、material_text/material_method 清空\n")
+            f.write("-- 回滚：把 content 还原、material_text 清空\n")
             for qid, _material, _rest, _subj in plan:
                 cur.execute("SELECT content FROM questions WHERE id=%s", (qid,))
                 orig = cur.fetchone()[0]
                 f.write(
                     f"UPDATE questions SET content={conn.escape(orig)}, "
-                    f"material_text=NULL, material_method=NULL WHERE id={qid};\n"
+                    f"material_text=NULL WHERE id={qid};\n"
                 )
         print(f"备份已写入 {backup}")
 
@@ -330,18 +329,18 @@ def main() -> int:
 
         for qid, material, rest, _subj in plan:
             cur.execute(
-                "UPDATE questions SET material_text=%s, content=%s, material_method='rule' WHERE id=%s",
+                "UPDATE questions SET material_text=%s, content=%s WHERE id=%s",
                 (material, rest, qid),
             )
 
-        # ---- 复查：其他列 MD5 不变 + 三列已写 ----
+        # ---- 复查：其他列 MD5 不变 + 两列已写 ----
         cur.execute(guard_sql % ",".join(["%s"] * len(ids)), ids)
         changed = [r[0] for r in cur.fetchall()
                    if other_cols_before.get(r[0]) != md5("|".join("" if v is None else str(v) for v in r[1:]))]
 
         cur.execute("""
             SELECT COUNT(*) FROM questions
-             WHERE id IN (%s) AND material_text IS NOT NULL AND material_method='rule'
+             WHERE id IN (%s) AND material_text IS NOT NULL
         """ % ",".join(["%s"] * len(ids)), ids)
         written = cur.fetchone()[0]
 

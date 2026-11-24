@@ -7,11 +7,9 @@ material_text=NULL。本脚本按扩词后的规则识别并搬回正确位置�
 
     content         ← content 首行（做题要求）
     material_text   ← content 其余全文（填充语段）
-    material_method ← 'rule'
 
 只处理 material_text IS NULL 的题——已有材料的（如 q5847 房山诗歌原文+图）
-一律跳过，绝不覆盖既有数据。只改 content / material_text / material_method /
-content_hash 四列，其余列逐行 MD5 比对不变；写回滚 SQL；按现有口径重算 content_hash。
+一律跳过，绝不覆盖既有数据。只改 content / material_text / content_hash 三列，其余列逐行 MD5 比对不变；写回滚 SQL；按现有口径重算 content_hash。
 
 默认 dry-run；`--apply` 才写库。幂等：回填后 material_text 非空，重跑 0 行。
 
@@ -39,7 +37,7 @@ from subject_strategies.chinese_inline_material import _split_lead_as_stem, _nor
 DB = dict(host="localhost", port=3306, user="ai_k12", password="ai_k12",
           database="ai_k12", charset="utf8mb4")
 BACKUP = Path(__file__).resolve().parent / "backups" / "20261122_content_lead_stem_rollback.sql"
-TOUCHED = ("content", "material_text", "material_method", "content_hash")
+TOUCHED = ("content", "material_text", "content_hash")
 
 
 def _sql_literal(value) -> str:
@@ -77,7 +75,6 @@ def _plan(conn) -> list[dict]:
         new = dict(row)
         new["content"] = rest
         new["material_text"] = material
-        new["material_method"] = "rule"
         new["content_hash"] = rewrite_hash_for_row(new)
         todo.append({"old": row, "new": new, "before_md5": _fingerprint(row)})
     return todo
@@ -114,23 +111,21 @@ def main() -> None:
                 lines.append(
                     f"UPDATE questions SET content={_sql_literal(old['content'])}, "
                     f"material_text={_sql_literal(old['material_text'])}, "
-                    f"material_method={_sql_literal(old['material_method'])}, "
                     f"content_hash={_sql_literal(old['content_hash'])} "
                     f"WHERE id={old['id']};"
                 )
                 try:
                     cur.execute(
                         "UPDATE questions SET content=%s, material_text=%s, "
-                        "material_method=%s, content_hash=%s WHERE id=%s",
-                        (new["content"], new["material_text"], new["material_method"],
+                        "content_hash=%s WHERE id=%s",
+                        (new["content"], new["material_text"],
                          new["content_hash"], old["id"]),
                     )
                 except pymysql.err.IntegrityError:
-                    # 唯一键冲突：保留旧 hash，其余三列照常写（与既有回填同口径）
+                    # 唯一键冲突：保留旧 hash，其余两列照常写（与既有回填同口径）
                     cur.execute(
-                        "UPDATE questions SET content=%s, material_text=%s, "
-                        "material_method=%s WHERE id=%s",
-                        (new["content"], new["material_text"], new["material_method"], old["id"]),
+                        "UPDATE questions SET content=%s, material_text=%s WHERE id=%s",
+                        (new["content"], new["material_text"], old["id"]),
                     )
                     print(f"  q{old['id']}: content_hash 冲突，保留旧值")
         conn.commit()

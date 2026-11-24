@@ -55,7 +55,6 @@ def test_26_splits_two_with_own_materials():
     assert out[1].material_text.startswith("## 【活动二】文物载史")
     assert out[1].content.startswith("(2)")
     assert "+学科观点" not in out[1].content
-    assert all(q.material_position == "before" for q in out)
     assert all(q.group_order == 26 for q in out)
 
 
@@ -108,7 +107,7 @@ def test_stem_without_question_cue_does_not_split():
     assert len(out) == 1
 
 
-def test_existing_material_position_is_set_for_single_question():
+def test_single_question_material_is_split_out():
     q = _q(
         "（10分）阅读材料，回答问题。\n"
         "材料正文不少于六十个字：黄河是中华民族的母亲河，黄河治理事关中华民族伟大复兴，"
@@ -118,7 +117,6 @@ def test_existing_material_position_is_set_for_single_question():
     out = expand([q])
     assert len(out) == 1
     assert out[0].material_text.startswith("（10分）阅读材料")
-    assert out[0].material_position == "before"
 
 
 def test_split_page_applies_politics_expansion():

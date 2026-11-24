@@ -478,10 +478,10 @@ describe('TrainingService.startTargetedPractice', () => {
     created_at: new Date('2026-09-01'),
   };
 
-  it('道法小问：subNo/materialPosition 透传', async () => {
+  it('道法小问：subNo 透传，materialPosition 按学科推导（subject_id=9 → before）', async () => {
     const deps = mk({
       questionsRepo: { findRandomByKpAndType: vi.fn().mockResolvedValue([
-        { ...questionRow, sub_no: 1, material_position: 'before' },
+        { ...questionRow, sub_no: 1, subject_id: 9 },
       ]) },
     });
     const r = await mkSvc(deps).startTargetedPractice({ studentId: 7, subjectId: 1, kpId: 3, type: 'choice', count: 5 });

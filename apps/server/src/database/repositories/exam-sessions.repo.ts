@@ -67,7 +67,7 @@ export interface ExamResultRow {
   material_text: string | null; // 同节共享材料（语文阅读/文段题）
   material_url: string | null; // 整段材料在素材库中的路径
   sub_no: number;              // 小问序号（0=非小问）
-  material_position: string | null; // 'before'=题干上方；null=题干下方
+  subject_id: number;          // 学科 id：materialPosition 由它推导（见 common/subject-config.ts）
   is_active: number; // 题目在架标记（详情判断 canRedo / canSimilar）
   question_source: string | null; // 题目来源（questions.source），详情页溯源用
 }
@@ -162,7 +162,7 @@ export class ExamSessionsRepository {
       `SELECT ea.question_id, ea.question_order, ea.answer_text, ea.is_correct, ea.analysis,
               ea.method, ea.judged_at,
               q.content AS text, q.type, q.options, q.explanation, q.answer AS answer,
-              q.material_text, q.material_url, q.sub_no, q.material_position,
+              q.material_text, q.material_url, q.sub_no, q.subject_id,
               q.is_active, q.source AS question_source
        FROM exam_answers ea JOIN questions q ON q.id = ea.question_id
        WHERE ea.session_id = ?

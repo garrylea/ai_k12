@@ -316,7 +316,7 @@ def main(argv=None):
                     article_bodies = [b for b in (
                         _doc_body(it.material_url) for it in items) if b]
 
-                    def _inject(item, text, method):
+                    def _inject(item, text):
                         """写题内素材；若与同卷任一篇文章是同段（Q5 类重复）则丢弃并记账。"""
                         if not (text or "").strip():
                             return
@@ -332,10 +332,9 @@ def main(argv=None):
                                 }, ensure_ascii=False) + "\n")
                             return
                         item.material_text = text
-                        item.material_method = method
 
                     for idx, text in post_materials.items():
-                        _inject(items[idx], text, "rule")
+                        _inject(items[idx], text)
                     # 人工 inline 修正优先于自动找回：--redo 冲掉 extracted 后仍保得住
                     manual_inline = _manual_inline_materials(
                         config.output_dir, {it.source for it in items},
@@ -343,7 +342,7 @@ def main(argv=None):
                     for item in items:
                         override = manual_inline.get(item.source, {}).get(item.group_order)
                         if override:
-                            _inject(item, override, "manual")
+                            _inject(item, override)
                 out_items = []
                 for idx, item in enumerate(items, start=1):
                     asset_prefix = f"questions/{subject_code}/{source_key}/{idx}"

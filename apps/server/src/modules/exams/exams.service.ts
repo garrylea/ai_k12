@@ -12,7 +12,7 @@ import type { AwardResult } from '../points/points.service.js';
 import { toPointsAwardDto } from '../points/dto/points.dto.js';
 import type { EventsService } from '../analytics/events.service.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
-import { selfAssessSkipsJudging, paperTaskCode } from '../../common/subject-config.js';
+import { selfAssessSkipsJudging, paperTaskCode, materialPositionFor } from '../../common/subject-config.js';
 import type { ExamSessionRow, ExamAnswerRow } from '../../database/repositories/exam-sessions.repo.js';
 import type { ExamPaperDto, PaperDetailDto, PaperQueryDto } from './dto/paper-query.dto.js';
 import type {
@@ -279,7 +279,7 @@ export class ExamsService {
       options: parseOptions(row.options),
       materialText: row.material_text ?? null,
       materialUrl: row.material_url ?? null,
-      materialPosition: row.material_position ?? null,
+      materialPosition: materialPositionFor(row.subject_id),
       answerText: row.answer_text,
       isCorrect: row.is_correct,               // null = 主观题待自评
       analysis: row.analysis,
@@ -500,7 +500,7 @@ export class ExamsService {
   private toSessionQuestion(q: {
     questionId: number; questionNo: number; subNo: number; text: string; type: string;
     options: string | null; materialText: string | null; materialUrl: string | null;
-    materialPosition: string | null;
+    subjectId: number;
   }): SessionQuestionDto {
     return {
       questionId: q.questionId,
@@ -511,7 +511,7 @@ export class ExamsService {
       options: parseOptions(q.options),
       materialText: q.materialText ?? null,
       materialUrl: q.materialUrl ?? null,
-      materialPosition: q.materialPosition ?? null,
+      materialPosition: materialPositionFor(q.subjectId),
     };
   }
 

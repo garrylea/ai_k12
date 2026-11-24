@@ -23,7 +23,7 @@ import { DictationFeedbackCapability } from '../../ai-core/capabilities/dictatio
 import { InterpretationJudgeCapability } from '../../ai-core/capabilities/interpretation-judge.capability.js';
 import { parseOptions } from '../../common/utils/parse-options.util.js';
 import { collapseUnitVerdict, isCorrectOf } from '../../common/utils/special-practice.util.js';
-import { targetedTaskCode, subjectCodeOf, SUBJECT_CHINESE, SUBJECT_MATH } from '../../common/subject-config.js';
+import { targetedTaskCode, subjectCodeOf, materialPositionFor, SUBJECT_CHINESE, SUBJECT_MATH } from '../../common/subject-config.js';
 import { MODEL_SPECIALS, type ModelSpecial } from './model-specials.js';
 import { SpecialPracticeLogsRepository } from '../../database/repositories/special-practice-logs.repo.js';
 import type { SpecialPracticeVerdict } from '../../database/repositories/special-practice-logs.repo.js';
@@ -1045,7 +1045,7 @@ export class TrainingService {
       materialText: q.material_text ?? null,
       materialUrl: q.material_url ?? null,
       subNo: Number(q.sub_no ?? 0),
-      materialPosition: q.material_position ?? null,
+      materialPosition: materialPositionFor(q.subject_id ?? input.subjectId),
       source: q.source ?? null,
       questionNo: q.question_no ?? null,
     }));

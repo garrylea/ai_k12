@@ -67,11 +67,11 @@ class FakeCursor:
                 self._rows = list(self.siblings)
         elif "FROM questions WHERE material_url=%s" in sql:
             self._rows = list(self.siblings)
-        elif "SELECT material_url, material_method, options, material_text FROM questions" in sql:
-            self._rows = [(self.material_url, None, self.existing_options_json,
+        elif "SELECT material_url, options, material_text FROM questions" in sql:
+            self._rows = [(self.material_url, self.existing_options_json,
                            self.existing_material_text)]
-        elif "SELECT material_url, material_method, options FROM questions" in sql:
-            self._rows = [(self.material_url, None, self.existing_options_json)]
+        elif "SELECT material_url, options FROM questions" in sql:
+            self._rows = [(self.material_url, self.existing_options_json)]
         elif "SELECT material_url FROM questions" in sql:
             self._rows = [(self.material_url,)]
         else:
@@ -565,7 +565,6 @@ def test_inline_material_fix_on_externalized_row_keeps_article(tmp_path, monkeyp
     assert calls[0]["preserve_existing_material"] is True
     upd = [a for sql, a in cur.sql
            if sql.startswith("UPDATE questions SET content=")]
-    assert upd and upd[0][6] == "manual"          # material_method
     assert upd[0][5] == rec["material_text"]       # DB 写题内素材；文章仍在 material_url
 
 
@@ -608,7 +607,7 @@ def test_legacy_inline_without_url_is_written(tmp_path, monkeypatch):
     msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
     assert "跳过" not in msg
     ins = [a for sql, a in cur.sql if sql.startswith("INSERT INTO questions")]
-    assert ins and ins[0][9] == "manual"             # material_method
+    assert ins and ins[0][8] == "材料正文很长很长。"   # material_text
 
 
 def test_hash_uses_material_url(tmp_path, monkeypatch):
@@ -787,7 +786,7 @@ def test_inline_material_fix_without_url(tmp_path, monkeypatch):
     cur = FakeCursor(paper=(17, 2), existing=5173)   # material_url=None
     A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
     upd = [a for sql, a in cur.sql if sql.startswith("UPDATE questions SET content=")]
-    assert upd and upd[0][5] == "## 短文\n正文" and upd[0][6] == "manual"
+    assert upd and upd[0][5] == "## 短文\n正文"
 
 
 def test_stem_only_fix_preserves_existing_options(tmp_path, monkeypatch):
@@ -904,7 +903,7 @@ def test_explicit_material_url_written_and_hash_uses_it(tmp_path, monkeypatch):
     msg = A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
 
     assert "跳过" not in msg
-    assert _update_args(cur)[8] == url               # 写库用的是指认的 URL
+    assert _update_args(cur)[7] == url               # 写库用的是指认的 URL
     assert seen[-1][3] == url                        # hash 也按它算
     assert rec["applied_hash"] == real(*seen[-1]) and len(rec["applied_hash"]) == 64
 
@@ -919,7 +918,7 @@ def test_explicit_null_clears_material_url(tmp_path, monkeypatch):
     cur = FakeCursor(paper=(17, 2), existing=5182,
                      material_url="materials/chinese/oldkey/content.md")
     A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
-    assert _update_args(cur)[8] is None
+    assert _update_args(cur)[7] is None
 
 
 def test_missing_url_field_keeps_db_url(tmp_path, monkeypatch):
@@ -931,7 +930,7 @@ def test_missing_url_field_keeps_db_url(tmp_path, monkeypatch):
     rec = {**REC, "source": "语文-模拟二", "rel_path": "语文/模拟二", "content": "题干"}
     cur = FakeCursor(paper=(17, 2), existing=5182, material_url=old)
     A.apply_record(cur, rec, apply=True, output_dir=tmp_path)
-    assert _update_args(cur)[8] == old
+    assert _update_args(cur)[7] == old
 
 
 def test_explicit_url_missing_doc_is_rejected(tmp_path, monkeypatch):
@@ -974,7 +973,7 @@ def test_duplicate_inline_text_is_healed_to_article(tmp_path, monkeypatch):
     assert calls.get("text", "").startswith("该中心开拓")
     args = _update_args(cur)
     assert args[5] is None, "重复的题内素材应被清空（不能 url+text 并存）"
-    assert args[8] == "materials/chinese/new/content.md"
+    assert args[7] == "materials/chinese/new/content.md"
 
 
 def _write_doc(root: Path, url: str, body: str) -> None:
@@ -1120,3 +1119,30 @@ def test_patch_extracted_matches_sub_no(tmp_path):
     rows = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
     assert [r["content"] for r in rows] == ["旧1", "新2"]
     assert [r["sub_no"] for r in rows] == [1, 2]
+
+
+# ---------- content_only：丢弃自动修复、恢复原文（2026-11-23） ----------
+
+def test_content_only_restores_stem_without_touching_options_or_material(tmp_path):
+    rec = dict(REC, content="修复前完整原文", content_only=True,
+               options=None, material_text=None)
+    cur = FakeCursor(paper=(54, 4), existing=42,
+                     existing_options_json='[{"label":"A","text":"甲"}]',
+                     existing_material_text="题内材料")
+
+    msg = _impl.apply_record(cur, rec, apply=True, output_dir=tmp_path)
+
+    assert msg.startswith("已恢复原文")
+    stem_updates = [a for sql, a in cur.sql
+                    if sql.startswith("UPDATE questions SET content=")]
+    assert len(stem_updates) == 1
+    assert stem_updates[0][0] == "修复前完整原文"
+    assert any("needs_review=0" in sql for sql, _ in cur.sql)
+    assert not any(sql.startswith("INSERT INTO questions") for sql, _ in cur.sql)
+    assert not any(sql.startswith("UPDATE questions SET answer=") for sql, _ in cur.sql)
+
+
+def test_content_only_rejects_empty_stem():
+    rec = dict(REC, content="  ", content_only=True)
+    cur = FakeCursor(paper=(54, 4), existing=42)
+    assert _impl.apply_record(cur, rec, apply=True).startswith("跳过")

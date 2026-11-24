@@ -390,7 +390,6 @@ def externalize_chinese_materials(
         for m in members:
             m.material_url = url
             m.material_text = None
-            m.material_method = None
     append_skipped_report(Path(assets_dir).parent / "material_group_skipped.jsonl", skipped)
 
     # 纯标题的分组：文章不存在，material_text 清掉
@@ -409,7 +408,6 @@ def externalize_chinese_materials(
         if material:
             item.content = rest
             item.material_text = material
-            item.material_method = "rule"
         elif needs_llm(item.content):
             review.append({"group_order": item.group_order, "content": item.content})
     if review:

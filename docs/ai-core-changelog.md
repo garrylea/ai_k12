@@ -8,7 +8,22 @@
 
 ---
 
-## 2026-11-23 人工补题新增「只改文本」模式
+## 2026-11-24 删除 material_method / material_position，材料位置改为按学科下发
+
+**用户裁决**：材料显示位置是学科口径（物理/化学/道法材料在设问之前、语文/英语在之后），不该存库；`material_method` 只是排查字段，也删。立即删，不管后果。
+
+**DB**：迁移 `tools/db/migrations/2026-11-24_drop_material_columns.sql`（幂等 `information_schema` + `PREPARE`）删两列；`schema.sql` 同步。删前导出 76 行原值到 `tools/db/backups/20261124_material_columns_rollback.sql`。
+
+**服务端**：`common/subject-config.ts` 新增 `materialPositionFor(subjectId)`（4/5/9 → `'before'`，其余 `null`），与学科差异其它映射同处。5 个读取点改为用 `q.subject_id` 现算、不再查列：`exam-papers.repo.findQuestionsByPaperId`、`exam-sessions.repo.findAnswersWithQuestions`、`special-answer-records.repo.listBySession`、`training.service`（`q.subject_id ?? input.subjectId`）、`practice-history.service`（考试行 `subject_id` / 专项行 `question_subject_id`）。API 形状不变，前端 `materialSlots()` 与四处渲染无需改。
+
+**管线**：`models.ExamQuestion` / `RawQuestion` / `LabeledQuestion` / JSONL / `db_loader`（3 处 SQL）/ `apply_fixes`（SELECT + 2 处 UPDATE + INSERT）/ `publish_cli._inject` / `politics_subquestions` / `chinese_material_doc` 全部去掉两列。三个存量回填脚本同步：`content_lead_stem_backfill`、`material_backfill` 去掉写列与 `method='rule'` 判据（复查改看 `material_text IS NOT NULL`）；`material_doc_backfill` 的计划元组少一列，幂等改为「已外置文章的行 `material_text` 为空、天然不入组」+ `material_group_reason` 拦不像文章的片段（原 `material_method='rule'` 标记已不存在）。
+
+**验证**：server 2884 passed、tsc 无错；data-refinery 2230 passed / 10 skipped；`schema_reconcile.py` 结构差异 0（线上多出的 `_bak_35_q/_pq/_ea` 是 2026-11-23 重导前的备份表，早已存在）。
+
+**可见变化**：物理 43 + 化学 12 道材料题、道法海淀 5 道旧形态题，材料从渲染在题干/小问下方改为题干上方（与道法 35 中 8 条一致）。
+
+---
+
 
 已有题重录时图片处理菜单从 3 项扩到 4 项：**`4` 只改文本（原题内容一律不留）**。选它时不再补回原图、不换图、不走 OCR 占位符，题干只用新粘的纯文本；同时 `material_url` 显式写 `None`（apply_fixes 口径 = 确认无材料），`material_text`/`options` 也按新文本拆出的结果写，旧的共享文章与图片不会残留。适合「OCR 图全错、只想留干净文字」的题。`test_manual_fix` 152 passed（含端到端断言：原图/材料/选项/文章 URL 全清），全量 2212 passed / 10 skipped。
 
@@ -4066,3 +4081,34 @@ MDM 描述文件（`com.apple.applicationaccess` 的 `allowAssistant=false`，ma
 **2026-11-21（再续）：题号丢失时补题无法指认 material_url——三态字段 + 同卷候选**：导入 2025 海淀模拟二时预览冒出一条无关数学卷的 `[replay]`（`apply_fixes.run()` 在按学科/卷名过滤**之前**就打印，纯日志泄漏，未写库；另案）。顺查发现同一卷语文 Q20 的题干「阅读第一封信……」在 PDF→MD 时丢了行首 `20.`，切题器下一个题号是 `21.`，于是两封信材料 + Q20 题干整段并进 Q21–23，`material_text` 为空 → 分不到文章组 → published `material_url=None`；Q21 拿到带 `<u>` 标注且尾部粘着 Q20 题干的加长版，生成了 `8e5d0eab131b`。Q20 库里另存的 `8bdd2e775c45` 是干净版两封信 → **一篇两文**。`recognition_scan._body_owners` 把正文归给「前面最后一个题号」，丢了 `20.` 就误报「属于第 19 题」——这是纯规则假阳性，不是 LLM 判断。用户对设计裁决：小节标题同样会在转换中丢失，不能靠它自动推归属，选「补题记录显式 `material_url`」。修法：`material_url` 三态——字段不存在=不动（兼容旧记录/非 TTY）、显式 null=确认无材料写 NULL、字符串=写该 URL 并按它重算 `content_hash`（URL 本就在指纹里），文档不存在拒写；显式 URL 优先于 `material_scope` 且不走 `_correct_article_doc`（那是改正文重算 doc_key，不是认领已有文章）。交互候选从**同卷 published JSONL** 收集已有 URL 按题号列出，人看着原卷选序号/粘贴/`n`，不依赖小节标题。spec §4.5 同步。测试：`test_apply_fixes.py` 4 例（写URL+hash/清NULL/不动/缺文档拒写）、`test_manual_fix.py` 2 例（候选去重排序/缺文件空）。
 
 **2026-11-21（再续）：语文题中材料三处规则太窄，材料并进题干**：用户报 2025 西城模拟二 Q8/Q15 材料没被拆出。根因在 `tools/data-refinery/src/subject_strategies/chinese_inline_material.py`：① 注释块只认 `注：`，`[注释]/【注释】/【注】/注释：/[注]` 全漏；② 切点「最后一个圈号后第一个句号」在末条无句号时贪进语段（陈经纶「④数：多次」）、无圈号单条注又把语段占位 ① 当注条目（海淀期中 `[注] 阻风…`）、句号后换行仍被续写守卫误挡（35中语段以「“内核稳定”指…」开头）；③「题干在前、材料在后、无后续语段」没有规则（西城 Q8、首师大 Q13）。修法：扩 `NOTE_RE`；`_cut_after_note` 改为「换行早于句号取换行」+ 无圈号单条注切到注记行末 + 句号后换行不触发续写守卫（补 `意思为/意即`）；新增 `_split_stem_then_material`（题干在前）并对选项块（含点号丢失的 `A …`）/填空线/设问开头设守卫；`_split_by_note` 拒绝只剩 `答:` 的语段；`material_doc_backfill.py` 的题中素材分支保留已有 `material_url`（否则 Q15 共享文章 URL 被写成 NULL）。`LEAD_RE`/`needs_llm` 补 `根据/依据` 与 `文段`，疑似题进复核清单。测试：`test_chinese_inline_material.py` 新增 Q8/Q15/陈经纶/35中/海淀期中/选项块/意思为/答: 等 10 例，refinery 全量 2056 passed。已对 paper 730 跑 `material_doc_backfill.py --paper 730 --apply`（仅 Q8=7744、Q15=7750 两行；幂等复跑 0 行；回滚 `tools/db/backups/20261121_material_doc_rollback.sql`）。
+
+---
+
+## 2026-11-23 · 复核清单按题收口 + 自动修复砍短改为双版本校对
+
+**背景**：物理西城模拟一第18题同时命中 `incomplete_content`（内容不完整）与 `repair_truncated`（自动修复砍短 631→437）。人工答「2 没问题」后，同题立刻以另一个 kind 再问一遍，并强制「录入第18题」重录。根因三处：`manual_fix.mark_issue` 按 kind 过滤、复核循环按 `(卷,题号,kind)` 跳过、`repair_truncated` 不在 `_CONTENT_KINDS` 因而不经过「有没有问题」那道门。
+
+**实测反证**：该题的「原文」其实更差——631 字里含几十个下划线的坏填空、截断的「或 “不能”)」、以及**下一题的「19题图」**；437 字的修复后版本才是干净的。盲目「丢弃修复、恢复原文」会污染题目，所以 B 落地为**双版本校对**：修复前原文与修复后并列摆出，人工选 ①保留修复后 ②恢复原文 ③两版都不对才录入一次。选②生成 `content_only` 记录，`apply_fixes` 只 UPDATE `content`/`content_hash`/`is_active`/`needs_review` 并回写 extracted，**选项/材料/答案一律不碰**（避免把题内素材或外置文章冲掉）。
+
+**改动**：`manual_fix.py` — `mark_issue` 不再按 kind 过滤（`kind` 参数保留但忽略），同一题一次确认关掉全部 flag；`repair_truncated` 纳入内容层并走 `_ask_repair_truncated`；完整原文从 `labeling_issues.jsonl.original_content` 取（issue 的 `excerpt` 被 `_excerpt` 截到 600 字，不可用于恢复）。`apply_fixes.py` — 新增 `content_only` 分支与 `_patch_extracted_content`。测试 `test_manual_fix.py` +4、`test_apply_fixes.py` +2。
+
+**未做**：本次不改 `recognition_scan` 的 70% 砍短判据本身（改了会牵动 17 条历史 flag）；它只负责把题报出来，裁决交给人工校对的那一道门。
+
+---
+
+## 2026-11-23（续）· 撤销「按位置猜图归属」；补题编辑改为文件编辑
+
+**撤销的错误逻辑**：上一版为修「题19 图丢失」，在 `split_questions` 里把「题号行上方的配图块」并进后续题号。用户指出这是错的：题号上方的图可能属于**上一题**（实测 OCR 里 `18 题图` 就排在 `19.` 行上方），按位置猜归属会把 18 题的图并进 19 题。已撤销该启发式。
+
+**正确修法**：`split_questions` 只按题号切、不判图归属；新增 `_one_question_body()`：整段粘贴里**至多一个题号**时，不把前置配图/说明拆成「无题号」伪题，整段原样作为这一题（`_ask_one` 单题编辑场景）。这样既不猜归属、也不丢任何行；两个及以上题号仍逐题拆。`_keep_prior_images` 保留作多题粘贴的安全网（同号覆盖时补回被吞的图并告警）。
+
+**TTY 编辑准确率低 → 文件编辑**：`_confirm_text` 菜单新增第 5 项「用编辑器打开文件改」。`_file_edit()` 把内容写到 `output/edits/<题干|答案>_<时间戳>.md`，优先用 VS Code（`code --wait --reuse-window`，含 macOS App 内路径兜底），不可用退回 vim/vi/nano；都没有就打印路径让用户手动打开，回来按回车读回。保存退出后重新展示全文，仍需显式按 1 确认。测试：`test_manual_fix.py` 新增 `_one_question_body` 合并/多题不合并、菜单 5 文件编辑、无编辑器读回 4 例；refinery 全量 2150 passed。
+
+
+**2026-11-24：已有内容直接进编辑器改（不再强制重新录入）**：用户校对时多数只是小改，`_ask_one` 原流程要求先选图片策略、再粘贴/截图，重录成本高且易改错。现在只要该题在 extracted 里已有正文，`_ask_one` 先问「这一题已有内容，怎么改？1 用编辑器打开现有内容改 / 2 重新录入」。选 1 会用 `_editable_body()` 把「题干 + A/B/C/D 选项 + 题内材料」拼成 Markdown（外置共享文章不拼入，避免把整篇文章当题干写回），写到 `output/edits/第N题题干_<时间戳>.md` 并用 VS Code（`code --wait`，App 内路径兜底）/vim/vi/nano 打开；保存关闭后读回，再走原有确认/答案流程。编辑器路径强制 `mode="text"`，**不会**把用户删掉的旧图自动补回。非 TTY 环境不拉起图形编辑器（避免 `code --wait` 挂住管道/测试）。测试：`test_manual_fix.py` 新增 `_editable_body` 两例 + 编辑器改现有内容一例；refinery 全量 2153 passed。
+
+
+**2026-11-24（续）：编辑器返回后的确认/取消门**：上一版 `code --wait` 要等标签页关闭才返回，用户只保存不关就「没下文」。现在 VS Code 改为非阻塞 `--reuse-window` 打开，打开后统一提示「改完按回车确认 / c 取消」；vim/vi 退出后也走同一提示。回车读回文件继续；取消则让用户选「重新打开编辑器 / 跳过本题 / 结束程序」，重试复用同一个文件、不覆盖刚改的内容。测试：`test_manual_fix.py` 新增取消返回 None、取消后跳过、取消后重试复用文件 3 例；refinery 全量 2156 passed。
+
+
+**2026-11-24（续）：题20「题干不完整」是误判——引言本就在 material_text，材料切分保留**：物理西城模拟一题20 重录后 `content` 是 `(1)(2)`、引言在 `material_text`，这是 `split_material` 的正常结果（`material_position=NULL` 时前端按固定规则把题中素材渲染在题干下方）。曾误改为「人工录入不搬材料」，用户裁决**材料切分是对的**，已恢复 `_ask_one` 原逻辑与 `test_ask_one_splits_material_then_options`。教训：用户说「题干不完整」时，先确认内容是否在 `material_text`，再谈改代码。

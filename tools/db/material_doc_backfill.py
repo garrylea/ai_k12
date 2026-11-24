@@ -18,11 +18,11 @@
 
 ## 安全边界（项目铁律）
 
-- **不重跑 extract**：只回填 `material_url` / `material_text` / `material_method` /
-  `content` / `content_hash` 五列。
+- **不重跑 extract**：只回填 `material_url` / `material_text` / `content` /
+  `content_hash` 四列。
 - **默认 dry-run**：dry-run 连 md 都不写盘（`write_material_doc(dry_run=True)`）。
-- **幂等**：`material_method='rule'` 的行（已抽过题中素材）不再参与文章分组，否则第二次运行
-  会把「文章 + 题中素材」的行当成文章组，清掉它已有的 `material_url`。
+- **幂等**：已外置文章的行 `material_text` 为空，不会被再次分组；题中素材行若重跑，
+  由 `material_group_reason` 拦掉「不像文章」的片段（2026-11-24 删列后不再有显式标记）。
 - **备份**：`--apply` 前把受影响行的原值**追加**到当日回滚文件（带 `-- run <时间戳>` 段头），
   同日多次运行互不覆盖；没有计划时不碰回滚文件。
 - **逐行容错**：`content_hash` 唯一键冲突时保留旧 hash，其余四列照常写入，避免半回填。
@@ -93,7 +93,7 @@ def _load_rows(cur, paper_id: int | None):
     # GROUP BY q.id：一道题可能挂多张卷（跨卷共用行），只取一个 paper_id 做分组键
     cur.execute(
         f"""SELECT q.id, MIN(pq.paper_id) AS paper_id, q.source, q.content, q.options,
-                   q.material_text, q.material_url, q.material_method, q.content_hash
+                   q.material_text, q.material_url, q.content_hash
               FROM questions q
               JOIN subjects s ON s.id=q.subject_id
               LEFT JOIN paper_questions pq ON pq.question_id=q.id
@@ -107,8 +107,8 @@ def _load_rows(cur, paper_id: int | None):
 
 
 def eligible_for_article(rows: list[dict]) -> list[dict]:
-    """已抽过题中素材的行不再参与文章分组（第二次运行必须 0 行）。"""
-    return [r for r in rows if r.get("material_method") != "rule"]
+    """已外置文章的行不再参与分组（`material_text` 已清空，分组阶段天然跳过）。"""
+    return rows
 
 
 def build_plans(rows: list[dict], *, apply: bool,
@@ -120,7 +120,7 @@ def build_plans(rows: list[dict], *, apply: bool,
     """
     group_rows = eligible_for_article(rows)
     groups = build_groups(group_rows)
-    plans: list[list] = []  # [qid, material_url, material_text, content, material_method, new_hash]
+    plans: list[list] = []  # [qid, material_url, material_text, content, new_hash]
     skipped_ids: set[int] = set()
     for members in groups.values():
         canonical = choose_canonical([m.get("material_text") or "" for m in members])
@@ -143,20 +143,18 @@ def build_plans(rows: list[dict], *, apply: bool,
             dry_run=not apply,
         )
         for m in members:
-            plans.append([m["id"], url, None, None, None])
+            plans.append([m["id"], url, None, None])
 
     by_id = {p[0]: p for p in plans}
     review: list[dict] = []
     for row in rows:
-        if row.get("material_method") == "rule":
-            continue  # 已处理：保证第二次运行幂等
         if row["id"] in skipped_ids:
             # 材料不像文章、要原样保留；再切题中素材会覆盖它且没留 URL（数据丢失）
             continue
         mt = row.get("material_text") or ""
         if mt.strip() and is_heading_only(mt) and row["id"] not in by_id:
             # 与 publish 同口径：纯标题旧材料清掉，不建文档；但仍要继续抽题中素材
-            plans.append([row["id"], row.get("material_url"), None, None, None])
+            plans.append([row["id"], row.get("material_url"), None, None])
             by_id[row["id"]] = plans[-1]
         material, rest = split_inline_material(row.get("content") or "")
         if material:
@@ -165,12 +163,11 @@ def build_plans(rows: list[dict], *, apply: bool,
                 # 保留已有 material_url（共享文章）：这题可能既有文章又有题中素材
                 # （如「根据《曹刿论战》及下面的材料」），只补 material_text，
                 # 不能把文章 URL 写成 NULL（2026-11-21 修：否则 Q15 文章链接被抹掉）。
-                plan = [row["id"], row.get("material_url"), None, None, None]
+                plan = [row["id"], row.get("material_url"), None, None]
                 plans.append(plan)
                 by_id[row["id"]] = plan
             plan[2] = material
             plan[3] = rest
-            plan[4] = "rule"
         elif needs_llm(row.get("content") or ""):
             review.append({
                 "id": row["id"],
@@ -180,14 +177,13 @@ def build_plans(rows: list[dict], *, apply: bool,
             })
 
     for plan in plans:
-        qid, url, mtext, content, method = plan
+        qid, url, mtext, content = plan
         row = next(r for r in rows if r["id"] == qid)
         new_row = dict(row)
         new_row["material_url"] = url if url is not None else row.get("material_url")
         new_row["material_text"] = mtext
         if content is not None:
             new_row["content"] = content
-        new_row["material_method"] = method
         plan.append(rewrite_hash_for_row(new_row))
     return plans, review
 
@@ -206,7 +202,6 @@ def rollback_sql(plans: list[list], rows: list[dict]) -> str:
             f"content={_sql_literal(r.get('content'))}, "
             f"material_text={_sql_literal(r.get('material_text'))}, "
             f"material_url={_sql_literal(r.get('material_url'))}, "
-            f"material_method={_sql_literal(r.get('material_method'))}, "
             f"content_hash={_sql_literal(r.get('content_hash'))} WHERE id={qid};"
         )
     return "\n".join(lines) + "\n"
@@ -214,20 +209,20 @@ def rollback_sql(plans: list[list], rows: list[dict]) -> str:
 
 def apply_plan(cur, plan: list) -> bool:
     """执行一条计划；content_hash 冲突时保留旧 hash，其余列仍写入。返回是否冲突。"""
-    qid, url, mtext, content, method, new_hash = plan
+    qid, url, mtext, content, new_hash = plan
     try:
         cur.execute(
             "UPDATE questions SET material_url=%s, material_text=%s, "
-            "content=COALESCE(%s, content), material_method=%s, content_hash=%s "
+            "content=COALESCE(%s, content), content_hash=%s "
             "WHERE id=%s",
-            (url, mtext, content, method, new_hash, qid),
+            (url, mtext, content, new_hash, qid),
         )
         return False
     except pymysql.err.IntegrityError:
         cur.execute(
             "UPDATE questions SET material_url=%s, material_text=%s, "
-            "content=COALESCE(%s, content), material_method=%s WHERE id=%s",
-            (url, mtext, content, method, qid),
+            "content=COALESCE(%s, content) WHERE id=%s",
+            (url, mtext, content, qid),
         )
         return True
 

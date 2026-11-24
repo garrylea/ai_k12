@@ -233,8 +233,6 @@ CREATE TABLE IF NOT EXISTS questions (
   approach TEXT DEFAULT NULL,                       -- 解题思路（方法/切入点概述；折回自 migrations/2026-09-10_add_questions_approach_verified.sql）
   material_text TEXT DEFAULT NULL,
   material_url TEXT DEFAULT NULL,
-  material_method VARCHAR(8) DEFAULT NULL,          -- 材料抽取方式：rule|llm|manual；NULL=未抽取（2026-11-02）
-  material_position VARCHAR(8) DEFAULT NULL,        -- 材料显示位置：before=题干上方；NULL=题干下方（2026-11-23）
   grade_band VARCHAR(20) DEFAULT NULL,
   source VARCHAR(200) DEFAULT NULL,
   source_year SMALLINT DEFAULT NULL,

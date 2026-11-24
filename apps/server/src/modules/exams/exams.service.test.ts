@@ -162,7 +162,7 @@ describe('ExamsService.getPaperDetail', () => {
         findById: vi.fn().mockResolvedValue(paperRow),
         findQuestionsByPaperId: vi.fn().mockResolvedValue([
           { questionId: 30, questionNo: 26, subNo: 1, text: '(1) 甲', type: 'short_answer',
-            options: null, materialText: '材料一', materialUrl: null, materialPosition: 'before' },
+            options: null, materialText: '材料一', materialUrl: null, subjectId: 9 },
         ]),
       },
     });

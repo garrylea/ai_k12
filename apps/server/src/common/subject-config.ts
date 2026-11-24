@@ -90,5 +90,20 @@ export const SIMILAR_PRACTICE_SUBJECTS: ReadonlySet<number> = new Set([
   SUBJECT_MATH, SUBJECT_CHINESE, SUBJECT_PHYSICS,
 ]);
 
+/**
+ * 材料显示位置（2026-11-24 用户裁决：由学科决定，不入库）。
+ *
+ * 物理/化学/道法的材料在原卷里位于设问**之前**（题前科技阅读、实验材料、道法逐小问材料）
+ * → 题干上方；语文/英语的题中材料是设问**之后**的文段/素材 → 题干下方（2026-11-21 口径）。
+ * 数学无材料，回落 `null` 与「不渲染材料块」等价。
+ */
+const MATERIAL_ABOVE_SUBJECTS = new Set<number>([
+  SUBJECT_PHYSICS, SUBJECT_CHEMISTRY, SUBJECT_POLITICS,
+]);
+
+export function materialPositionFor(subjectId: number | null | undefined): 'before' | null {
+  return MATERIAL_ABOVE_SUBJECTS.has(Number(subjectId)) ? 'before' : null;
+}
+
 /** 语文同类型练习开放的顶层知识点 code：积累与运用 / 古诗文。 */
 export const CN_SIMILAR_KP_ROOTS: readonly string[] = ['C01', 'C02'];

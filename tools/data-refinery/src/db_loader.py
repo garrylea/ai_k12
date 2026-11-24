@@ -1306,15 +1306,14 @@ class DbLoader:
             "UPDATE questions SET subject_id=%s, group_id=%s, group_order=%s, sub_no=%s, type=%s, "
             "difficulty=%s, full_score=%s, content=%s, options=%s, "
             "answer=COALESCE(NULLIF(%s,''), answer), explanation=%s, approach=%s, "
-            "material_text=%s, material_url=%s, material_method=%s, material_position=%s, "
+            "material_text=%s, material_url=%s, "
             "grade_band=%s, source=%s, source_year=%s, content_hash=%s, is_active=%s WHERE id=%s",
             (sid, q.get("group_id"), q.get("group_order"), q.get("sub_no") or 0,
              q.get("type"),
              q.get("difficulty"), q.get("full_score"), content,
              json.dumps(opts, ensure_ascii=False) if opts is not None else None,
              q.get("answer") or "", q.get("explanation"), q.get("approach"),
-             q.get("material_text"), q.get("material_url"), q.get("material_method"),
-             q.get("material_position"),
+             q.get("material_text"), q.get("material_url"),
              q.get("grade_band"),
              q.get("source"), q.get("source_year"), chash,
              0 if q.get("needs_review") else 1, qid),
@@ -1435,12 +1434,10 @@ class DbLoader:
                         # 题21：difficulty 2→3、is_active 1→0 都没写进库）。
                         self._exec(
                             "UPDATE questions SET type=%s, difficulty=%s, is_active=%s, "
-                            "sub_no=%s, material_text=%s, material_url=%s, material_method=%s, "
-                            "material_position=%s WHERE id=%s",
+                            "sub_no=%s, material_text=%s, material_url=%s WHERE id=%s",
                             (q.get("type"), q.get("difficulty"), new_active,
                              q.get("sub_no") or 0,
-                             q.get("material_text"), q.get("material_url"),
-                             q.get("material_method"), q.get("material_position"), qid))
+                             q.get("material_text"), q.get("material_url"), qid))
                         updated += 1
                     if old_hash != chash:
                         other = self._reusable_question(chash, opts, exclude_id=qid)
@@ -1504,17 +1501,16 @@ class DbLoader:
                 if qid is None:
                     self._exec(
                         "INSERT INTO questions (subject_id, group_id, group_order, sub_no, type, difficulty, full_score, "
-                        "content, options, answer, explanation, material_text, material_url, material_method, "
-                        "material_position, grade_band, source, source_year, content_hash, is_active) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "content, options, answer, explanation, material_text, material_url, "
+                        "grade_band, source, source_year, content_hash, is_active) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (sid, q.get("group_id"), q.get("group_order"), q.get("sub_no") or 0,
                          q.get("type"), q.get("difficulty"),
                          q.get("full_score"),
                          content,
                          json.dumps(opts, ensure_ascii=False) if opts is not None else None,
                          q.get("answer") or "", q.get("explanation"), q.get("material_text"),
-                         q.get("material_url"), q.get("material_method"),
-                         q.get("material_position"),
+                         q.get("material_url"),
                          q.get("grade_band"), q.get("source"), q.get("source_year"),
                          chash,
                          # LLM 补全/修复过的内容默认不进抽题池，人工复核后再置 1

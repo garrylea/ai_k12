@@ -410,7 +410,6 @@ class LabeledQuestion:
     explanation: str | None             # Python 对齐的解析
     score: int | None = None            # 每题满分
     sub_no: int = 0
-    material_position: str | None = None
     type: str = ""
     difficulty: int = 2
     knowledge_points: list = None
@@ -437,7 +436,6 @@ class LabeledQuestion:
             explanation=q.explanation,
             score=q.score,
             sub_no=q.sub_no,
-            material_position=q.material_position,
             material_text=q.material_text,
             post_material_base=getattr(q, "post_material_base", None),
             post_material_appended=getattr(q, "post_material_appended", None),

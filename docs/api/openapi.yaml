@@ -8735,7 +8735,7 @@ components:
         materialPosition:
           type: string
           nullable: true
-          description: 材料位置；'before'=题干上方，null=题干下方
+          description: 材料位置（服务端按学科推导，不存库）；物理/化学/道法='before'（题干上方），语文/英语=null（题干下方）
         questionAnswer:
           type: string
           nullable: true
@@ -11868,7 +11868,7 @@ components:
         materialPosition:
           type: string
           nullable: true
-          description: 材料位置；'before'=题干上方，null=题干下方
+          description: 材料位置（服务端按学科推导，不存库）；物理/化学/道法='before'（题干上方），语文/英语=null（题干下方）
         source:
           type: string
           nullable: true
@@ -12998,7 +12998,7 @@ components:
         materialPosition:
           type: string
           nullable: true
-          description: 材料位置；'before'=题干上方，null=题干下方
+          description: 材料位置（服务端按学科推导，不存库）；物理/化学/道法='before'（题干上方），语文/英语=null（题干下方）
       required: [questionId, questionNo, text, type, options, materialText]
 
     ExamPaperDetail:
@@ -13180,7 +13180,7 @@ components:
         materialPosition:
           type: string
           nullable: true
-          description: 材料位置；'before'=题干上方，null=题干下方
+          description: 材料位置（服务端按学科推导，不存库）；物理/化学/道法='before'（题干上方），语文/英语=null（题干下方）
         answerText:
           type: string
           nullable: true
