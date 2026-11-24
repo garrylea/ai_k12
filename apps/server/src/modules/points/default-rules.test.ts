@@ -5,8 +5,8 @@ const tiersOf = (taskCode: string) =>
   DEFAULT_RULES.filter((r) => r.taskCode === taskCode).map((r) => r.tierKey);
 
 describe('DEFAULT_RULES', () => {
-  it('共 40 行', () => {
-    expect(DEFAULT_RULES).toHaveLength(40);
+  it('共 45 行', () => {
+    expect(DEFAULT_RULES).toHaveLength(45);
   });
 
   it('(taskCode, tierKey) 组合唯一（point_rules 的唯一键，重复会 INSERT IGNORE 静默丢行）', () => {
@@ -26,14 +26,14 @@ describe('DEFAULT_RULES', () => {
     }
   });
 
-  it('有每日上限的只有六类任务：math/physics_targeted 各五档、cn/chemistry/politics_targeted 各四档共用 5 次、en_vocabulary 三档共用 2 次', () => {
+  it('有每日上限的只有七类任务：math/physics_targeted 各五档、cn/chemistry/politics/en_targeted 各四档共用 5 次、en_vocabulary 三档共用 2 次', () => {
     const limited = DEFAULT_RULES.filter((r) => r.dailyLimit !== null);
-    expect(limited).toHaveLength(25);
+    expect(limited).toHaveLength(29);
     for (const code of ['math_targeted', 'physics_targeted']) {
       expect(limited.filter((r) => r.taskCode === code).every((r) => r.dailyLimit === 5)).toBe(true);
       expect(limited.filter((r) => r.taskCode === code)).toHaveLength(5);
     }
-    for (const code of ['cn_targeted', 'chemistry_targeted', 'politics_targeted']) {
+    for (const code of ['cn_targeted', 'chemistry_targeted', 'politics_targeted', 'en_targeted']) {
       expect(limited.filter((r) => r.taskCode === code).every((r) => r.dailyLimit === 5)).toBe(true);
       expect(limited.filter((r) => r.taskCode === code)).toHaveLength(4);
     }
@@ -42,11 +42,12 @@ describe('DEFAULT_RULES', () => {
     // 其余任务一律不限（甲类靠判题函数天然的一次性目标物防刷，不需要日上限）
     expect(limited.every((r) =>
       r.taskCode === 'math_targeted' || r.taskCode === 'cn_targeted' || r.taskCode === 'en_vocabulary' ||
-      r.taskCode === 'physics_targeted' || r.taskCode === 'chemistry_targeted' || r.taskCode === 'politics_targeted')).toBe(true);
+      r.taskCode === 'physics_targeted' || r.taskCode === 'chemistry_targeted' || r.taskCode === 'politics_targeted' ||
+      r.taskCode === 'en_targeted')).toBe(true);
     for (const code of ['math_targeted', 'physics_targeted']) {
       expect(tiersOf(code)).toEqual(['1', '2', '3', '5', '10']);
     }
-    for (const code of ['cn_targeted', 'chemistry_targeted', 'politics_targeted']) {
+    for (const code of ['cn_targeted', 'chemistry_targeted', 'politics_targeted', 'en_targeted']) {
       expect(tiersOf(code)).toEqual(['1', '3', '5', '10']);
     }
   });
@@ -64,6 +65,25 @@ describe('DEFAULT_RULES', () => {
 
   it('en_vocabulary 三档 10/15/20', () => {
     expect(tiersOf('en_vocabulary')).toEqual(['10', '15', '20']);
+  });
+
+  it('英语任务名齐备', () => {
+    expect(TASK_NAMES.en_paper).toBe('英语卷子一套');
+    expect(TASK_NAMES.en_targeted).toBe('英语专项');
+  });
+
+  it('en_paper 一套 50 分、不限每日上限', () => {
+    expect(DEFAULT_RULES).toContainEqual(expect.objectContaining({
+      taskCode: 'en_paper', tierKey: 'default', points: 50, dailyLimit: null,
+    }));
+  });
+
+  it('en_targeted 四档与语文同口径、共用每日 5 次', () => {
+    const tiers = DEFAULT_RULES.filter((r) => r.taskCode === 'en_targeted');
+    expect(tiers.map((r) => [r.tierKey, r.points])).toEqual([
+      ['1', 2], ['3', 8], ['5', 15], ['10', 35],
+    ]);
+    expect(tiers.every((r) => r.dailyLimit === 5)).toBe(true);
   });
 
   it('remediation_question 按题型三档：选择 3 / 填空 4 / 大题 6，不限每日上限', () => {
@@ -94,7 +114,7 @@ describe('DEFAULT_RULES', () => {
     }
   });
 
-  it('全表 40 行黄金值（taskCode/tierKey/points/dailyLimit，Task 4 发币直接读 points）', () => {
+  it('全表 45 行黄金值（taskCode/tierKey/points/dailyLimit，Task 4 发币直接读 points）', () => {
     expect(DEFAULT_RULES.map((r) => [r.taskCode, r.tierKey, r.points, r.dailyLimit])).toEqual([
       ['mainline_lesson', 'default', 10, null],
       ['math_paper', 'default', 50, null],
@@ -102,6 +122,7 @@ describe('DEFAULT_RULES', () => {
       ['physics_paper', 'default', 50, null],
       ['chemistry_paper', 'default', 50, null],
       ['politics_paper', 'default', 50, null],
+      ['en_paper', 'default', 50, null],
       ['math_targeted', '1', 2, 5],
       ['math_targeted', '2', 5, 5],
       ['math_targeted', '3', 8, 5],
@@ -136,6 +157,10 @@ describe('DEFAULT_RULES', () => {
       ['politics_targeted', '3', 8, 5],
       ['politics_targeted', '5', 15, 5],
       ['politics_targeted', '10', 35, 5],
+      ['en_targeted', '1', 2, 5],
+      ['en_targeted', '3', 8, 5],
+      ['en_targeted', '5', 15, 5],
+      ['en_targeted', '10', 35, 5],
     ]);
   });
 });
