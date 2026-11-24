@@ -14,7 +14,7 @@ import {
   type ExamSummary,
 } from '@/services/api';
 import { usePointsFeedback } from './points-feedback';
-import { parseSubjectId, subjectName, SUBJECT_MATH } from '@/constants';
+import { parseSubjectId, getTrainingSubject, subjectName } from '@/constants';
 
 const SPINNER_SVG = (
   <svg
@@ -185,8 +185,9 @@ export default function ExamResultPage() {
     return map;
   }, [items]);
 
-  // AnswerResultList 的 AnswerRecord 映射：isCorrect 后端为 0|1|null（null = 主观题待自评）；
-  // 解析统一走 explanations prop
+  // AnswerResultList 的 AnswerRecord 映射：isCorrect 后端为 0|1|null（null = 主观题待自评 或 无参考答案）；
+  // 是否有标准答案一律读后端 method / needsSelfAssessment，**不再由 isCorrect===null 推断**
+  // （无参考答案的题同样为 NULL，但既不要求自评也不计分）。解析统一走 explanations prop
   const answers = useMemo(() => {
     const map: Record<
       string,
@@ -197,16 +198,18 @@ export default function ExamResultPage() {
         failed: boolean;
         needsSelfAssess: boolean;
         selfAssessment: 'correct' | 'incorrect' | null;
+        unscored: boolean;
       }
     > = {};
     for (const it of items ?? []) {
       map[paperQuestionKey(it.questionNo, it.subNo)] = {
         isCorrect: it.isCorrect === 1,
-        method: it.isCorrect === null ? 'self_assess' : '',
+        method: it.method ?? (it.isCorrect === null ? 'self_assess' : ''),
         studentAnswer: it.answerText ?? '',
         failed: false,
-        needsSelfAssess: it.isCorrect === null && it.selfAssessment == null,
+        needsSelfAssess: it.needsSelfAssessment === true,
         selfAssessment: it.selfAssessment ?? null,
+        unscored: it.method === 'no_standard_answer',
       };
     }
     return map;
@@ -222,9 +225,9 @@ export default function ExamResultPage() {
   // 与后端 examWrongIds 同口径：只数 is_correct === 0。
   // 自评为「做错」的主观题（isCorrect === null）不算——后端不为它建相似题组，
   // 前端若算进去，卡片会承诺一个后端不会兑现的数字。
-  // 补偿套题当前只支持数学（后端 remediation 只认 math_targeted/exam 数学卷），语文不显示。
+  // 补偿套题入口按学科配置放行（只有数学 supportsRemediation=true，后端 remediation 也只认数学卷）。
   const remediationWrongCount = (items ?? []).filter((it) => it.isCorrect === 0).length;
-  const remediationSupported = subjectId === SUBJECT_MATH;
+  const remediationSupported = getTrainingSubject(subjectId)?.supportsRemediation === true;
 
   // 镜像 RemediationOfferCard 自身的守卫（RemediationOfferCard.tsx:17 的
   // `wrongCount === 0 || sessionId == null || state === 'done'`，宿主只能知道前两项）。
@@ -295,8 +298,11 @@ export default function ExamResultPage() {
             summary && (
               <div>
                 {(() => {
-                  // 未自评横幅：主观题尚未完成自评时提示（自评提交后 items 更新，横幅消失）
-                  const unassessed = (items ?? []).filter((it) => it.isCorrect === null && it.selfAssessment == null).length;
+                  // 未自评横幅：主观题尚未完成自评时提示（自评提交后 items 更新，横幅消失）。
+                  // 无参考答案的题（method='no_standard_answer'）同样 isCorrect===null，但不能自评，必须排除。
+                  const unassessed = (items ?? []).filter(
+                    (it) => it.isCorrect === null && it.selfAssessment == null && it.method !== 'no_standard_answer',
+                  ).length;
                   if (unassessed > 0) {
                     return (
                       <div className="flex items-center justify-center gap-2 py-2 bg-[var(--brand-100)] text-[13px] text-[var(--warning)]">

@@ -26,6 +26,8 @@ interface AnswerRecord {
   needsSelfAssess?: boolean;
   /** 已有自评结果（重进结果页恢复）：'correct' | 'incorrect' */
   selfAssessment?: 'correct' | 'incorrect' | null;
+  /** 无参考答案（method='no_standard_answer'）：不判对错、不计分、不要求自评 */
+  unscored?: boolean;
 }
 
 interface Props {
@@ -131,10 +133,19 @@ export function AnswerResultList({
     }
   };
 
+  // 统计口径：unscored（无参考答案）不进任何对/错/主观/未判定计数，
+  // 否则 974 卷 35 道无答案题会被算成 35 道错题。
   const failedCount = questions.filter(q => answers[q.n]?.failed).length;
-  const subjectiveCount = questions.filter(q => answers[q.n]?.method === 'self_assess' || answers[q.n]?.needsSelfAssess || answers[q.n]?.method === 'unanswered').length;
-  const correctCount = questions.filter(q => answers[q.n]?.isCorrect && !answers[q.n]?.failed && answers[q.n]?.method !== 'self_assess' && !answers[q.n]?.needsSelfAssess && answers[q.n]?.method !== 'unanswered').length;
-  const wrongCount = questions.length - correctCount - failedCount - subjectiveCount;
+  const unscoredCount = questions.filter(q => answers[q.n]?.unscored).length;
+  const subjectiveCount = questions.filter(q => {
+    const r = answers[q.n];
+    return !!r && !r.unscored && (r.method === 'self_assess' || r.needsSelfAssess || r.method === 'unanswered');
+  }).length;
+  const correctCount = questions.filter(q => {
+    const r = answers[q.n];
+    return !!r && !r.unscored && r.isCorrect && !r.failed && r.method !== 'self_assess' && !r.needsSelfAssess && r.method !== 'unanswered';
+  }).length;
+  const wrongCount = questions.length - correctCount - failedCount - subjectiveCount - unscoredCount;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true">
@@ -182,8 +193,9 @@ export function AnswerResultList({
               const explanation = explanations[q.n] ?? null;
               const hasQuestionId = (questionIdOf?.(q.n) ?? null) != null;
               const rec = a;
-              const subjective = !!rec?.needsSelfAssess || rec?.method === 'self_assess';
-              const noAnswer = rec?.method === 'unanswered';
+              const unscored = rec?.unscored === true;
+              const subjective = !unscored && (!!rec?.needsSelfAssess || rec?.method === 'self_assess');
+              const noAnswer = !unscored && rec?.method === 'unanswered';
               const slots = materialSlots(q);
               return (
                 <div key={q.n} className="bg-[var(--bg-card)] rounded-xl border border-[var(--bg-subtle)] overflow-hidden">
@@ -199,10 +211,15 @@ export function AnswerResultList({
                       {q.n}
                     </span>
                     {/* Status icon */}
-                    <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5 ${failed ? 'bg-[var(--bg-subtle)]' : subjective || noAnswer ? 'bg-[var(--brand-100)]' : correct ? 'bg-[#E8F5EE]' : 'bg-[#FCE8E6]'}`}>
+                    <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5 ${failed || unscored ? 'bg-[var(--bg-subtle)]' : subjective || noAnswer ? 'bg-[var(--brand-100)]' : correct ? 'bg-[#E8F5EE]' : 'bg-[#FCE8E6]'}`}>
                       {failed ? (
                         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="3" strokeLinecap="round">
                           <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                      ) : unscored ? (
+                        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2.5" strokeLinecap="round">
+                          <circle cx="12" cy="12" r="8" />
+                          <path d="M8 12h8" />
                         </svg>
                       ) : subjective || noAnswer ? (
                         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--brand-500)" strokeWidth="2.5" strokeLinecap="round">
@@ -288,6 +305,12 @@ export function AnswerResultList({
                           )}
                         </div>
                       )}
+                      {/* 无参考答案：不判对错、不计分、无自评按钮 */}
+                      {unscored && !failed && (
+                        <div className="mt-2.5">
+                          <span className="text-xs text-[var(--text-tertiary)]">无参考答案 · 不计分</span>
+                        </div>
+                      )}
                       {/* 空答案守卫：不计对错 */}
                       {noAnswer && !failed && !subjective && (
                         <div className="mt-2.5">
@@ -301,7 +324,7 @@ export function AnswerResultList({
                         </div>
                       )}
                       {/* 解析（wrong only, non-failed）：有解析看解析 / 无解析有 questionId 可刷新 / 孤儿题暂无 */}
-                      {!correct && !failed && !subjective && !noAnswer && (
+                      {!correct && !failed && !subjective && !noAnswer && !unscored && (
                         <div className="mt-2.5 flex items-center gap-2">
                           {explanation ? (
                             <button

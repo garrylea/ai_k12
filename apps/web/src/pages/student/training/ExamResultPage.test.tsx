@@ -215,6 +215,40 @@ describe('ExamResultPage 交卷发分庆祝', () => {
   });
 
   /**
+   * 无参考答案（method='no_standard_answer'）：英语 974 卷 35 题全部无答案。
+   * 这些题 isCorrect 也是 null，但**不能**被当成待自评：横幅不数、列表不给自评按钮。
+   */
+  it('无参考答案题不计入未自评横幅、不渲染自评按钮，普通客观题仍正常', async () => {
+    const subjective: ExamResultItem = {
+      ...ITEM, questionId: 102, questionNo: 2, type: 'short_answer', options: null,
+      isCorrect: null, needsSelfAssessment: true, selfAssessment: null,
+      answerText: '我的作答', answer: '参考答案',
+    };
+    const unscored = (id: number, n: number, answerText: string | null): ExamResultItem => ({
+      ...ITEM, questionId: id, questionNo: n, type: 'short_answer', options: null,
+      isCorrect: null, method: 'no_standard_answer', hasStandardAnswer: false,
+      needsSelfAssessment: false, selfAssessment: null, answerText, answer: null,
+    });
+    resultsMock.mockResolvedValue({
+      ...SUMMARY, correctCount: 1, totalCount: 1, accuracy: 100, unscoredCount: 2,
+      items: [ITEM, subjective, unscored(103, 3, '我的作文'), unscored(104, 4, null)],
+    });
+
+    renderResult();
+
+    // 两道无答案题各显示一次
+    expect(await screen.findAllByText('无参考答案 · 不计分')).toHaveLength(2);
+    // 无答案题不数进横幅：只有 1 道真正待自评的主观题
+    expect(screen.getByText(/还有 1 题未自评/)).toBeTruthy();
+    // 自评按钮只属于那道主观题（两道无答案题没有）
+    expect(screen.getAllByRole('button', { name: '我做对了' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: '我做错了' })).toHaveLength(1);
+    // 客观题照常显示、照常计入
+    expect(screen.getByTestId('result-qno-1')).toBeTruthy();
+    expect(screen.getByText(/对\s*1/)).toBeTruthy();
+  });
+
+  /**
    * 错题补偿套题询问卡（2026-09-21 批）：结果页有客观错题时才出现。
    * 一正一反两条：只断言「出现」证明不了 wrongCount 是从 items 算的——还得证明没错题时不出现。
    */

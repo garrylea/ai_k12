@@ -96,6 +96,45 @@ describe('AnswerResultList 题号', () => {
   });
 });
 
+describe('AnswerResultList 无参考答案（method=no_standard_answer）', () => {
+  it('unscored 项显示「无参考答案 · 不计分」，无自评按钮，且不计入对/错/主观计数', () => {
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '客观题' }, { n: '2', text: '无答案题' }]}
+        answers={{
+          '1': { isCorrect: true, method: 'exact', studentAnswer: 'A' },
+          '2': { isCorrect: false, method: 'no_standard_answer', studentAnswer: '写了点东西', unscored: true },
+        }}
+        onClose={() => {}}
+        onSelfAssess={async () => {}}
+      />,
+    );
+    expect(screen.getByText('无参考答案 · 不计分')).toBeTruthy();
+    // 不计分：不渲染自评按钮，也不出「查看解析」的对错分支
+    expect(screen.queryAllByRole('button', { name: /自评|做对|做错/ })).toHaveLength(0);
+    // 计数：题面 2 道，只算 1 道答对，无错题/主观题
+    expect(screen.getByText(/对\s*1/)).toBeTruthy();
+    expect(screen.getByText(/错\s*0/)).toBeTruthy();
+    expect(screen.queryByText(/主观\s*\d/)).toBeNull();
+  });
+
+  it('普通记录（不传 unscored）计数保持原样', () => {
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '题一' }, { n: '2', text: '题二' }]}
+        answers={{
+          '1': { isCorrect: true, method: 'exact', studentAnswer: 'A' },
+          '2': { isCorrect: false, method: 'exact', studentAnswer: 'B' },
+        }}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByText(/无参考答案/)).toBeNull();
+    expect(screen.getByText(/对\s*1/)).toBeTruthy();
+    expect(screen.getByText(/错\s*1/)).toBeTruthy();
+  });
+});
+
 describe('AnswerResultList 导出入口', () => {
   it('传 onExport 时出现「导出 PDF」并可点击', async () => {
     const onExport = vi.fn();

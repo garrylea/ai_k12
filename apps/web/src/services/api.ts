@@ -2346,6 +2346,8 @@ export interface ExamSummary {
   subjectiveCount?: number;
   /** 多选「选对不全」的题数（各记 0.5 分，已计入 accuracy） */
   partialCount?: number;
+  /** 无参考答案、不判不计的题数（method='no_standard_answer'，已从 totalCount 剔除） */
+  unscoredCount?: number;
   /**
    * 交卷发分结果（丙类埋点 math_paper）。
    *
@@ -2374,8 +2376,12 @@ export interface ExamResultItem {
   /** 材料位置：'before'=题干上方；null=题干下方 */
   materialPosition?: string | null;
   answerText: string | null;
-  /** null = 主观题待自评 */
+  /** null = 主观题待自评 或 无参考答案 */
   isCorrect: number | null;
+  /** 该题最终落库 method：exact/ai/self_assess/unanswered/failed/no_standard_answer */
+  method?: string | null;
+  /** 是否有标准答案（method='no_standard_answer' 为 false） */
+  hasStandardAnswer?: boolean;
   analysis: string | null;
   explanation: string | null;
   /** 参考答案 */
