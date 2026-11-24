@@ -14,11 +14,18 @@
 5. 打印统计：标注数 / 失败题 id 清单。
 
 纯函数（可测，LLM 不参与）：parse_kp_response / parse_batch_response /
-build_user_message / _filter_kps。LLM 与 DB 只出现在 main。
+build_question_select_sql / build_question_block / build_user_message / _filter_kps。
+LLM 与 DB 只出现在 main。
+
+英语阅读/完形题的题干常为空、文章在 material_url（题内材料在 material_text），
+默认只读 content/options 会把文章题标错。两个开关（默认关，其它学科行为不变）：
+    --include-material  读 material_text + material_url 正文随题送模型
+    --answerable-only   只标注在架且有标准答案的题
 
 用法：cd tools/data-refinery
     python src/backfill_question_kps.py                  # 数学（默认）
     python src/backfill_question_kps.py --subject chinese
+    python src/backfill_question_kps.py --subject english --include-material --answerable-only
 """
 
 import json
@@ -35,6 +42,7 @@ from extract import _repair_json_escapes, _strip_code_fence  # noqa: E402
 BATCH_SIZE = 10          # 每批调 LLM 的题数
 MAX_KPS_PER_QUESTION = 3  # 每题最多知识点数（brief 约定 1-3）
 MAX_CONTENT_LEN = 500     # 题面截断长度（字符）
+MAX_MATERIAL_LEN = 4000   # 材料截断长度（字符；一篇英语阅读通常 1.5–2.5k 字符）
 SUBJECT_ID_MATH = 1       # subjects 种子：math
 
 # 本地推理模型（Qwen thinking）可能先输出推理段再输出 JSON
@@ -161,6 +169,81 @@ def parse_batch_response(raw: str, whitelist: dict[int, str]) -> dict[int, list[
 
 
 # ---------------------------------------------------------------------------
+# SQL 构造（纯函数）
+# ---------------------------------------------------------------------------
+
+def build_question_select_sql(subject_id: int, include_material: bool,
+                              answerable_only: bool) -> str:
+    """未标注本学科题的 SELECT；两个开关默认关，过滤条件与改造前一致。
+
+    include_material 额外取 material_text/material_url（英语阅读/完形必需；
+    默认不取，其它学科的 SQL 与旧版等价）。
+    answerable_only 只留在架且有标准答案的题（英语本次只标可练题）。
+    """
+    cols = "q.id, q.content, q.options, q.type"
+    if include_material:
+        cols += ", q.material_text, q.material_url"
+    where = ["qkp.question_id IS NULL", "q.subject_id = %s"]
+    if answerable_only:
+        where.append("q.is_active = 1")
+        where.append("COALESCE(TRIM(q.answer), '') <> ''")
+    return (
+        f"SELECT {cols} FROM questions q "
+        "LEFT JOIN question_knowledge_points qkp ON qkp.question_id = q.id "
+        f"WHERE {' AND '.join(where)} ORDER BY q.id"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 材料读取
+# ---------------------------------------------------------------------------
+
+def _read_material_doc(output_dir, url: str | None) -> str | None:
+    """读 material_url 指向的文档正文（output_dir/assets/<url>）；缺文件返回 None，不抛。"""
+    if not url:
+        return None
+    try:
+        return (Path(output_dir) / "assets" / url).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _load_question_material(output_dir, material_text: str | None,
+                            material_url: str | None) -> tuple[str | None, str | None]:
+    """返回 (材料正文, 错误原因)。
+
+    material_text 是题内材料，material_url 是共享文章正文，两者都有就拼接；
+    url 有值但读不到文件 → (None, 原因)，由调用方把该题记 failed——
+    **不得退化成只看选项猜测**。无任何材料 → (None, None)。
+    """
+    parts: list[str] = []
+    if material_text and material_text.strip():
+        parts.append(material_text.strip())
+    if material_url:
+        body = _read_material_doc(output_dir, material_url)
+        if body is None:
+            return None, f"material_url 读取失败: {material_url}"
+        if body.strip():
+            parts.append(body.strip())
+    if not parts:
+        return None, None
+    return "\n\n".join(parts), None
+
+
+def _row_to_item(row, output_dir, include_material: bool) -> dict:
+    """DB 行 -> 题目块输入。默认路径只取前三列（旧行为）。"""
+    qid, content, options = row[0], row[1], row[2]
+    if not include_material:
+        return {"qid": qid, "content": content, "options": options,
+                "qtype": None, "material": None, "material_error": None}
+    qtype, material_text, material_url = row[3], row[4], row[5]
+    material, material_error = _load_question_material(output_dir, material_text,
+                                                       material_url)
+    return {"qid": qid, "content": content, "options": options,
+            "qtype": qtype, "material": material, "material_error": material_error}
+
+
+# ---------------------------------------------------------------------------
 # user message 构建（纯函数）
 # ---------------------------------------------------------------------------
 
@@ -187,26 +270,71 @@ def _format_options(raw) -> str:
     return " ".join(parts)
 
 
+def build_question_block(qid: int, content, options, qtype: str | None = None,
+                         material: str | None = None,
+                         material_error: str | None = None) -> str | None:
+    """单题块。material 为 None 时输出与旧版逐字一致（回归钉子）。
+
+    material 非 None 表示开了 --include-material：附题型与材料正文；
+    材料读取失败（material_error）返回 None，由调用方记 failed；
+    题干与材料都为空也返回 None（没有可判断的题面，不能只靠选项猜）。
+    """
+    if material_error:
+        return None
+    opts_text = _format_options(options)
+    if material is None:
+        truncated = (content or "")[:MAX_CONTENT_LEN]
+        line = f"[qid {qid}] {truncated}"
+        if opts_text:
+            line += f"\n  选项：{opts_text}"
+        return line
+
+    stem = (content or "").strip()
+    body = (material or "").strip()
+    if not stem and not body:
+        return None
+    parts = [f"[qid {qid}]"]
+    if qtype:
+        parts.append(f"  题型：{qtype}")
+    if stem:
+        parts.append(f"  题干：{stem[:MAX_CONTENT_LEN]}")
+    if body:
+        parts.append(f"  材料：{body[:MAX_MATERIAL_LEN]}")
+    if opts_text:
+        parts.append(f"  选项：{opts_text}")
+    return "\n".join(parts)
+
+
+def _block_of(item) -> str | None:
+    """元组 (qid, content, options) = 旧格式；dict 额外带 qtype/material/material_error。"""
+    if isinstance(item, dict):
+        return build_question_block(
+            item["qid"], item.get("content"), item.get("options"),
+            item.get("qtype"), item.get("material"), item.get("material_error"),
+        )
+    qid, content, options = item
+    return build_question_block(qid, content, options)
+
+
 def build_user_message(whitelist: dict[int, str],
-                       questions: list[tuple[int, str, object]]) -> str:
-    """白名单 id+name 清单 + 每题 [qid n] 题面（截断 MAX_CONTENT_LEN 字）。
+                       questions: list) -> str:
+    """白名单 id+name 清单 + 每题一个题目块。
 
     题面必须带上选项：物理/化学大量客观题的题干只有「下列说法正确的是」，
     真正的考点全在选项里，只给题干会让模型瞎标（2026-10-30 实测）。
-    第三个元素可以是 options 的 JSON 字符串（DB 原样）、已解析列表或 None。
+    questions 元素可以是 (qid, content, options) 元组（旧格式，options 为
+    DB 原样 JSON 字符串 / 已解析列表 / None），也可以是带
+    qid/content/options/qtype/material/material_error 的 dict（材料模式）。
     """
     lines = ["知识点白名单（id: 名称）："]
     for kp_id, name in whitelist.items():
         lines.append(f"{kp_id}: {name}")
     lines.append("")
     lines.append("题目（[qid 编号] 题面）：")
-    for qid, content, options in questions:
-        truncated = (content or "")[:MAX_CONTENT_LEN]
-        line = f"[qid {qid}] {truncated}"
-        opts_text = _format_options(options)
-        if opts_text:
-            line += f"\n  选项：{opts_text}"
-        lines.append(line)
+    for item in questions:
+        block = _block_of(item)
+        if block is not None:
+            lines.append(block)
     return "\n".join(lines)
 
 
@@ -255,6 +383,11 @@ def main():
                         help="只标注前 N 题（验证质量用；缺省全量）")
     parser.add_argument("--subject", default="math",
                         help="学科 code（默认 math；语文用 chinese）")
+    parser.add_argument("--include-material", action="store_true",
+                        help="读取 material_text/material_url 并随题目送模型"
+                             "（英语阅读/完形必需）")
+    parser.add_argument("--answerable-only", action="store_true",
+                        help="只标注在架且有标准答案的题（英语本次只标可练题）")
     args = parser.parse_args()
 
     cfg = RefineryConfig.from_env()
@@ -307,14 +440,11 @@ def main():
 
         # 2. 幂等：只取无 qkp 记录的本学科题（subject 过滤与白名单一致——
         #    KP 白名单是本科知识点，他科题不能参与标注）
+        include_material = args.include_material
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT q.id, q.content, q.options FROM questions q "
-                "LEFT JOIN question_knowledge_points qkp "
-                "  ON qkp.question_id = q.id "
-                "WHERE qkp.question_id IS NULL "
-                "  AND q.subject_id = %s "
-                "ORDER BY q.id",
+                build_question_select_sql(subject_id, include_material,
+                                          args.answerable_only),
                 (subject_id,),
             )
             rows = cur.fetchall()
@@ -334,20 +464,40 @@ def main():
         for i in range(0, total, BATCH_SIZE):
             batch = rows[i:i + BATCH_SIZE]
             batch_no = i // BATCH_SIZE + 1
-            user_msg = build_user_message(whitelist,
-                                          [(r[0], r[1], r[2]) for r in batch])
+            batch_total = (total + BATCH_SIZE - 1) // BATCH_SIZE
+
+            # 材料读取失败 / 无题面无材料的题先剔出本批，记 failed，不送模型猜
+            items: list[dict] = []
+            batch_failed = 0
+            for row in batch:
+                item = _row_to_item(row, cfg.output_dir, include_material)
+                if item["material_error"]:
+                    print(f"[WARN] qid {item['qid']}: {item['material_error']}，记失败",
+                          flush=True)
+                if _block_of(item) is None:
+                    failed_ids.append(item["qid"])
+                    batch_failed += 1
+                    continue
+                items.append(item)
+            if not items:
+                print(f"[ok] batch {batch_no}/{batch_total}: labeled=0, "
+                      f"failed={batch_failed}", flush=True)
+                continue
+
+            user_msg = build_user_message(whitelist, items)
             try:
                 response = llm.complete(system_prompt, user_msg)
             except Exception as e:
                 print(f"[WARN] batch {batch_no}: LLM 调用失败（{e}），"
-                      f"本批 {len(batch)} 题记失败", flush=True)
-                failed_ids.extend(r[0] for r in batch)
+                      f"本批 {len(items)} 题记失败", flush=True)
+                failed_ids.extend(item["qid"] for item in items)
+                batch_failed += len(items)
                 continue
 
             kps_map = parse_batch_response(response.content, whitelist)
-            batch_failed = 0
-            for row in batch:
-                qid = row[0]
+            batch_labeled = 0
+            for item in items:
+                qid = item["qid"]
                 kps = kps_map.get(qid)
                 if not kps:
                     # LLM 漏答 / 输出全非法：记失败，可重跑补齐
@@ -364,8 +514,9 @@ def main():
                         )
                 conn.commit()
                 labeled += 1
-            print(f"[ok] batch {batch_no}/{(total + BATCH_SIZE - 1) // BATCH_SIZE}: "
-                  f"labeled={len(batch) - batch_failed}, failed={batch_failed}",
+                batch_labeled += 1
+            print(f"[ok] batch {batch_no}/{batch_total}: "
+                  f"labeled={batch_labeled}, failed={batch_failed}",
                   flush=True)
 
         # 4. 统计

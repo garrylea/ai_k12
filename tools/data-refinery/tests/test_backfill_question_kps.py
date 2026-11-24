@@ -1,11 +1,15 @@
 # -*- coding: utf-8 -*-
 """backfill_question_kps 纯函数测试（LLM 不参与，mock 输出字符串）。
 
-核心被测：parse_kp_response / parse_batch_response / build_user_message。
+核心被测：parse_kp_response / parse_batch_response / build_user_message /
+build_question_select_sql / build_question_block / 材料读取。
 主流程幂等（LEFT JOIN qkp IS NULL + INSERT IGNORE）见脚本 main，不在此测。
 """
 
 from backfill_question_kps import (
+    _load_question_material,
+    build_question_block,
+    build_question_select_sql,
     build_user_message,
     parse_batch_response,
     parse_kp_response,
@@ -129,3 +133,131 @@ def test_build_user_message_truncates_content_to_500():
     msg = build_user_message(WHITELIST, [(1, long_content, None)])
     assert "字" * 500 in msg
     assert "字" * 501 not in msg
+
+
+# ===== build_question_select_sql =====
+
+def test_answerable_only_filters_questions():
+    """英语只标在架且有标准答案的题；材料模式同时取两列材料"""
+    sql = build_question_select_sql(subject_id=3, include_material=True,
+                                    answerable_only=True)
+    assert "q.is_active = 1" in sql
+    assert "COALESCE(TRIM(q.answer), '') <> ''" in sql
+    assert "q.material_text" in sql and "q.material_url" in sql
+
+
+def test_default_flags_do_not_change_other_subjects():
+    """两开关默认关：不查 material 列、不加在架/答案过滤"""
+    sql = build_question_select_sql(subject_id=1, include_material=False,
+                                    answerable_only=False)
+    assert "q.material_text" not in sql
+    assert "q.material_url" not in sql
+    assert "q.is_active" not in sql
+    assert "q.answer" not in sql
+    # 幂等谓词 + 学科过滤 + 排序与改造前一致
+    assert sql == (
+        "SELECT q.id, q.content, q.options, q.type FROM questions q "
+        "LEFT JOIN question_knowledge_points qkp ON qkp.question_id = q.id "
+        "WHERE qkp.question_id IS NULL AND q.subject_id = %s ORDER BY q.id"
+    )
+
+
+def test_include_material_alone_keeps_answer_filter_off():
+    sql = build_question_select_sql(subject_id=3, include_material=True,
+                                    answerable_only=False)
+    assert "q.material_text" in sql and "q.material_url" in sql
+    assert "q.is_active" not in sql
+
+
+# ===== 材料读取 =====
+
+def test_load_question_material_reads_doc(tmp_path):
+    """material_url 正文在 output_dir/assets/<url>"""
+    doc = tmp_path / "assets" / "materials" / "english" / "abc" / "content.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("Tom went to the park.", encoding="utf-8")
+
+    material, error = _load_question_material(
+        tmp_path, "题内材料", "materials/english/abc/content.md")
+    assert error is None
+    assert "题内材料" in material
+    assert "Tom went to the park." in material
+
+
+def test_load_question_material_missing_file_is_error(tmp_path):
+    """url 有值但文件缺失 → 错误原因返回给调用方，不退化成只看选项"""
+    material, error = _load_question_material(
+        tmp_path, None, "materials/english/missing/content.md")
+    assert material is None
+    assert error and "material_url" in error
+
+
+def test_load_question_material_no_material_is_not_error(tmp_path):
+    assert _load_question_material(tmp_path, None, None) == (None, None)
+    assert _load_question_material(tmp_path, "  ", None) == (None, None)
+
+
+# ===== build_question_block =====
+
+def test_build_question_block_material_mode_includes_type_and_article():
+    block = build_question_block(
+        7, "What is the passage mainly about?", None, "choice",
+        "Tom went to the park. He played with his dog.")
+    assert block.startswith("[qid 7]")
+    assert "题型：choice" in block
+    assert "题干：What is the passage mainly about?" in block
+    assert "材料：Tom went to the park." in block
+
+
+def test_build_question_block_material_error_returns_none():
+    """材料读取失败必须整题记 failed，不能只拿选项去猜"""
+    assert build_question_block(
+        7, "", None, "choice", None, "material_url 读取失败: x") is None
+
+
+def test_build_question_block_empty_stem_and_material_returns_none():
+    assert build_question_block(7, "", None, "choice", "") is None
+    assert build_question_block(7, "  ", None, "choice", "  ") is None
+
+
+def test_build_question_block_legacy_format_unchanged():
+    """无 material 的旧路径输出与改造前逐字一致（回归钉子）"""
+    assert build_question_block(101, "解方程 $x^2=4$", None) == \
+        "[qid 101] 解方程 $x^2=4$"
+
+    options = '[{"label": "A", "text": "甲"}, {"label": "B", "text": "乙"}]'
+    assert build_question_block(102, "下列说法正确的是", options, "choice", None) == \
+        "[qid 102] 下列说法正确的是\n  选项：A. 甲 B. 乙"
+
+
+def test_build_user_message_legacy_tuples_unchanged():
+    msg = build_user_message(WHITELIST, [(101, "解方程 $x^2=4$", None)])
+    assert msg == (
+        "知识点白名单（id: 名称）：\n"
+        "1: 有理数的运算\n"
+        "2: 一元二次方程的解法\n"
+        "3: 全等三角形的判定\n"
+        "4: 圆周角定理\n"
+        "17: 一次函数的图象与性质\n"
+        "\n"
+        "题目（[qid 编号] 题面）：\n"
+        "[qid 101] 解方程 $x^2=4$"
+    )
+
+
+def test_build_user_message_accepts_material_items():
+    msg = build_user_message(WHITELIST, [{
+        "qid": 9, "content": "What is the passage about?", "options": None,
+        "qtype": "choice", "material": "Long article body",
+    }])
+    assert "[qid 9]" in msg
+    assert "材料：Long article body" in msg
+
+
+def test_build_user_message_skips_unrenderable_items():
+    """material_error 的题不进入批消息（调用方已记 failed）"""
+    msg = build_user_message(WHITELIST, [{
+        "qid": 9, "content": "", "options": None, "qtype": "choice",
+        "material": None, "material_error": "material_url 读取失败: x",
+    }])
+    assert "[qid 9]" not in msg
