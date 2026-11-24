@@ -8,6 +8,25 @@
 
 ---
 
+## 2026-11-24 试卷+配套答案成对导入：答案自动转换并合并
+
+**问题**：`--file` 解析出精确试卷名后，`convert --materials` 按这个名字过滤素材，同目录的
+`X-答案.pdf` 不匹配 → 答案从未转 md；extract 的 `maybe_merge_answer_md` 找不到配对方，
+题目答案全空。实测 2026 西城物理模拟一（paper 899）28 题 0 答案；全库 68 份答案 PDF 有
+62 份没有对应 md。
+
+**改法**：`_resolve_file` 解析出试卷后主动找同目录答案（`is_answer_pair` + 文件名变体），
+记到 `args._paired_answer_rel`；`convert_argv` 把答案追加进 `--materials`（逗号 OR）；
+extract/publish/meta/load 仍只拿试卷路径。关键词直接命中答案名时反向收敛到试卷。
+`maybe_merge_answer_md` 在 case 4a/4b 打 `[merge]` 日志；case 4b（教师版）保持用答案全文。
+
+**范围**：只支持同目录 + `-答案/_答案/（答案）/(答案)/答案` 命名；`--answers` 路径不变。
+
+**验证**：新增入口配对/convert 参数/批量不串答案/合并日志/端到端切题对齐共 12 例；
+真卷 paper 899 重抽后 28 题、答案非空 ≥20，重跑幂等。
+
+---
+
 ## 2026-11-24 删除 material_method / material_position，材料位置改为按学科下发
 
 **用户裁决**：材料显示位置是学科口径（物理/化学/道法材料在设问之前、语文/英语在之后），不该存库；`material_method` 只是排查字段，也删。立即删，不管后果。
