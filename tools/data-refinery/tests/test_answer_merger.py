@@ -352,3 +352,25 @@ def test_merged_answer_strips_answer_marker_and_score(tmp_path):
     by_no = {q.group_order: q for q in split_page(merged, paper)}
     assert by_no[1].answer == "D"
     assert by_no[2].answer == "略"
+
+
+def test_case4a_logs_merge(tmp_path, capsys):
+    paper = tmp_path / "X-试卷.md"
+    answer = tmp_path / "X-答案.md"
+    paper.write_text("1. 题干\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n", encoding="utf-8")
+    answer.write_text("# 参考答案\n1. B\n", encoding="utf-8")
+    out = maybe_merge_answer_md(paper, paper.read_text(encoding="utf-8"))
+    assert "参考答案" in out
+    log = capsys.readouterr().out
+    assert "[merge]" in log and "case 4a" in log
+
+
+def test_case4b_logs_paper_replaced(tmp_path, capsys):
+    paper = tmp_path / "Y-试卷.md"
+    answer = tmp_path / "Y-答案.md"
+    paper.write_text("1. 只有题干\n", encoding="utf-8")
+    answer.write_text("1. 题干\nA. 甲\nB. 乙\nC. 丙\nD. 丁\n参考答案\n1. B\n", encoding="utf-8")
+    out = maybe_merge_answer_md(paper, paper.read_text(encoding="utf-8"))
+    assert "只有题干" not in out
+    log = capsys.readouterr().out
+    assert "case 4b" in log and "试卷 md 不参与切题" in log

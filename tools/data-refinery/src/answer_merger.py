@@ -162,8 +162,12 @@ def maybe_merge_answer_md(md_path: Path, text: str) -> str:
             # 当成更多题干（题号重复、答案全空）。补一个规范化答案区标题对齐口径。
             if not any(is_answer_keyword(line) for line in answer_text.split("\n")):
                 answer_text = _ANSWER_SECTION_HEADER + answer_text
+            print(f"[merge] {md_path.name} ← {answer_path.name}"
+                  f"（case 4a 纯答案拼接，{len(answer_text.strip())} 字）", flush=True)
             return text + "\n\n" + answer_text
         # case 4b: 答案是试卷+答案版本 → 用答案文件（它有完整题干+答案），丢弃试卷
+        print(f"[merge] {md_path.name} ← {answer_path.name}"
+              f"（case 4b 用答案文件全文，试卷 md 不参与切题）", flush=True)
         return answer_text
 
     # case 5: 两份都无答案 → 处理试卷文件（答案留空，做题时大模型补）
