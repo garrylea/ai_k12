@@ -185,9 +185,11 @@ export default function ExamResultPage() {
     return map;
   }, [items]);
 
-  // AnswerResultList 的 AnswerRecord 映射：isCorrect 后端为 0|1|null（null = 主观题待自评 或 无参考答案）；
-  // 是否有标准答案一律读后端 method / needsSelfAssessment，**不再由 isCorrect===null 推断**
-  // （无参考答案的题同样为 NULL，但既不要求自评也不计分）。解析统一走 explanations prop
+  // AnswerResultList 的 AnswerRecord 映射：isCorrect 后端为 0|1|null（null = 主观题待自评 或 无参考答案）。
+  // method 只透传 `no_standard_answer` —— 它决定「无参考答案 · 不计分」这一新分支；
+  // 其余（unanswered / failed / exact / ai）保持旧语义（由 isCorrect===null 判 self_assess），
+  // 否则学生跳题（method='unanswered'、isCorrect=0、有标准答案）会被当成「该题暂无标准答案」。
+  // 解析统一走 explanations prop
   const answers = useMemo(() => {
     const map: Record<
       string,
@@ -204,10 +206,14 @@ export default function ExamResultPage() {
     for (const it of items ?? []) {
       map[paperQuestionKey(it.questionNo, it.subNo)] = {
         isCorrect: it.isCorrect === 1,
-        method: it.method ?? (it.isCorrect === null ? 'self_assess' : ''),
+        method: it.method === 'no_standard_answer' ? 'no_standard_answer' : (it.isCorrect === null ? 'self_assess' : ''),
         studentAnswer: it.answerText ?? '',
         failed: false,
-        needsSelfAssess: it.needsSelfAssessment === true,
+        // 后端 needsSelfAssessment 只看 method，重进结果页会把已自评题再当待自评；
+        // 这里以 selfAssessment 为空为准（无参考答案题永不要求自评）。
+        needsSelfAssess:
+          it.selfAssessment == null &&
+          (it.needsSelfAssessment === true || (it.isCorrect === null && it.method !== 'no_standard_answer')),
         selfAssessment: it.selfAssessment ?? null,
         unscored: it.method === 'no_standard_answer',
       };

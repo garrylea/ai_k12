@@ -249,6 +249,56 @@ describe('ExamResultPage 交卷发分庆祝', () => {
   });
 
   /**
+   * 跳题（method='unanswered'）不是「无参考答案」：后端照样判错、有标准答案、能看解析。
+   * 回归钉子：映射曾把 method 原样透传，AnswerResultList 按 `method==='unanswered'`
+   * 当成「该题暂无标准答案」，把跳题从错误计数剔除且隐藏了解析。
+   */
+  it('跳题（method=unanswered, isCorrect=0）仍按错题展示、能看解析、计入「错」，不显示「该题暂无标准答案」', async () => {
+    const skipped: ExamResultItem = {
+      ...ITEM, questionNo: 2, answerText: null, isCorrect: 0, method: 'unanswered',
+      needsSelfAssessment: false, selfAssessment: null, explanation: '这题选 B',
+    };
+    resultsMock.mockResolvedValue({
+      ...SUMMARY, correctCount: 1, totalCount: 2, accuracy: 50, items: [ITEM, skipped],
+    });
+
+    renderResult();
+
+    expect(await screen.findByText(/错\s*1/)).toBeTruthy();
+    expect(screen.getByText('（未作答）')).toBeTruthy();
+    expect(screen.queryByText(/该题暂无标准答案/)).toBeNull();
+    expect(screen.queryByText(/无参考答案/)).toBeNull();
+    // 跳题不是主观题：不能进「主观」计数
+    expect(screen.queryByText(/主观\s*\d/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '查看解析' }));
+    expect(screen.getByText('这题选 B')).toBeTruthy();
+  });
+
+  /**
+   * 重进结果页：后端 needsSelfAssessment 只看 method，已自评的主观题仍会带 true；
+   * 前端必须以 selfAssessment 已有值为准，不能再给一次自评按钮。
+   */
+  it('重进已自评页：不渲染自评按钮，显示「已自评」', async () => {
+    const assessed: ExamResultItem = {
+      ...ITEM, questionId: 102, questionNo: 2, type: 'short_answer', options: null,
+      isCorrect: null, method: 'self_assess', needsSelfAssessment: true,
+      selfAssessment: 'correct', answerText: '我的作答', answer: '参考答案',
+    };
+    resultsMock.mockResolvedValue({
+      ...SUMMARY, correctCount: 1, totalCount: 2, accuracy: 50, subjectiveCount: 1,
+      items: [ITEM, assessed],
+    });
+
+    renderResult();
+
+    expect(await screen.findByText(/已自评：做对了/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '我做对了' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '我做错了' })).toBeNull();
+    // 已自评 → 不再计入未自评横幅
+    expect(screen.queryByText(/还有 \d+ 题未自评/)).toBeNull();
+  });
+
+  /**
    * 错题补偿套题询问卡（2026-09-21 批）：结果页有客观错题时才出现。
    * 一正一反两条：只断言「出现」证明不了 wrongCount 是从 items 算的——还得证明没错题时不出现。
    */
