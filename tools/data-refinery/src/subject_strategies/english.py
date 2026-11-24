@@ -29,6 +29,31 @@ _PASSAGE_LABELS = {"A", "B", "C", "D", "E"}
 # 竖排选项标记行：整行只有字母，可带 . 、 ． （与内核 `_BARE_LINE_RE` 同义）
 _OPTION_LABEL_LINE_RE = re.compile(r"^\s*([A-D])\s*[.、．]?\s*$")
 
+# 英语卷面指令：开头整行删，不按字数猜；`## B` / 文章标题不会命中
+_ENGLISH_INSTRUCTION_RE = re.compile(
+    r"^#{0,6}\s*(?:"
+    r"本部分共|第[一二三四五六七八九十]+部分\s*$|"
+    r"从下面各题所给|阅读下面的短文|阅读下列短文|阅读短文，根据|"
+    r"[一二三四五六七八九十]、)"
+)
+
+
+def _strip_english_instructions(text: str) -> str:
+    lines = (text or "").splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and _ENGLISH_INSTRUCTION_RE.match(lines[0].strip()):
+        lines.pop(0)
+        while lines and not lines[0].strip():
+            lines.pop(0)
+    return "\n".join(lines).strip()
+
+
+def _split_writing(content: str) -> tuple[str, str]:
+    """第一行留给题干，其余整体作为作文材料。"""
+    lines = (content or "").strip().split("\n")
+    return lines[0].strip(), "\n".join(lines[1:]).strip()
+
 
 def _bare_label_run(lines, index: int) -> int:
     """从 index 行起（含本行）到下一个题号之前的裸单字母行数。
@@ -155,3 +180,22 @@ class EnglishStrategy:
         # 答案与其余学科同一份实现（整卷对齐）；英语目前没有答案段的特殊规则。
         # 仍然显式传 self：答案与题干必须按同一套材料/选项规则切。
         return extract_generic_answers(text, md_path, strategy=self)
+
+    def attach_post_material(self, questions, lines, md_path_stem):
+        """按大题号规整英语材料：一~四去卷面指令、五切题干与材料。"""
+        for q in questions:
+            gid = (q.group_id or "").strip()
+            if gid == "一":
+                # 清卷面说明，但保留「## 一、阅读理解」这类篇章材料（旧卷真题为一组）
+                cleaned = _strip_english_instructions(q.material_text or "")
+                q.material_text = cleaned or None
+            elif gid in ("二", "三", "四"):
+                cleaned = _strip_english_instructions(q.material_text or "")
+                q.material_text = cleaned or None
+            elif gid == "五":
+                stem, material = _split_writing(q.content)
+                q.content = stem
+                q.material_text = material or None
+                if not material:
+                    print(f"[WARN] {md_path_stem}: 题{q.group_order} 作文只有一段，"
+                          "material_text 留空", flush=True)

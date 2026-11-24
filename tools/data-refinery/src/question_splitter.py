@@ -1366,7 +1366,8 @@ def split_page(text: str, md_path: Path,
     attach_pre = getattr(strategy, "attach_pre_material", None)
     if callable(attach_pre):
         attach_pre(questions, lines)
-    # 题后材料（语文）：与 attach_pre 对称的可选钩子，其它学科没有此方法，行为不变。
+    # 题后材料/材料规整（语文、英语）：与 attach_pre 对称的可选钩子，
+    # 其它学科没有此方法，行为不变。
     attach_post = getattr(strategy, "attach_post_material", None)
     if callable(attach_post):
         attach_post(questions, lines, md_path.stem)

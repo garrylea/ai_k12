@@ -159,3 +159,69 @@ def test_second_passage_label_after_vertical_options():
     assert [o["label"] for o in opts] == ["A", "B", "C", "D"]
     assert opts[3]["text"] == (
         "Students should talk about their books with parents and teachers.")
+
+
+_FIVE_PARTS_MD = """# 英语试卷
+
+## 一、单项填空
+从下面各题所给的 A、B、C、D 四个选项中，选择可以填入空白处的最佳选项。
+1. We visit \\_\\_\\_\\_ grandparents.
+A. we B. us C. our D. ours
+
+## 二、完形填空
+阅读下面的短文，掌握其大意，然后从短文后各题所给的 A、B、C、D 四个选项中，选择最佳选项。
+The Unexpected Detour
+Last summer, our bus broke down. Mr. Evans, \\_13\\_ said "Let's explore."
+
+13. A. simply B. hopelessly C. mainly D. properly
+
+## 三、阅读理解
+## B
+Jameson stood outside the kitchen. He felt bored.
+
+14. How did Jameson feel?
+A. Hopeful. B. Happy. C. Worried. D. Bored.
+
+## 四、阅读表达
+## 第二部分
+## 本部分共 5 题，共 20 分。根据题目要求，完成相应任务。 四、阅读表达(34-36题，共10分)
+阅读短文，根据短文内容回答问题。
+## Be Smart About Your Smartphone
+Losing your phone is a bad thing.
+
+34. How did the author feel?
+
+## 五、文段表达
+38.从下面两个题目中任选一题，完成一篇不少于50词的英语文段写作。请不要写出你的校名和姓名。
+
+题目①
+假设你是李华。
+
+提示词语: reuse, donate
+
+题目②
+在生活中，你一定拍摄过很多美好的画面。
+
+提示词: beautiful, friend
+"""
+
+
+def test_five_parts_material_assignment():
+    from pathlib import Path
+    from question_splitter import split_page
+    from subject_strategies import get_strategy
+
+    qs = split_page(_FIVE_PARTS_MD, Path("x.md"), strategy=get_strategy("english"))
+    by = {q.group_order: q for q in qs}
+
+    assert by[1].material_text is None                       # 一：单选说明清掉
+    assert "simply" in (by[13].content or "")                 # 二：题干原文（选项）留给 extract 再拆
+    assert "\\_13\\_" in (by[13].material_text or "")        # 空格标记保留
+    assert "阅读下面的短文" not in (by[13].material_text or "")
+    assert (by[14].material_text or "").startswith("## B")   # 三：篇章标题保留
+    assert (by[34].material_text or "").startswith(
+        "## Be Smart About Your Smartphone")                 # 四：文章标题保留
+    assert "本部分共" not in (by[34].material_text or "")
+    assert (by[38].content or "").startswith("从下面两个题目中任选一题")
+    assert "题目①" in (by[38].material_text or "")
+    assert "题目②" in (by[38].material_text or "")
