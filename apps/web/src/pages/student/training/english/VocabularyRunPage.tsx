@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@/components/base';
 import { CelebrationOverlay } from '@/components/business';
 import { RunExitGuard } from '@/components/business/answer/RunExitGuard';
@@ -32,6 +32,12 @@ import { newSessionUid } from '@/utils/sessionUid';
  */
 export default function VocabularyRunPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // 从专项练习页一路带下来的回程标记：返回配置页时原样保留，只认固定值 'targeted'
+  const fromTargeted = searchParams.get('from') === 'targeted';
+  const configPath = fromTargeted
+    ? '/student/training/english/vocabulary?from=targeted'
+    : '/student/training/english/vocabulary';
   const [questions, setQuestions] = useState<VocabularyQuestionItem[] | null>(null);
   const [idx, setIdx] = useState(0);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
@@ -69,14 +75,14 @@ export default function VocabularyRunPage() {
     );
     // 形状不对 / 解析失败 / 空词单一律视为「空题单」踢回配置页
     if (!handoff || handoff.questions.length === 0) {
-      navigate('/student/training/english/vocabulary', { replace: true });
+      navigate(configPath, { replace: true });
       return;
     }
     setQuestions(handoff.questions);
     setSessionId(handoff.sessionId);
     setFromWrongPool(handoff.fromWrongPool === true);
     setEntries(handoff.questions.map((q) => ({ question: q, answer: '', submitted: false })));
-  }, [navigate]);
+  }, [navigate, configPath]);
 
   // finished 变 true 即收尾（内部 startedRef 防重入，StrictMode 双跑也只发一次）
   useEffect(() => {
@@ -159,7 +165,7 @@ export default function VocabularyRunPage() {
   const handleFinish = () => {
     guardRef.current = false;
     sessionStorage.removeItem('training:vocabulary');
-    navigate('/student/training/english/vocabulary', { replace: true });
+    navigate(configPath, { replace: true });
   };
 
   const summary = useMemo(
@@ -196,7 +202,7 @@ export default function VocabularyRunPage() {
 
       <div className="w-full max-w-3xl px-4 sm:px-8 py-10">
         <PageHeader
-          to="/student/training/english/vocabulary"
+          to={configPath}
           caption="退出"
           title="背单词"
           titleClassName="text-4xl font-extrabold"

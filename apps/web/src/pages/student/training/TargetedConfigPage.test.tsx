@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router-dom';
 import TargetedConfigPage from './TargetedConfigPage';
 import {
   getKnowledgePoints,
@@ -115,6 +115,12 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+/** 落点探针：断言学科扩展入口带过去的完整路径与 query（防开放重定向）。 */
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>;
+}
+
 /** 知识点与档位都在 useEffect 里异步拉取，render 必须包在 act 里等它们落地。 */
 async function renderPage(initialEntries: string | string[] = '/') {
   const entries = Array.isArray(initialEntries) ? initialEntries : [initialEntries];
@@ -126,6 +132,8 @@ async function renderPage(initialEntries: string | string[] = '/') {
       { path: '/student/training/targeted', element: <TargetedConfigPage /> },
       // 开练成功会 navigate 到 run 页；这里要有落点，否则测试环境报「无匹配路由」
       { path: '/student/training/targeted/run', element: <div /> },
+      // 学科扩展入口（背单词）的落点，用探针核对 from=targeted
+      { path: '/student/training/english/vocabulary', element: <LocationProbe /> },
     ],
     { initialEntries: entries },
   );
@@ -678,5 +686,44 @@ describe('试卷题号模式', () => {
     getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
     await renderPage('/?subjectId=2');
     expect(screen.queryByRole('button', { name: '试卷题号' })).toBeNull();
+  });
+});
+
+describe('TargetedConfigPage 学科扩展入口', () => {
+  beforeEach(() => {
+    getKpsMock.mockReset();
+    getRulesMock.mockReset();
+    startMock.mockReset();
+    getKpsMock.mockResolvedValue([]);
+    getRulesMock.mockResolvedValue({
+      tasks: [{
+        taskCode: 'en_targeted',
+        taskName: '英语专项',
+        tiers: [tier({ tierKey: '5', tierLabel: '5 题', points: 10 })],
+      }],
+    });
+  });
+
+  it('英语渲染背单词入口，点击进入带 from=targeted 的背单词页', async () => {
+    await renderPage('/student/training/targeted?subjectId=3');
+
+    expect(screen.getByText('背单词')).toBeTruthy();
+    const enter = screen.getByRole('button', { name: '进入' });
+
+    await act(async () => {
+      fireEvent.click(enter);
+    });
+
+    expect(screen.getByTestId('location-probe')).toHaveTextContent(
+      '/student/training/english/vocabulary?from=targeted',
+    );
+  });
+
+  it('数学不显示背单词入口（配置驱动，不按学科硬编码）', async () => {
+    getRulesMock.mockResolvedValue(rulesOf(MATH_TIERS));
+    await renderPage('/student/training/targeted?subjectId=1');
+
+    expect(screen.queryByText('背单词')).toBeNull();
+    expect(screen.queryByRole('button', { name: '进入' })).toBeNull();
   });
 });

@@ -108,6 +108,7 @@ export default function TargetedConfigPage() {
   const subjectId = parseSubjectId(searchParams.get('subjectId'));
   const subject = getTrainingSubject(subjectId);
   const typeOptions = subject?.typeOptions ?? MATH_TYPE_OPTIONS;
+  const extras = subject?.targetedExtras ?? [];
   const subjectQuery = `?subjectId=${subjectId}`;
 
   // KP 平铺列表（mount 拉一次）
@@ -491,6 +492,25 @@ export default function TargetedConfigPage() {
             title={subjectId === SUBJECT_MATH ? '专项练习' : `${subjectName(subjectId)} · 专项`}
             actions={<StudentAccountActions />}
           />
+
+          {/* 学科专属入口（如英语背单词）：由学科配置驱动，不写学科分支 */}
+          {extras.length > 0 && (
+            <div className="mt-6 flex flex-wrap gap-3">
+              {extras.map((extra) => (
+                <div
+                  key={extra.key}
+                  className="flex items-center gap-3 rounded-[var(--radius-card)] border border-[var(--learn-card-border)] bg-[var(--learn-card-bg)] px-4 py-3"
+                >
+                  <span className="text-sm font-semibold text-[var(--learn-text-primary)]">
+                    {extra.label}
+                  </span>
+                  <Button variant="secondary" size="sm" onClick={() => navigate(extra.to)}>
+                    {extra.cta}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* 工具条：不再展示清单入口 */}
           <div className="flex justify-end mb-3">

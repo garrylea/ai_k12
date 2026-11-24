@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader, Skeleton } from '@/components/base';
 import { StudentAccountActions } from '@/components/business';
+import { SUBJECT_ENGLISH } from '@/constants';
 import {
   fetchVocabularyOptions,
   startVocabulary,
@@ -46,6 +47,15 @@ const CARD_BORDER = { border: '1px solid rgba(226, 232, 240, 0.8)' } as const;
  */
 export default function VocabularyConfigPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // 从专项练习页进来的回程标记：只认固定值 'targeted'，不接收任意回跳地址（防开放重定向）
+  const fromTargeted = searchParams.get('from') === 'targeted';
+  const backTo = fromTargeted
+    ? `/student/training/targeted?subjectId=${SUBJECT_ENGLISH}`
+    : '/student/training';
+  const runPath = fromTargeted
+    ? '/student/training/english/vocabulary/run?from=targeted'
+    : '/student/training/english/vocabulary/run';
   const [options, setOptions] = useState<VocabularyOptions | null>(null);
   const [levelPool, setLevelPool] = useState<VocabularyLevelPool>('junior');
   // 背几个：档位来自积分规则（家长可改），不硬编码 10/15/20；`tiers == null` = 仍在加载
@@ -105,7 +115,7 @@ export default function VocabularyConfigPage() {
         ...(onlyMyWrong ? { fromWrongPool: true } : {}),
       };
       sessionStorage.setItem('training:vocabulary', JSON.stringify(handoff));
-      navigate('/student/training/english/vocabulary/run');
+      navigate(runPath);
     } catch {
       setError('开练失败，请稍后重试');
       setLoading(false);
@@ -123,7 +133,7 @@ export default function VocabularyConfigPage() {
     >
       <div className="w-full max-w-3xl px-4 sm:px-8 py-10">
         <PageHeader
-          to="/student/training"
+          to={backTo}
           caption="返回"
           title="背单词"
           titleClassName="text-4xl font-extrabold"

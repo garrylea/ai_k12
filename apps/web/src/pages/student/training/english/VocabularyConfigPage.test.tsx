@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router-dom';
 import VocabularyConfigPage from './VocabularyConfigPage';
 import {
   fetchVocabularyOptions,
@@ -79,15 +79,25 @@ function rulesOf(tiers: PointRuleTier[]): MyPointRules {
   };
 }
 
+/** 落点探针：断言返回/开始背词带过去的完整路径与 query。 */
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>;
+}
+
 /** 词库信息与档位都在 useEffect 里异步拉取，render 必须包在 act 里等它们落地。 */
-async function renderPage() {
+async function renderPage(initialEntries: string | string[] = '/') {
+  const entries = Array.isArray(initialEntries) ? initialEntries : [initialEntries];
   const router = createMemoryRouter(
     [
       { path: '/', element: <VocabularyConfigPage /> },
       // 开背成功会 navigate 到 run 页；这里要有落点，否则测试环境报「无匹配路由」
-      { path: '/student/training/english/vocabulary/run', element: <div /> },
+      { path: '/student/training/english/vocabulary/run', element: <LocationProbe /> },
+      // 返回目标（训练首页 / 专项配置页）也要有落点才能断言回程
+      { path: '/student/training', element: <LocationProbe /> },
+      { path: '/student/training/targeted', element: <LocationProbe /> },
     ],
-    { initialEntries: ['/'] },
+    { initialEntries: entries },
   );
   let result!: ReturnType<typeof render>;
   await act(async () => {
@@ -268,5 +278,48 @@ describe('VocabularyConfigPage 错词模式', () => {
     }));
     const stored: unknown = JSON.parse(sessionStorage.getItem('training:vocabulary') ?? 'null');
     expect(stored).toEqual({ sessionId: 88, questions: [STARTED_WORD], fromWrongPool: true });
+  });
+});
+
+describe('VocabularyConfigPage 从专项练习页进入的回程', () => {
+  beforeEach(() => {
+    optionsMock.mockReset();
+    getRulesMock.mockReset();
+    startMock.mockReset();
+    optionsMock.mockResolvedValue(OPTIONS);
+    getRulesMock.mockResolvedValue(rulesOf(VOCAB_TIERS));
+    startMock.mockResolvedValue({ questions: [STARTED_WORD], poolSize: 1, sessionId: 88 });
+  });
+
+  it('普通进入：返回训练轨首页（回归钉子）', async () => {
+    await renderPage();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    });
+
+    expect(screen.getByTestId('location-probe')).toHaveTextContent('/student/training');
+  });
+
+  it('?from=targeted：返回专项练习配置页（英语）', async () => {
+    await renderPage('/?from=targeted');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    });
+
+    expect(screen.getByTestId('location-probe')).toHaveTextContent(
+      '/student/training/targeted?subjectId=3',
+    );
+  });
+
+  it('?from=targeted：开始背词把标记带进答题页', async () => {
+    await renderPage('/?from=targeted');
+
+    await clickStart();
+
+    expect(screen.getByTestId('location-probe')).toHaveTextContent(
+      '/student/training/english/vocabulary/run?from=targeted',
+    );
   });
 });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router-dom';
 import VocabularyRunPage from './VocabularyRunPage';
 import {
   ApiError,
@@ -77,10 +77,22 @@ function seed(sessionId: number | null) {
   sessionStorage.setItem(KEY, JSON.stringify({ sessionId, questions: [QUESTION] }));
 }
 
-function renderPage() {
-  const router = createMemoryRouter([{ path: '/', element: <VocabularyRunPage /> }], {
-    initialEntries: ['/'],
-  });
+/** 落点探针：断言完成/退出回到配置页时保留 from=targeted。 */
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>;
+}
+
+function renderPage(initialEntries: string | string[] = '/') {
+  const entries = Array.isArray(initialEntries) ? initialEntries : [initialEntries];
+  const router = createMemoryRouter(
+    [
+      { path: '/', element: <VocabularyRunPage /> },
+      // 完成/空题单会 navigate 回配置页；探针用来核对回程 query
+      { path: '/student/training/english/vocabulary', element: <LocationProbe /> },
+    ],
+    { initialEntries: entries },
+  );
   return render(<RouterProvider router={router} />);
 }
 
@@ -265,5 +277,51 @@ describe('VocabularyRunPage 完成发分', () => {
 
     expect(await screen.findByRole('dialog', { name: '晋升 铸铁！' })).toBeTruthy();
     expect(usePointsStore.getState().queue).toHaveLength(0);
+  });
+});
+
+describe('VocabularyRunPage 从专项练习页进入的回程', () => {
+  beforeEach(() => {
+    judgeMock.mockReset();
+    completeMock.mockReset();
+    getMyPointsMock.mockReset();
+    judgeMock.mockResolvedValue(JUDGED);
+    getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
+  });
+
+  it('?from=targeted：完成后回配置页保留标记', async () => {
+    // sessionId 为 null：不触发发分，只用「完成」按钮验证回程
+    seed(null);
+    renderPage('/?from=targeted');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('skip-button'));
+    });
+    await screen.findByText('本轮成绩');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '完成' }));
+    });
+
+    expect(screen.getByTestId('location-probe')).toHaveTextContent(
+      '/student/training/english/vocabulary?from=targeted',
+    );
+  });
+
+  it('无 from 参数：完成仍回普通配置页（回归钉子）', async () => {
+    seed(null);
+    renderPage();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('skip-button'));
+    });
+    await screen.findByText('本轮成绩');
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '完成' }));
+    });
+
+    expect(screen.getByTestId('location-probe')).toHaveTextContent(
+      '/student/training/english/vocabulary',
+    );
+    expect(screen.getByTestId('location-probe')).not.toHaveTextContent('from=targeted');
   });
 });
