@@ -2,6 +2,9 @@
 
 流程（main，镜像 backfill_practice_questions.py）：
 1. 加载 KP 白名单（knowledge_points，按 --subject 的学科过滤；默认 math）。
+   英语是两级树：只取二级（parent_kp_id 非 NULL），7 个一级大类不进模型、
+   也过不了白名单校验（prompt 的「只选二级」与白名单一致），避免模型选大类
+   被静默写入。
 2. SELECT 未标注的本学科题（LEFT JOIN question_knowledge_points qkp ... IS NULL，
    且 q.subject_id 与白名单学科一致——库中含他科题，不限定会把本科
    KP 错标到他科题上）——幂等，已有 qkp 记录的题不再处理。
@@ -113,6 +116,35 @@ def _filter_kps(kps: object, whitelist: dict[int, str]) -> list[int]:
 
 
 # ---------------------------------------------------------------------------
+# KP 白名单（纯函数）
+# ---------------------------------------------------------------------------
+
+# 只有二级知识点结构的学科：一级是大类，不进模型（否则可能被当考点写库）。
+LEAF_ONLY_SUBJECTS = frozenset({"english"})
+
+
+def is_leaf_only_subject(subject: str | None) -> bool:
+    """该学科的白名单是否只取二级（parent_kp_id 非 NULL）。"""
+    return (subject or "").strip().lower() in LEAF_ONLY_SUBJECTS
+
+
+def build_kp_whitelist(rows, leaf_only: bool) -> dict[int, str]:
+    """knowledge_points 行 (id, name, parent_kp_id) -> {id: name}。
+
+    leaf_only=True 只保留二级（parent_kp_id 非 NULL）——一级大类不发给模型，
+    也不可能通过 _filter_kps（白名单外 id 直接丢弃）。其它学科 leaf_only=False，
+    口径不变（全部保留）。
+    """
+    whitelist: dict[int, str] = {}
+    for row in rows:
+        kp_id, name, parent_kp_id = row[0], row[1], row[2]
+        if leaf_only and parent_kp_id is None:
+            continue
+        whitelist[kp_id] = name
+    return whitelist
+
+
+# ---------------------------------------------------------------------------
 # LLM 输出解析（纯函数）
 # ---------------------------------------------------------------------------
 
@@ -199,12 +231,16 @@ def build_question_select_sql(subject_id: int, include_material: bool,
 # ---------------------------------------------------------------------------
 
 def _read_material_doc(output_dir, url: str | None) -> str | None:
-    """读 material_url 指向的文档正文（output_dir/assets/<url>）；缺文件返回 None，不抛。"""
+    """读 material_url 指向的文档正文（output_dir/assets/<url>）。
+
+    缺文件（OSError）或非 UTF-8（UnicodeDecodeError）都返回 None，不抛；
+    调用方据此把该题记 failed，而非退化成只看选项。
+    """
     if not url:
         return None
     try:
         return (Path(output_dir) / "assets" / url).read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
 
 
@@ -235,12 +271,14 @@ def _row_to_item(row, output_dir, include_material: bool) -> dict:
     qid, content, options = row[0], row[1], row[2]
     if not include_material:
         return {"qid": qid, "content": content, "options": options,
-                "qtype": None, "material": None, "material_error": None}
+                "qtype": None, "material": None, "material_error": None,
+                "material_mode": False}
     qtype, material_text, material_url = row[3], row[4], row[5]
     material, material_error = _load_question_material(output_dir, material_text,
                                                        material_url)
     return {"qid": qid, "content": content, "options": options,
-            "qtype": qtype, "material": material, "material_error": material_error}
+            "qtype": qtype, "material": material, "material_error": material_error,
+            "material_mode": True}
 
 
 # ---------------------------------------------------------------------------
@@ -272,17 +310,19 @@ def _format_options(raw) -> str:
 
 def build_question_block(qid: int, content, options, qtype: str | None = None,
                          material: str | None = None,
-                         material_error: str | None = None) -> str | None:
-    """单题块。material 为 None 时输出与旧版逐字一致（回归钉子）。
+                         material_error: str | None = None,
+                         material_mode: bool = False) -> str | None:
+    """单题块。material 为 None 且未开材料模式时输出与旧版逐字一致（回归钉子）。
 
-    material 非 None 表示开了 --include-material：附题型与材料正文；
-    材料读取失败（material_error）返回 None，由调用方记 failed；
-    题干与材料都为空也返回 None（没有可判断的题面，不能只靠选项猜）。
+    material_mode 由调用方按 --include-material 显式传入：此时 material 为 None
+    只代表「本题没有材料」，仍需题干非空——无材料且题干为空返回 None，由调用方
+    记 failed（不能只靠选项猜）。旧调用方不传该参数：material 非 None 即视为
+    材料模式，兼容既有行为。材料读取失败（material_error）同样返回 None。
     """
     if material_error:
         return None
     opts_text = _format_options(options)
-    if material is None:
+    if material is None and not material_mode:
         truncated = (content or "")[:MAX_CONTENT_LEN]
         line = f"[qid {qid}] {truncated}"
         if opts_text:
@@ -306,11 +346,12 @@ def build_question_block(qid: int, content, options, qtype: str | None = None,
 
 
 def _block_of(item) -> str | None:
-    """元组 (qid, content, options) = 旧格式；dict 额外带 qtype/material/material_error。"""
+    """元组 (qid, content, options) = 旧格式；dict 额外带 qtype/material/material_error/material_mode。"""
     if isinstance(item, dict):
         return build_question_block(
             item["qid"], item.get("content"), item.get("options"),
             item.get("qtype"), item.get("material"), item.get("material_error"),
+            material_mode=item.get("material_mode", False),
         )
     qid, content, options = item
     return build_question_block(qid, content, options)
@@ -426,16 +467,19 @@ def main():
             return
         subject_id, subject_name = row
 
-        # 1. KP 白名单
+        # 1. KP 白名单（英语只取二级：一级大类不进模型、也过不了白名单校验）
+        leaf_only = is_leaf_only_subject(args.subject)
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, name FROM knowledge_points WHERE subject_id = %s",
+                "SELECT id, name, parent_kp_id FROM knowledge_points "
+                "WHERE subject_id = %s",
                 (subject_id,),
             )
-            whitelist = {row[0]: row[1] for row in cur.fetchall()}
+            whitelist = build_kp_whitelist(cur.fetchall(), leaf_only)
         if not whitelist:
-            print(f"[error] {subject_name} 的 knowledge_points 为空（subject_id={subject_id}），"
-                  f"先跑对应 KP 种子迁移", flush=True)
+            scope = "二级 " if leaf_only else ""
+            print(f"[error] {subject_name} 的{scope}knowledge_points 为空"
+                  f"（subject_id={subject_id}），先跑对应 KP 种子迁移", flush=True)
             return
 
         # 2. 幂等：只取无 qkp 记录的本学科题（subject 过滤与白名单一致——

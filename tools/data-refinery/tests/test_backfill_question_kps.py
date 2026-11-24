@@ -7,16 +7,30 @@ build_question_select_sql / build_question_block / 材料读取。
 """
 
 from backfill_question_kps import (
+    _block_of,
     _load_question_material,
+    _read_material_doc,
+    _row_to_item,
+    build_kp_whitelist,
     build_question_block,
     build_question_select_sql,
     build_user_message,
+    is_leaf_only_subject,
     parse_batch_response,
     parse_kp_response,
 )
 
 WHITELIST = {1: "有理数的运算", 2: "一元二次方程的解法", 3: "全等三角形的判定",
              4: "圆周角定理", 17: "一次函数的图象与性质"}
+
+# 英语 KP 行 (id, name, parent_kp_id)：1/2 是一级大类（parent 为 NULL）
+EN_KP_ROWS = [
+    (1, "语法", None),
+    (2, "词汇", None),
+    (101, "时态", 1),
+    (102, "语态", 1),
+    (201, "词义辨析", 2),
+]
 
 
 # ===== parse_kp_response：单题输出 =====
@@ -91,6 +105,37 @@ def test_parse_batch_truncates_per_question():
     """批量内单题 kps 同样受白名单过滤 + 截 3 约束"""
     raw = '{"items": [{"qid": 1, "kps": [1, 2, 3, 4, 4]}]}'
     assert parse_batch_response(raw, WHITELIST) == {1: [1, 2, 3]}
+
+
+# ===== KP 白名单：英语只取二级（E01-E07 大类不进模型） =====
+
+def test_leaf_only_subject_is_english_only():
+    assert is_leaf_only_subject("english") is True
+    assert is_leaf_only_subject(" English ") is True
+    assert is_leaf_only_subject("math") is False
+    assert is_leaf_only_subject("chinese") is False
+    assert is_leaf_only_subject(None) is False
+
+
+def test_english_whitelist_excludes_top_level_kps():
+    """英语白名单不含一级 id（parent_kp_id IS NULL 的 7 个大类）"""
+    wl = build_kp_whitelist(EN_KP_ROWS, is_leaf_only_subject("english"))
+    assert 1 not in wl and 2 not in wl
+    assert wl == {101: "时态", 102: "语态", 201: "词义辨析"}
+
+
+def test_other_subject_whitelist_unchanged():
+    """非英语学科口径不变：一级/二级全部保留（不改其它学科的白名单）"""
+    wl = build_kp_whitelist(EN_KP_ROWS, is_leaf_only_subject("math"))
+    assert wl == {1: "语法", 2: "词汇", 101: "时态", 102: "语态", 201: "词义辨析"}
+
+
+def test_model_top_level_kp_id_filtered_out():
+    """模型返回一级 id 时被 _filter_kps 丢弃（白名单外），不会被静默写库"""
+    wl = build_kp_whitelist(EN_KP_ROWS, True)
+    assert parse_kp_response('{"kps": [1, 101, 999]}', wl) == [101]
+    # 批量里只回一级 id 的题不出现 -> 调用方记 failed，可重跑
+    assert parse_batch_response('{"items": [{"qid": 7, "kps": [2]}]}', wl) == {}
 
 
 # ===== build_user_message =====
@@ -197,6 +242,18 @@ def test_load_question_material_no_material_is_not_error(tmp_path):
     assert _load_question_material(tmp_path, "  ", None) == (None, None)
 
 
+def test_load_question_material_invalid_utf8_is_error(tmp_path):
+    """文件存在但不是 UTF-8：记 failed，不中断整轮（UnicodeDecodeError 也要吞）"""
+    doc = tmp_path / "assets" / "bad.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_bytes(b"\xff\xfe\x00bad")
+
+    assert _read_material_doc(tmp_path, "bad.md") is None
+    material, error = _load_question_material(tmp_path, None, "bad.md")
+    assert material is None
+    assert error and "material_url" in error
+
+
 # ===== build_question_block =====
 
 def test_build_question_block_material_mode_includes_type_and_article():
@@ -218,6 +275,27 @@ def test_build_question_block_material_error_returns_none():
 def test_build_question_block_empty_stem_and_material_returns_none():
     assert build_question_block(7, "", None, "choice", "") is None
     assert build_question_block(7, "  ", None, "choice", "  ") is None
+    # 显式材料模式、本题无材料（material=None）：题干为空也必须 None
+    assert build_question_block(7, "", None, "choice", None, None,
+                                material_mode=True) is None
+
+
+def test_include_material_no_material_and_empty_stem_is_failed(tmp_path):
+    """真实路径（--include-material + 无材料 + 空题干）：记 failed，不得只看选项"""
+    row = (7, "", '[{"label": "A", "text": "go"}]', "choice", None, None)
+    item = _row_to_item(row, tmp_path, include_material=True)
+    assert item["material_mode"] is True
+    assert item["material"] is None
+    assert _block_of(item) is None
+
+
+def test_include_material_no_material_but_stem_ok(tmp_path):
+    """无材料但题干非空：允许送模型（不含「材料」行）"""
+    row = (8, "What does he do?", None, "choice", None, None)
+    item = _row_to_item(row, tmp_path, include_material=True)
+    block = _block_of(item)
+    assert block and "题干：What does he do?" in block
+    assert "材料：" not in block
 
 
 def test_build_question_block_legacy_format_unchanged():
