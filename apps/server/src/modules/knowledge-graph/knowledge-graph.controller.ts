@@ -15,6 +15,7 @@ import { Roles } from '../../common/decorators/roles.js';
 import { CurrentUser } from '../../common/decorators/current-user.js';
 import {
   SUBJECT_MATH,
+  SUBJECT_ENGLISH,
   SUBJECT_PHYSICS,
   SUBJECT_CHEMISTRY,
   SUBJECT_POLITICS,
@@ -25,8 +26,10 @@ import type { KnowledgeGraphMastery, WeakPointRecommendation } from './dto/knowl
 const DEFAULT_LIMIT = 1;
 const MAX_LIMIT = 10;
 
-/** 图谱目前开放的学科：数学 + 物理/化学/道法（服务层按 subjectId 通用，仅这里设门禁）。 */
-const SUPPORTED_SUBJECTS = new Set([SUBJECT_MATH, SUBJECT_PHYSICS, SUBJECT_CHEMISTRY, SUBJECT_POLITICS]);
+/** 图谱目前开放的学科：数学 + 英语 + 物理/化学/道法（服务层按 subjectId 通用，仅这里设门禁）。 */
+const SUPPORTED_SUBJECTS = new Set([
+  SUBJECT_MATH, SUBJECT_ENGLISH, SUBJECT_PHYSICS, SUBJECT_CHEMISTRY, SUBJECT_POLITICS,
+]);
 
 /**
  * 数学薄弱点图谱（API 文档 §4.5）。
@@ -83,10 +86,10 @@ export class KnowledgeGraphController {
     }
   }
 
-  /** 图谱目前开放的学科：数学 + 物理/化学/道法。 */
+  /** 图谱目前开放的学科：数学 + 英语 + 物理/化学/道法。 */
   private assertSupportedSubject(subjectId: number): void {
     if (!SUPPORTED_SUBJECTS.has(subjectId)) {
-      throw new BadRequestException({ code: 1001, message: 'subjectId 仅支持 1 / 4 / 5 / 9' });
+      throw new BadRequestException({ code: 1001, message: 'subjectId 仅支持 1 / 3 / 4 / 5 / 9' });
     }
   }
 }

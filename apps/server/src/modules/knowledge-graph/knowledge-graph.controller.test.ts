@@ -32,11 +32,28 @@ describe('KnowledgeGraphController 归属校验', () => {
 });
 
 describe('KnowledgeGraphController subjectId 校验', () => {
-  it.each([1, 4, 5, 9])('subjectId=%i 放行并透传', async (subjectId) => {
+  it.each([1, 3, 4, 5, 9])('subjectId=%i 放行并透传', async (subjectId) => {
     const { ctrl, service } = makeCtrl();
     service.getMastery.mockResolvedValue({});
     await ctrl.getMastery(7, user, subjectId);
     expect(service.getMastery).toHaveBeenCalledWith(7, subjectId);
+  });
+
+  it('英语（3）两个端点都不再 400', async () => {
+    const { ctrl, service } = makeCtrl();
+    service.getMastery.mockResolvedValue({});
+    service.getWeakPoints.mockResolvedValue({});
+
+    await expect(ctrl.getMastery(7, user, 3)).resolves.toBeDefined();
+    await expect(ctrl.getWeakPoints(7, user, 3, undefined)).resolves.toBeDefined();
+  });
+
+  it('错误文案点名 3', async () => {
+    const { ctrl } = makeCtrl();
+    await expect(ctrl.getMastery(7, user, 6)).rejects.toMatchObject({
+      response: { code: 1001, message: 'subjectId 仅支持 1 / 3 / 4 / 5 / 9' },
+      status: 400,
+    });
   });
 
   it.each([6, 7, 8])('未开放学科 %i -> 400 + code 1001', async (subjectId) => {

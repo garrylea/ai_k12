@@ -458,6 +458,25 @@ describe('WeakPointGraphPage 按学科取图谱与档位（Task 11）', () => {
     expect(getMyPointRules).toHaveBeenCalled();
   });
 
+  it('?subjectId=3 时按英语请求图谱与档位', async () => {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery({ subjectId: 3 }));
+    getWeakPoints.mockResolvedValue({
+      subjectId: 3,
+      candidates: [],
+      recommendation: null,
+      reason: 'no_qualified_candidate',
+    });
+    getMyPointRules.mockResolvedValue({
+      tasks: [{ taskCode: 'en_targeted', taskName: '英语专项', tiers: [{ tierKey: '3' }] }],
+    });
+
+    renderPage('/student/training/weak-points?subjectId=3');
+
+    await waitFor(() => expect(getKnowledgeGraphMastery).toHaveBeenCalledWith(7, 3));
+    expect(getWeakPoints).toHaveBeenCalledWith(7, 3, 1);
+    expect(screen.getByText('英语 · 薄弱点图谱')).toBeInTheDocument();
+  });
+
   it('?subjectId=4 时标题显示「物理」、返回按钮指向物理训练首页（Fix I-1/I-2）', async () => {
     getKnowledgeGraphMastery.mockResolvedValue(mastery());
     getWeakPoints.mockResolvedValue({
@@ -484,6 +503,88 @@ describe('WeakPointGraphPage 按学科取图谱与档位（Task 11）', () => {
     await waitFor(() =>
       expect(router.state.location.pathname + router.state.location.search).toBe(
         '/student/training/home?subjectId=4',
+      ),
+    );
+  });
+});
+
+/**
+ * Task 7：英语接入图谱后，四个跳转动作必须带 subjectId，否则会落回数学链路。
+ *
+ * 该页所有动作都是 `<Button onClick>`（navigate），没有 `<a href>`——按 pathname + search 断言。
+ */
+describe('WeakPointGraphPage 英语（3）动作保留学科上下文', () => {
+  function mockEnglish(recommendationOverride?: WeakPointRecommendation) {
+    getKnowledgeGraphMastery.mockResolvedValue(mastery({ subjectId: 3 }));
+    getWeakPoints.mockResolvedValue(recommendationOverride ?? { ...recommendation(), subjectId: 3 });
+    getMyPointRules.mockResolvedValue({
+      tasks: [{ taskCode: 'en_targeted', taskName: '英语专项', tiers: [{ tierKey: '3' }] }],
+    });
+  }
+
+  const emptyRec: WeakPointRecommendation = {
+    subjectId: 3, candidates: [], recommendation: null, reason: 'no_qualified_candidate',
+  };
+
+  it('开始补这个 → /targeted/run?subjectId=3', async () => {
+    mockEnglish();
+    startTargetedPractice.mockResolvedValue({
+      sessionId: 3,
+      questions: [{ questionId: 1, text: 't', type: 'choice', options: null }],
+    });
+
+    const { router } = renderPage('/student/training/weak-points?subjectId=3');
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始补这个' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '开始补这个' }));
+
+    await waitFor(() =>
+      expect(startTargetedPractice).toHaveBeenCalledWith({ subjectId: 3, kpId: 11, type: null, count: 3 }),
+    );
+    await waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        '/student/training/targeted/run?subjectId=3',
+      ),
+    );
+  });
+
+  it('看这个知识点的错题 → /errors?subjectId=3&kpId=11（同时保留 kpId）', async () => {
+    mockEnglish();
+
+    const { router } = renderPage('/student/training/weak-points?subjectId=3');
+    expect(await screen.findByText('数与式')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /数与式/ }));
+    fireEvent.click(screen.getByRole('button', { name: '有理数' }));
+    fireEvent.click(screen.getByRole('button', { name: '看这个知识点的错题' }));
+
+    await waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        '/student/training/errors?subjectId=3&kpId=11',
+      ),
+    );
+  });
+
+  it('去专项练习 → /targeted?subjectId=3', async () => {
+    mockEnglish(emptyRec);
+
+    const { router } = renderPage('/student/training/weak-points?subjectId=3');
+    fireEvent.click(await screen.findByRole('button', { name: '去专项练习' }));
+
+    await waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        '/student/training/targeted?subjectId=3',
+      ),
+    );
+  });
+
+  it('去考试 → /exam?subjectId=3', async () => {
+    mockEnglish(emptyRec);
+
+    const { router } = renderPage('/student/training/weak-points?subjectId=3');
+    fireEvent.click(await screen.findByRole('button', { name: '去考试' }));
+
+    await waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        '/student/training/exam?subjectId=3',
       ),
     );
   });

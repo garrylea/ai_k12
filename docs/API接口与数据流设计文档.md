@@ -227,7 +227,7 @@
 
 ### 4.5 Knowledge Graph — `/api/knowledge-graph`
 
-**支持学科**：数学 / 物理 / 化学 / 道法（`subjectId ∈ {1, 4, 5, 9}`；语文/英语无知识点体系，2/3 一律 400 / code 1001）。全部为**只读**端点，`studentId` 必须等于 JWT 的 `sub`（不符 403 / code 1005），`subjectId` 不在 `{1,4,5,9}` 一律 400 / code 1001（错误文案：「subjectId 仅支持 1 / 4 / 5 / 9」）。
+**支持学科**：数学 / 英语 / 物理 / 化学 / 道法（`subjectId ∈ {1, 3, 4, 5, 9}`；语文无知识点体系，2 一律 400 / code 1001）。全部为**只读**端点，`studentId` 必须等于 JWT 的 `sub`（不符 403 / code 1005），`subjectId` 不在 `{1,3,4,5,9}` 一律 400 / code 1001（错误文案：「subjectId 仅支持 1 / 3 / 4 / 5 / 9」）。
 
 **掌握度写入口（2026-11-07 起）**：`student_knowledge_mastery` 由**判题出口 + 自评出口**共同回写——客观题判对/判错、主观题自评「我做对了/做错了」都按同一公式累加（`mastery_score = correct / (correct + error)`，`level = FLOOR(5 * score)`）；空答案/未作答/判题失败不写。
 
@@ -2592,6 +2592,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.36 | 2026-11-24 | **知识图谱开放英语**。§4.5 `weak-points` / `mastery` 的 `subjectId` 允许值由 `{1,4,5,9}` 扩到 `{1,3,4,5,9}`，错误文案改「subjectId 仅支持 1 / 3 / 4 / 5 / 9」（**删除「语文/英语…2/3 一律 400」中的 3**）；前端图谱页四个跳转动作（开始补这个 / 看错题 / 去专项练习 / 去考试）非数学一律带 `subjectId`，看错题同时保留 `kpId`。openapi.yaml 两个端点同步 enum 与 description。 |
 | v4.35 | 2026-11-24 | **删除 `questions.material_method` / `questions.material_position` 两列**（迁移 `2026-11-24_drop_material_columns.sql`）。`materialPosition` 改为服务端按学科推导后下发：物理/化学/道法=`before`、语文/英语=`null`；API 形状不变，前端无需改。`material_method` 无读取方，一并删除；数据管线与三个存量回填脚本同步去掉该列。 |
 | v4.34 | 2026-11-23 | **道法大题按小问拆题：题目载荷新增 `subNo` / `materialPosition`**。§4.18 `targeted/start`、§4.19 试卷详情/结果页、§4.29 练习记录详情的题目对象新增 **`subNo`**（小问序号；0=非小问，道法 26 题的 26(1)/26(2)）与 **`materialPosition`**（`'before'`=材料在题干上方；null=题干下方；练习记录详情只有该字段）。前端题目标识键改为 `26(1)`/`26(2)`，避免同题号小问作答串题；`subNo` 为 0/缺省时行为与旧版一致。openapi.yaml 的 `TargetedPracticeQuestion`/`ExamQuestionMeta`/`ExamResultItem`/`PracticeHistoryQuestion` 四个 schema 同步。 |
 | v4.33 | 2026-11-20 | **语文文章文档化：题目载荷新增 `materialUrl`（与 `materialText` 职责分离）**。§4.18 `targeted/start`、§4.19 试卷详情/结果页、§4.29 练习记录详情/重做/同类型练习四处题目载荷在 `materialText` 旁新增 **`materialUrl`**（文章 Markdown 相对地址 `materials/chinese/{doc_key}/content.md`，无文章为 null）；`materialText` 自此只放题中素材，文章不再复制到每题 `materialText`。§5.16/§5.17 数据流 prose 同步。openapi.yaml 的 `TargetedPracticeQuestion`/`ExamQuestionMeta`/`ExamResultItem`/`PracticeHistoryQuestion`/`HistoryRunQuestion` 五个 schema 同步新增 `materialUrl`。 |

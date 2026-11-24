@@ -12,7 +12,7 @@ import {
   type WeakPointRecommendation,
 } from '@/services/api';
 import { getAuthItem } from '@/services/authStorage';
-import { getTrainingSubject, parseSubjectId, subjectHomePath, subjectName } from '@/constants';
+import { getTrainingSubject, parseSubjectId, SUBJECT_MATH, subjectHomePath, subjectName } from '@/constants';
 import { MATH_TASK_CODE, pickPracticeCount, usePointTiers } from './point-tiers';
 import { heatForNode, isDashedBorder, summarizeParent } from './weak-point-heat';
 import type { TargetedRunHandoff } from './run-handoff';
@@ -46,6 +46,9 @@ export default function WeakPointGraphPage() {
   const [searchParams] = useSearchParams();
   const subjectId = parseSubjectId(searchParams.get('subjectId'));
   const studentId = Number(getAuthItem('userId')) || 0;
+
+  // 数学保持既有不带参链接；其它学科每个跳转都必须带上学科，否则会落回数学链路。
+  const subjectQuery = subjectId === SUBJECT_MATH ? '' : `?subjectId=${subjectId}`;
 
   const [mastery, setMastery] = useState<KnowledgeGraphMastery | null>(null);
   const [masteryError, setMasteryError] = useState(false);
@@ -157,7 +160,7 @@ export default function WeakPointGraphPage() {
       }
       const handoff: TargetedRunHandoff = { sessionId: res.sessionId, questions: res.questions };
       sessionStorage.setItem(TARGETED_SESSION_KEY, JSON.stringify(handoff));
-      navigate('/student/training/targeted/run');
+      navigate(`/student/training/targeted/run${subjectQuery}`);
     } catch (err) {
       setStartNotice(err instanceof Error ? err.message : '开练失败，请重试');
     } finally {
@@ -166,7 +169,15 @@ export default function WeakPointGraphPage() {
   };
 
   const goErrors = (kpId?: number) => {
-    navigate(kpId == null ? '/student/training/errors' : `/student/training/errors?kpId=${kpId}`);
+    if (kpId == null) {
+      navigate(`/student/training/errors${subjectQuery}`);
+      return;
+    }
+    navigate(
+      subjectId === SUBJECT_MATH
+        ? `/student/training/errors?kpId=${kpId}`
+        : `/student/training/errors?subjectId=${subjectId}&kpId=${kpId}`,
+    );
   };
 
   return (
@@ -224,10 +235,10 @@ export default function WeakPointGraphPage() {
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  <Button variant="secondary" size="sm" onClick={() => navigate('/student/training/targeted')}>
+                  <Button variant="secondary" size="sm" onClick={() => navigate(`/student/training/targeted${subjectQuery}`)}>
                     去专项练习
                   </Button>
-                  <Button variant="primary" size="sm" onClick={() => navigate('/student/training/exam')}>
+                  <Button variant="primary" size="sm" onClick={() => navigate(`/student/training/exam${subjectQuery}`)}>
                     去考试
                   </Button>
                 </div>
