@@ -7552,10 +7552,15 @@ paths:
       summary: 单题提交（同步判题，白名单响应）
       description: >-
         考试逐题作答（student JWT）。同步走 JudgeCore（source='exam',
-        sourceRefId=sessionId）：客观题 exact 即返，主观题 AI 判定
-        （judgment per-scene 90s）；判题结果全量落 exam_answers，
-        答错由 JudgeCore 写 main_error_books。判题失败先落 answerText
-        （在途，is_correct NULL，交卷时统一补判）、错误透传前端重试。
+        sourceRefId=sessionId）：客观题 exact 即返；自评学科的非客观题
+        不判题，直接落 is_correct=NULL + method='self_assess'（语文 =
+        非 choice/multi_choice/true_false；物理/化学/道法/英语 = 仅
+        short_answer/proof，英语为显式学科规则、不依赖 JUDGE_SUBJECTIVE_MODE）。
+        无参考答案的题（questions.answer 空）在此不判，交卷时统一落
+        method='no_standard_answer'——不判、不计分、不入错题本、不要求自评。
+        其余主观题 AI 判定（judgment per-scene 90s）；判题结果全量落
+        exam_answers，答错由 JudgeCore 写 main_error_books。判题失败先落
+        answerText（在途，is_correct NULL，交卷时统一补判）、错误透传前端重试。
         响应白名单 {saved:true}——不回传对错（考试防作弊设计，
         对错只在交卷后的 results 出现）。错误：题目不在题单 400；
         已交卷再提交 409（code=4101）；超 deadline 先自动收卷再 409
@@ -13207,7 +13212,7 @@ components:
           description: 落库判题方式（exact / ai / self_assess / unanswered / failed / no_standard_answer）；no_standard_answer = 无参考答案、不判不计
         hasStandardAnswer:
           type: boolean
-          description: 该题是否有参考答案；以落库 method 为准（答案列后来补齐也不回改，method='no_standard_answer' 恒 false）
+          description: 该题是否有参考答案。实现口径 = answerPresent && method !== 'no_standard_answer'（答案列当前非空，且交卷时未判为无参考答案）；答案列后来被清空也会 false，method='no_standard_answer' 恒 false
         answer:
           type: string
           nullable: true

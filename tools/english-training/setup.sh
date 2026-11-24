@@ -31,7 +31,8 @@ echo "== 2/6 确认（仅此一步需要人） =="
 if [ "${SETUP_YES:-0}" = "1" ]; then
   echo "SETUP_YES=1，跳过确认"
 else
-  read -r -p "将写入英语知识点种子并重跑标注，确认？[y/N] " ans
+  read -r -p "将写入英语知识点种子并重跑标注，确认？[y/N] " ans \
+    || { echo "非交互环境（stdin 已结束）无法确认。请用 SETUP_YES=1 bash tools/english-training/setup.sh" >&2; exit 1; }
   [ "$ans" = "y" ] || { echo "已取消"; exit 0; }
 fi
 
