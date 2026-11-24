@@ -50,10 +50,18 @@ export interface TrainingSubjectConfig {
   homePath: string;
   /** 专项配置页的题型下拉；空串 = 全部。 */
   typeOptions: readonly SubjectTypeOption[];
-  /** 专项练习任务码（档位/发分用）；英语无专项练习。 */
+  /** 专项练习任务码（档位/发分用）；英语专项走 en_targeted，背单词以 targetedExtras 形式挂在专项页。 */
   targetedTaskCode?: string;
   /** 理科：作答区用 LaTeX 输入 + 预览。 */
   isMathLike: boolean;
+  /** 专项配置页顶部的学科专属入口（英语=背单词）；页面遍历渲染，不写学科分支。 */
+  targetedExtras?: readonly { key: string; label: string; cta: string; to: string }[];
+  /** 考试列表页标题；缺省 '考试'。 */
+  examListTitle?: string;
+  /** 错题练习页标题；缺省 '错题练习'。 */
+  errorPracticeTitle?: string;
+  /** 是否显示相似题补偿入口；缺省 false（只有数学 true）。 */
+  supportsRemediation?: boolean;
 }
 
 const ALL: SubjectTypeOption = { value: '', label: '全部' };
@@ -72,6 +80,12 @@ const CN_TYPE_OPTIONS: readonly SubjectTypeOption[] = [
   ALL,
   { value: 'choice', label: '选择' },
   { value: 'fill_blank', label: '填空' },
+  { value: 'short_answer', label: '简答' },
+];
+
+const EN_TYPE_OPTIONS: readonly SubjectTypeOption[] = [
+  ALL,
+  { value: 'choice', label: '选择' },
   { value: 'short_answer', label: '简答' },
 ];
 
@@ -95,16 +109,25 @@ export const TRAINING_SUBJECTS: readonly TrainingSubjectConfig[] = [
     id: SUBJECT_MATH, name: '数学', icon: 'math', desc: '考试 / 专项练习 / 错题练习',
     enabled: true, homePath: '/student/training/home',
     typeOptions: MATH_TYPE_OPTIONS, targetedTaskCode: 'math_targeted', isMathLike: true,
+    supportsRemediation: true,
   },
   {
     id: SUBJECT_CHINESE, name: '语文', icon: 'chinese', desc: '真题考试 / 专项练习 / 古诗文专项',
     enabled: true, homePath: '/student/training/chinese/special',
     typeOptions: CN_TYPE_OPTIONS, targetedTaskCode: 'cn_targeted', isMathLike: false,
+    examListTitle: '语文 · 真题', errorPracticeTitle: '语文 · 错题',
   },
   {
-    id: SUBJECT_ENGLISH, name: '英语', icon: 'english', desc: '背单词',
-    enabled: true, homePath: '/student/training/english/vocabulary',
-    typeOptions: [], isMathLike: false,
+    id: SUBJECT_ENGLISH, name: '英语', icon: 'english',
+    desc: '真题考试 / 专项练习 / 错题练习 / 薄弱点图谱',
+    enabled: true, homePath: '/student/training/home?subjectId=3',
+    typeOptions: EN_TYPE_OPTIONS, targetedTaskCode: 'en_targeted', isMathLike: false,
+    targetedExtras: [{
+      key: 'vocabulary', label: '背单词', cta: '进入',
+      to: '/student/training/english/vocabulary?from=targeted',
+    }],
+    examListTitle: '英语 · 真题',
+    errorPracticeTitle: '英语 · 错题练习',
   },
   {
     id: SUBJECT_PHYSICS, name: '物理', icon: 'physics', desc: '考试 / 专项练习 / 错题练习',

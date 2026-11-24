@@ -36,10 +36,10 @@ describe('学科辅助函数', () => {
     expect(subjectName(SUBJECT_MATH)).toBe('数学');
   });
 
-  it('subjectHomePath：数学不带参，物理带 subjectId，语文/英语走专项页', () => {
+  it('subjectHomePath：数学不带参，物理带 subjectId，语文走专项页，英语走四卡页', () => {
     expect(subjectHomePath(SUBJECT_MATH)).toBe('/student/training/home');
     expect(subjectHomePath(SUBJECT_CHINESE)).toBe('/student/training/chinese/special');
-    expect(subjectHomePath(SUBJECT_ENGLISH)).toBe('/student/training/english/vocabulary');
+    expect(subjectHomePath(SUBJECT_ENGLISH)).toBe('/student/training/home?subjectId=3');
     expect(subjectHomePath(SUBJECT_PHYSICS)).toBe('/student/training/home?subjectId=4');
   });
 
@@ -67,5 +67,25 @@ describe('selfAssessEligible（闸门③）', () => {
       expect(selfAssessEligible(id, 'choice')).toBe(false);
       expect(selfAssessEligible(id, 'true_false')).toBe(false);
     }
+  });
+});
+
+describe('学科配置驱动页面差异', () => {
+  it('英语入口落到四卡页且题型按库内实际类型', () => {
+    const s = getTrainingSubject(SUBJECT_ENGLISH)!;
+    expect(s.homePath).toBe('/student/training/home?subjectId=3');
+    expect(s.targetedTaskCode).toBe('en_targeted');
+    expect(s.typeOptions.map((o) => o.value)).toEqual(['', 'choice', 'short_answer']);
+    expect(s.targetedExtras).toEqual([{
+      key: 'vocabulary', label: '背单词', cta: '进入',
+      to: '/student/training/english/vocabulary?from=targeted',
+    }]);
+    expect(s.examListTitle).toBe('英语 · 真题');
+    expect(s.errorPracticeTitle).toBe('英语 · 错题练习');
+    expect(s.supportsRemediation ?? false).toBe(false);
+  });
+  it('语文特判迁入配置、数学补偿套题显式开启', () => {
+    expect(getTrainingSubject(SUBJECT_CHINESE)!.examListTitle).toBe('语文 · 真题');
+    expect(getTrainingSubject(SUBJECT_MATH)!.supportsRemediation).toBe(true);
   });
 });
