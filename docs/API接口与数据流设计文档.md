@@ -764,7 +764,7 @@ PC App（Electron 壳）的「单次学习锁定」：**一次学生登录 → �
 
 | # | 端点 | 返回（data） |
 |---|---|---|
-| 1 | `GET /api/student/practice-history?page=&pageSize=&subjectId=` | `{items:[{source, sessionId, subjectId, title, module, startedAt, completedAt, totalCount, correctCount}], total, page, pageSize}` |
+| 1 | `GET /api/student/practice-history?page=&pageSize=&subjectId=` | `{items:[{source, sessionId, subjectId, title, module, startedAt, completedAt, totalCount, correctCount, unscoredCount}], total, page, pageSize}` |
 | 2 | `GET /api/student/practice-history/:source/:sessionId` | `{session:{同列表项}, questions:[{questionId, questionOrder, answerText, isCorrect, score, method, analysis, judgedAt, questionContent, materialText, materialUrl, materialPosition, questionAnswer, questionAnalysis, questionSource, questionNo, refType, refId, sentenceIndex, passageTitle, passageSentence, canRedo, canSimilar}]}`；`questionNo` 是专项题在原试卷中的题号（`paper_questions.question_no`；无卷关联时退回 `questions.group_order`；考试恒 null，`questionOrder` 已是卷内题号）；`materialText` 只放题中素材（文章题为 null）、`materialUrl` 为文章 Markdown 相对地址（无文章为 null） |
 | 3 | `POST /api/student/practice-history/:source/:sessionId/questions/:questionId/redo`（**201**） | `{questions:[{questionId,text,type,options,materialText,materialUrl}], title}`；不建会话、不发分 |
 | 4 | `POST /api/student/practice-history/:source/:sessionId/questions/:questionId/similar`（**201**） | body `{count:1\|2\|3\|5}`；返回 `{questions:[...], sessionId, title}`；0 题时 `questions:[]`、`sessionId:null` |

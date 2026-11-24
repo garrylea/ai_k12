@@ -8700,7 +8700,10 @@ components:
           type: integer
         correctCount:
           type: integer
-      required: [source, sessionId, subjectId, startedAt, totalCount, correctCount]
+        unscoredCount:
+          type: integer
+          description: 无参考答案、不判不计的题数
+      required: [source, sessionId, subjectId, startedAt, totalCount, correctCount, unscoredCount]
 
     PracticeHistoryQuestion:
       type: object

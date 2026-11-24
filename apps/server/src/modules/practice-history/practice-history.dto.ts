@@ -23,7 +23,7 @@ export interface PracticeHistoryItem {
   /** 计分题数（已排除 method='no_standard_answer' 的无参考答案题）。 */
   totalCount: number;
   correctCount: number;
-  /** 无参考答案、不判不计的题数（974 卷整卷无答案时 totalCount=0、unscoredCount=35）。 */
+  /** 无参考答案、不判不计的题数（974 卷整卷无答案时 totalCount=0、unscoredCount=32（在架题；另有 3 道 is_active=0））。 */
   unscoredCount: number;
 }
 

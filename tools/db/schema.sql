@@ -1627,7 +1627,7 @@ CREATE TABLE IF NOT EXISTS special_practice_sessions (
 CREATE TABLE IF NOT EXISTS special_answer_records (
   id              BIGINT AUTO_INCREMENT PRIMARY KEY,
   session_id      BIGINT      NOT NULL,
-  question_id     BIGINT      DEFAULT NULL COMMENT '数学/物理/化学/英语专项非空；语文三专项/英语背词为 NULL',
+  question_id     BIGINT      DEFAULT NULL COMMENT '数学/物理/化学/英语/语文试题类专项（cn_targeted）非空；语文三专项/英语背词为 NULL',
   ref_type        VARCHAR(24) DEFAULT NULL COMMENT 'question|passage|word',
   ref_id          BIGINT      DEFAULT NULL COMMENT 'passage_id / word_id',
   sentence_index  SMALLINT    DEFAULT NULL COMMENT '解释/含义专项逐句',
