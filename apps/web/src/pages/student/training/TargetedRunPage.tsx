@@ -27,7 +27,7 @@ import { parseRunHandoff } from './run-handoff';
 import { useSessionPointsCompletion } from './session-completion';
 import { newSessionUid } from '@/utils/sessionUid';
 import { SessionPointsRetryNotice } from './SessionPointsRetryNotice';
-import { parseSubjectId, subjectName, SUBJECT_CHINESE } from '@/constants';
+import { getTrainingSubject, parseSubjectId, subjectName } from '@/constants';
 
 /** 配置页写入的题单键（读后即删，防止刷新后重复进入旧题单）。 */
 const SESSION_KEY = 'training:targeted';
@@ -49,8 +49,8 @@ export default function TargetedRunPage() {
     returnToRaw && /^\/student\/practice-history\/(exam|special)\/\d+$/.test(returnToRaw)
       ? returnToRaw
       : `/student/training/targeted${subjectQuery}`;
-  /** 补偿套题当前只支持数学（后端 remediation 不认语文会话）。 */
-  const remediationSupported = subjectId !== SUBJECT_CHINESE;
+  /** 仅数学显示补偿套题，读学科配置（后端 remediation 也只认 math_targeted 会话）。 */
+  const remediationSupported = getTrainingSubject(subjectId)?.supportsRemediation === true;
 
   const [phase, setPhase] = useState<Phase>('answering');
   const [hints, setHints] = useState<Record<string, string>>({});

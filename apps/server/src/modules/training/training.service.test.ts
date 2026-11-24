@@ -1310,6 +1310,32 @@ describe('TrainingService.judgeTraining — special_answer_records 旁路写入'
     }));
   });
 
+  it('英语 subjectId=3 映射 module=en_targeted，不再串到 math_targeted', async () => {
+    const deps = mk({
+      judgeCore: { judgeQuestion: vi.fn().mockResolvedValue(judgeResult) },
+    });
+    await mkSvc(deps).judgeTraining({
+      studentId: 7, questionId: 100, subjectId: 3, studentAnswer: 'B', source: 'targeted',
+      sessionUid: 'abc-en', questionOrder: 1,
+    });
+    expect(deps.specialSessionsRepo.upsertSession).toHaveBeenCalledWith(expect.objectContaining({
+      module: 'en_targeted', subjectId: 3,
+    }));
+  });
+
+  it('道法 subjectId=9 映射 module=politics_targeted（既有缺口一并修）', async () => {
+    const deps = mk({
+      judgeCore: { judgeQuestion: vi.fn().mockResolvedValue(judgeResult) },
+    });
+    await mkSvc(deps).judgeTraining({
+      studentId: 7, questionId: 100, subjectId: 9, studentAnswer: 'C', source: 'targeted',
+      sessionUid: 'abc-pol', questionOrder: 1,
+    });
+    expect(deps.specialSessionsRepo.upsertSession).toHaveBeenCalledWith(expect.objectContaining({
+      module: 'politics_targeted', subjectId: 9,
+    }));
+  });
+
   // 未作答占位行（2026-11-06）：前端 Task 9 起在首题判题时带上整轮题单。
   describe('plannedQuestionIds — 整轮题单落库', () => {
     const mkJudge = (over: any = {}) => mk({

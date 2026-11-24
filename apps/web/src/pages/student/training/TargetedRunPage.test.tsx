@@ -438,6 +438,23 @@ describe('TargetedRunPage 完成发分', () => {
   });
 
   /**
+   * 补偿入口按学科配置放行（只有数学 supportsRemediation=true）：
+   * 英语同样有答错题、会话也正常建了，但既不能画询问卡、连槽位都不能留。
+   */
+  it('英语（subjectId=3）判错后仍不显示相似题补偿入口', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+    judgeMock.mockResolvedValue({ ...JUDGED, isCorrect: false });
+
+    await answerOnlyQuestion('/?subjectId=3');
+
+    expect(await screen.findByText('答题结果')).toBeInTheDocument();
+    expect(screen.queryByTestId('remediation-offer-slot')).toBeNull();
+    expect(screen.queryByText(/本次错了/)).toBeNull();
+    expect(screen.queryByRole('button', { name: '生成练习' })).toBeNull();
+  });
+
+  /**
    * 会话结束后的守卫回归钉子（2026-09-22 用户报障）：
    * 答完最后一题后点结果页「确认」= 正常结束、回配置页，**不得**再弹
    * 「确认离开 / 继续答题」—— 那是「还没答完就想走」的确认，题都答完了就不该出现。

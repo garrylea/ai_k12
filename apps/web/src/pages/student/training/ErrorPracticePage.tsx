@@ -9,7 +9,7 @@ import {
 } from '@/components/markdown';
 import { Button, Card, PageHeader, Skeleton, Tag } from '@/components/base';
 import { StudentAccountActions } from '@/components/business';
-import { parseSubjectId, subjectHomePath, SUBJECT_CHINESE, SUBJECT_MATH } from '@/constants';
+import { getTrainingSubject, parseSubjectId, subjectHomePath, SUBJECT_MATH } from '@/constants';
 import {
   getKnowledgePoints,
   getTrainingErrorBook,
@@ -249,7 +249,7 @@ export default function ErrorPracticePage() {
           <PageHeader
             to={subjectHomePath(subjectId)}
             caption="返回训练"
-            title={subjectId === SUBJECT_CHINESE ? '语文 · 错题' : '错题练习'}
+            title={getTrainingSubject(subjectId)?.errorPracticeTitle ?? '错题练习'}
             actions={<StudentAccountActions />}
           />
 

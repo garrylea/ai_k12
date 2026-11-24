@@ -57,6 +57,32 @@ function renderAt(path: string) {
   return { router, ...render(<RouterProvider router={router} />) };
 }
 
+describe('ErrorPracticePage 标题读学科配置', () => {
+  it('英语（subjectId=3）标题为「英语 · 错题练习」', async () => {
+    renderAt('/student/training/errors?subjectId=3');
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: '英语 · 错题练习' }),
+    ).toBeInTheDocument();
+  });
+
+  it('语文（subjectId=2）标题仍为「语文 · 错题」（改用配置后行为不变）', async () => {
+    renderAt('/student/training/errors?subjectId=2');
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: '语文 · 错题' }),
+    ).toBeInTheDocument();
+  });
+
+  it('数学（缺省）标题仍为「错题练习」', async () => {
+    renderAt('/student/training/errors');
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: '错题练习' }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe('ErrorPracticePage ?kpId= 预填', () => {
   it('带 kpId 时首屏查询就带上该 kpId', async () => {
     renderAt('/student/training/errors?kpId=11');

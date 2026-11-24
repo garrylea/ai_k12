@@ -1,11 +1,11 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
-/** 8 个 module 值（语文专项 + 三专项 + 英语 + 数/理/化专项）。 */
+/** 专项会话 module 值：语文三专项 + 英语背单词 + 各学科 targeted（英语/道法已补齐）。 */
 export type SpecialSessionModule =
   | 'chinese_dictation' | 'chinese_interpretation' | 'chinese_meaning'
-  | 'en_vocabulary' | 'cn_targeted'
-  | 'math_targeted' | 'physics_targeted' | 'chemistry_targeted';
+  | 'en_vocabulary' | 'cn_targeted' | 'en_targeted'
+  | 'math_targeted' | 'physics_targeted' | 'chemistry_targeted' | 'politics_targeted';
 
 export interface UpsertSessionInput {
   sessionUid: string;

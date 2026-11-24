@@ -8,7 +8,7 @@ import {
   getExamPapers,
   type ExamPaper,
 } from '@/services/api';
-import { parseSubjectId, subjectHomePath, SUBJECT_CHINESE } from '@/constants';
+import { getTrainingSubject, parseSubjectId, subjectHomePath } from '@/constants';
 
 /** 时长档（分钟）；推荐时长四舍五入到最近档位。 */
 const DURATION_OPTIONS = [60, 75, 90, 120] as const;
@@ -208,7 +208,7 @@ export default function ExamListPage() {
           <PageHeader
             to={subjectHomePath(subjectId)}
             caption="返回训练"
-            title={subjectId === SUBJECT_CHINESE ? '语文 · 真题' : '考试'}
+            title={getTrainingSubject(subjectId)?.examListTitle ?? '考试'}
             actions={<StudentAccountActions />}
           />
 
