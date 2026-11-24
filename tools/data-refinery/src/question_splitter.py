@@ -672,6 +672,18 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
 
 _CELL_DIGITS_RE = re.compile(r"^\d{1,2}$")
 _CELL_CHOICE_RE = re.compile(r"^[A-D]{1,4}$")
+_CELL_SPACED_CHOICE_RE = re.compile(r"^[A-D](?:\s+[A-D]){0,3}$")
+
+
+def _compact_choice_cells(cells: list[str]) -> list[str]:
+    """把空格分隔的多选答案格（'A B C'）压成连续字母（'ABC'）。
+
+    西城 2026 期末物理卷答案表的多选写作 `B D` / `A B C`，直接套
+    _CELL_CHOICE_RE 会整组不匹配、被静默跳过（单选单字母正常，故只有多选全丢）。
+    只动这类「字母+空白+字母」的格，其余单元格原样返回。
+    """
+    return [re.sub(r"\s+", "", c) if _CELL_SPACED_CHOICE_RE.match(c) else c
+            for c in cells]
 
 
 def _table_rows(line: str) -> list[list[str]]:
@@ -707,7 +719,8 @@ def _number_cells(cells: list[str]) -> list[str]:
 
 
 def _choice_body(cells: list[str]) -> list[str]:
-    body = _strip_leading_label(cells, lambda c: bool(_CELL_CHOICE_RE.match(c)))
+    body = _strip_leading_label(_compact_choice_cells(cells),
+                                lambda c: bool(_CELL_CHOICE_RE.match(c)))
     while body and not body[-1]:
         body.pop()
     return body
@@ -762,7 +775,7 @@ def _parse_vertical(rows: list[list[str]]) -> dict[int, str]:
     result: dict[int, str] = {}
     pairs = 0
     for row in rows:
-        body = [c for c in row if c]  # 空角格/合并占位不参与
+        body = [c for c in _compact_choice_cells(row) if c]  # 空角格/合并占位不参与
         if len(body) != 2 or not _CELL_DIGITS_RE.match(body[0]):
             continue
         if not _CELL_CHOICE_RE.match(body[1]):

@@ -108,3 +108,32 @@ def test_count_mismatch_writes_nothing_for_that_pair():
         "</table>"
     )
     assert parse_answer_table(line) == {}
+
+
+def test_spaced_multiselect_answers_in_horizontal_table_are_compacted():
+    """西城 2026 期末物理卷：多选答案格用空格分隔（B D / A B C）。
+
+    旧正则 ^[A-D]{1,4}$ 不接受空格 → 整组 16–20 被静默跳过（单选单字母正常，
+    故只有多选题全丢）。必须压成连续字母再校验、入库。
+    """
+    line = (
+        "<table>"
+        "<tr><td>题号</td><td>16</td><td>17</td><td>18</td><td>19</td><td>20</td></tr>"
+        "<tr><td>答案</td><td>B D</td><td>A D</td><td>A B C</td><td>C D</td><td>A B D</td></tr>"
+        "</table>"
+    )
+    assert parse_answer_table(line) == {
+        16: "BD", 17: "AD", 18: "ABC", 19: "CD", 20: "ABD",
+    }
+
+
+def test_spaced_multiselect_answers_in_vertical_table_are_compacted():
+    """纵向表同样要认空格分隔的多选答案。"""
+    line = (
+        "<table>"
+        "<tr><td>题号</td><td>答案</td></tr>"
+        "<tr><td>16</td><td>B D</td></tr>"
+        "<tr><td>17</td><td>A B C</td></tr>"
+        "</table>"
+    )
+    assert parse_answer_table(line) == {16: "BD", 17: "ABC"}
