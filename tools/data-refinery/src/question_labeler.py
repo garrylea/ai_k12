@@ -107,6 +107,32 @@ def apply_material_sections_exemption(labeled) -> int:
     return cleared
 
 
+# 完形题题干为空是正常形态：空格所在句在共享文章里，选项自带作答信息。
+_CLOZE_STEM_CLAIM_RE = re.compile(r"题干(?:为空|缺失)|仅显示为?[‘'“]?题干")
+
+
+def apply_english_cloze_exemption(labeled, subject: str = "english") -> int:
+    if subject != "english":
+        return 0
+    from subject_strategies import get_strategy
+    strategy = get_strategy("english")
+    cleared = 0
+    for lab in labeled:
+        if (lab.is_complete or (lab.group_id or "").strip() != "二"
+                or not (lab.material_text or "").strip()):
+            continue
+        issues = " ".join(str(i) for i in (lab.completeness_issues or []))
+        if not _CLOZE_STEM_CLAIM_RE.search(issues):
+            continue
+        _, opts = strategy.split_options(lab.content or "")
+        if not opts or len(opts) != 4 or not all((o.get("text") or "").strip() for o in opts):
+            continue
+        lab.is_complete = True
+        lab.completeness_issues = []
+        cleared += 1
+    return cleared
+
+
 def apply_material_subq_exemption(labeled) -> int:
     """材料题「只切到第(1)问」的误判：LLM 说只有第 1 问，但 content 里确有 (2)。
 
@@ -653,6 +679,7 @@ class QuestionLabeler:
         # 判断题同理：陈述句没有「设问」是题型本身决定的，不是缺陷。
         # 只有题干为空或明显截断才保留缺陷（2026-11-06 海淀道法 8/10 误判）。
         apply_true_false_exemption([labeled])
+        apply_english_cloze_exemption([labeled], self._subject)
         # 材料题「只切到第(1)问」的断言可用 Python 直接核对（题 26 误判）
         apply_material_subq_exemption([labeled])
         # 「匹配不到知识点」是我们没建 KP，不是题目缺陷

@@ -948,3 +948,38 @@ def test_material_subq_exemption_does_not_clear_source_issues():
     lab.completeness_issues = ["题干中缺失具体的三段视频素材内容（通常以①②③列出）"]
     assert apply_material_subq_exemption([lab]) == 0
     assert lab.is_complete is False
+
+
+def _cloze_labeled(content, *, material="## Passage\nText", issues=None):
+    return LabeledQuestion(
+        group_order=13, group_id="二", content=content,
+        answer="A", explanation=None, material_text=material,
+        is_complete=False,
+        completeness_issues=issues or ["题干为空，仅显示为'题干：'"],
+    )
+
+
+_OPTIONS_4 = "A. simply\nB. hopelessly\nC. mainly\nD. properly"
+
+
+def test_english_cloze_empty_stem_exemption():
+    from question_labeler import apply_english_cloze_exemption
+
+    lab = _cloze_labeled(_OPTIONS_4)
+    assert apply_english_cloze_exemption([lab], "english") == 1
+    assert lab.is_complete is True and lab.completeness_issues == []
+
+
+def test_english_cloze_exemption_requires_options_and_stem_claim():
+    from question_labeler import apply_english_cloze_exemption
+
+    few = _cloze_labeled("A. simply\nB. hopelessly")
+    assert apply_english_cloze_exemption([few], "english") == 0
+    assert few.is_complete is False
+
+    other = _cloze_labeled(_OPTIONS_4, issues=["缺图"])
+    assert apply_english_cloze_exemption([other], "english") == 0
+    assert other.is_complete is False
+
+    no_material = _cloze_labeled(_OPTIONS_4, material=None)
+    assert apply_english_cloze_exemption([no_material], "english") == 0
