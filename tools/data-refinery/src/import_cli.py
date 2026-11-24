@@ -175,6 +175,9 @@ def parse_args(argv=None):
                             (args.skip_load, "--skip-load")):
             if given:
                 parser.error(f"--reload-paper 不能与 {flag} 同用")
+    # 全范围跑（不传 --file）时不会经过 _resolve_file 的命中分支，这里给默认值，
+    # 保证下游可以无条件读取。
+    args._paired_answer_rel = None
     return args
 
 

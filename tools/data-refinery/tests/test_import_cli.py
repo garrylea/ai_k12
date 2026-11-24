@@ -61,6 +61,9 @@ def test_main_runs_stages_in_order(monkeypatch):
     calls = []
     for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
         monkeypatch.setattr(import_cli, name, lambda argv, n=name: calls.append((n, argv)))
+    # 元数据阶段会读真实 output/md 并调 LLM，答案回填会扫真实 published；单测只管编排顺序
+    monkeypatch.setattr(import_cli, "paper_meta_main", lambda argv: 0)
+    monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
     assert import_cli.main(["--subject", "语文", "--dry-run"]) == 0
     assert [c[0] for c in calls] == ["convert_main", "extract_main", "publish_main", "db_loader_main"]
     # 每阶段都带范围参数
@@ -72,6 +75,7 @@ def test_main_skip_flags(monkeypatch):
     calls = []
     for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
         monkeypatch.setattr(import_cli, name, lambda argv, n=name: calls.append(n))
+    monkeypatch.setattr(import_cli, "paper_meta_main", lambda argv: 0)
     import_cli.main(["--subject", "语文", "--skip-convert", "--skip-load"])
     assert calls == ["extract_main", "publish_main"]
 
@@ -87,6 +91,9 @@ def _stub_stages(monkeypatch):
     calls = []
     for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
         monkeypatch.setattr(import_cli, name, lambda argv, n=name: calls.append(n))
+    # 这两个阶段会读真实 output/ 并调 LLM / 扫 published；只管编排的单测不跑它们
+    monkeypatch.setattr(import_cli, "paper_meta_main", lambda argv: 0)
+    monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
     return calls
 
 
@@ -157,6 +164,7 @@ def test_single_hit_rewrites_selector_for_all_stages(monkeypatch, capsys):
     for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
         monkeypatch.setattr(import_cli, name, lambda argv, n=name: seen.append((n, argv)))
     monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
+    monkeypatch.setattr(import_cli, "paper_meta_main", lambda argv: 0)
     monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
         Path("道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治"),
     ], []))
@@ -176,6 +184,7 @@ def test_multi_hit_tty_selects_one(monkeypatch, capsys):
     for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
         monkeypatch.setattr(import_cli, name, lambda argv, n=name: seen.append((n, argv)))
     monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
+    monkeypatch.setattr(import_cli, "paper_meta_main", lambda argv: 0)
     monkeypatch.setattr(import_cli, "_collect_candidates", lambda cfg: ([
         Path("道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治"),
         Path("道法/初中/first/2026/2026北京海淀·人大附中初三（上）期中道德与法治"),
@@ -225,6 +234,7 @@ def _stub_all(monkeypatch):
     calls = []
     for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
         monkeypatch.setattr(import_cli, name, lambda argv, n=name: calls.append(n))
+    monkeypatch.setattr(import_cli, "paper_meta_main", lambda argv: 0)
     monkeypatch.setattr(
         import_cli, "answers_backfill",
         lambda cfg, scope, **kw: calls.append(("answers", kw)),
@@ -690,6 +700,11 @@ def test_parse_args_accepts_paper_id():
     assert parse_args(["--answers", "a.md", "--paper-id", "362"]).paper_id == 362
 
 
+def test_parse_args_defaults_paired_answer_to_none():
+    """不传 --file（全范围跑）时下游也能无条件读取 _paired_answer_rel。"""
+    assert parse_args(["--subject", "语文"])._paired_answer_rel is None
+
+
 def test_paper_id_requires_answers():
     import pytest
 
@@ -859,6 +874,7 @@ def test_files_batch_resolves_each_keyword(monkeypatch):
     for name in ("convert_main", "extract_main", "publish_main", "db_loader_main"):
         monkeypatch.setattr(import_cli, name, lambda argv, n=name: 0)
     monkeypatch.setattr(import_cli, "answers_backfill", lambda *a, **k: None)
+    monkeypatch.setattr(import_cli, "paper_meta_main", lambda argv: 0)
 
     def fake_collect(cfg):
         stub_calls.append(1)
