@@ -8,12 +8,20 @@ const MAX_EDGE = 1600;
 /** 贴图初始宽 = board 宽 × 该系数（等比；原图更小则按原图） */
 const INIT_WIDTH_FACTOR = 0.6;
 
-/** 事件目标是输入框/可编辑元素时返回 true（粘贴/删除键此时必须放行，不拦截） */
+/** 不承载文字编辑的 input 类型：聚焦在它们上面时撤销/删除快捷键仍应作用于草稿。
+ *  典型就是属性条的「线宽」滑杆 —— 拖过它之后焦点留在 range 上，曾导致 Ctrl+Z / Delete 静默失效。 */
+const NON_TEXT_INPUT_TYPES = new Set([
+  'range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'file', 'color', 'image',
+]);
+
+/** 事件目标是文字输入/可编辑元素时返回 true（粘贴/删除/撤销此时必须放行，不拦截） */
 export function isEditableTarget(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null;
   if (!el || typeof el.tagName !== 'string') return false;
   const tag = el.tagName.toLowerCase();
-  return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+  if (tag === 'textarea' || tag === 'select' || el.isContentEditable) return true;
+  if (tag === 'input') return !NON_TEXT_INPUT_TYPES.has((el as HTMLInputElement).type);
+  return false;
 }
 
 /** 图片文件 → 压缩 data URL + 尺寸。FileReader 读出后经 Image 解码取自然尺寸，超限走离屏 canvas。 */

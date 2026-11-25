@@ -16,6 +16,7 @@ import { DraftImageLayer } from './DraftImageLayer';
 import { fileToDraftImage, draftImageFromSrc, isEditableTarget } from './draft-image-utils';
 import { registerDropTarget } from './draft-image-drag';
 import { strokePivots, nearestPivot, type PivotCandidate } from './draft-shape-pivots';
+import { rotateHandleFor, hitRotateHandle, ROTATE_HANDLE_R, type RotateHandle } from './draft-rotate-handle';
 import { drawStroke, drawStrokes, renderDraftSnapshot } from './draft-render';
 
 type Tool = 'pen' | 'dot' | 'eraser' | 'select' | 'compass' | 'line' | 'rect' | 'ellipse' | 'triangle';
@@ -201,37 +202,12 @@ function unionStrokeBounds(sel: Iterable<Stroke>): { x0: number; y0: number; x1:
   return out;
 }
 
-/** 旋转手柄：默认在选区上方 26px；上方空间不足（y0 < 48）时放到下方，避免顶出画布抓不到 */
-const ROTATE_HANDLE_GAP = 26;
-const ROTATE_HANDLE_R = 6;
-/** 命中半径 20px：iPad 手指够得着（本体只有 12px 直径） */
-const ROTATE_HANDLE_HIT = 20;
 /** Shift 吸附步长 15° */
 const ROTATE_SNAP = Math.PI / 12;
 /** 小于 0.5° 视为没有旋转（不记历史、不落盘） */
 const MIN_ROTATE_ANGLE = Math.PI / 360;
 /** 选中移动的净位移下限（px）：拖出去又拖回原位（净位移小于它）不算一次移动，不记历史 */
 const MIN_MOVE_PX = 0.5;
-
-interface RotateHandle {
-  x: number;
-  y: number;
-  /** 连线接在包围盒的哪条边（上方手柄接 y0，下方手柄接 y1） */
-  edgeY: number;
-  below: boolean;
-}
-
-function rotateHandleFor(b: { x0: number; y0: number; x1: number; y1: number }): RotateHandle {
-  const cx = (b.x0 + b.x1) / 2;
-  return b.y0 >= 48
-    ? { x: cx, y: b.y0 - ROTATE_HANDLE_GAP, edgeY: b.y0 - 4, below: false }
-    : { x: cx, y: b.y1 + ROTATE_HANDLE_GAP, edgeY: b.y1 + 4, below: true };
-}
-
-function hitRotateHandle(b: { x0: number; y0: number; x1: number; y1: number }, x: number, y: number): boolean {
-  const h = rotateHandleFor(b);
-  return Math.hypot(h.x - x, h.y - y) <= ROTATE_HANDLE_HIT;
-}
 
 /** 旋转中心的候选点与命中判定在 `draft-shape-pivots.ts`（纯几何）：
  *  直线 = 两端 + 中点，矩形 = 中心 + 四角，其它图形没有候选（仍绕选区包围盒中心）。
@@ -739,7 +715,7 @@ export function DraftWhiteboard({
   const selectedStrokesRef = useRef<Set<Stroke>>(new Set());
   const selectedImageIdsRef = useRef<Set<string>>(new Set());
   const selectGestureRef = useRef<
-    | { kind: 'move'; startX: number; startY: number; lastX: number; lastY: number; moved: boolean; pivotPick: { x: number; y: number } | null; origImages: Map<string, { x: number; y: number }> }
+    | { kind: 'move'; startX: number; startY: number; lastX: number; lastY: number; moved: boolean; pivotPick: { x: number; y: number } | null; origImages: Map<string, { x: number; y: number }>; blankInside: boolean }
     | { kind: 'marquee'; startX: number; startY: number; x: number; y: number }
     | RotateGesture
     | null
@@ -773,6 +749,12 @@ export function DraftWhiteboard({
     pushHistory();
   }, [pushHistory]);
 
+  /** 画板可视尺寸（CSS px）：旋转旋钮的夹取边界。只读 ref，dep-free 的 redraw 也是同一口径 */
+  const boardSize = () => {
+    const c = canvasRef.current;
+    return { w: c?.clientWidth ?? 0, h: c?.clientHeight ?? 0 };
+  };
+
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
@@ -802,7 +784,7 @@ export function DraftWhiteboard({
         g && g.kind === 'marquee' ? g : null,
         selB
           ? {
-              handle: rotateHandleFor(selB),
+              handle: rotateHandleFor(selB, { w: canvas.clientWidth, h: canvas.clientHeight }),
               deg: g && g.kind === 'rotate' ? (g.total * 180) / Math.PI : null,
               pivots: shapePivots?.candidates ?? null,
               activePivot,
@@ -1248,7 +1230,7 @@ export function DraftWhiteboard({
   const selectDown = (x: number, y: number, shiftKey: boolean) => {
     // 旋转手柄的命中优先于元素命中：手柄常常压在选择框外/贴图上方，否则会变成拖走底下那条笔画
     const selBounds = selectedStrokesRef.current.size ? unionStrokeBounds(selectedStrokesRef.current) : null;
-    if (selBounds && hitRotateHandle(selBounds, x, y)) {
+    if (selBounds && hitRotateHandle(selBounds, x, y, boardSize())) {
       startRotate(x, y, selBounds);
       return;
     }
@@ -1303,7 +1285,10 @@ export function DraftWhiteboard({
     const candidates = only ? strokePivots(only.points)?.candidates ?? null : null;
     const picked = candidates ? nearestPivot(candidates, x, y, PIVOT_HIT) : null;
     const pivotPick = picked ? { x: picked.x, y: picked.y } : null;
-    selectGestureRef.current = { kind: 'move', startX: x, startY: y, lastX: x, lastY: y, moved: false, pivotPick, origImages };
+    // blankInside：按在「选中包围盒内的空白」上。拖动照旧移动整块选区（抓取区），
+    // 但**点按**（没位移）必须清掉选区 —— 否则包围盒盖住点按点时永远取消不了选中，
+    // 而大图形/旋转过的图形包围盒常常铺满整块画板，学生就表现为「点哪都在拖图形」。
+    selectGestureRef.current = { kind: 'move', startX: x, startY: y, lastX: x, lastY: y, moved: false, pivotPick, origImages, blankInside: !hit };
   };
 
   const selectMove = (x: number, y: number, shiftKey: boolean) => {
@@ -1316,7 +1301,7 @@ export function DraftWhiteboard({
         const only = singleSelectedStroke(selectedStrokesRef.current);
         const candidates = only ? strokePivots(only.points)?.candidates ?? null : null;
         if (candidates && nearestPivot(candidates, x, y, PIVOT_HIT)) canvas.style.cursor = 'pointer';
-        else canvas.style.cursor = (b && hitRotateHandle(b, x, y)) || insideSelectionBounds(x, y) ? 'grab' : 'default';
+        else canvas.style.cursor = (b && hitRotateHandle(b, x, y, boardSize())) || insideSelectionBounds(x, y) ? 'grab' : 'default';
       }
       return;
     }
@@ -1404,6 +1389,13 @@ export function DraftWhiteboard({
         redraw();
         const canvas = canvasRef.current;
         if (canvas) canvas.style.cursor = 'pointer';
+        return;
+      }
+      // 没位移、按的是选中框内的空白：点按空白 = 取消选中（与「按在框外空白」同语义）
+      if (!g.moved && g.blankInside) {
+        setSelection(new Set(), new Set());
+        const canvas = canvasRef.current;
+        if (canvas) canvas.style.cursor = 'default';
         return;
       }
       if (g.moved) {
@@ -1605,6 +1597,9 @@ export function DraftWhiteboard({
     e.currentTarget.setPointerCapture(e.pointerId);
     // scroll-y：每根落到画布的新指针都先记录（含第二根）；两指齐下进入平移，打断进行中的单指笔迹/圆规画弧
     if (scrollMode === 'scroll-y') {
+      // 上一次手势的 up 若丢了（切窗口/系统打断），表里会留下陈旧记录：同一 pointerId 重按时先清掉。
+      // 否则一次「重按」会被数成两指齐下 → 进入平移态，画布从此不响应落笔（只有重开面板才好）。
+      activePointersRef.current.delete(e.pointerId);
       const wasPanning = panRef.current;
       const prevCount = activePointersRef.current.size;
       activePointersRef.current.set(e.pointerId, { y: e.clientY });
@@ -1616,7 +1611,7 @@ export function DraftWhiteboard({
           drawingRef.current = false;
           const strokes = strokesRef.current;
           const last = strokes[strokes.length - 1];
-          if (last && last.points.length === 1) strokes.pop();
+          if (last && last.points.length === 1) strokesRef.current = strokes.slice(0, -1);
           redraw();
         }
         if (compassRef.current.phase !== 'idle' && compassRef.current.phase !== 'ready') {
@@ -1634,7 +1629,12 @@ export function DraftWhiteboard({
         eraserActiveRef.current = false; // 平移接管橡皮拖拽：撤销不再被这个手势挡住（脏标记留给抬手冲）
         return;
       }
-      if (panRef.current) return; // 平移中（第三指及以上）：仅记录，不再起笔
+      if (panRef.current) {
+        // 只剩当前这一根（另一根的 up 丢了）却还在平移态：就地复位，继续正常落笔；
+        // 真有两根及以上（第三指）才继续把这次按下当平移、不起笔
+        if (activePointersRef.current.size < 2) panRef.current = false;
+        else return;
+      }
     }
     const p = pointFromEvent(e);
     if (tool === 'eraser') {
@@ -1711,6 +1711,8 @@ export function DraftWhiteboard({
     if (tool === 'dot') return; // 点工具：落点已定，拖动不追加新点、也不连成线
     if (!drawingRef.current) return;
     const stroke = strokesRef.current[strokesRef.current.length - 1];
+    // 残留态兜底：一笔还没抬手时被「清空/撤销」清掉了笔迹数组，别再往 undefined 上 push（否则每次 move 抛错、笔画不再跟手）
+    if (!stroke) { drawingRef.current = false; return; }
     stroke.points.push(p);
     redraw();
   };
@@ -1723,29 +1725,24 @@ export function DraftWhiteboard({
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     endPointer(e);
-    if (tool === 'eraser') { eraserActiveRef.current = false; flushEraserHistory(); return; }
-    if (tool === 'compass') {
-      const p = pointFromEvent(e);
-      compassUp(p.x, p.y);
-      return;
+    const p = pointFromEvent(e);
+    // 收尾按「起手时的手势」而不是「当前工具」：手势进行中被切走工具（触屏第二指/手掌点到工具条）时，
+    // 旧写法只跑当前工具的分支，起手那个手势的 ref 永远留着 —— gestureBusy() 恒为 true，
+    // 撤销/重做从此静默失效，移动过的坐标也只改了内存没落盘。各收尾函数对「无该手势」都是幂等的。
+    if (drawingRef.current) {
+      drawingRef.current = false;
+      if (persist) setDraft(questionId, strokesRef.current);
+      pushHistory();
     }
-    if (tool === 'select') {
-      const p = pointFromEvent(e);
-      selectUp(p.x, p.y);
-      return;
+    if (eraserActiveRef.current) {
+      eraserActiveRef.current = false;
+      flushEraserHistory();
     }
-    if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
-      shapeUp();
-      return;
-    }
-    if (tool === 'triangle') {
-      triangleUp();
-      return;
-    }
-    if (!drawingRef.current) return;
-    drawingRef.current = false;
-    if (persist) setDraft(questionId, strokesRef.current);
-    pushHistory();
+    const c = compassRef.current;
+    if (c.phase === 'placing' || c.phase === 'resizing' || c.phase === 'drawing') compassUp(p.x, p.y);
+    if (selectGestureRef.current) selectUp(p.x, p.y);
+    if (shapeGestureRef.current) shapeUp();
+    if (triDragRef.current !== null) triangleUp();
   };
 
   // 系统打断（来电/手势接管）或捕获丢失：指针从表中移除；中断单指笔迹不落盘、圆规/选中手势收尾
@@ -1761,6 +1758,9 @@ export function DraftWhiteboard({
   };
   const handleLostPointerCapture = (e: React.PointerEvent<HTMLCanvasElement>) => {
     endPointer(e);
+    // 捕获真的丢了（元素被移除/被别的元素抢走）时 pointerup 可能永远不来：
+    // 不清 drawingRef 就是「撤销被 gestureBusy 永久挡住」；与 pointercancel 同口径（中断的笔迹不落盘）
+    drawingRef.current = false;
     eraserActiveRef.current = false; // 捕获丢失等同抬手：橡皮手势结束
     flushEraserHistory(); // 对无橡皮手势幂等
     cancelCompass(); // 正常抬手后此事件仍会触发，各 cancel 对无手势态幂等
@@ -1774,6 +1774,9 @@ export function DraftWhiteboard({
     imagesRef.current = [];
     setImages([]);
     if (persist) { setDraft(questionId, []); setDraftImages(questionId, []); }
+    // 清空可能发生在另一个输入源还按着画布时（触屏第二指）：顺手结束进行中的笔/橡皮手势
+    drawingRef.current = false;
+    eraserActiveRef.current = false;
     updateCompass({ phase: 'idle' }); // 圆规一并重置（含重绘）
     shapeGestureRef.current = null;
     resetTriangle();

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { MutableRefObject } from 'react';
 import { cleanup, render, fireEvent, waitFor } from '@testing-library/react';
 import { DraftWhiteboard } from './DraftWhiteboard';
+import { rotateHandleFor } from './draft-rotate-handle';
 import { clearDraft, getDraft, getDraftImages, setDraftImages } from './draft-store';
 import { beginImageDrag } from './draft-image-drag';
 
@@ -753,5 +754,134 @@ describe('草稿白板：属性条（墨色 / 线型 / 线宽）', () => {
     const second = getDraft('q1')[1];
     expect(second.color).toBeUndefined();
     expect(second.dash).toBeUndefined();
+  });
+});
+
+describe('草稿白板：手势进行中切工具（触屏第二指/手掌点到工具条）', () => {
+  it('手写按下后切走工具再抬手：这一笔照样收尾落盘，撤销不被门闩挡住', () => {
+    const { container, canvas } = setup();
+    penLine(canvas, 100);
+    expect(getDraft('q1')).toHaveLength(1);
+
+    // 第一根手指还按在画布上，第二根手指点到了工具条（切到橡皮）
+    fireEvent.pointerDown(canvas, { pointerId: 2, pointerType: 'touch', button: 0, clientX: 120, clientY: 200 });
+    fireEvent.pointerMove(canvas, { pointerId: 2, pointerType: 'touch', buttons: 1, clientX: 160, clientY: 200 });
+    pickTool(container, '橡皮');
+    fireEvent.pointerUp(canvas, { pointerId: 2, pointerType: 'touch', clientX: 160, clientY: 200 });
+
+    // 进行中的那一笔按抬手位置收尾：既不丢掉，也不会永远挂在 gestureBusy 里
+    expect(getDraft('q1')).toHaveLength(2);
+    fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+    expect(getDraft('q1')).toHaveLength(1);
+    fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+    expect(getDraft('q1')).toHaveLength(0);
+  });
+
+  it('选中拖动中切走工具再抬手：位移落盘 + 可撤销', () => {
+    const { container, canvas } = setup();
+    penLine(canvas, 100);
+    pickTool(container, '选中');
+
+    fireEvent.pointerDown(canvas, { pointerId: 3, pointerType: 'mouse', button: 0, clientX: 150, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 3, pointerType: 'mouse', buttons: 1, clientX: 250, clientY: 180 });
+    pickTool(container, '手写笔'); // 手势中切走
+    fireEvent.pointerUp(canvas, { pointerId: 3, pointerType: 'mouse', clientX: 250, clientY: 180 });
+
+    expect(getDraft('q1')[0].points[0].x).toBeCloseTo(200, 5);
+    expect(getDraft('q1')[0].points[0].y).toBeCloseTo(180, 5);
+
+    fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+    expect(getDraft('q1')[0].points[0].x).toBeCloseTo(100, 5);
+  });
+});
+
+describe('草稿白板：选中包围盒内的空白点按 = 取消选中', () => {
+  it('包围盒盖住点按位置时也能取消，随后拖拽是框选而不是拖走图形', () => {
+    const { container, canvas } = setup();
+    pickTool(container, '直线');
+    fireEvent.pointerDown(canvas, { pointerId: 5, pointerType: 'mouse', button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(canvas, { pointerId: 5, pointerType: 'mouse', buttons: 1, clientX: 580, clientY: 350 });
+    fireEvent.pointerUp(canvas, { pointerId: 5, pointerType: 'mouse', clientX: 580, clientY: 350 });
+
+    pickTool(container, '选中');
+    // 点线中点选中（这条线铺满画板，包围盒几乎盖住整块画板）
+    fireEvent.pointerDown(canvas, { pointerId: 6, pointerType: 'mouse', button: 0, clientX: 300, clientY: 185 });
+    fireEvent.pointerUp(canvas, { pointerId: 6, pointerType: 'mouse', clientX: 300, clientY: 185 });
+
+    // 点包围盒内部的空白：应取消选中（选中框消失）
+    rects = [];
+    fireEvent.pointerDown(canvas, { pointerId: 7, pointerType: 'mouse', button: 0, clientX: 560, clientY: 40 });
+    fireEvent.pointerUp(canvas, { pointerId: 7, pointerType: 'mouse', clientX: 560, clientY: 40 });
+    expect(rects.filter((r) => r.dashed)).toHaveLength(0);
+
+    // 再从这块空白拖动：没有选区 → 是框选，不会把线拖走
+    fireEvent.pointerDown(canvas, { pointerId: 8, pointerType: 'mouse', button: 0, clientX: 560, clientY: 40 });
+    fireEvent.pointerMove(canvas, { pointerId: 8, pointerType: 'mouse', buttons: 1, clientX: 600, clientY: 80 });
+    fireEvent.pointerUp(canvas, { pointerId: 8, pointerType: 'mouse', clientX: 600, clientY: 80 });
+
+    expect(getDraft('q1')).toHaveLength(1);
+    expect(getDraft('q1')[0].points[0]).toMatchObject({ x: 20, y: 20 });
+  });
+});
+
+describe('草稿白板：属性条滑杆不吞快捷键', () => {
+  const slider = (c: Element) => c.querySelector('input[aria-label="线宽"]') as HTMLInputElement;
+
+  it('滑杆聚焦时 Ctrl+Z 仍能撤销草稿', () => {
+    const { container, canvas } = setup();
+    penLine(canvas, 100);
+
+    const el = slider(container);
+    el.focus();
+    expect(document.activeElement).toBe(el);
+
+    fireEvent.keyDown(el, { key: 'z', ctrlKey: true });
+    expect(getDraft('q1')).toHaveLength(0);
+  });
+
+  it('滑杆聚焦时 Delete 仍能删除选中笔迹', () => {
+    const { container, canvas } = setup();
+    penLine(canvas, 100);
+    penLine(canvas, 160);
+    pickTool(container, '选中');
+    dragSelect(canvas, [50, 50], [300, 250]);
+
+    const el = slider(container);
+    el.focus();
+    fireEvent.keyDown(el, { key: 'Delete' });
+    expect(getDraft('q1')).toHaveLength(0);
+  });
+});
+
+describe('草稿白板：清空发生在落笔中途', () => {
+  it('不抛错、不把笔画补回空画板', () => {
+    const { container, canvas } = setup();
+    fireEvent.pointerDown(canvas, { pointerId: 9, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 9, pointerType: 'mouse', buttons: 1, clientX: 150, clientY: 120 });
+    fireEvent.click(container.querySelector('button[title="清空草稿"]')!);
+    fireEvent.pointerMove(canvas, { pointerId: 9, pointerType: 'mouse', buttons: 1, clientX: 200, clientY: 140 });
+    fireEvent.pointerUp(canvas, { pointerId: 9, pointerType: 'mouse', clientX: 200, clientY: 140 });
+
+    expect(getDraft('q1')).toHaveLength(0);
+  });
+});
+
+describe('草稿白板：旋转旋钮不出画板', () => {
+  it('下方放不下时夹进画板底边（贴着底边的图形仍抓得到旋钮）', () => {
+    const h = rotateHandleFor({ x0: 100, y0: 20, x1: 300, y1: 120 }, { w: 400, h: 140 });
+    expect(h.below).toBe(true);
+    expect(h.y).toBeLessThanOrEqual(140 - 10);
+  });
+
+  it('x 也夹进画板（图形有一半在画板外时）', () => {
+    const h = rotateHandleFor({ x0: 500, y0: 100, x1: 700, y1: 160 }, { w: 300, h: 300 });
+    expect(h.below).toBe(false);
+    expect(h.x).toBeCloseTo(290, 5);
+    expect(h.y).toBeCloseTo(74, 5);
+  });
+
+  it('画板尺寸未知（首帧）时不夹取', () => {
+    const h = rotateHandleFor({ x0: 0, y0: 20, x1: 100, y1: 60 }, { w: 0, h: 0 });
+    expect(h.y).toBeCloseTo(86, 5);
   });
 });
