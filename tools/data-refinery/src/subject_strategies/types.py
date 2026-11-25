@@ -5,7 +5,10 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from answer_blocks import AnswerLine, AnswerParseResult, AnswerQuestion
 
 
 @dataclass
@@ -79,6 +82,16 @@ class QuestionStrategy(Protocol):
 
         默认返回 `(None, content)` —— 不切，行为与今天完全一致。
         """
+        ...
+
+    def parse_answers(
+        self,
+        answer_lines: list["AnswerLine"],
+        questions: list["AnswerQuestion"],
+        *,
+        first_line_no: int,
+    ) -> "AnswerParseResult":
+        """把答案区行解析成结构化结果；各科决定使用块解析或兼容适配。"""
         ...
 
     def extract_answers(self, text: str, md_path: Path) -> list[ExtractedAnswer]:

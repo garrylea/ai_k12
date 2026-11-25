@@ -9,6 +9,7 @@
 
 from pathlib import Path
 
+from answer_blocks import AnswerLine, AnswerParseResult, AnswerQuestion
 from question_splitter import is_main_stem, split_options, split_page
 from subject_strategies.types import ExtractedAnswer, MaterialPolicy, NO_MATERIAL
 
@@ -28,7 +29,24 @@ def extract_generic_answers(text: str, md_path: Path,
     ]
 
 
-class GenericStrategy:
+class BlockAnswerMixin:
+    """generic 答案链：答案区统一走块解析。"""
+
+    def parse_answers(
+        self,
+        answer_lines: list[AnswerLine],
+        questions: list[AnswerQuestion],
+        *,
+        first_line_no: int,
+    ) -> AnswerParseResult:
+        from answer_region import parse_answer_region
+
+        return parse_answer_region(
+            answer_lines, questions, first_line_no=first_line_no,
+        )
+
+
+class GenericStrategy(BlockAnswerMixin):
     code = "generic"
 
     def is_stem(self, line: str) -> tuple[bool, int | None]:
@@ -54,7 +72,7 @@ class GenericStrategy:
         return extract_generic_answers(text, md_path, strategy=self)
 
 
-class NaturalScienceStrategy:
+class NaturalScienceStrategy(BlockAnswerMixin):
     """数学/物理/化学/道法的默认行为：A–D 四项、无材料归属、答案走 generic。
 
     各科文件继承本类并指定 `code` —— 学科差异写在子类里（覆盖 `answers` 或

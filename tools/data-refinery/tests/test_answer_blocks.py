@@ -10,6 +10,7 @@ from answer_blocks import (
     split_answer_blocks,
 )
 from answer_region import parse_answer_region
+from subject_strategies import get_strategy
 
 
 def test_block_models_keep_source_line_and_group():
@@ -204,3 +205,34 @@ def test_region_with_no_assignments_has_sentinel_issue():
         issue.code == "answer_region_no_assignments"
         for issue in result.issues
     )
+
+
+CHINESE_ANSWER_PAPER = """# 参考答案
+
+1. 答案：B
+
+2. 答案：C
+"""
+
+
+def test_chinese_parse_answers_adapter_keeps_existing_result():
+    strategy = get_strategy("chinese")
+    result = strategy.parse_answers(
+        [
+            AnswerLine(i + 1, line)
+            for i, line in enumerate(CHINESE_ANSWER_PAPER.splitlines())
+        ],
+        [
+            AnswerQuestion(no=1, group_id=None),
+            AnswerQuestion(no=2, group_id=None),
+        ],
+        first_line_no=1,
+    )
+    by_no = {fragment.question_no: fragment.text for fragment in result.fragments}
+    assert by_no[1] == "B"
+    assert by_no[2] == "C"
+
+
+def test_generic_strategy_exposes_block_answer_parser():
+    strategy = get_strategy("math")
+    assert callable(strategy.parse_answers)
