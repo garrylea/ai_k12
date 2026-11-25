@@ -3,6 +3,8 @@ from answer_blocks import (
     AnswerIssue,
     AnswerLine,
     AnswerQuestion,
+    parse_compact_choice,
+    parse_numbered_block,
     parse_answer_table,
     prepare_answer_lines,
     split_answer_blocks,
@@ -95,3 +97,51 @@ def test_split_blocks_keeps_blank_lines_inside_numbered_block():
         "17. 解：第一行", "", "$$", "x=1", "$$",
     ]
     assert blocks[1].lines[0].text == "18. 证明：结论"
+
+
+def _block(kind: str, *texts: str, group_id: str | None = "二") -> AnswerBlock:
+    return AnswerBlock(
+        kind=kind,
+        lines=tuple(AnswerLine(i + 1, text) for i, text in enumerate(texts)),
+        group_id=group_id,
+    )
+
+
+def test_miyun_header_tail_and_numeric_answers_are_split():
+    block = _block(
+        "numbered",
+        "9. (-1,-2) 10.x1=4，x2=-4 11. <",
+        "12.2（本题答案不唯一） $1 3 . 2(1+x)^2=5.8$ "
+        "14. $\\sqrt{3}$ 15. $20^\\circ$",
+    )
+    fragments, issues = parse_numbered_block(block, list(range(9, 16)))
+    got = {fragment.question_no: fragment.text for fragment in fragments}
+
+    assert got[9] == "(-1,-2)"
+    assert got[10] == "x1=4，x2=-4"
+    assert got[11] == "<"
+    assert got[12] == "2（本题答案不唯一）"
+    assert got[13] == "2(1+x)^2=5.8"
+    assert got[14] == "$\\sqrt{3}$"
+    assert got[15] == "$20^\\circ$"
+    assert not [issue for issue in issues if issue.code == "answer_missing"]
+
+
+def test_decimal_in_previous_answer_is_not_next_question():
+    block = _block(
+        "numbered",
+        "11. 距离约为 12.2 米。",
+        "12. 20",
+    )
+    fragments, _issues = parse_numbered_block(block, [11, 12])
+    assert [(fragment.question_no, fragment.text) for fragment in fragments] == [
+        (11, "距离约为 12.2 米。"),
+        (12, "20"),
+    ]
+
+
+def test_single_letter_is_not_compact_choice_key():
+    block = _block("compact_choice", "A", group_id="一")
+    fragments, issues = parse_compact_choice(block, [1, 2, 3])
+    assert fragments == []
+    assert issues[0].code == "compact_choice_count_mismatch"

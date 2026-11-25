@@ -200,6 +200,141 @@ def split_answer_blocks(
     return blocks
 
 
+_MATH_OPERATORS = set("=+-×÷")
+_STRONG_PREFIXES = set("；。$")
+
+
+def _line_start_offsets(text: str) -> set[int]:
+    starts = {0}
+    starts.update(i + 1 for i, char in enumerate(text) if char == "\n")
+    return starts
+
+
+def _marker_allowed(
+    text: str,
+    match: re.Match[str],
+    line_starts: set[int],
+) -> bool:
+    before = text[:match.start()].rstrip()
+    previous = before[-1:] if before else ""
+    raw_previous = text[match.start() - 1:match.start()] if match.start() else ""
+    at_line_start = match.start() in line_starts or not before
+    has_dot = match.group("dot") is not None
+    followed_by_digit = bool(re.match(r"\d", text[match.end():]))
+
+    if raw_previous and (raw_previous.isalnum() or raw_previous in _MATH_OPERATORS):
+        return False
+    if has_dot and followed_by_digit and not at_line_start:
+        return previous in _STRONG_PREFIXES or previous == "分"
+    return (
+        at_line_start
+        or raw_previous.isspace()
+        or previous in _STRONG_PREFIXES
+        or previous in ")]）】"
+    )
+
+
+def _find_marker(
+    text: str,
+    start: int,
+    expected_no: int,
+    line_starts: set[int],
+) -> re.Match[str] | None:
+    digits = r"\s*".join(str(expected_no))
+    pattern = re.compile(
+        rf"(?<!\d)(?P<number>{digits})\s*(?P<dot>[.．])?\s*(?=\S)"
+    )
+    for match in pattern.finditer(text, start):
+        if _marker_allowed(text, match, line_starts):
+            return match
+    return None
+
+
+def parse_numbered_block(
+    block: AnswerBlock,
+    expected_numbers: list[int],
+) -> tuple[list[AnswerFragment], list[AnswerIssue]]:
+    """按期望题号切分统一编号块，答案正文保留原始换行。"""
+    text = "\n".join(line.text for line in block.lines)
+    starts = _line_start_offsets(text)
+    markers: list[tuple[int, re.Match[str]]] = []
+    cursor = 0
+    for number in expected_numbers:
+        marker = _find_marker(text, cursor, number, starts)
+        if marker is None:
+            continue
+        markers.append((number, marker))
+        cursor = marker.end()
+
+    fragments: list[AnswerFragment] = []
+    issues: list[AnswerIssue] = []
+    for index, (number, marker) in enumerate(markers):
+        has_next = index + 1 < len(markers)
+        end = markers[index + 1][1].start() if has_next else len(text)
+        if has_next and end > 0 and text[end - 1] == "$":
+            end -= 1
+        answer = text[marker.end():end].strip()
+        current_formula = marker.start() > 0 and text[marker.start() - 1] == "$"
+        if current_formula and answer.endswith("$"):
+            answer = answer[:-1].rstrip()
+        line_start = block.lines[0].line_no
+        line_end = block.lines[-1].line_no
+        if not answer:
+            issues.append(AnswerIssue(
+                code="answer_empty",
+                severity="error",
+                message=f"第 {number} 题答案为空",
+                question_no=number,
+                line_start=line_start,
+                line_end=line_end,
+                excerpt="",
+            ))
+            continue
+        fragments.append(AnswerFragment(
+            question_no=number,
+            text=answer,
+            block_kind="numbered",
+            line_start=line_start,
+            line_end=line_end,
+        ))
+    return fragments, issues
+
+
+def parse_compact_choice(
+    block: AnswerBlock,
+    expected_numbers: list[int],
+) -> tuple[list[AnswerFragment], list[AnswerIssue]]:
+    """按题号顺序展开裸字母答案串，数量不等时整串不写。"""
+    text = " ".join(line.text for line in block.lines).strip()
+    letters = re.findall(r"[A-Da-d]", text)
+    line_start = block.lines[0].line_no
+    line_end = block.lines[-1].line_no
+    if len(letters) < 2 or len(letters) != len(expected_numbers):
+        issue = AnswerIssue(
+            code="compact_choice_count_mismatch",
+            severity="error",
+            message=(
+                f"裸答案 {len(letters)} 项，期望题号 {len(expected_numbers)} 项，"
+                "整串不展开"
+            ),
+            question_no=None,
+            line_start=line_start,
+            line_end=line_end,
+            excerpt=text[:200],
+        )
+        return [], [issue]
+    return [
+        AnswerFragment(
+            question_no=number,
+            text=letter.upper(),
+            block_kind="compact_choice",
+            line_start=line_start,
+            line_end=line_end,
+        )
+        for number, letter in zip(expected_numbers, letters)
+    ], []
+
+
 _CELL_DIGITS_RE = re.compile(r"^\d{1,2}$")
 _CELL_CHOICE_RE = re.compile(r"^[A-D]{1,4}$")
 _CELL_SPACED_CHOICE_RE = re.compile(r"^[A-D](?:\s+[A-D]){0,3}$")
