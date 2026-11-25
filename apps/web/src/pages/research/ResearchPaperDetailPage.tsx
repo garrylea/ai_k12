@@ -233,10 +233,12 @@ export default function ResearchPaperDetailPage() {
         </div>
       ) : (
         <div data-testid="detail-table" className="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
-          <table className="w-full min-w-[1270px] table-fixed text-sm">
+          <table className="w-full min-w-[1340px] table-fixed text-sm">
             <colgroup>
               <col className="w-16" />
-              <col className="w-20" />
+              {/* 题型列要放得下 short_answer / calculation 这类英文枚举（12 字符），
+                  w-20 会被挤进题干列；固定列加宽后同步抬 min-w，免得题干变窄 */}
+              <col className="w-36" />
               <col />
               <col className="w-[10.5rem]" />
               <col className="w-56" />
@@ -260,7 +262,7 @@ export default function ResearchPaperDetailPage() {
               {data.questions.map((q) => (
                 <tr key={q.id} className="border-t border-gray-100">
                   <td className="px-4 py-3">{q.questionNo}{q.subNo ? `(${q.subNo})` : ''}</td>
-                  <td className="px-4 py-3">{q.type}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">{q.type}</td>
                   <td className="px-4 py-3">
                     <MarkdownBody text={q.content} />
                   </td>
