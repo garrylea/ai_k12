@@ -42,7 +42,7 @@ beforeEach(() => {
     class { observe() {} disconnect() {} };
 });
 
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); cleanup(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); cleanup(); });
 
 /** 渲染白板，返回 canvas 与容器（jsdom 的 getBoundingClientRect 全 0 → clientX/Y 即画布坐标） */
 function setup() {
@@ -305,6 +305,58 @@ describe('草稿白板：撤销 / 重做', () => {
     expect(getDraft('q1')).toHaveLength(1);
     undoKey();
     expect(getDraft('q1')).toHaveLength(0);
+  });
+});
+
+describe('草稿白板：scroll-y 陈旧指针清理（手写笔画几笔后画不了）', () => {
+  const setupScrollY = () => {
+    const { container } = render(<DraftWhiteboard questionId="q1" scrollMode="scroll-y" />);
+    return container.querySelector('canvas')!;
+  };
+
+  const stroke = (canvas: Element, id: number, pointerType: string, y: number) => {
+    fireEvent.pointerDown(canvas, { pointerId: id, pointerType, button: 0, clientX: 100, clientY: y });
+    fireEvent.pointerMove(canvas, { pointerId: id, pointerType, buttons: 1, clientX: 200, clientY: y });
+    fireEvent.pointerUp(canvas, { pointerId: id, pointerType, clientX: 200, clientY: y });
+  };
+
+  it('鼠标对照：同一个 pointerId 连续落笔始终正常', () => {
+    const canvas = setupScrollY();
+    stroke(canvas, 1, 'mouse', 100);
+    stroke(canvas, 1, 'mouse', 160);
+    expect(getDraft('q1')).toHaveLength(2);
+  });
+
+  it('手掌误触的指针抬起事件丢失后，手写笔后续落笔不再被吞', () => {
+    const canvas = setupScrollY();
+    // 手掌（touch）按下，但它的 up/cancel 永远不来：表里留下一个不属于笔尖的 pointerId
+    fireEvent.pointerDown(canvas, { pointerId: 2, pointerType: 'touch', button: 0, clientX: 50, clientY: 50 });
+    stroke(canvas, 1, 'pen', 100);
+    stroke(canvas, 1, 'pen', 160);
+    expect(getDraft('q1')).toHaveLength(2);
+  });
+
+  it('真实两指仍是平移手势：第三指按下不起笔，两指松开后落笔恢复', () => {
+    const canvas = setupScrollY();
+    fireEvent.pointerDown(canvas, { pointerId: 2, pointerType: 'touch', button: 0, clientX: 50, clientY: 50 });
+    fireEvent.pointerDown(canvas, { pointerId: 3, pointerType: 'touch', button: 0, clientX: 60, clientY: 80 });
+    stroke(canvas, 4, 'touch', 120);
+    expect(getDraft('q1')).toHaveLength(0); // 平移态吞掉落笔
+    fireEvent.pointerUp(canvas, { pointerId: 2, pointerType: 'touch' });
+    fireEvent.pointerUp(canvas, { pointerId: 3, pointerType: 'touch' });
+    stroke(canvas, 1, 'pen', 200);
+    expect(getDraft('q1')).toHaveLength(1);
+  });
+
+  it('超时且没收到抬手的陈旧指针会被清掉，不阻塞后续落笔', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const canvas = setupScrollY();
+    fireEvent.pointerDown(canvas, { pointerId: 2, pointerType: 'touch', button: 0, clientX: 50, clientY: 50 });
+    // up 丢失；5 秒后再落一指，旧的 touch 记录应已过期被清理
+    vi.setSystemTime(new Date('2026-01-01T00:00:05Z'));
+    stroke(canvas, 3, 'touch', 100);
+    expect(getDraft('q1')).toHaveLength(1);
   });
 });
 

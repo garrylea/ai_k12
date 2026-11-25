@@ -25,6 +25,10 @@ type Tool = 'pen' | 'dot' | 'eraser' | 'select' | 'compass' | 'line' | 'rect' | 
 type ShapeKind = 'line' | 'rect' | 'ellipse';
 const SHAPE_TOOLS: ReadonlySet<Tool> = new Set<Tool>(['line', 'rect', 'ellipse']);
 
+/** scroll-y 活动指针的过期时长：超过这个时间没动、又没收到抬起事件，视为已不在屏幕上。
+ *  手写笔场景里手掌/侧键的 down 可能到了、up 被系统吞掉，这条记录会一直卡在表里。 */
+const STALE_POINTER_MS = 2000;
+
 /** 手写笔光标：斜握钢笔图标（白底 + 深色描边，浅色/夜间浅灰画板上都看得清），
  *  热点 (3,21) 对齐笔尖；浏览器不支持自定义光标时回退十字准星。 */
 const PEN_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
@@ -687,8 +691,8 @@ export function DraftWhiteboard({
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
-  // 两指平移（仅 scroll-y 模式）：活动指针表（pointerId -> 该指针 clientY）+ 平移标志 + 上一帧质心 clientY
-  const activePointersRef = useRef<Map<number, { y: number }>>(new Map());
+  // 两指平移（仅 scroll-y 模式）：活动指针表（pointerId -> clientY / 类型 / 最后活动时间）+ 平移标志 + 上一帧质心 clientY
+  const activePointersRef = useRef<Map<number, { y: number; type: string; at: number }>>(new Map());
   const panRef = useRef(false);
   const panLastYRef = useRef(0);
   // 圆规状态机：state 供控制条渲染（提示文案/半径读数），ref 供指针手势与 redraw 读写（连续更新不拿旧闭包）
@@ -1602,17 +1606,50 @@ export function DraftWhiteboard({
     return ptrs.size === 0 ? 0 : sum / ptrs.size;
   };
 
+  /** 新指针按下时若还有上一笔没抬手（它的 up 被系统吞了），先收掉，别和新一笔粘成一条。
+   *  刚按下未成形的单点当误触丢弃；已经拖出的按正常收尾落盘+记一步。 */
+  const settleInterruptedStroke = () => {
+    if (!drawingRef.current) return;
+    const strokes = strokesRef.current;
+    const last = strokes[strokes.length - 1];
+    if (last && last.points.length === 1) {
+      strokesRef.current = strokes.slice(0, -1);
+      if (persist) setDraft(questionId, strokesRef.current);
+      drawingRef.current = false;
+      redraw();
+    } else {
+      finishPenStroke();
+    }
+  };
+
+  /** scroll-y：落笔前清掉「已经不在屏幕上」的指针记录。不清会被误数成两指齐下 →
+   *  画布从此只滚不画、只有重开面板才好（手写笔场景手掌/侧键的 up 被系统吞掉时必现）。
+   *  ① 掌贴拒绝：笔/鼠标按下时，touch 记录一律当手掌误触丢弃（真两指平移两根都是 touch，不受影响）；
+   *  ② 超时：太久没动、又没收到抬手的记录当已消失。 */
+  const pruneStalePointers = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const ptrs = activePointersRef.current;
+    ptrs.delete(e.pointerId); // 同 ID 重按：先清自己的旧记录
+    const now = Date.now();
+    const palmReject = e.pointerType === 'pen' || e.pointerType === 'mouse';
+    for (const [id, rec] of ptrs) {
+      if ((palmReject && rec.type === 'touch') || now - rec.at > STALE_POINTER_MS) ptrs.delete(id);
+    }
+  };
+
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // 指针已失效时捕获会抛（NotFoundError）；不能让它中断落笔
+    }
     // scroll-y：每根落到画布的新指针都先记录（含第二根）；两指齐下进入平移，打断进行中的单指笔迹/圆规画弧
     if (scrollMode === 'scroll-y') {
-      // 上一次手势的 up 若丢了（切窗口/系统打断），表里会留下陈旧记录：同一 pointerId 重按时先清掉。
-      // 否则一次「重按」会被数成两指齐下 → 进入平移态，画布从此不响应落笔（只有重开面板才好）。
-      activePointersRef.current.delete(e.pointerId);
+      pruneStalePointers(e);
+      settleInterruptedStroke();
       const wasPanning = panRef.current;
       const prevCount = activePointersRef.current.size;
-      activePointersRef.current.set(e.pointerId, { y: e.clientY });
+      activePointersRef.current.set(e.pointerId, { y: e.clientY, type: e.pointerType, at: Date.now() });
       if (!wasPanning && prevCount === 1 && activePointersRef.current.size === 2) {
         panRef.current = true;
         panLastYRef.current = meanActiveY();
@@ -1687,7 +1724,7 @@ export function DraftWhiteboard({
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (panRef.current) {
-      activePointersRef.current.set(e.pointerId, { y: e.clientY });
+      activePointersRef.current.set(e.pointerId, { y: e.clientY, type: e.pointerType, at: Date.now() });
       const meanY = meanActiveY();
       const delta = meanY - panLastYRef.current;
       panLastYRef.current = meanY;
