@@ -14,7 +14,12 @@ from pathlib import Path
 
 import pymysql
 
-from answer_extract_cli import paper_title, render_answer_doc
+from answer_extract_cli import (
+    has_no_answer_assignments,
+    paper_title,
+    render_answer_doc,
+    write_issues,
+)
 from answer_importer_cli import main as importer_main
 from db_loader_cli import _kind
 from page_markers import strip_page_markers
@@ -103,6 +108,15 @@ def backfill(cfg, scope: Scope, *, dry_run: bool = False, overwrite: bool = Fals
                 print(f"[WARN] [page-marker] {rel}: 未处理 {len(manual)} 处"
                       f"（表格/标签/围栏内）", flush=True)
             answers = strategy.extract_answers(text, md_path)
+            write_issues(
+                cfg.output_dir / "answer_issues.jsonl",
+                str(rel_md),
+                answers,
+            )
+            if has_no_answer_assignments(answers):
+                print(f"[answers] 失败（答案区零命中）：{rel}")
+                stats["failed"] += 1
+                continue
             if not any((a.answer or "").strip() for a in answers):
                 print(f"[answers] 跳过（没有参考答案段）：{rel}")
                 stats["no_answer"] += 1

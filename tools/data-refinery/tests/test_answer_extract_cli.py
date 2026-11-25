@@ -3,7 +3,13 @@
 from pathlib import Path
 
 from answer_doc import parse_answer_doc
-from answer_extract_cli import find_paper_md, main, render_answer_doc
+from answer_extract_cli import (
+    find_paper_md,
+    has_no_answer_assignments,
+    main,
+    render_answer_doc,
+)
+from subject_strategies import get_strategy
 from subject_strategies.types import ExtractedAnswer
 
 
@@ -49,6 +55,82 @@ def test_find_paper_md_ambiguous_returns_none(tmp_path: Path, capsys):
     assert find_paper_md(tmp_path, "202507-海淀") is None
     out = capsys.readouterr().err
     assert "命中 2 个文件" in out
+
+
+def test_generic_answer_result_carries_missing_issue_details():
+    text = """9. 第 9 题
+
+10. 第 10 题
+
+# 参考答案
+
+9. (-1,-2)
+"""
+    answers = get_strategy("math").extract_answers(
+        text,
+        Path("数学/初中/first/2025/test.md"),
+    )
+    q10 = next(item for item in answers if item.no == 10)
+    assert any(
+        issue["code"] == "answer_missing"
+        for issue in q10.issue_details
+    )
+
+
+def test_zero_assignment_sentinel_is_detectable():
+    from subject_strategies.types import ExtractedAnswer
+
+    answers = [
+        ExtractedAnswer(
+            no=0,
+            issues=["答案区存在但未解析出任何答案"],
+            issue_details=[{
+                "code": "answer_region_no_assignments",
+                "severity": "error",
+            }],
+        )
+    ]
+    assert has_no_answer_assignments(answers)
+
+
+def test_english_strategy_uses_block_answer_parser():
+    assert callable(get_strategy("english").parse_answers)
+
+
+def test_main_does_not_write_doc_when_answer_region_has_zero_assignments(
+    tmp_path: Path, monkeypatch
+):
+    from subject_strategies.types import ExtractedAnswer
+
+    md_dir = tmp_path / "md"
+    paper_dir = md_dir / "数学/初中/first/2025/试卷"
+    paper_dir.mkdir(parents=True)
+    (paper_dir / "试卷.md").write_text("# 参考答案\n\n无法识别", encoding="utf-8")
+
+    class ZeroAnswers:
+        def extract_answers(self, _text, _path):
+            return [
+                ExtractedAnswer(
+                    no=0,
+                    issues=["答案区存在但未解析出任何答案"],
+                    issue_details=[{
+                        "code": "answer_region_no_assignments",
+                        "severity": "error",
+                    }],
+                )
+            ]
+
+    monkeypatch.setattr("answer_extract_cli.get_strategy", lambda _subject: ZeroAnswers())
+    out_doc = tmp_path / "out.md"
+    rc = main([
+        "--file", "试卷",
+        "--input-dir", str(md_dir),
+        "--output-dir", str(tmp_path / "out"),
+        "--out", str(out_doc),
+        "--subject", "math",
+    ])
+    assert rc == 2
+    assert not out_doc.exists()
 
 
 ANSWER_MD_WITH_CROSS_PAGE_FOOTER = """# 海淀区2026年九年级

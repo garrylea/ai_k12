@@ -19,6 +19,7 @@ class ExtractedAnswer:
     approach: str = ""
     explanation: str = ""
     issues: list[str] = field(default_factory=list)
+    issue_details: list[dict] = field(default_factory=list)
 
 
 class UnknownStrategyError(ValueError):

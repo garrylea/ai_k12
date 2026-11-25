@@ -97,10 +97,19 @@ def render_answer_doc(title: str, answers) -> str:
 
 
 def write_issues(path: Path, source: str, answers) -> int:
-    rows = [
-        {"source": source, "question_no": a.no, "reason": reason}
-        for a in answers for reason in a.issues
-    ]
+    rows: list[dict] = []
+    for answer in answers:
+        if answer.issue_details:
+            rows.extend({
+                "source": source,
+                "question_no": answer.no,
+                **detail,
+            } for detail in answer.issue_details)
+            continue
+        rows.extend(
+            {"source": source, "question_no": answer.no, "reason": reason}
+            for reason in answer.issues
+        )
     if not rows:
         return 0
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +117,15 @@ def write_issues(path: Path, source: str, answers) -> int:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     return len(rows)
+
+
+def has_no_answer_assignments(answers) -> bool:
+    """是否出现「答案区存在但 0 道题解析成功」的 sentinel。"""
+    return any(
+        detail.get("code") == "answer_region_no_assignments"
+        for answer in answers
+        for detail in answer.issue_details
+    )
 
 
 def main(argv=None) -> int:
@@ -152,6 +170,10 @@ def main(argv=None) -> int:
     for a in answers:
         for reason in a.issues:
             print(f"  [issue] {reason}")
+
+    if not with_answer and has_no_answer_assignments(answers):
+        print("[ERROR] 答案区存在但未解析出任何答案，未写答案文档", file=sys.stderr)
+        return 2
 
     doc = render_answer_doc(paper_title(rel_md, text), answers)
     if args.dry_run:

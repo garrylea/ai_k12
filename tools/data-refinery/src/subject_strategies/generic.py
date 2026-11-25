@@ -10,7 +10,7 @@
 from pathlib import Path
 
 from answer_blocks import AnswerLine, AnswerParseResult, AnswerQuestion
-from question_splitter import is_main_stem, split_options, split_page
+from question_splitter import is_main_stem, split_options, split_page_result
 from subject_strategies.types import ExtractedAnswer, MaterialPolicy, NO_MATERIAL
 
 
@@ -22,11 +22,53 @@ def extract_generic_answers(text: str, md_path: Path,
     `material_policy`，答案按另一套切分对齐就会静默错位（题号对得上、内容对不上）。
     None 表示 generic（既有两参调用行为不变）。
     """
-    questions = split_page(text, md_path, strategy=strategy)
-    return [
-        ExtractedAnswer(no=q.group_order, answer=(q.answer or "").strip())
-        for q in questions
-    ]
+    result = split_page_result(text, md_path, strategy=strategy)
+    parse_result = result.answer_result
+    answers: list[ExtractedAnswer] = []
+    for question in result.questions:
+        details = [
+            {
+                "code": issue.code,
+                "severity": issue.severity,
+                "message": issue.message,
+                "question_no": issue.question_no,
+                "line_start": issue.line_start,
+                "line_end": issue.line_end,
+                "excerpt": issue.excerpt,
+            }
+            for issue in (parse_result.issues if parse_result else [])
+            if issue.question_no == question.group_order
+        ]
+        answers.append(ExtractedAnswer(
+            no=question.group_order,
+            answer=(question.answer or "").strip(),
+            issues=[detail["message"] for detail in details],
+            issue_details=details,
+        ))
+    if parse_result is not None and not any(answer.answer for answer in answers):
+        sentinel = next(
+            (
+                issue
+                for issue in parse_result.issues
+                if issue.code == "answer_region_no_assignments"
+            ),
+            None,
+        )
+        if sentinel is not None:
+            answers.append(ExtractedAnswer(
+                no=0,
+                issues=[sentinel.message],
+                issue_details=[{
+                    "code": sentinel.code,
+                    "severity": sentinel.severity,
+                    "message": sentinel.message,
+                    "question_no": sentinel.question_no,
+                    "line_start": sentinel.line_start,
+                    "line_end": sentinel.line_end,
+                    "excerpt": sentinel.excerpt,
+                }],
+            ))
+    return answers
 
 
 class BlockAnswerMixin:
