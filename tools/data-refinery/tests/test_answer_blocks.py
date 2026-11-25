@@ -9,6 +9,7 @@ from answer_blocks import (
     prepare_answer_lines,
     split_answer_blocks,
 )
+from answer_region import parse_answer_region
 
 
 def test_block_models_keep_source_line_and_group():
@@ -145,3 +146,61 @@ def test_single_letter_is_not_compact_choice_key():
     fragments, issues = parse_compact_choice(block, [1, 2, 3])
     assert fragments == []
     assert issues[0].code == "compact_choice_count_mismatch"
+
+
+def test_region_reports_missing_without_writing_neighbor():
+    lines = [
+        AnswerLine(10, "9. (-1,-2) 10. 4"),
+    ]
+    result = parse_answer_region(
+        lines,
+        [AnswerQuestion(no=n, group_id="二") for n in range(9, 14)],
+        first_line_no=10,
+    )
+    got = {fragment.question_no: fragment.text for fragment in result.fragments}
+
+    assert got == {9: "(-1,-2)", 10: "4"}
+    missing = {
+        issue.question_no
+        for issue in result.issues
+        if issue.code == "answer_missing"
+    }
+    assert missing == {11, 12, 13}
+
+
+def test_second_independent_answer_block_does_not_replace_first():
+    lines = [
+        AnswerLine(
+            1,
+            "<table>"
+            "<tr><td>1</td><td>2</td><td>3</td></tr>"
+            "<tr><td>B</td><td>C</td><td>A</td></tr>"
+            "</table>",
+        ),
+        AnswerLine(2, ""),
+        AnswerLine(3, "1. 答案：B"),
+        AnswerLine(4, "解析：第一题说明"),
+    ]
+    result = parse_answer_region(
+        lines,
+        [AnswerQuestion(no=n, group_id="一") for n in (1, 2, 3)],
+        first_line_no=1,
+    )
+    merged: dict[int, str] = {}
+    for fragment in result.fragments:
+        merged.setdefault(fragment.question_no, fragment.text)
+
+    assert merged == {1: "B", 2: "C", 3: "A"}
+    assert any(issue.code == "answer_duplicate_ignored" for issue in result.issues)
+
+
+def test_region_with_no_assignments_has_sentinel_issue():
+    result = parse_answer_region(
+        [AnswerLine(1, "无法识别的一段文本")],
+        [AnswerQuestion(no=9, group_id="二")],
+        first_line_no=1,
+    )
+    assert any(
+        issue.code == "answer_region_no_assignments"
+        for issue in result.issues
+    )
