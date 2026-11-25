@@ -5,6 +5,7 @@
 docs/superpowers/specs/2026-09-05-exam-question-splitter-design.md。
 """
 
+import html
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -673,6 +674,7 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
 _CELL_DIGITS_RE = re.compile(r"^\d{1,2}$")
 _CELL_CHOICE_RE = re.compile(r"^[A-D]{1,4}$")
 _CELL_SPACED_CHOICE_RE = re.compile(r"^[A-D](?:\s+[A-D]){0,3}$")
+_ANSWER_LABEL_RE = re.compile(r"答案|选项|解答|answer|key", re.IGNORECASE)
 
 
 def _compact_choice_cells(cells: list[str]) -> list[str]:
@@ -690,7 +692,7 @@ def _table_rows(line: str) -> list[list[str]]:
     """HTML 表格 → 行×格文本（剥标签、去首尾空白；rowspan/colspan 只留空文本）。"""
     rows = re.findall(r"<tr[^>]*>(.*?)</tr>", line, re.DOTALL)
     return [
-        [re.sub(r"<[^>]+>", "", c).strip()
+        [html.unescape(re.sub(r"<[^>]+>", "", c)).strip()
          for c in re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)]
         for row in rows
     ]
@@ -748,6 +750,34 @@ def _choice_cells(cells: list[str], expected: int) -> list[str]:
     return []
 
 
+def _is_answer_label(cell: str) -> bool:
+    """答案表行首标签（答案/选项/正确答案/answer/key…）。"""
+    text = re.sub(r"[\s:：]+", "", cell or "")
+    return bool(text and _ANSWER_LABEL_RE.search(text))
+
+
+def _freeform_cells(cells: list[str], expected: int) -> list[str]:
+    """提取带「答案」标签的自由文本答案格。
+
+    填空题答案可能是公式、数值或比较符，不能复用 A-D 校验。为避免把数学数据表
+    （``x | 0 | 1 | 2`` + ``y | 0 | 1 | 4``）误当答案，只有明确答案标签才接受；
+    无标签或空标签的数据行即使列数吻合也整组拒绝。空角格只用于选择题答案，
+    自由文本没有明确标签时无法证明语义，不能猜。
+    """
+    body = list(cells)
+    while body and not body[-1]:
+        body.pop()
+    if len(body) == expected + 1:
+        if not _is_answer_label(body[0]):
+            return []
+        body = body[1:]
+    else:
+        return []
+    if len(body) != expected or not any(c.strip() for c in body):
+        return []
+    return body
+
+
 def _parse_horizontal(rows: list[list[str]]) -> dict[int, str]:
     """横向表：数字行 + 下一行答案行，一张表里可以有多组（11–15 常在第二组）。"""
     result: dict[int, str] = {}
@@ -756,6 +786,8 @@ def _parse_horizontal(rows: list[list[str]]) -> dict[int, str]:
         if not nums:
             continue
         answers = _choice_cells(rows[i + 1], len(nums))
+        if not answers:
+            answers = _freeform_cells(rows[i + 1], len(nums))
         if not answers:
             # 列数对不齐（OCR 拆并格）：这一组不写，宁空不猜。
             # 只对「答案行」喊话 —— 数学/统计表（题号 + 分值）在答案段里很常见，
@@ -774,11 +806,16 @@ def _parse_vertical(rows: list[list[str]]) -> dict[int, str]:
     """纵向表：一行一对「题号 | 答案」，表头行（题号/答案）自动跳过。"""
     result: dict[int, str] = {}
     pairs = 0
+    has_answer_header = any(
+        _is_answer_label(cell)
+        for row in rows
+        for cell in row
+    )
     for row in rows:
         body = [c for c in _compact_choice_cells(row) if c]  # 空角格/合并占位不参与
         if len(body) != 2 or not _CELL_DIGITS_RE.match(body[0]):
             continue
-        if not _CELL_CHOICE_RE.match(body[1]):
+        if not (_CELL_CHOICE_RE.match(body[1]) or has_answer_header):
             continue
         pairs += 1
         result[int(body[0])] = body[1]
@@ -791,7 +828,7 @@ def answer_table_numbers(line: str) -> set[int]:
 
 
 def parse_answer_table(line: str) -> dict[int, str]:
-    """解析 HTML 表格提取选择题答案（题号→答案），按版式分派而非按位置猜。
+    """解析 HTML 答案表（题号→答案），按版式分派而非按位置猜。
 
     真实试卷的答案表有三种版式（2026-11 实测 47 份带答案段的 md）：
     ① 双标签：`题号|1|2…` + `答案|A|B…` —— 两行各有一个标签格；
@@ -800,8 +837,10 @@ def parse_answer_table(line: str) -> dict[int, str]:
     旧实现按①写死「每行跳过第 0 格」，②③ 会把首题答案整格丢掉（北师大实验
     2024 物理卷第 1 题 C 丢失、入库成了别的值）。
 
+    填空题答案表（数学/物理/化学/英语等）也走这里：答案格可以是公式、数值或比较符。
+    这类自由文本必须带明确的「答案/选项/解答」标签，不能仅凭列数猜。
     非答案表（数学的数据表 `x|…|0|1|2` + 数值行）整表返回 {}；列数对不齐的那一组
-    不写。都不猜。
+    不写。HTML 实体在这里统一反转义，`&lt;` 会作为答案 `<` 进入后续流程。
     """
     rows = _table_rows(line)
     if len(rows) < 2:
@@ -1151,7 +1190,7 @@ def split_page(text: str, md_path: Path,
             # 不跳过会拼进上一题答案（海淀 2026 题10 实测）。
             if is_answer_structure_line(line):
                 continue
-            # 表格格式选择题答案（<table>...<tr><td>题号</td>...<td>答案</td>...</table>）
+            # HTML 答案表（选择题与填空题共用）：不在这里维护 A-D/公式两套分支。
             if '<table>' in line or '<table ' in line:
                 table_answers = parse_answer_table(line)
                 if table_answers:

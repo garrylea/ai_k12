@@ -1,4 +1,4 @@
-"""答案表格解析：按版式分派（双标签 / 单标签 / 无表头 / 纵向），不按位置猜。
+"""答案表格解析：按版式分派（选择题 / 填空题 / 横向 / 纵向），不按位置猜。
 
 事故背景（2026-11-01）：北师大实验 2024 物理卷的答案表是「数字行 + 答案行」无表头
 布局，旧实现无条件跳过每行第 0 格（那是「题号/答案」标签位），于是第 1 题答案 C
@@ -137,3 +137,100 @@ def test_spaced_multiselect_answers_in_vertical_table_are_compacted():
         "</table>"
     )
     assert parse_answer_table(line) == {16: "BD", 17: "ABC"}
+
+
+def test_labeled_horizontal_fill_blank_table_keeps_formula_answers():
+    """昌平 2026 数学：填空题答案行是公式/数值/比较符，不能只认 A-D。
+
+    原实现把整张 9-16 题答案表判成非答案表，导致答案文档从第 8 题直接跳到
+    第 17 题。HTML 实体 ``&lt;`` 也必须在入库前还原成 ``<``。
+    """
+    line = (
+        "<table>"
+        "<tr><td>题号</td><td>9</td><td>10</td><td>11</td><td>12</td>"
+        "<td>13</td><td>14</td><td>15</td><td>16</td></tr>"
+        "<tr><td>答案</td><td> $\\frac{1}{9}$ </td>"
+        "<td> $y=x^{2}+1$ (答案不唯一)</td><td>&lt;</td>"
+        "<td> $4\\sqrt{2}$ </td><td> $150\\sqrt{3}$ </td>"
+        "<td>8</td><td>35</td><td>123</td></tr>"
+        "</table>"
+    )
+    assert parse_answer_table(line) == {
+        9: "$\\frac{1}{9}$",
+        10: "$y=x^{2}+1$ (答案不唯一)",
+        11: "<",
+        12: "$4\\sqrt{2}$",
+        13: "$150\\sqrt{3}$",
+        14: "8",
+        15: "35",
+        16: "123",
+    }
+
+
+def test_repeated_labeled_fill_blank_groups_are_both_read():
+    """同一张填空答案表有多组「题号行 + 答案行」时，两组都要提取。"""
+    line = (
+        "<table>"
+        "<tr><td>题号</td><td>9</td><td>10</td><td>11</td><td>12</td></tr>"
+        "<tr><td>答案</td><td>(4,-1)</td><td> $y=x^{2}$ </td><td>直线x=-3</td>"
+        "<td> $x_{1}=2,x_{2}=-8$ </td></tr>"
+        "<tr><td>题号</td><td>13</td><td>14</td><td>15</td><td>16</td></tr>"
+        "<tr><td>答案</td><td> $k\\leq 1$ 且 $k\\neq 0$ </td><td>8</td>"
+        "<td> $2\\sqrt{2}$ </td><td>21,4</td></tr>"
+        "</table>"
+    )
+    assert parse_answer_table(line) == {
+        9: "(4,-1)",
+        10: "$y=x^{2}$",
+        11: "直线x=-3",
+        12: "$x_{1}=2,x_{2}=-8$",
+        13: "$k\\leq 1$ 且 $k\\neq 0$",
+        14: "8",
+        15: "$2\\sqrt{2}$",
+        16: "21,4",
+    }
+
+
+def test_unlabeled_non_choice_data_table_is_still_not_an_answer_key():
+    """无「答案」标签的数值表不能因为新增自由文本支持而误判。"""
+    line = (
+        "<table>"
+        "<tr><td>1</td><td>2</td><td>3</td></tr>"
+        "<tr><td>10</td><td>20</td><td>30</td></tr>"
+        "</table>"
+    )
+    assert parse_answer_table(line) == {}
+
+
+def test_blank_corner_numeric_data_table_is_not_an_answer_key():
+    """空角格不能成为自由文本答案表的放行条件，否则统计表仍会被误判。"""
+    line = (
+        "<table>"
+        "<tr><td></td><td>1</td><td>2</td></tr>"
+        "<tr><td></td><td>10</td><td>20</td></tr>"
+        "</table>"
+    )
+    assert parse_answer_table(line) == {}
+
+
+def test_blank_answer_label_does_not_unlock_freeform_values():
+    """有「题号」行但答案行首格为空时，无法证明是答案表，不能猜。"""
+    line = (
+        "<table>"
+        "<tr><td>题号</td><td>1</td><td>2</td></tr>"
+        "<tr><td></td><td>10</td><td>20</td></tr>"
+        "</table>"
+    )
+    assert parse_answer_table(line) == {}
+
+
+def test_vertical_fill_blank_table_keeps_formula_answers():
+    """纵向「题号|答案」表也要支持非 A-D 答案。"""
+    line = (
+        "<table>"
+        "<tr><td>题号</td><td>答案</td></tr>"
+        "<tr><td>9</td><td>$\\frac{1}{9}$</td></tr>"
+        "<tr><td>10</td><td>8</td></tr>"
+        "</table>"
+    )
+    assert parse_answer_table(line) == {9: "$\\frac{1}{9}$", 10: "8"}
