@@ -90,17 +90,22 @@ Markdown 输出会把它们变成完全不同的结构：
 | `question_splitter.py` | 识别题干、选项、材料、小问；定位答案区边界；保存原始答案行 | 答案区内部题号和边界解析 |
 | `answer_blocks.py` | 答案结构谓词、块类型、表格解析、块检测与具体块解析 | 不读数据库、不写文件、不知道学科 |
 | `answer_region.py` | 接收答案行与期望题号，组织块解析、合并片段、覆盖校验 | 不参与题干或材料切分 |
+| `legacy_answer_parser.py` | 第一阶段供语文适配器使用的旧答案状态机 | 不接入 generic 链，不供新学科使用 |
 | `subject_strategies/generic.py` | 调用新答案链，将答案和 issue 转成 `ExtractedAnswer` | 不实现具体版式 |
 | `EnglishStrategy.extract_answers()` | 使用通用链后再合并区间答案 | 不在通用内核写英语规则 |
 | `ChineseStrategy.extract_answers()` | 第一阶段保持现状 | 不迁入新块解析 |
+| `ChineseStrategy.parse_answers()` | 通过 `legacy_answer_parser.py` 保持既有 `RawQuestion.answer` 行为 | 不进入通用块解析 |
 
 ### 4.2 依赖方向
 
 ```text
 question_splitter
-  └─> answer_region
-        └─> answer_blocks
-              └─> page_markers / 标准库
+  ├─> answer_region
+  │     └─> answer_blocks
+  │           └─> page_markers / 标准库
+  └─> strategy.parse_answers()
+        ├─> generic/natural-science/english: answer_region
+        └─> chinese: legacy_answer_parser
 ```
 
 禁止反向依赖：
@@ -108,6 +113,7 @@ question_splitter
 - `answer_blocks.py` 不 import `question_splitter.py`。
 - `answer_region.py` 不 import `subject_strategies`。
 - `question_splitter.py` 不按学科写答案分支。
+- `legacy_answer_parser.py` 只能被 `ChineseStrategy.parse_answers()` 使用。
 
 现有 `question_splitter.parse_answer_table()`、`is_answer_structure_line()` 等
 答案结构函数迁入 `answer_blocks.py`，由 `question_splitter.py` 兼容导入并重新
@@ -130,8 +136,7 @@ class AnswerLine:
 
 @dataclass(frozen=True)
 class AnswerBlock:
-    kind: str                 # table | compact_choice | compact_numbered |
-                              # expanded_numbered | unknown
+    kind: str                 # table | compact_choice | numbered | unknown
     lines: tuple[AnswerLine, ...]
     group_id: str | None
 
@@ -200,6 +205,29 @@ def split_page(
 `split_page()`。`generic.extract_generic_answers()` 改用
 `split_page_result()` 获取结构化答案诊断。
 
+### 4.5 学科答案解析钩子
+
+`QuestionStrategy` 增加可选方法：
+
+```python
+def parse_answers(
+    self,
+    answer_lines: list[AnswerLine],
+    questions: list[AnswerQuestion],
+    *,
+    first_line_no: int,
+) -> AnswerParseResult:
+    ...
+```
+
+- `GenericStrategy`、数学、物理、化学、道法、英语调用
+  `answer_region.parse_answer_region()`。
+- `ChineseStrategy.parse_answers()` 调用 `legacy_answer_parser.py`，保持第一阶段
+  `RawQuestion.answer` 行为不变。
+- `ChineseStrategy.extract_answers()` 仍走自己的答案文档实现，不调用块解析。
+- 测试或临时策略未实现该钩子时，`question_splitter` 使用通用块解析器兜底；
+  这个兜底不包含任何学科条件。
+
 ## 5. 数据流
 
 ```text
@@ -209,7 +237,7 @@ split_page_result()
   │    ├─ 结束题干解析
   │    ├─ 保存答案区原始行和原始行号
   │    └─ 记录期望题号及其 group_id
-  ├─ parse_answer_region()
+  ├─ strategy.parse_answers()
   │    ├─ 清洗答案结构行
   │    ├─ 识别 AnswerBlock
   │    ├─ 将块解析为 AnswerFragment
@@ -240,10 +268,16 @@ split_page_result()
 | `## 数学试卷参考答案及评分标准` | 丢弃标题，建立答案区 |
 | `二、填空题(...)9. ... 10. ...` | 剥离大题标题前缀，保留 `9...10...` 并设置 group scope |
 | `一、选择题（共 16 分）` 后下一行开始答案 | 标题只更新 group scope |
-| 页码、空行、纯小节标题 | 从解析视图移除，保留原行号映射 |
+| 页码、纯小节标题 | 从块扫描视图移除，保留原行号映射 |
+| 空行 | 保留在原始答案文本中；块检测时可跳过，但不得从答案正文删除 |
 | `6.答案：C` | 整行保留，不能当标题剥掉题号 |
 
 清洗只改变解析视图，不改写原 Markdown 文件。
+
+解析器必须同时保留两份表示：
+
+- `scan_text`：供块识别和行号定位使用，可忽略空行；
+- `render_lines`：块内答案原文，保留空行、缩进和围栏代码块。
 
 ## 7. 块识别与解析
 
@@ -252,8 +286,7 @@ split_page_result()
 ```text
 table
   → compact_choice
-  → compact_numbered
-  → expanded_numbered
+  → numbered
   → unknown
 ```
 
@@ -282,34 +315,18 @@ BBCAD
 裸选项串没有显式题号，只允许使用当前答案大题中尚未填充的期望题号。
 
 - 字母数量必须与期望题号数量完全相等。
+- 至少包含两个选项字母；单个字母不视为裸答案串。
+- 当前大题至少有两个待填题时才启用。
 - 当前大题无法定位时产生 `group_scope_unresolved`，不分配。
 - 数量不等时产生 `compact_choice_count_mismatch`，整串不展开。
 
-### 7.3 `compact_numbered`
+### 7.3 `numbered`
 
-用于一行或多行的紧凑编号答案：
+统一处理一行多题、视觉网格和逐题展开。禁止再根据“短块/长块”猜测两个不同的
+块类型。解析器只使用一个 `numbered` 块，块内题号标记按边界强度分类。
 
 ```text
 9. A 10. B 11. C 12. D
-9. ... 10. ... 11. ...
-9. (-1,-2) 10. x1=4,x2=-4 11. <
-```
-
-解析器不一次性提取所有“像题号”的数字，而是按当前期望题号定向扫描：
-
-```text
-期望 9  → 从块首找 9 的标记
-期望 10 → 从 9 的答案后面找 10
-期望 11 → 从 10 的答案后面找 11
-```
-
-每个答案从该题标记后开始，到下一个已识别期望题号前结束。
-
-### 7.4 `expanded_numbered`
-
-用于逐题展开的解答：
-
-```text
 17. 解：...
 方法二：...
 
@@ -318,15 +335,40 @@ BBCAD
 （2）...
 ```
 
-题号只允许出现在：
+解析器按当前期望题号定向扫描：
+
+```text
+期望 9  → 查找第 9 题强边界
+期望 10 → 从第 9 题答案后继续查找第 10 题强边界
+期望 11 → 继续按顺序查找
+```
+
+每个答案从该题标记后开始，到下一个已识别期望题号前结束。块内答案原文保留
+空行、缩进和围栏代码块。
+
+题号边界分为：
+
+**强边界**
 
 - 行首；
+- 块首；
 - 明确的分值边界后，如 `6分26.解：`；
-- 独立的 `19.` 行后，正文继续到下一题。
+- 公式或数学环境中的 `$1 3 .`，仅在题号等于当前期望值时接受；
+- `；`、`。` 等明确答案分隔符后。
 
-展开正文中的 `x=13.5`、`1.`、评分细则编号不能被当成下一题。
+**弱边界**
 
-### 7.5 `unknown`
+- 同一物理行内，前一个答案是紧凑答案且题号正在严格递增；
+- 弱边界只在当前块第一行或已确认的紧凑编号行内启用。
+
+以下数字不得成为下一题：
+
+- 普通正文中的小数，如 `约为 12.2 米`；
+- 公式中的 `x=13.5`；
+- 解答内部的 `1.`、`2.` 评分细则编号；
+- 题号不递增、超出当前作用域或不在期望集合中的数字。
+
+### 7.4 `unknown`
 
 连续文本无法归入上述块时形成 `unknown` 块：
 
@@ -356,11 +398,16 @@ $1 3 . 2(1+x)^2=5.8$  → 数字空格归一后为第 13 题
 4. 块内题号只能递增。
 5. 题号后紧跟数字时，只有该题号正好等于当前期望值才接受。
 6. 数字之间允许由 MinerU 插入空格，如 `1 3` 归一为 `13`。
+7. 点后紧跟数字的候选只允许出现在：
+   - 块首或行首；
+   - `；`、`。`、分值和 `$` 等强边界后。
+8. 普通正文中间的 `约为 12.2 米` 不得成为第 12 题。
 
 因此：
 
 - `12.2` 可以被解释为第 12 题；
 - 解答中的 `x=13.5` 不会成为第 13 题；
+- 上一题正文中的 `约为 12.2 米` 不会成为第 12 题；
 - `$1 3 . 2...$` 只在期望第 13 题时接受；
 - 未知或回退题号不会被静默写入。
 
@@ -384,19 +431,21 @@ $1 3 . 2(1+x)^2=5.8$  → 数字空格归一后为第 13 题
 
 ## 10. 片段合并
 
-同一题可能有多个答案块，按源文件顺序合并：
+同一题可能有多个答案块。为防止后续详解污染或覆盖首套标准答案：
 
 | 情况 | 行为 |
 |---|---|
 | 首次非空片段 | 写入 `RawQuestion.answer` |
-| 后续片段完全相同 | 忽略 |
-| 后续片段已被现有答案包含 | 忽略 |
-| 后续片段包含新增解答内容 | 换行追加，记录 `answer_merged` warning |
+| 后续同题片段完全相同 | 忽略 |
+| 后续同题片段包含更多内容 | 仍忽略，记录 `answer_duplicate_ignored` warning |
+| 首次片段为空、后续片段非空 | 后续片段成为首套答案 |
 | 空片段 | 不写入，记录 `answer_empty` |
 | 题号不在期望集合 | 丢弃，记录 `answer_number_unexpected` |
 | 题号回退或乱序 | 丢弃，记录 `answer_number_out_of_order` |
 
-后续错误片段不能覆盖先前正确的表格答案。
+单个 `numbered` 块内部属于同一题的连续多行答案仍然原样保留。上述“第一套优先”
+只作用于多个独立答案块之间，确保现有
+`test_second_answer_block_does_not_pollute_last_question` 行为不变。
 
 ## 11. 完整覆盖校验
 
@@ -421,7 +470,7 @@ $1 3 . 2(1+x)^2=5.8$  → 数字空格归一后为第 13 题
 |---|---|---|
 | `answer_missing` | error | 期望题号最终没有非空答案 |
 | `answer_empty` | error | 有题号但答案文本为空 |
-| `answer_merged` | warning | 同题多段答案被追加合并 |
+| `answer_duplicate_ignored` | warning | 同题后续独立答案块被忽略 |
 | `answer_number_unexpected` | error | 题号不在期望集合 |
 | `answer_number_out_of_order` | error | 块内题号回退或乱序 |
 | `answer_region_no_assignments` | error | 答案区存在但 0 道题有答案 |
@@ -459,6 +508,24 @@ class ExtractedAnswer:
 - 单块失败：该块不分配，其它块继续。
 - issue 写 `output/answer_issues.jsonl`。
 
+“答案区存在但零命中”通过 sentinel 传递：
+
+```python
+ExtractedAnswer(
+    no=0,
+    issues=["答案区存在但未解析出任何答案"],
+    issue_details=[{
+        "code": "answer_region_no_assignments",
+        "severity": "error",
+        ...
+    }],
+)
+```
+
+`answer_extract_cli` 和 `answer_backfill` 只把
+`answer_region_no_assignments` 当作块解析失败；其它学科原有的 `no=0` issue
+语义不变。
+
 示例：
 
 ```text
@@ -471,7 +538,7 @@ class ExtractedAnswer:
 
 - 复用同一个 issue 写入函数。
 - 没有答案区：维持 `no_answer` 统计。
-- 有答案区、0 道题成功：计入 `failed`，不按“无答案段”跳过。
+- 有 `answer_region_no_assignments`：计入 `failed`，不按“无答案段”跳过。
 - 部分成功：继续回填非空答案，并输出 issue。
 
 ## 14. 实施步骤
@@ -481,7 +548,7 @@ class ExtractedAnswer:
 | 1 | 增加块类型、解析接口和真实版式夹具，不接入主链 | 新单测全绿，现有测试无改动 |
 | 2 | 将表格解析迁入 `answer_blocks.py`，旧 API 兼容导出 | `test_answer_table.py` 原断言全绿 |
 | 3 | 实现 `AnswerRegionParser` 和覆盖校验 | 密云、顺义、昌平、门头沟、石景山夹具全绿 |
-| 4 | 增加 `split_page_result()`，旧 `split_page()` 变薄包装 | 现有切题测试全绿 |
+| 4 | 增加策略 `parse_answers` 钩子和语文 legacy adapter；增加 `split_page_result()`，旧 `split_page()` 变薄包装 | 现有切题、语文答案和语文 `RawQuestion.answer` 测试全绿 |
 | 5 | 题干循环在答案边界停止，内容交给块解析器 | 密云 Q9–13 全部恢复 |
 | 6 | `generic` 链接入结构化 issue；英语保留区间答案适配 | 数理化道法英语答案测试全绿 |
 | 7 | 删除 `split_page` 内旧答案游标和逐行答案分支 | 源码中不再有 `current_answer_n/last_answer_n` |
@@ -505,9 +572,13 @@ class ExtractedAnswer:
 - 石景山：每格自带 `9. 答案` 的网格。
 - 解答题：`6分26.解：` 行尾粘连。
 - 裸选择答案：`B C A D` 与 `BBCAD`。
+- 单字母 `A` 不得被当作裸选择答案串。
 - 页码和小节标题夹在答案中。
+- 多行答案中的空行、缩进和围栏代码块必须保留。
 - 表格列数不等、多组表、未知块。
+- 同一 `numbered` 块混用紧凑编号和多行展开。
 - 题号乱序、意外题号、重复答案。
+- 上一题正文中的 `约为 12.2 米` 不得成为第 12 题。
 
 ### 15.2 集成测试
 
@@ -524,8 +595,11 @@ class ExtractedAnswer:
 - 答案不能写入相邻题号。
 - 空答案必须在 `answer_missing` 中出现。
 - 语文独立答案文档不变。
+- 语文 `RawQuestion.answer` 与重构前逐题一致。
 - 英语 `1-5 CBBCD` 合并后不重复、不覆盖。
 - 道法父题答案在小问扩展前完成写回。
+- 答案区存在但零命中时，`answer_extract_cli` 返回 `2`，
+  `answer_backfill` 计入 `failed`。
 
 ### 15.3 语料回归
 
@@ -558,9 +632,10 @@ class ExtractedAnswer:
 | 风险 | 应对 |
 |---|---|
 | 新块解析改变题干或材料 | `split_page_result()` 对既有题干、选项、材料做逐项回归；只替换答案段 |
-| 为兼容语文保留两套答案实现 | 语文独立策略继续隔离；通用块内核不出现学科分支 |
+| 为兼容语文保留两套答案实现 | 语文通过旧状态机 adapter 隔离；通用块内核不出现学科分支 |
 | 宽松匹配误把公式数字当题号 | 只搜索期望题号，要求顺序、集合和前缀边界同时成立 |
 | 部分答案串到相邻题 | 期望集合和完整覆盖校验；夹具逐题断言 |
+| 后续详解覆盖首套标准答案 | 独立答案块“第一套优先”，后续片段只记 issue |
 | 英语区间答案被覆盖 | 英语适配器只在空答案上填区间答案，再按源顺序合并 |
 | 旧答案产物未重生成 | 明确只对新解析流程生效；目标卷重新执行答案提取和核对 |
 
