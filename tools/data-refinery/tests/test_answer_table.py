@@ -191,6 +191,60 @@ def test_repeated_labeled_fill_blank_groups_are_both_read():
     }
 
 
+def test_colspan_header_merges_all_answer_cells_for_that_question():
+    """门头沟 2025 数学：第 16 题题号横跨两列，两个答案格都必须归第 16 题。
+
+    旧解析只按格数对齐，把 8 个题号和 9 个答案判成列数不齐，整张
+    9–16 题答案表被静默跳过。
+    """
+    line = (
+        "<table>"
+        "<tr><td>题号</td><td>9</td><td>10</td><td>11</td><td>12</td>"
+        "<td>13</td><td>14</td><td>15</td><td colspan=\"2\">16</td></tr>"
+        "<tr><td>答案</td><td>(-2,3)</td><td>六</td><td>略</td>"
+        "<td> $\\frac{1}{2}$ </td><td> $130^{\\circ}$ </td><td>3</td>"
+        "<td>1,4</td><td>略</td><td>A,B,E</td></tr>"
+        "</table>"
+    )
+    assert parse_answer_table(line) == {
+        9: "(-2,3)",
+        10: "六",
+        11: "略",
+        12: "$\\frac{1}{2}$",
+        13: "$130^{\\circ}$",
+        14: "3",
+        15: "1,4",
+        16: "略；A,B,E",
+    }
+
+
+def test_grid_cells_with_embedded_question_numbers_are_answers():
+    """石景山 2025 数学：每个答案格自带「题号. 答案」，没有题号行。
+
+    旧解析只支持「题号行 + 答案行」和纵向「题号|答案」两种结构，这张
+    9–16 题表因此整张被当成非答案表，答案文档从 8 直接跳到 17。
+    """
+    line = (
+        "<table>"
+        "<tr><td>9. 4:9</td><td>10.  $\\frac{1}{2}$ </td>"
+        "<td>11. 1</td><td>12. 500</td></tr>"
+        "<tr><td>13. 答案不唯一,如: $y = -x^{2}$ </td>"
+        "<td>14.  $\\frac{1}{4}$ </td><td>15. 8</td>"
+        "<td>16. (1) $\\frac{1}{4}$ ; (2) $\\frac{5}{12}$ .</td></tr>"
+        "</table>"
+    )
+    assert parse_answer_table(line) == {
+        9: "4:9",
+        10: "$\\frac{1}{2}$",
+        11: "1",
+        12: "500",
+        13: "答案不唯一,如: $y = -x^{2}$",
+        14: "$\\frac{1}{4}$",
+        15: "8",
+        16: "(1) $\\frac{1}{4}$ ; (2) $\\frac{5}{12}$ .",
+    }
+
+
 def test_unlabeled_non_choice_data_table_is_still_not_an_answer_key():
     """无「答案」标签的数值表不能因为新增自由文本支持而误判。"""
     line = (

@@ -1206,6 +1206,38 @@ def test_glued_next_stem_is_split_out():
     assert "根据材料三的图文信息" in q16.content
 
 
+def test_orphan_dot_uses_next_consecutive_question_number():
+    """OCR 丢了题号只剩 `．题干` 时，按上一题 +1 恢复连续题号。
+
+    门头沟 2025 数学卷的题 3 和题 22 都呈现为独立一行的 `．…`；旧逻辑把
+    题 3 并进题 2，把题 22 并进题 21，后续答案自然无题可写。
+    """
+    from pathlib import Path as _Path
+
+    from question_splitter import split_page
+
+    cases = [
+        (
+            "1. 第一题\n\n2. 第二题\nA.甲 B.乙 C.丙 D.丁\n\n"
+            "．抛物线先向上平移后得到的表达式是\nA.甲 B.乙 C.丙 D.丁\n\n"
+            "4. 第四题\n",
+            (2, 3),
+            "抛物线先向上平移",
+        ),
+        (
+            "21. 第二十一题\n\n．一次活动中要围一个矩形花园\n\n23. 第二十三题\n",
+            (21, 22),
+            "一次活动中要围一个矩形花园",
+        ),
+    ]
+    for text, (previous, orphan), expected_start in cases:
+        qs = split_page(text, _Path("x.md"))
+        by_no = {q.group_order: q for q in qs}
+        assert orphan in by_no
+        assert by_no[orphan].content.startswith(expected_start)
+        assert expected_start not in by_no[previous].content
+
+
 def test_exam_notice_numbers_are_not_split():
     """卷首考试说明（'150分钟。2.在试卷…'）不能被当成题号。"""
     from pathlib import Path as _Path
@@ -1962,6 +1994,104 @@ def test_bare_answer_stem_line_starts_new_answer():
     by_no = {q.group_order: q.answer for q in qs}
     assert by_no[18] == "代入得 7。"
     assert "图略" in by_no[19] and "19." not in by_no[18]
+
+
+def test_inline_fill_blank_answers_split_bare_question_numbers():
+    """同一行填空题答案混用带点与裸题号时，必须按连续题号逐题切开。
+
+    顺义 2025 数学期末第 9–16 题答案写在同一行，其中 9/10/13/16 没有点号。
+    旧规则只认 `11.` 这类标记：9/10/13 全空，16 的答案被并进 15。
+    """
+    from pathlib import Path as _Path
+    from question_splitter import split_page
+
+    stems = "\n\n".join(f"{n}. 第 {n} 题" for n in range(1, 17))
+    text = (
+        stems
+        + "\n\n# 参考答案\n\n"
+        "<table><tr><td>题号</td><td>1</td><td>2</td><td>3</td>"
+        "<td>4</td><td>5</td><td>6</td><td>7</td><td>8</td></tr>"
+        "<tr><td>答案</td><td>A</td><td>B</td><td>A</td><td>C</td>"
+        "<td>B</td><td>D</td><td>C</td><td>C</td></tr></table>\n\n"
+        "9 $x { \\neq } 5$ 10 $y = - x ^ { 2 } + 2$ （答案不唯一）； "
+        "11．0； 12．20；13 $\\frac { \\sqrt { 5 } } { 5 }$ ； "
+        "14． $\\frac 1 3$ ； 15．②③； 16 $b { \\geqslant } 2$\n"
+    )
+    qs = split_page(text, _Path("x.md"))
+    by_no = {q.group_order: q.answer for q in qs}
+
+    assert by_no[9] == "$x { \\neq } 5$"
+    assert by_no[10] == "$y = - x ^ { 2 } + 2$ （答案不唯一）；"
+    assert by_no[11] == "0；"
+    assert by_no[12] == "20；"
+    assert by_no[13] == "$\\frac { \\sqrt { 5 } } { 5 }$ ；"
+    assert by_no[14] == "$\\frac 1 3$ ；"
+    assert by_no[15] == "②③；"
+    assert by_no[16] == "$b { \\geqslant } 2$"
+
+
+def test_glued_next_answer_number_splits_from_previous_answer():
+    """上一题答案行尾粘着下一题的「26.解：」时，后续行必须归第 26 题。
+
+    顺义 2025 数学卷第 25 题答案以「6 分26.解：」直接接第 26 题，
+    第 26 题解析又延续多行；旧状态机把整段都写进第 25 题，第 26 题留空。
+    """
+    from pathlib import Path as _Path
+    from question_splitter import split_page
+
+    text = (
+        "25. 第 25 题\n\n26. 第 26 题\n\n27. 第 27 题\n\n"
+        "# 参考答案\n\n"
+        "25.（1）证明：答案甲。 6 分26.解： (1) $x = b$\n"
+        "方法二：综上可得 $b < 0$。 6 分\n\n"
+        "27．解：答案丙。\n"
+    )
+    qs = split_page(text, _Path("x.md"))
+    by_no = {q.group_order: q.answer for q in qs}
+
+    assert by_no[25] == "（1）证明：答案甲。 6 分"
+    assert by_no[26] == "(1) $x = b$\n方法二：综上可得 $b < 0$。 6 分"
+    assert by_no[27] == "答案丙。"
+
+
+def test_glued_answer_number_before_subquestion_splits():
+    """下一题粘在行尾时也可能是 `24．（1）证明`，不要求标记后紧跟冒号。"""
+    from pathlib import Path as _Path
+    from question_splitter import split_page
+
+    text = (
+        "23. 第 23 题\n\n24. 第 24 题\n\n25. 第 25 题\n\n"
+        "# 参考答案\n\n"
+        "23. 解：答案为 129.2m.24．（1）证明：连接 OA。\n"
+        "（2）解：答案为 6。\n\n"
+        "25．解：下一题答案。\n"
+    )
+    qs = split_page(text, _Path("x.md"))
+    by_no = {q.group_order: q.answer for q in qs}
+
+    assert by_no[23] == "答案为 129.2m."
+    assert by_no[24] == "（1）证明：连接 OA。\n（2）解：答案为 6。"
+    assert by_no[25] == "下一题答案。"
+
+
+def test_score_suffix_before_next_answer_starts_new_question():
+    """OCR 连下一题题号也丢了时，前题 `6分解：（1）` 仍可恢复下一连续题。"""
+    from pathlib import Path as _Path
+    from question_splitter import split_page
+
+    text = (
+        "25. 第 25 题\n\n26. 第 26 题\n\n27. 第 27 题\n\n"
+        "# 参考答案\n\n"
+        "25. 解：由题意可得结论。……6分解：（1）抛物线对称轴为 x=1。\n"
+        "（2）最终范围为 a=5。\n\n"
+        "27．解：答案丙。\n"
+    )
+    qs = split_page(text, _Path("x.md"))
+    by_no = {q.group_order: q.answer for q in qs}
+
+    assert by_no[25] == "由题意可得结论。……6分"
+    assert by_no[26] == "（1）抛物线对称轴为 x=1。\n（2）最终范围为 a=5。"
+    assert by_no[27] == "答案丙。"
 
 
 def test_second_answer_block_does_not_pollute_last_question():

@@ -204,6 +204,9 @@ _BARE_STEM_RE = re.compile(r"^\s*#{0,6}\s*(\d{1,2})\s+(?=[^\d\s])")
 # 字符，裸题号认不出（2026 北京中学期末实测 Q19 答案被吞进 Q18）。只在答案区
 # 生效，避免题干区的孤立数字行被切出空题。
 _BARE_ANSWER_STEM_RE = re.compile(r"^\s*#{0,6}\s*(\d{1,2})\s*[.．]\s*$")
+# OCR 丢了整个题号、只剩题号后的点：门头沟 2025 数学题 3/22 均为独立一行
+# `．题干`。仅在已有上一题且题号连续时按上一题 +1 恢复，避免把普通句点当题号。
+_ORPHAN_STEM_DOT_RE = re.compile(r"^\s*#{0,6}\s*[.．]\s*(?=\S)")
 
 
 def _starts_with_measure_word(rest: str) -> bool:
@@ -304,6 +307,59 @@ def split_inline_stems(line: str) -> list[tuple[int, str]]:
     return results
 
 
+_INLINE_ANSWER_MARKER_RE = re.compile(
+    r"(?<!\d)(?P<number>\d{1,2})(?:(?P<dot>[.．])\s*|\s+)(?=\S)"
+)
+_INLINE_MATH_SPAN_RE = re.compile(r"\$\$.*?\$\$|\$[^$\n]*\$")
+
+
+def _mask_inline_math(line: str) -> str:
+    """把行内公式换成等长空格，防止答案里的数字被当作下一题题号。"""
+    return _INLINE_MATH_SPAN_RE.sub(lambda m: " " * len(m.group(0)), line)
+
+
+def split_inline_fill_blank_answers(
+    line: str, expected_start: int
+) -> list[tuple[int, str]]:
+    """按连续题号切开同一行的填空题答案，兼容部分题号后没有点。
+
+    仅从 ``expected_start`` 开始逐题找题号，裸题号必须出现在行首或空白后；
+    公式区间先遮掉，避免 ``x-5``、``\\sqrt{5}`` 里的数字切错。
+    """
+    masked = _mask_inline_math(line)
+    markers: list[tuple[int, int, int]] = []
+    cursor = 0
+    expected = expected_start
+
+    while True:
+        match = _INLINE_ANSWER_MARKER_RE.search(line, cursor)
+        if match is None:
+            break
+        number = int(match.group("number"))
+        if number != expected:
+            cursor = match.start() + 1
+            continue
+        if not masked[match.start():match.end("number")].strip():
+            cursor = match.end()
+            continue
+        if match.group("dot") is None and match.start() > 0 \
+                and masked[match.start() - 1] not in " \t；;。":
+            cursor = match.start() + 1
+            continue
+        markers.append((number, match.start(), match.end()))
+        cursor = match.end()
+        expected += 1
+
+    if len(markers) < 2:
+        return []
+
+    results: list[tuple[int, str]] = []
+    for i, (number, _, content_start) in enumerate(markers):
+        next_marker_start = markers[i + 1][1] if i + 1 < len(markers) else len(line)
+        results.append((number, line[content_start:next_marker_start].strip()))
+    return results
+
+
 # 选择题答案裸串：'BBCA CACC' / 'ABCABCD'（无题号，按字母位置对应题号）。
 # 仅在答案区使用；至少两个字母，避免把单个选项字母当答案表。
 _COMPACT_ANSWER_KEY_RE = re.compile(r"^\s*([A-Da-d]+(?:\s+[A-Da-d]+)+)\s*$")
@@ -331,6 +387,69 @@ def _split_glued_next_stem(line: str, expected: int) -> tuple[str, int, str] | N
         if tail:
             return line[: m.start() + 1], expected, tail
     return None
+
+
+_GLUED_ANSWER_RE = re.compile(
+    r"(?<!\d)(?P<number>\d{1,2})\s*[.．]\s*"
+    r"(?:(?:答案|解|证明)[：:]\s*"
+    r"|(?=[（(]\s*\d{1,2}\s*[）)]\s*(?:答案|解|证明)))"
+)
+_SCORE_SPLIT_ANSWER_RE = re.compile(
+    r"(?P<score>\d{1,2}\s*分)\s*"
+    r"(?=(?:解|证明|答案)[：:]\s*[（(]\s*1\s*[）)])"
+)
+
+
+def _split_glued_answers(
+    line: str, current_number: int
+) -> tuple[str, list[tuple[int, str]]] | None:
+    """拆出上一题答案行内粘连的后续题号（``...6分26.解：...``）。
+
+    只接受恰好从当前题号 +1 开始的连续编号，并要求题号后带「答案/解/证明：」。
+    行内 LaTeX 先遮掉，避免 ``x=26.解...`` 这类公式内数字误触发。
+    """
+    masked = _mask_inline_math(line)
+    markers: list[re.Match[str]] = []
+    expected = current_number + 1
+    for match in _GLUED_ANSWER_RE.finditer(masked):
+        if int(match.group("number")) != expected:
+            continue
+        markers.append(match)
+        expected += 1
+    if not markers:
+        return None
+
+    head = line[:markers[0].start()].rstrip()
+    parts: list[tuple[int, str]] = []
+    for i, match in enumerate(markers):
+        end = markers[i + 1].start() if i + 1 < len(markers) else len(line)
+        parts.append((
+            int(match.group("number")),
+            line[match.end():end].strip(),
+        ))
+    return head, parts
+
+
+def _split_score_prefixed_answer(
+    line: str,
+    current_number: int,
+    question_numbers: set[int],
+) -> tuple[str, str] | None:
+    """拆出连题号都丢失、但前题分值后直接接下一题答案的边界。
+
+    石景山 2025 数学第 25 题末尾 ``……6分解：（1）`` 实际已进入第 26 题。
+    只有下一连续题确实存在、且 ``解/证明/答案`` 后紧接 ``(1)`` 时才拆。
+    """
+    if current_number + 1 not in question_numbers:
+        return None
+    match = _SCORE_SPLIT_ANSWER_RE.search(line)
+    if match is None:
+        return None
+    head = line[:match.end()].rstrip()
+    tail = line[match.end():].strip()
+    if not tail:
+        return None
+    return head, tail
 
 
 def parse_group_scores(header: str) -> tuple[str, object | None]:
@@ -705,13 +824,38 @@ def _compact_choice_cells(cells: list[str]) -> list[str]:
             for c in cells]
 
 
+@dataclass(frozen=True)
+class _TableCell:
+    text: str
+    colspan: int = 1
+
+
+def _table_cell_rows(line: str) -> list[list[_TableCell]]:
+    """HTML 表格 → 行×单元格（保留题号/答案格的 colspan）。"""
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", line, re.DOTALL)
+    result: list[list[_TableCell]] = []
+    for row in rows:
+        cells: list[_TableCell] = []
+        for attrs, body in re.findall(
+            r"<td([^>]*)>(.*?)</td>", row, re.DOTALL
+        ):
+            span_match = re.search(
+                r"\bcolspan\s*=\s*[\"']?(\d+)", attrs, re.IGNORECASE
+            )
+            colspan = int(span_match.group(1)) if span_match else 1
+            cells.append(_TableCell(
+                text=html.unescape(re.sub(r"<[^>]+>", "", body)).strip(),
+                colspan=max(1, colspan),
+            ))
+        result.append(cells)
+    return result
+
+
 def _table_rows(line: str) -> list[list[str]]:
     """HTML 表格 → 行×格文本（剥标签、去首尾空白；rowspan/colspan 只留空文本）。"""
-    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", line, re.DOTALL)
     return [
-        [html.unescape(re.sub(r"<[^>]+>", "", c)).strip()
-         for c in re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)]
-        for row in rows
+        [cell.text for cell in row]
+        for row in _table_cell_rows(line)
     ]
 
 
@@ -795,7 +939,58 @@ def _freeform_cells(cells: list[str], expected: int) -> list[str]:
     return body
 
 
-def _parse_horizontal(rows: list[list[str]]) -> dict[int, str]:
+def _span_aligned_answers(
+    number_row: list[_TableCell],
+    answer_row: list[_TableCell],
+) -> dict[int, str]:
+    """按题号行的 colspan 把答案格合并回每一题。
+
+    门头沟 2025 数学第 16 题题号跨两列，对应两格答案「略」「A,B,E」。
+    只有答案行明确带「答案」标签（允许自由文本）或其余格全像 A–D 时才接受；
+    否则数学数据表仍会被拒绝。
+    """
+    header = list(number_row)
+    if header and not _CELL_DIGITS_RE.match(header[0].text):
+        header = header[1:]
+    if len(header) < 2 or not all(
+        _CELL_DIGITS_RE.match(cell.text) for cell in header
+    ):
+        return {}
+
+    answer_cells = list(answer_row)
+    labeled = bool(answer_cells and _is_answer_label(answer_cells[0].text))
+    if labeled:
+        answer_cells = answer_cells[1:]
+
+    slots: list[str] = []
+    for cell in answer_cells:
+        slots.append(cell.text)
+        slots.extend("" for _ in range(cell.colspan - 1))
+
+    header_width = sum(cell.colspan for cell in header)
+    if len(slots) != header_width:
+        return {}
+    if not labeled and not all(
+        not text or _CELL_CHOICE_RE.match(_compact_choice_cells([text])[0])
+        for text in slots
+    ):
+        return {}
+
+    result: dict[int, str] = {}
+    offset = 0
+    for cell in header:
+        values = slots[offset:offset + cell.colspan]
+        offset += cell.colspan
+        merged = "；".join(value for value in values if value)
+        if merged:
+            result[int(cell.text)] = merged
+    return result
+
+
+def _parse_horizontal(
+    rows: list[list[str]],
+    cell_rows: list[list[_TableCell]] | None = None,
+) -> dict[int, str]:
     """横向表：数字行 + 下一行答案行，一张表里可以有多组（11–15 常在第二组）。"""
     result: dict[int, str] = {}
     for i in range(len(rows) - 1):
@@ -805,6 +1000,11 @@ def _parse_horizontal(rows: list[list[str]]) -> dict[int, str]:
         answers = _choice_cells(rows[i + 1], len(nums))
         if not answers:
             answers = _freeform_cells(rows[i + 1], len(nums))
+        if not answers and cell_rows is not None:
+            aligned = _span_aligned_answers(cell_rows[i], cell_rows[i + 1])
+            if aligned:
+                result.update(aligned)
+                continue
         if not answers:
             # 列数对不齐（OCR 拆并格）：这一组不写，宁空不猜。
             # 只对「答案行」喊话 —— 数学/统计表（题号 + 分值）在答案段里很常见，
@@ -839,6 +1039,39 @@ def _parse_vertical(rows: list[list[str]]) -> dict[int, str]:
     return result if pairs >= 2 else {}
 
 
+_NUMBERED_ANSWER_CELL_RE = re.compile(
+    r"^\s*(\d{1,2})\s*[.．]\s*(.+?)\s*$"
+)
+
+
+def _parse_cell_numbered(
+    rows: list[list[_TableCell]]
+) -> dict[int, str]:
+    """解析每格都写成「题号. 答案」的答案网格。
+
+    石景山 2025 数学 9–16 题就是两行四列的网格，没有独立的题号行。
+    只有所有非空格都带题号、且题号按行序连续时才接受，避免把普通数据表
+    里的数字格误当答案。
+    """
+    result: dict[int, str] = {}
+    for row in rows:
+        for cell in row:
+            text = cell.text.strip()
+            if not text:
+                continue
+            match = _NUMBERED_ANSWER_CELL_RE.match(text)
+            if match is None:
+                return {}
+            result[int(match.group(1))] = match.group(2).strip()
+
+    numbers = list(result)
+    if len(numbers) < 2:
+        return {}
+    if numbers != list(range(numbers[0], numbers[-1] + 1)):
+        return {}
+    return result
+
+
 def answer_table_numbers(line: str) -> set[int]:
     """这张表里「声明了有答案」的题号集合（供调用方核对有没有解析漏）。"""
     return {int(n) for row in _table_rows(line) for n in _number_cells(row)}
@@ -859,10 +1092,15 @@ def parse_answer_table(line: str) -> dict[int, str]:
     非答案表（数学的数据表 `x|…|0|1|2` + 数值行）整表返回 {}；列数对不齐的那一组
     不写。HTML 实体在这里统一反转义，`&lt;` 会作为答案 `<` 进入后续流程。
     """
-    rows = _table_rows(line)
+    cell_rows = _table_cell_rows(line)
+    rows = [[cell.text for cell in row] for row in cell_rows]
     if len(rows) < 2:
         return {}
-    return _parse_horizontal(rows) or _parse_vertical(rows)
+    return (
+        _parse_horizontal(rows, cell_rows)
+        or _parse_vertical(rows)
+        or _parse_cell_numbered(cell_rows)
+    )
 
 
 @dataclass
@@ -890,7 +1128,13 @@ def _strip_main_stem_prefix(line: str) -> str:
     '9.若代数式' -> '若代数式'
     '9. $\\frac{1}{x-3}$' -> '$\\frac{1}{x-3}$'
     """
-    return _STEM_PREFIX_RE.sub('', line, count=1).strip()
+    stripped = _STEM_PREFIX_RE.sub('', line, count=1)
+    if stripped != line:
+        return stripped.strip()
+    orphan = _ORPHAN_STEM_DOT_RE.match(line)
+    if orphan:
+        return line[orphan.end():].strip()
+    return line.strip()
 
 
 # 答案区单行里的前缀标记：「答案：」「答案示例 2：」「答案要点：」/「解：」。
@@ -1171,6 +1415,12 @@ def split_page(text: str, md_path: Path,
 
         # 主题号处理（含紧凑格式一行多题号）
         inline_stems = split_inline_stems(line) if in_answer_section else []
+        if in_answer_section:
+            fill_blank_stems = split_inline_fill_blank_answers(
+                line, last_answer_n + 1
+            )
+            if len(fill_blank_stems) > len(inline_stems):
+                inline_stems = fill_blank_stems
         # 题号判定走学科策略（`is_stem`），内核不再自己判——
         # 各科的 is_stem 目前都委托 is_main_stem，行为等价。
         ok, n = strategy.is_stem(line)
@@ -1182,6 +1432,14 @@ def split_page(text: str, md_path: Path,
             if amb and _has_next_stem(lines, i + 1, int(amb.group(1)),
                                       is_stem=strategy.is_stem):
                 ok, n = True, int(amb.group(1))
+        if not ok and not in_answer_section and has_blank_before \
+                and last_stem_no > 0:
+            orphan = _ORPHAN_STEM_DOT_RE.match(line)
+            if orphan:
+                orphan_rest = line[orphan.end():].strip()
+                if len(orphan_rest) >= 6 \
+                        and re.search(r"[\u4e00-\u9fff]", orphan_rest):
+                    ok, n = True, last_stem_no + 1
         # 裸题号（OCR 丢了点）：`11 在平面直角坐标系…`。规则级 4 条全满足才认；
         # 拿不准的攒进 suspects_out 交 LLM 复核，第二遍带 forced_stem_lines 直接采纳。
         if not ok and not in_answer_section:
@@ -1306,10 +1564,55 @@ def split_page(text: str, md_path: Path,
                 current_answer_n = n
                 current_answer_lines = [rest] if rest else []
                 last_answer_n = max(last_answer_n, n)
+                glued_answers = _split_glued_answers(rest, n)
+                if glued_answers is not None:
+                    head, parts = glued_answers
+                    current_answer_lines = [head] if head else []
+                    for answer_no, answer_text in parts:
+                        _flush_answer()
+                        current_answer_n = answer_no
+                        current_answer_lines = [answer_text] if answer_text else []
+                        last_answer_n = max(last_answer_n, answer_no)
+                else:
+                    score_split = _split_score_prefixed_answer(
+                        rest, n, {q.group_order for q in questions}
+                    )
+                    if score_split is not None:
+                        head, tail = score_split
+                        current_answer_lines = [head] if head else []
+                        _flush_answer()
+                        current_answer_n = n + 1
+                        current_answer_lines = [tail]
+                        last_answer_n = max(last_answer_n, current_answer_n)
             else:
                 # 答案段的续行（含小问号行 (1)(2)）
                 if current_answer_n is not None:
-                    current_answer_lines.append(line)
+                    glued_answers = _split_glued_answers(line, current_answer_n)
+                    if glued_answers is None:
+                        score_split = _split_score_prefixed_answer(
+                            line, current_answer_n,
+                            {q.group_order for q in questions},
+                        )
+                        if score_split is None:
+                            current_answer_lines.append(line)
+                        else:
+                            head, tail = score_split
+                            next_answer_n = current_answer_n + 1
+                            if head:
+                                current_answer_lines.append(head)
+                            _flush_answer()
+                            current_answer_n = next_answer_n
+                            current_answer_lines = [tail]
+                            last_answer_n = max(last_answer_n, current_answer_n)
+                    else:
+                        head, parts = glued_answers
+                        if head:
+                            current_answer_lines.append(head)
+                        for answer_no, answer_text in parts:
+                            _flush_answer()
+                            current_answer_n = answer_no
+                            current_answer_lines = [answer_text] if answer_text else []
+                            last_answer_n = max(last_answer_n, answer_no)
             continue
 
         # 题干区
