@@ -3,7 +3,8 @@
 文档格式（spec 2026-09-10 §4.2）：
 
     # 试卷：<试卷标题>          —— 用于定位 exam_papers（可用库内 title 或素材原名；重名时 CLI 列候选）
-    ## <印刷题号>               —— 对应 paper_questions.question_no
+    # 试卷                     —— 素材直转出的裸标题；无标题文本，需调用方给 --paper-id
+    ## / ### <印刷题号>         —— 对应 paper_questions.question_no；素材直转出用 ###
     答案：<内容，可多行>         —— 必填；公式用 $...$ LaTeX
     思路：<内容，可多行>         —— 可选；写入 questions.approach
     解析：<内容，可多行>         —— 可选；写入 questions.explanation
@@ -23,8 +24,11 @@ from dataclasses import dataclass, field
 
 from answer_records import AnswerRecord, VALID_TYPES
 
-HEADING_PAPER_RE = re.compile(r"^#\s*试卷[:：]\s*(.+?)\s*$")
-HEADING_ITEM_RE = re.compile(r"^##\s*(\d+)\s*$")
+# 标题兼容两种写法：规范的 `# 试卷：<标题>`，以及素材直转出的裸 `# 试卷`
+# （此时没有标题文本，用字面量占位；定位卷靠调用方的 --paper-id）。
+HEADING_PAPER_RE = re.compile(r"^#\s*试卷(?:[:：]\s*(.+?))?\s*$")
+# 题号兼容 `## 1` 与素材直转出的 `### 1`（只认纯数字标题，带文字的小节标题不算题）。
+HEADING_ITEM_RE = re.compile(r"^#{2,3}\s*(\d+)\s*$")
 # 字段行容忍 Markdown 强调与列表前缀：`**答案：** A` / `**答案**：A` / `- **答案：** A`
 FIELD_RE = re.compile(
     r"^(?:[-*+]\s+)?(?:\*\*|__)?\s*(答案|思路|解析|题型)\s*(?:\*\*|__)?\s*"
@@ -87,7 +91,7 @@ def parse_answer_doc(text: str) -> AnswerDoc:
 
         m = HEADING_PAPER_RE.match(line)
         if m:
-            doc.title = m.group(1)
+            doc.title = m.group(1) or "试卷"
             current, field_name, pending_blanks = None, None, 0
             continue
 
@@ -141,9 +145,9 @@ def parse_answer_doc(text: str) -> AnswerDoc:
 
 def _validate(doc: AnswerDoc) -> None:
     if not doc.title:
-        raise AnswerDocError("缺少试卷标题（首行应为「# 试卷：<标题>」）")
+        raise AnswerDocError("缺少试卷标题（首行应为「# 试卷」或「# 试卷：<标题>」）")
     if not doc.items:
-        raise AnswerDocError("文档中没有任何题目（需要「## <题号>」标记）")
+        raise AnswerDocError("文档中没有任何题目（需要「## / ### <题号>」标记）")
     for it in doc.items:
         if not it.answer.strip():
             raise AnswerDocError(f"第 {it.no} 题缺少「答案：」字段（每题必写答案）")

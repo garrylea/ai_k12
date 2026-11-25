@@ -1,6 +1,9 @@
 """import_cli 单测：各阶段 argv 拼装 + 阶段顺序/跳过 + --file 入口解析。"""
 
+import builtins
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -712,66 +715,102 @@ def test_preview_log_written_with_records(tmp_path, monkeypatch, capsys):
 # ---------- --answers：指定答案/解析文件 ----------
 
 class TestAnswersFileEntry:
-    def _run(self, monkeypatch, tmp_path, name, content, *,
-             file_kw="西城35中", dry_run=False, paper_id=None, lookup=420):
-        from types import SimpleNamespace
+    DEFAULT_ROWS = [(420, "2024 海淀 初三 模拟二", "数学/初中/first/2024/海淀卷-试卷")]
 
+    def _stub_lookup(self, monkeypatch, rows, keywords, *, answer="y", isatty=True):
+        monkeypatch.setattr(import_cli, "_lookup_paper_rows",
+                            lambda cfg, kw: keywords.append(kw) or rows)
+        monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: isatty))
+        monkeypatch.setattr(builtins, "input", lambda _prompt="": answer)
+
+    def _run(self, monkeypatch, tmp_path, name, content, *, dry_run=False,
+             paper_id=None, rows=None, answer="y", isatty=True):
         import answer_importer_cli
 
         path = tmp_path / name
         path.write_text(content, encoding="utf-8")
-        calls = []
+        calls, keywords = [], []
         monkeypatch.setattr(answer_importer_cli, "main",
                             lambda argv: calls.append(argv) or 0)
-        monkeypatch.setattr(import_cli, "_lookup_paper_id", lambda cfg, kw: lookup)
+        self._stub_lookup(monkeypatch, self.DEFAULT_ROWS if rows is None else rows,
+                          keywords, answer=answer, isatty=isatty)
         monkeypatch.setattr(import_cli.RefineryConfig, "from_env",
                             staticmethod(lambda *a, **k: None))
-        args = SimpleNamespace(answers=str(path), file=file_kw,
+        args = SimpleNamespace(answers=str(path), file=None,
                                dry_run=dry_run, paper_id=paper_id)
         rc = import_cli._answers_file_entry(args)()
-        return rc, calls
+        return rc, calls, keywords
 
-    def test_md_uses_doc_with_resolved_paper_id(self, monkeypatch, tmp_path):
-        rc, calls = self._run(monkeypatch, tmp_path, "a.md", "# 试卷：x\n")
+    def test_md_uses_doc_with_paper_id_from_filename(self, monkeypatch, tmp_path):
+        rc, calls, keywords = self._run(monkeypatch, tmp_path, "a.md", "# 试卷\n### 1\n答案：B\n")
         assert rc == 0
+        assert keywords == ["a"]  # 拿文件名查库，不再依赖 doc 里的标题
         assert calls == [[
             "--doc", str(tmp_path / "a.md"), "--paper-id", "420",
             "--apply", "--yes",
         ]]
 
+    def test_md_strips_answer_suffix_before_lookup(self, monkeypatch, tmp_path):
+        _, _, keywords = self._run(monkeypatch, tmp_path, "八中试卷答案.md", "# 试卷\n")
+        assert keywords == ["八中试卷"]
+
     def test_md_dry_run_does_not_apply(self, monkeypatch, tmp_path):
-        _, calls = self._run(monkeypatch, tmp_path, "a.md", "# 试卷：x\n", dry_run=True)
+        _, calls, _ = self._run(monkeypatch, tmp_path, "a.md", "# 试卷\n", dry_run=True)
         assert calls == [["--doc", str(tmp_path / "a.md"), "--paper-id", "420"]]
 
-    def test_jsonl_uses_records(self, monkeypatch, tmp_path):
-        _, calls = self._run(monkeypatch, tmp_path, "a.jsonl", "{}\n")
+    def test_jsonl_uses_records_and_never_looks_up_paper(self, monkeypatch, tmp_path):
+        _, calls, keywords = self._run(monkeypatch, tmp_path, "a.jsonl", "{}\n")
+        assert keywords == []  # .jsonl 记录自带定位
         assert calls == [["--records", str(tmp_path / "a.jsonl"), "--apply", "--yes"]]
 
     def test_missing_file_returns_2(self, monkeypatch, tmp_path):
-        from types import SimpleNamespace
-
         monkeypatch.setattr(import_cli.RefineryConfig, "from_env",
                             staticmethod(lambda *a, **k: None))
         args = SimpleNamespace(answers=str(tmp_path / "nope.md"),
-                               file="x", dry_run=False, paper_id=None)
+                               file=None, dry_run=False, paper_id=None)
         assert import_cli._answers_file_entry(args)() == 2
 
-    def test_explicit_paper_id_wins_over_file_lookup(self, monkeypatch, tmp_path):
-        """卷名重名（昌平一中 = 语文卷 + 数学卷）时，--paper-id 必须原样透传。"""
-        # 反查桩返回 420：若实现走反查，argv 里就会是 420 而不是 362
-        _, calls = self._run(monkeypatch, tmp_path, "a.md", "# 试卷：昌平一中\n",
-                             paper_id=362, lookup=420)
+    def test_explicit_paper_id_skips_filename_lookup(self, monkeypatch, tmp_path):
+        _, calls, keywords = self._run(monkeypatch, tmp_path, "a.md", "# 试卷\n", paper_id=362)
+        assert keywords == []
         assert calls == [["--doc", str(tmp_path / "a.md"), "--paper-id", "362",
                           "--apply", "--yes"]]
 
     def test_jsonl_ignores_paper_id(self, monkeypatch, tmp_path):
-        _, calls = self._run(monkeypatch, tmp_path, "a.jsonl", "{}\n", paper_id=362)
+        _, calls, _ = self._run(monkeypatch, tmp_path, "a.jsonl", "{}\n", paper_id=362)
         assert calls == [["--records", str(tmp_path / "a.jsonl"), "--apply", "--yes"]]
 
-    def _run_pdf(self, monkeypatch, tmp_path, *, file_kw=None, dry_run=False,
-                 paper_id=None, lookup=667, with_md=True):
-        from types import SimpleNamespace
+    def test_single_match_asks_confirmation_and_cancel_stops(self, monkeypatch, tmp_path,
+                                                             capsys):
+        _, calls, _ = self._run(monkeypatch, tmp_path, "a.md", "# 试卷\n", answer="n")
+        assert calls == []
+        out = capsys.readouterr().out
+        assert "试卷 #420" in out and "2024 海淀 初三 模拟二" in out
 
+    def test_multiple_matches_let_user_choose(self, monkeypatch, tmp_path, capsys):
+        rows = [(420, "2024 海淀 初三 模拟二", "数学/初中/first/2024/海淀卷-试卷"),
+                (421, "2024 西城 初三 期末", "数学/初中/first/2024/西城卷-试卷")]
+        _, calls, _ = self._run(monkeypatch, tmp_path, "a.md", "# 试卷\n",
+                                rows=rows, answer="2")
+        out = capsys.readouterr().out
+        assert "命中 2 份试卷" in out and "#421 2024 西城 初三 期末" in out
+        assert calls == [["--doc", str(tmp_path / "a.md"), "--paper-id", "421",
+                          "--apply", "--yes"]]
+
+    def test_no_match_hints_rename_file(self, monkeypatch, tmp_path, capsys):
+        rc, calls, _ = self._run(monkeypatch, tmp_path, "a.md", "# 试卷\n", rows=[])
+        out = capsys.readouterr().out
+        assert rc == 2 and calls == []
+        assert "没有匹配到试卷" in out and "改成合适的试卷名" in out
+
+    def test_non_interactive_single_match_refuses(self, monkeypatch, tmp_path, capsys):
+        rc, calls, _ = self._run(monkeypatch, tmp_path, "a.md", "# 试卷\n", isatty=False)
+        out = capsys.readouterr().out
+        assert rc == 2 and calls == []
+        assert "--paper-id 420" in out
+
+    def _run_pdf(self, monkeypatch, tmp_path, *, dry_run=False, paper_id=None,
+                 rows=None, with_md=True):
         import answer_extract_cli
         import answer_importer_cli
 
@@ -789,14 +828,14 @@ class TestAnswersFileEntry:
         monkeypatch.setattr(import_cli.RefineryConfig, "from_env",
                             staticmethod(lambda *a, **k: cfg))
         lookup_kw = []
-        monkeypatch.setattr(import_cli, "_lookup_paper_id",
-                            lambda c, kw: lookup_kw.append(kw) or lookup)
+        self._stub_lookup(monkeypatch, self.DEFAULT_ROWS if rows is None else rows,
+                          lookup_kw)
         extract_calls, import_calls = [], []
         monkeypatch.setattr(answer_extract_cli, "main",
                             lambda argv: extract_calls.append(argv) or 0)
         monkeypatch.setattr(answer_importer_cli, "main",
                             lambda argv: import_calls.append(argv) or 0)
-        args = SimpleNamespace(answers=str(pdf), file=file_kw,
+        args = SimpleNamespace(answers=str(pdf), file=None,
                                dry_run=dry_run, paper_id=paper_id)
         rc = import_cli._answers_file_entry(args)()
         return rc, lookup_kw, extract_calls, import_calls, md
@@ -813,14 +852,14 @@ class TestAnswersFileEntry:
             "--subject", "chinese", "--out", str(doc),
         ]]
         assert import_calls == [[
-            "--doc", str(doc), "--paper-id", "667", "--apply", "--yes",
+            "--doc", str(doc), "--paper-id", "420", "--apply", "--yes",
         ]]
 
     def test_pdf_dry_run_does_not_apply(self, monkeypatch, tmp_path):
         _, _, _, import_calls, _ = self._run_pdf(monkeypatch, tmp_path, dry_run=True)
         assert import_calls == [[
             "--doc", str(tmp_path / "out" / "answers" / "八中试卷答案.md"),
-            "--paper-id", "667",
+            "--paper-id", "420",
         ]]
 
     def test_pdf_explicit_paper_id_skips_lookup(self, monkeypatch, tmp_path):
@@ -830,11 +869,30 @@ class TestAnswersFileEntry:
         assert "--paper-id" in import_calls[0]
         assert import_calls[0][import_calls[0].index("--paper-id") + 1] == "362"
 
-    def test_pdf_no_unique_paper_returns_2_without_extracting(self, monkeypatch, tmp_path):
+    def test_pdf_no_match_returns_2_without_extracting(self, monkeypatch, tmp_path):
         rc, _, extract_calls, import_calls, _ = self._run_pdf(
-            monkeypatch, tmp_path, lookup=None)
+            monkeypatch, tmp_path, rows=[])
         assert rc == 2
         assert extract_calls == [] and import_calls == []  # 定位失败不浪费 MinerU
+
+
+def test_answers_only_output_does_not_mention_scope_flags(monkeypatch, tmp_path, capsys):
+    """只导答案时进度输出不要再提 --file/--subject 等无关参数。"""
+    import answer_importer_cli
+
+    path = tmp_path / "试卷答案.md"
+    path.write_text("# 试卷\n### 1\n答案：B\n", encoding="utf-8")
+    _stub_all(monkeypatch)
+    monkeypatch.setattr(answer_importer_cli, "main", lambda argv: 0)
+    monkeypatch.setattr(import_cli, "_lookup_paper_rows",
+                        lambda cfg, kw: [(420, "卷A", "x/y-试卷")])
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(builtins, "input", lambda _prompt="": "y")
+
+    assert import_cli.main(["--answers", str(path), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "--file" not in out and "--subject" not in out
+    assert "只导入答案" in out and "范围 all" not in out
 
 
 def test_parse_args_accepts_answers():

@@ -91,15 +91,12 @@ def parse_args(argv=None):
     parser.add_argument("--skip-load", action="store_true", help="跳过 db_loader（只到 published）")
     parser.add_argument("--answers", metavar="PATH",
                         help="指定答案/解析文件：.pdf 答案 PDF（自动转 md → 按学科提取 → "
-                             "回写）、.md 按卷答案文档（# 试卷：… + ## 题号 + 答案/思路/解析）、"
-                             ".jsonl 记录；第 6 步写入，非 dry-run 自动 --apply --yes。"
-                             "只做答案导入，不能与范围参数 --subject/--stage/--term/--year/"
-                             "--file/--files、--preview/--cards-only/--fix-only、"
-                             "--reconvert/--re-extract/--re-publish/--redo 同用；"
-                             "可搭配 --paper-id / --dry-run")
+                             "回写）、.md 按卷答案文档（# 试卷 / # 试卷：<标题> + ## / ### 题号 "
+                             "+ 答案/思路/解析）、.jsonl 记录；第 6 步写入，非 dry-run 自动 --apply --yes。"
+                             "按文件名自动定位试卷（去「答案」后缀模糊查），重名时在终端里选择；"
+                             "只做答案导入，不带其它范围/重建参数；可搭配 --paper-id / --dry-run。")
     parser.add_argument("--paper-id", type=int, default=None,
-                        help="试卷 id：--answers 的答案定位不到唯一卷时直接指定（.md/.pdf 均可用），"
-                             "优先于 --file 反查与 PDF 文件名去「答案」匹配")
+                        help="试卷 id：跳过按文件名自动定位，直接指定卷（.md/.pdf 均可用）")
     parser.add_argument("--reload-paper", action="store_true",
                         help="重导本卷：删该卷旧题与关联业务数据后从 published 重插"
                              "（题数会变的场景；会删除该卷考试作答，不可恢复）")
@@ -491,8 +488,12 @@ def _answers_entry(args):
     return run
 
 
-def _lookup_paper_id(cfg, keyword: str, *, exact_rel: str | None = None) -> int | None:
-    """按卷名/来源键子串在 exam_papers 里查 paper_id；唯一命中才返回。"""
+def _lookup_paper_rows(cfg, keyword: str) -> list[tuple[int, str, str]]:
+    """按卷名/来源键子串查 exam_papers，返回全部命中的 (id, title, source_key)。
+
+    --answers 的定位需要区分「0 份 / 1 份 / 多份」三种情况，故不能像旧版
+    _lookup_paper_id 那样只返回唯一命中。
+    """
     import pymysql
 
     # LIKE 的通配符必须转义：卷名里出现 % 或 _（如「2025_一模」）会扩成通配，误命中别的卷
@@ -504,22 +505,20 @@ def _lookup_paper_id(cfg, keyword: str, *, exact_rel: str | None = None) -> int 
     )
     try:
         with conn.cursor() as cur:
-            if exact_rel:
-                leaf = Path(exact_rel).name
-                cur.execute(
-                    "SELECT DISTINCT id FROM exam_papers "
-                    "WHERE source_key IN (%s, %s) OR title = %s",
-                    (exact_rel, f"{exact_rel}/{leaf}", leaf),
-                )
-            else:
-                cur.execute(
-                    "SELECT id FROM exam_papers WHERE title LIKE %s OR source_key LIKE %s",
-                    (f"%{escaped}%", f"%{escaped}%"),
-                )
-            rows = cur.fetchall()
-        return int(rows[0][0]) if len(rows) == 1 else None
+            cur.execute(
+                "SELECT id, title, source_key FROM exam_papers "
+                "WHERE title LIKE %s OR source_key LIKE %s ORDER BY id",
+                (f"%{escaped}%", f"%{escaped}%"),
+            )
+            return [(int(r[0]), r[1] or "", r[2] or "") for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+def _lookup_paper_id(cfg, keyword: str) -> int | None:
+    """唯一命中才返回 paper_id（保留给非 --answers 的旧调用点）。"""
+    rows = _lookup_paper_rows(cfg, keyword)
+    return rows[0][0] if len(rows) == 1 else None
 
 
 # 答案文件名 → 试卷名：与 answer_merger._answer_name_variants（试卷 → 答案名）
@@ -528,31 +527,75 @@ _ANSWER_SUFFIXES = ("（答案）", "(答案)", "-答案", "_答案", "答案")
 
 
 def _strip_answer_suffix(name: str) -> str:
-    """答案 PDF 名去掉「答案」类后缀，得到用于定位试卷的关键词。"""
+    """答案文件名去掉「答案」类后缀，得到用于定位试卷的关键词。"""
     for mark in _ANSWER_SUFFIXES:
         if name.endswith(mark) and len(name) > len(mark):
             return name[: -len(mark)]
     return name
 
 
-def _pdf_paper_id(cfg, args, pdf: Path) -> tuple[int | None, str]:
-    """(paper_id, 匹配依据)：显式 --paper-id > --file 反查 > 文件名去「答案」。"""
+def _paper_label(title: str, source_key: str) -> str:
+    """候选卷的可读标签：同名卷必须带上素材原名才能区分。"""
+    leaf = (source_key or "").rstrip("/").rsplit("/", 1)[-1]
+    return title if leaf in ("", title) else f"{title}（来源：{leaf}）"
+
+
+def _resolve_answers_paper(cfg, args, path: Path) -> tuple[int | None, str]:
+    """--answers 专用：按答案文件名定位试卷，返回 (paper_id, 匹配依据)。
+
+    用户只知道卷名、不知道 paper_id，所以从文件名（去「答案」后缀）模糊查
+    exam_papers 的 title/source_key。三种命中分别处理：
+      1 份 → 打印是哪份卷，让用户确认；
+      多份 → 编号列出让用户选；
+      0 份 → 提示把文件名改成合适的试卷名，或用 --paper-id 指定。
+    非交互终端不猜、也不静默写入，引导用户用 --paper-id 或在终端运行。
+    """
     if args.paper_id is not None:
         return args.paper_id, "显式 --paper-id"
-    exact_rel = getattr(args, "_resolved_rel", None)
-    if exact_rel:
-        pid = _lookup_paper_id(cfg, args.file, exact_rel=exact_rel)
-        if pid is not None:
-            return pid, f"入口解析卷「{exact_rel}」"
-    if args.file:
-        pid = _lookup_paper_id(cfg, args.file)
-        if pid is not None:
-            return pid, f"--file 关键词「{args.file}」"
-    stem = _strip_answer_suffix(pdf.stem)
-    pid = _lookup_paper_id(cfg, stem)
-    if pid is not None:
-        return pid, f"文件名去「答案」：「{stem}」"
-    return None, f"文件名去「答案」后「{stem}」未唯一命中"
+
+    keyword = _strip_answer_suffix(path.stem)
+    rows = _lookup_paper_rows(cfg, keyword)
+    basis = f"文件名「{keyword}」"
+
+    if not rows:
+        print(f"[ERROR] 通过文件名「{keyword}」没有匹配到试卷。", flush=True)
+        print("  请把答案文件名改成合适的试卷名（如「2026 西城 初三 期末-答案.md」），"
+              "或用 --paper-id 指定卷。", flush=True)
+        return None, basis
+
+    if len(rows) > 1:
+        print(f"[匹配] {basis} 命中 {len(rows)} 份试卷：", flush=True)
+        for i, (pid, title, source_key) in enumerate(rows, 1):
+            print(f"  {i}. #{pid} {_paper_label(title, source_key)}", flush=True)
+        if not sys.stdin.isatty():
+            print("[ERROR] 非交互终端无法选择，请用 --paper-id 指定；或在终端交互运行。",
+                  flush=True)
+            return None, basis
+        ans = input("输入序号选择（直接回车取消）› ").strip()
+        if not ans.isdigit() or not (1 <= int(ans) <= len(rows)):
+            print("[取消] 未选择试卷，未做任何改动", flush=True)
+            return None, basis
+        chosen = rows[int(ans) - 1]
+        return chosen[0], f"{basis} → 选择 #{chosen[0]}"
+
+    pid, title, source_key = rows[0]
+    label = _paper_label(title, source_key)
+    if not sys.stdin.isatty():
+        print(f"[ERROR] {basis} 唯一命中试卷 #{pid} {label}，但非交互终端无法确认。",
+              flush=True)
+        print(f"  请用 --paper-id {pid} 明确指定；或在终端交互运行确认。", flush=True)
+        return None, basis
+    print(f"[匹配] {basis} → 试卷 #{pid} {label}", flush=True)
+    ans = input("确认导入该卷？y=确认 / 其他=取消 › ").strip().lower()
+    if ans not in ("y", "yes"):
+        print("[取消] 未确认，未做任何改动", flush=True)
+        return None, basis
+    return pid, f"{basis} → 确认 #{pid}"
+
+
+def _pdf_paper_id(cfg, args, pdf: Path) -> tuple[int | None, str]:
+    """PDF 与 .md 共用同一套按文件名定位逻辑。"""
+    return _resolve_answers_paper(cfg, args, pdf)
 
 
 def _pdf_answer_md(cfg, pdf: Path) -> tuple[Path, Path]:
@@ -593,10 +636,7 @@ def _run_pdf_answers(args, pdf: Path, importer_main) -> int:
     # 先定卷再转换：定位失败时不浪费 MinerU 调用
     paper_id, basis = _pdf_paper_id(cfg, args, pdf)
     if paper_id is None:
-        print(f"[ERROR] 答案文件「{pdf.name}」无法唯一定位试卷：{basis}。请用 --paper-id 指定；"
-              f"可先 python3 src/answer_importer_cli.py --list-papers <关键词> 查候选。",
-              flush=True)
-        return 2
+        return 2  # 定位失败的具体提示已由 _resolve_answers_paper 打印
     print(f"[匹配] 依据={basis} → paper_id={paper_id}", flush=True)
 
     try:
@@ -629,10 +669,8 @@ def _answers_file_entry(args):
     """第 6 步（--answers 指定文件）：.jsonl 走 --records，.md 走 --doc，
     .pdf 先转 md → 按学科策略提取答案文档 → 再走 --doc。
 
-    定位优先级：显式 `--paper-id` > `--file` 反查 > PDF 文件名去「答案」后缀
-    > 文档里的 `# 试卷：<标题>`。
-    前两者都是为了避免卷名重名（如「昌平一中」同时命中语文卷和数学卷）时
-    定位到别的卷。
+    .md / .pdf 都按答案文件名定位试卷（见 _resolve_answers_paper）；
+    .jsonl 记录自带 question_id / 试卷+题号，无需定位卷。
     """
     def run(_argv=None) -> int:
         from answer_importer_cli import main as importer_main
@@ -649,19 +687,12 @@ def _answers_file_entry(args):
             if args.paper_id is not None:
                 print("[提示] .jsonl 记录自带定位（question_id / 试卷+题号），"
                       f"--paper-id {args.paper_id} 已忽略", flush=True)
-        elif args.paper_id is not None:
-            argv += ["--paper-id", str(args.paper_id)]
-        elif getattr(args, "_resolved_rel", None):
-            pid = _lookup_paper_id(
-                RefineryConfig.from_env(), args.file,
-                exact_rel=args._resolved_rel,
-            )
-            if pid is not None:
-                argv += ["--paper-id", str(pid)]
-        elif args.file:
-            pid = _lookup_paper_id(RefineryConfig.from_env(), args.file)
-            if pid is not None:
-                argv += ["--paper-id", str(pid)]
+        else:
+            pid, basis = _resolve_answers_paper(RefineryConfig.from_env(), args, path)
+            if pid is None:
+                return 2
+            print(f"[匹配] 依据={basis} → paper_id={pid}", flush=True)
+            argv += ["--paper-id", str(pid)]
         if not args.dry_run:
             argv += ["--apply", "--yes"]
         return importer_main(argv)
@@ -803,11 +834,13 @@ def _execute(args) -> int:
         # 把前 5 步与 7/8/9 步关掉，只保留第 6 步
         args.skip_convert = args.skip_extract = args.skip_publish = True
         args.skip_meta = args.skip_load = args.skip_review = True
-        print("=== 只导入答案（未给 --file/--subject 等范围参数，跳过 convert~入库）===",
-              flush=True)
+        # 只导答案时不涉及范围参数，进度里不要再提 --file/--subject 之类
+        print("=== 只导入答案（按答案文件名定位试卷，不重跑转换/切题/入库）"
+              f"{' dry-run' if args.dry_run else ''} ===", flush=True)
     scope = scope_from_args(args)
-    print(f"=== import_cli：范围 {describe(scope)} "
-          f"{'(dry-run)' if args.dry_run else ''} ===", flush=True)
+    if not answers_only:
+        print(f"=== import_cli：范围 {describe(scope)} "
+              f"{'(dry-run)' if args.dry_run else ''} ===", flush=True)
 
     # 入口解析：把 --file 关键词在「当前维度范围」里解析成一份素材。
     # 0 命中就说清没命中什么（直接退出，不跑 9 步），多命中就让人选一份；

@@ -131,6 +131,22 @@ class TestParseBasic:
         doc = parse_answer_doc("# 试卷：X\n## 7\n**答案：**\n\n- (1) 交点\n- (2) 见解析\n")
         assert doc.items[0].answer == "- (1) 交点\n- (2) 见解析"
 
+    def test_裸试卷标题与H3题号(self):
+        doc = parse_answer_doc(
+            "# 试卷 \n"
+            "\n"
+            "### 1\n答案：B\n"
+            "### 2\n答案：$x=3$\n"
+        )
+        assert doc.title == "试卷"
+        assert [i.no for i in doc.items] == [1, 2]
+        assert doc.items[0].answer == "B"
+        assert doc.items[1].answer == "$x=3$"
+
+    def test_带文字的小节标题不算题号(self):
+        doc = parse_answer_doc("# 试卷：X\n### 第一部分 选择题\n## 1\n答案：A\n")
+        assert [i.no for i in doc.items] == [1]
+
 
 
 class TestValidation:
