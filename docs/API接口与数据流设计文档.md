@@ -1594,8 +1594,10 @@ TargetedConfigPage 加载 -> GET /api/training/knowledge-points?subjectId={subje
   ▼
 TrainingService.startTargetedPractice
   └─ QuestionsRepository.findRandomByKpAndType(subjectId, kpId, type?, count)
-       按 question_knowledge_points 关联 + 可选题型随机抽题（is_active=1；
+       按 question_knowledge_points 关联 + 可选题型抽题（is_active=1；
        choice/true_false 且 answer 为空的坏数据不进题单）
+       2026-11-25：未做过的优先（池内 RAND()），全做过后按最后作答时间从久到新补；
+       做过判定 = 专项/考试已判 + 主线非 method='unanswered'，三处合并取 MAX(judged_at/created_at)
   ▼
 返回 {questions: [{questionId, text, type, options, materialText, materialUrl}]}（白名单序列化，answer/explanation 剥离；materialText 只放题中素材、materialUrl 为文章 Markdown 相对地址，无文章为 null）
   └─ 抽不到题返回空数组（前端判空显示提示）
@@ -1610,7 +1612,7 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
 
 **模型专项（30 个有题模型，2026-11-15）**：专项页切到「中考模型」→ `GET /api/training/model-specials?subjectId=1` 取白名单与各模型可练数（按大类分组）→ 下拉选模型 → 选家长已开档位（≤ 题池；默认 3）→ `POST /api/training/targeted/start` 传 `{category, model, type:null, count}` → 服务端 JOIN `question_model_tags`（confidence>=0.70）+ 排除隐藏/空答案 + 倍长中线 `q.id ASC` / 其他 `RAND()` → 建 `training_sessions`（`task_code='math_targeted'`, `ref_type='model'`）→ 复用 `TargetedRunPage` 判题/发分。练习记录标题由 handoff `title` 落为模型名（如「倍长中线」）。
 
-**试卷题号（2026-11-18）**：专项页切到「试卷题号」→ `GET /api/training/paper-positions?subjectId=1` 取年级/学期选项 → 选年级+学期后再取 1..N 题号清单（每题带错题数/未做数）→ 选题号与家长已开档位（≤可练数）→ `POST /api/training/targeted/start` 传 `{grade, semester, paperQuestionNo, type:null, count}` → 服务端先取未清错题本中的同题号题（level 降序、同级别最近入本在前），不足再用从未做过的同题号题补足；仍不足 400 → 建 `training_sessions`（`math_targeted`, `ref_type='paper_position'`, `ref_id=题号`）→ 复用 `TargetedRunPage`。
+**试卷题号（2026-11-18，2026-11-25 改抽题顺序）**：专项页切到「试卷题号」→ `GET /api/training/paper-positions?subjectId=1` 取年级/学期选项 → 选年级+学期后再取 1..N 题号清单（每题带 `total`=可练数 / 错题数 / 未做数，前端按 `total` 置灰与档位上限）→ 选题号与家长已开档位（≤可练数）→ `POST /api/training/targeted/start` 传 `{grade, semester, paperQuestionNo, type:null, count}` → 服务端依次取从未做过的、未清错题（level 降序、同级别最近入本在前）、做过里最久没碰的，每池只补足剩余题数；仍不足 400 → 建 `training_sessions`（`math_targeted`, `ref_type='paper_position'`, `ref_id=题号`）→ 复用 `TargetedRunPage`。
 
 #### 5.16.1 专项训练选题排除已标记题
 
@@ -1618,7 +1620,7 @@ TargetedRunPage 逐题作答 -> POST /api/training/judge（source='targeted'）
 学生开专项练习 -> POST /api/training/targeted/start（JWT studentId 透传）
   -> QuestionsRepository.findRandomByKpAndType(studentId, ...)
   -> LEFT JOIN student_hidden_questions shq ON shq.student_id=? WHERE shq.id IS NULL
-  -> 排除该生已标记不再展示的题，ORDER BY RAND() LIMIT count
+  -> 排除该生已标记不再展示的题，未做优先（池内 RAND()）/ 做过按最后作答时间升序 LIMIT count
 题池排除后为空 -> 返回 { questions: [] }，前端 emptyHint 提示「可在清单页重置」
 ```
 

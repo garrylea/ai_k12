@@ -4,23 +4,24 @@ import { TrainingController } from './training.controller';
 import { PointRulesService } from '../points/point-rules.service.js';
 import { DEFAULT_RULES } from '../points/default-rules.js';
 
+const defaultQuestionsRepo = {
+  findById: vi.fn(),
+  findRandomByKpAndType: vi.fn().mockResolvedValue([]),
+  findByIds: vi.fn().mockResolvedValue([]),
+  findModelSpecialQuestions: vi.fn().mockResolvedValue([]),
+  countModelSpecialQuestions: vi.fn().mockResolvedValue(0),
+  listPaperPositionOptions: vi.fn().mockResolvedValue([]),
+  countPaperPositionQuestions: vi.fn().mockResolvedValue([]),
+  findPaperPositionUntriedQuestions: vi.fn().mockResolvedValue([]),
+  findPaperPositionWrongQuestions: vi.fn().mockResolvedValue([]),
+  findPaperPositionAnsweredQuestions: vi.fn().mockResolvedValue([]),
+};
 const mk = (overrides: any = {}) => ({
   mainErrorRepo: {
     findErrorBookEntries: vi.fn().mockResolvedValue([]),
     bumpLevels: vi.fn().mockResolvedValue(undefined),
   },
   judgeCore: { judgeQuestion: vi.fn(), recordSelfAssessment: vi.fn() },
-  questionsRepo: {
-    findById: vi.fn(),
-    findRandomByKpAndType: vi.fn().mockResolvedValue([]),
-    findByIds: vi.fn().mockResolvedValue([]),
-    findModelSpecialQuestions: vi.fn().mockResolvedValue([]),
-    countModelSpecialQuestions: vi.fn().mockResolvedValue(0),
-    listPaperPositionOptions: vi.fn().mockResolvedValue([]),
-    countPaperPositionQuestions: vi.fn().mockResolvedValue([]),
-    findPaperPositionWrongQuestions: vi.fn().mockResolvedValue([]),
-    findPaperPositionUntriedQuestions: vi.fn().mockResolvedValue([]),
-  },
   questionHintsRepo: {
     findByQuestionId: vi.fn().mockResolvedValue(null),
     upsert: vi.fn().mockResolvedValue(undefined),
@@ -60,6 +61,8 @@ const mk = (overrides: any = {}) => ({
     ensurePlannedQuestions: vi.fn().mockResolvedValue(undefined),
   },
   ...overrides,
+  // 用例常只覆盖 questionsRepo 的部分方法，补齐默认桩，别让新增抽题池把老用例打崩。
+  questionsRepo: { ...defaultQuestionsRepo, ...(overrides.questionsRepo ?? {}) },
 });
 const mkSvc = (deps: ReturnType<typeof mk>) =>
   new TrainingService(
@@ -615,33 +618,60 @@ describe('TrainingService.startTargetedPractice', () => {
     expect(deps.trainingSessionsRepo.create).not.toHaveBeenCalled();
   });
 
-  it('paper 模式：错题在前、未做补足，不足 count 直接 400 且不建会话', async () => {
+  it('paper 模式：先未做、再未清错题、最后做过最久的，各池只补足剩余题数', async () => {
+    const untried1 = { ...questionRow, id: 31, question_no: 24 };
+    const untried2 = { ...questionRow, id: 32, question_no: 24 };
     const wrong = { ...questionRow, id: 21, question_no: 24 };
-    const untried = { ...questionRow, id: 22, question_no: 24 };
+    const answered = { ...questionRow, id: 11, question_no: 24 };
     const deps = mk({
       questionsRepo: {
         listPaperPositionOptions: vi.fn().mockResolvedValue([
           { grade: '初三', semester: 'first', question_count: 28, papers: 6 },
         ]),
         countPaperPositionQuestions: vi.fn().mockResolvedValue([]),
+        findPaperPositionUntriedQuestions: vi.fn().mockResolvedValue([untried1, untried2]),
         findPaperPositionWrongQuestions: vi.fn().mockResolvedValue([wrong]),
-        findPaperPositionUntriedQuestions: vi.fn().mockResolvedValue([untried]),
+        findPaperPositionAnsweredQuestions: vi.fn().mockResolvedValue([answered]),
+      } as never,
+    });
+    const r = await mkSvc(deps).startTargetedPractice({
+      studentId: 7, subjectId: 1, paperPosition: { grade: '初三', semester: 'first', questionNo: 24 },
+      type: null, count: 4,
+    });
+
+    expect(deps.questionsRepo.findPaperPositionUntriedQuestions)
+      .toHaveBeenCalledWith(7, 1, '初三', 'first', 24, 4);
+    expect(deps.questionsRepo.findPaperPositionWrongQuestions)
+      .toHaveBeenCalledWith(7, 1, '初三', 'first', 24, 2);
+    expect(deps.questionsRepo.findPaperPositionAnsweredQuestions)
+      .toHaveBeenCalledWith(7, 1, '初三', 'first', 24, 1);
+    expect(r.questions.map((q) => q.questionId)).toEqual([31, 32, 21, 11]);
+    expect(deps.trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+      task_code: 'math_targeted', tier_key: '4', expected_count: 4,
+      ref_type: 'paper_position', ref_id: 24,
+    }));
+  });
+
+  it('paper 模式：全部做过的题也能抽（按最久作答优先），不再 400', async () => {
+    const answered1 = { ...questionRow, id: 12, question_no: 24 };
+    const answered2 = { ...questionRow, id: 11, question_no: 24 };
+    const deps = mk({
+      questionsRepo: {
+        listPaperPositionOptions: vi.fn().mockResolvedValue([
+          { grade: '初三', semester: 'first', question_count: 28, papers: 6 },
+        ]),
+        countPaperPositionQuestions: vi.fn().mockResolvedValue([]),
+        findPaperPositionUntriedQuestions: vi.fn().mockResolvedValue([]),
+        findPaperPositionWrongQuestions: vi.fn().mockResolvedValue([]),
+        findPaperPositionAnsweredQuestions: vi.fn().mockResolvedValue([answered1, answered2]),
       } as never,
     });
     const r = await mkSvc(deps).startTargetedPractice({
       studentId: 7, subjectId: 1, paperPosition: { grade: '初三', semester: 'first', questionNo: 24 },
       type: null, count: 2,
     });
-
-    expect(deps.questionsRepo.findPaperPositionWrongQuestions)
-      .toHaveBeenCalledWith(7, 1, '初三', 'first', 24, 2);
-    expect(deps.questionsRepo.findPaperPositionUntriedQuestions)
-      .toHaveBeenCalledWith(7, 1, '初三', 'first', 24, 1);
-    expect(r.questions.map((q) => q.questionId)).toEqual([21, 22]);
-    expect(deps.trainingSessionsRepo.create).toHaveBeenCalledWith(expect.objectContaining({
-      task_code: 'math_targeted', tier_key: '2', expected_count: 2,
-      ref_type: 'paper_position', ref_id: 24,
-    }));
+    expect(r.questions.map((q) => q.questionId)).toEqual([12, 11]);
+    expect(deps.trainingSessionsRepo.create).toHaveBeenCalled();
   });
 
   it('paper 模式：可练数不足 400，不建会话', async () => {

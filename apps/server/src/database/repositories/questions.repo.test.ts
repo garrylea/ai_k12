@@ -34,7 +34,29 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     // 老批量导入题没有 paper_questions 关联，退回 questions.group_order（卷面题号）
     expect(sql).toContain('COALESCE(');
     expect(sql).toContain('q.group_order');
-    expect(params).toEqual([7, 1, 3, 'proof', 5]);
+    expect(params).toEqual([7, 7, 7, 7, 1, 3, 'proof', 5]);
+  });
+
+  it('findRandomByKpAndType：没做过的优先随机抽，全做过后按最后作答时间从久到新', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    await repo.findRandomByKpAndType(7, 1, 3, null, 5);
+
+    const [sql] = pool.query.mock.calls[0];
+    // 三处作答记录合并出「做过 + 最后作答时间」，与试卷题号口径同源
+    expect(sql).toContain('UNION ALL');
+    expect(sql).toContain('FROM special_answer_records sar');
+    expect(sql).toContain('FROM exam_answers ea');
+    expect(sql).toContain('FROM practice_results pr');
+    expect(sql).toContain("pr.method <> 'unanswered'");
+    expect(sql).toContain('sar.is_correct IS NOT NULL');
+    expect(sql).toContain('ea.is_correct IS NOT NULL');
+    expect(sql).toContain('LEFT JOIN (');
+    expect(sql).toContain('ans.question_id = q.id');
+    // 第一排序键：未做（ans 无行）在前；未做内部仍随机，做过的按时间升序（最久先）
+    expect(sql).toContain('ORDER BY (ans.question_id IS NULL) DESC');
+    expect(sql).toContain('RAND()');
+    expect(sql).toContain('UNIX_TIMESTAMP(ans.answered_at)');
   });
 
   it('findRandomByKpAndType：空答案题全题型排除（q.answer <> \'\'）', async () => {
@@ -52,7 +74,7 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     await repo.findRandomByKpAndType(7, 1, 3, null, 10);
     const [sql, params] = pool.query.mock.calls[0];
     expect(sql).not.toContain('q.type = ?');
-    expect(params).toEqual([7, 1, 3, 10]);
+    expect(params).toEqual([7, 7, 7, 7, 1, 3, 10]);
   });
 
   it('返回 QuestionRow 行', async () => {
@@ -357,5 +379,28 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(sql).toContain('ORDER BY q.id ASC');
     expect(sql).toContain('LIMIT ?');
     expect(params).toEqual([1, '初三', 'first', 24, 7, 1, 7, 1, 7, 7, 7, 2]);
+  });
+
+  it('findPaperPositionAnsweredQuestions：三张作答表合并出最后作答时间，升序取最久未做的题', async () => {
+    const pool = mockPool([]);
+    const repo = new QuestionsRepository(pool as any);
+    await repo.findPaperPositionAnsweredQuestions(7, 1, '初三', 'first', 24, 2);
+
+    const [sql, params] = pool.query.mock.calls[0];
+    // 三处作答记录合并，方法与「从未做过」判定同源（跳过未答的占位行不算做过）。
+    expect(sql).toContain('UNION ALL');
+    expect(sql).toContain('FROM special_answer_records sar');
+    expect(sql).toContain('FROM exam_answers ea');
+    expect(sql).toContain('FROM practice_results pr');
+    expect(sql).toContain("pr.method <> 'unanswered'");
+    expect(sql).toContain('sar.is_correct IS NOT NULL');
+    expect(sql).toContain('ea.is_correct IS NOT NULL');
+    expect(sql).toContain('COALESCE(sar.judged_at, sar.created_at)');
+    // 错题池先取，这里必须排除未清错题，否则同一题会在两个池里重复出现。
+    expect(sql).toContain('meb.is_cleared = 0');
+    expect(sql).toContain('FROM student_hidden_questions shq');
+    expect(sql).toContain('ORDER BY last_answered_at ASC, q.id ASC');
+    expect(sql).toContain('LIMIT ?');
+    expect(params).toEqual([7, 7, 7, 1, '初三', 'first', 24, 7, 1, 7, 1, 2]);
   });
 });

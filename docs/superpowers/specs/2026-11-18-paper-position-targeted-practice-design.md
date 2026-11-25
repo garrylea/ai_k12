@@ -31,7 +31,7 @@
 - 学生端「专项练习」配置页新增第三种类型「试卷题号」（仅数学显示）
 - 年级 / 学期 / 题号 / 题量 四段选择
 - 新增题号清单接口（选项 + 每题的错题数/未做数/可练数）
-- 扩展开练接口，按题位抽题：**错题本优先（level 高→低）→ 从未做过**
+- 扩展开练接口，按题位抽题：**从未做过 → 未清错题（level 高→低）→ 做过里最久没碰的**（2026-11-25 改，原为错题优先）
 - 复用现有专项作答页、判题、积分、错题本、练习记录
 
 ### 2.2 本期不做（明确）
@@ -53,7 +53,7 @@
 | 2 | 参考卷 | **不选具体卷**；按学科 + 年级 + 学期 + 题号，从该范围全部试卷中取同题号的题 |
 | 3 | 题号数量 | **单选一个题号** |
 | 4 | 练习数量 | **沿用家长已开启档位**（1/2/3/5/10），不新增自由输入 |
-| 5 | 优先级 | **还在错题本里的题优先**，按错题级别从高到低；不足再用**从未做过**的同题号题补 |
+| 5 | 优先级（2026-11-25 用户改判） | **从未做过** → **未清错题**（级别高→低、同级最近入本在前）→ **做过里最久没碰的**（最后作答时间升序） |
 | 6 | 错题次数口径 | **用现有 L1–L5 级别**，不新增真实累加计数 |
 | 7 | 适用范围 | **只做数学** |
 
@@ -68,16 +68,17 @@
 | `total` | 该题号下、**已排除该生「不再展示」之后**的可判题数（接口直接给这个数，前端不二次过滤） |
 | 在错题本中 | 该生 + 该学科存在 `main_error_books.is_cleared=0 AND question_id=该题` |
 | 从未做过 | 该生对该题没有**已判**记录：`special_answer_records.is_correct IS NOT NULL`、`exam_answers.is_correct IS NOT NULL`、`practice_results` 三处均无（主线跳过未答 `practice_results.method='unanswered'` 的占位行不算做过） |
-| 可练数 `availableCount` | `在错题本中 + 从未做过`，且不在该生「不再展示」清单；**这才是本次能被抽到的题数** |
+| 可练数 `availableCount` | 即接口的 `total`：不在该生「不再展示」清单的全部可判题，含做过最久的池；**这才是本次能被抽到的题数**（2026-11-25 起不再等于 `wrongCount + untriedCount`） |
 | 共 N 题 | 该「年级+学期」下 `exam_papers.question_count` 的众数（并列取较大值）；题号列表为 `1..N` |
 
-**选题顺序（唯一顺序，不再另立规则）**：
+**选题顺序（唯一顺序，不再另立规则；2026-11-25 改）**：
 
-1. 错题优先池：`is_cleared=0` 的题，按 `MAX(level) DESC`，同级别按**最近进入错题本**的时间 `DESC`，再按 `q.id ASC`。（错题本没有「最近答错时间」列：重复答错复用原行、只 bump level，`created_at` 是首次入本时间。2026-11-18 用户裁决：同级别按最近入本排，不改表。）
-2. 补足池：从未做过的题，按 `q.id ASC`（确定性，便于测试与复现）。
-3. 两池按上序拼接后取前 `count` 道；不足 `count` 直接 400，不静默少给。
+1. 未做池：从未做过的题，按 `q.id ASC`（确定性，便于测试与复现）。
+2. 错题池：`is_cleared=0` 的题，按 `MAX(level) DESC`，同级别按**最近进入错题本**的时间 `DESC`，再按 `q.id ASC`。（错题本没有「最近答错时间」列：重复答错复用原行、只 bump level，`created_at` 是首次入本时间。2026-11-18 用户裁决：同级别按最近入本排，不改表。）
+3. 做过池：做过的题按**最后作答时间升序**（最久没碰的在前），再按 `q.id ASC`；排除未清错题，避免与第 2 池重复。作答判定与未做池同源：专项/考试已判（`is_correct IS NOT NULL`）+ 主线非 `method='unanswered'`。
+4. 三池按上序拼接后取前 `count` 道；不足 `count` 直接 400，不静默少给。
 
-**排除项（两个池都适用）**：`is_active=0`、`answer=''`、该生 `student_hidden_questions` 中已标记的题。
+**排除项（三个池都适用）**：`is_active=0`、`answer=''`、该生 `student_hidden_questions` 中已标记的题。
 
 ---
 
@@ -127,11 +128,28 @@ GROUP BY pq.question_no
 
 - 「在错题本中」「从未做过」用相关 `EXISTS` 子查询表达，候选池每题位只有 5–7 行，性能足够。
 - 返回 `positions` 只填 `1..typical_question_count`；某题号无题时补 `{total:0, wrongCount:0, untriedCount:0}`，前端置灰。
-- `availableCount = wrongCount + untriedCount` **由前端相加**（接口不再冗余返回，避免两处口径漂移）；若后续需要筛选排序再加。
+- `availableCount` 直接用接口的 `total`（2026-11-25 起含做过池），**不再由前端相加** `wrongCount + untriedCount`，否则全部做过的题号会被误置灰。
 
-### 5.3 开练抽题（两段查询，服务层拼接）
+### 5.3 开练抽题（三段查询，服务层拼接；2026-11-25 改）
 
-错题优先：
+从未做过（第一段）：
+
+```
+SELECT q.id, ... , MIN(pq.question_no) AS question_no
+FROM paper_questions pq
+JOIN exam_papers p ON p.id = pq.paper_id
+JOIN questions q ON q.id = pq.question_id
+WHERE 同上的学科/年级/学期/题号/is_active/answer/hidden 条件
+  AND NOT EXISTS (main_error_books 未清行)
+  AND NOT EXISTS (special_answer_records 已判行, 该生)
+  AND NOT EXISTS (exam_answers 已判行, 该生)
+  AND NOT EXISTS (practice_results, 该生，method <> 'unanswered')
+GROUP BY q.id
+ORDER BY q.id ASC
+LIMIT ?
+```
+
+未清错题（第二段）：
 
 ```
 SELECT q.id, q.content, q.type, q.options, q.material_text, q.source,
@@ -150,31 +168,41 @@ ORDER BY wrong_level DESC, last_wrong_at DESC, q.id ASC
 LIMIT ?
 ```
 
-**`GROUP BY q.id` 时 `pq.question_no` 必须包 `MIN()`**：`question_no` 不函数依赖于主键，MySQL `ONLY_FULL_GROUP_BY` 会拒绝裸选；筛选已锁单值，`MIN()` 不改变语义。
-
-从未做过（补足）：
+做过的题（第三段，最久没碰的在前）：
 
 ```
-SELECT q.id, ... , MIN(pq.question_no) AS question_no
+SELECT q.id, ..., MIN(pq.question_no) AS question_no, MAX(ans.answered_at) AS last_answered_at
 FROM paper_questions pq
 JOIN exam_papers p ON p.id = pq.paper_id
 JOIN questions q ON q.id = pq.question_id
+JOIN (
+  SELECT question_id, MAX(COALESCE(judged_at, created_at)) AS answered_at
+    FROM special_answer_records sar JOIN special_practice_sessions sps ON ...
+    WHERE sps.student_id = ? AND sar.is_correct IS NOT NULL GROUP BY sar.question_id
+  UNION ALL
+  SELECT question_id, MAX(COALESCE(judged_at, created_at))
+    FROM exam_answers ea JOIN exam_sessions es ON ...
+    WHERE es.student_id = ? AND ea.is_correct IS NOT NULL GROUP BY ea.question_id
+  UNION ALL
+  SELECT question_id, MAX(COALESCE(judged_at, created_at))
+    FROM practice_results pr
+    WHERE pr.student_id = ? AND pr.method <> 'unanswered' GROUP BY pr.question_id
+) ans ON ans.question_id = q.id
 WHERE 同上的学科/年级/学期/题号/is_active/answer/hidden 条件
-  AND NOT EXISTS (main_error_books 未清行)
-  AND NOT EXISTS (special_answer_records 已判行, 该生)
-  AND NOT EXISTS (exam_answers 已判行, 该生)
-  AND NOT EXISTS (practice_results, 该生)
+  AND NOT EXISTS (main_error_books 未清行)   -- 与第二段去重
 GROUP BY q.id
-ORDER BY q.id ASC
+ORDER BY last_answered_at ASC, q.id ASC
 LIMIT ?
 ```
+
+**`GROUP BY q.id` 时 `pq.question_no` 必须包 `MIN()`**：`question_no` 不函数依赖于主键，MySQL `ONLY_FULL_GROUP_BY` 会拒绝裸选；筛选已锁单值，`MIN()` 不改变语义。
 
 实现约束：
 
 - `LIMIT ?` 必须走 `pool.query`（仓库既有约定：`execute` 的 server-side prepare 对 `LIMIT ?` 会报错）。
-- 第二段 `LIMIT` 传 `count - 第一段行数`；为 0 时不发 SQL。
-- 两段结果按 `第一段在前、第二段在后` 拼接，不再二次排序。
-- 两段都用 `GROUP BY q.id` 去重（同一题在多卷同题号只出一次）。
+- 后段 `LIMIT` 传 `count - 前面各段已取行数`；为 0 时不发 SQL。
+- 三段结果按 `未做 → 错题 → 做过` 拼接，不再二次排序。
+- 三段都用 `GROUP BY q.id` 去重（同一题在多卷同题号只出一次）。
 
 ---
 
@@ -238,7 +266,7 @@ LIMIT ?
 5. `grade`/`semester` 组合不存在，或 `paperQuestionNo` 不在 1..typicalQuestionCount → 400。
 6. `count` 不在已开启档位 → 400（沿用现有文案）。
 
-**抽题不足**：`rows.length < count` → 400 `该题号可练题数不足（当前 N 题）`，不建会话。
+**抽题不足**：三个池都取完仍 `rows.length < count` → 400 `该题号可练题数不足（当前 N 题）`，不建会话。
 
 **会话**：`training_sessions` 落 `task_code='math_targeted'`、`tier_key=String(count)`、`expected_count=rows.length`、`ref_type='paper_position'`、`ref_id=paperQuestionNo`。
 
@@ -329,7 +357,7 @@ ok(positions) → 选题号 → 选档位 → starting → 跳转 /student/train
 1. `paper-positions` 选项：数学返回 grade/semester 组合；众数计算（28 优先于 29）；非数学 400；无卷返回空。
 2. 题号清单：`total` 排除 inactive/空答案；`wrongCount` 只算未清错题；`untriedCount` 三张作答表均无已判记录；隐藏题不进任何计数；无题题号补 0。
 3. 开练校验：三选一互斥；缺字段；非数学；`type` 非 null；grade/semester 组合不存在；题号越界；`count` 非档位。
-4. 抽题顺序：错题按 level 降序、同级按最近时间；不足时补从未做过；已做对且不在错题本的不补；多卷同题号去重。
+4. 抽题顺序：未做 → 错题（level 降序、同级最近入本在前）→ 做过按最后作答时间升序；三池按剩余题数依次补足；已做过的题也参与第三池；多卷同题号去重。
 5. 题量不足：返回 400 且**不建** `training_sessions`。
 6. 会话字段：`ref_type='paper_position'`、`ref_id=题号`、`tier_key=count`、`expected_count=实抽数`。
 7. 回归：KP 模式与模型模式行为不变（现有测试全绿）。
@@ -347,7 +375,7 @@ ok(positions) → 选题号 → 选档位 → starting → 跳转 /student/train
 
 ### 10.3 冒烟
 
-- 用测试学生：错题本先造 2 道 24 题的错题（不同 level），开 3 题档位 → 前两道必须是错题（level 高的在前），第三道为未做过的 24 题。
+- 用测试学生：先造 2 道未做过的 24 题 + 2 道错题（不同 level），开 5 题档位 → 前两道是未做过的，接着两道是错题（level 高的在前），第五道是做过里最久没碰的 24 题。
 - 作答页显示「来源 + 试卷第 24 题」；完成会话后积分按档位发放；答错进错题本。
 
 ---

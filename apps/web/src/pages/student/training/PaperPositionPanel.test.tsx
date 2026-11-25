@@ -31,7 +31,7 @@ function props(over: Partial<PaperPositionPanelProps> = {}): PaperPositionPanelP
     positions: [
       { questionNo: 1, total: 5, wrongCount: 2, untriedCount: 3 },
       { questionNo: 24, total: 6, wrongCount: 1, untriedCount: 4 },
-      { questionNo: 25, total: 6, wrongCount: 0, untriedCount: 0 },
+      { questionNo: 25, total: 0, wrongCount: 0, untriedCount: 0 },
     ],
     typicalQuestionCount: 28,
     selectedQuestionNo: 24,
@@ -73,6 +73,16 @@ describe('PaperPositionPanel', () => {
   it('可练 0 的题号禁用', () => {
     render(<PaperPositionPanel {...props()} />);
     expect(screen.getByRole('button', { name: '第25题，可练0题' })).toBeDisabled();
+  });
+
+  it('全部做过的题号（未做/错题都为 0，但 total>0）仍可开练', () => {
+    const p = props({
+      positions: [{ questionNo: 25, total: 3, wrongCount: 0, untriedCount: 0 }],
+      selectedQuestionNo: 25,
+    });
+    render(<PaperPositionPanel {...p} />);
+    expect(screen.getByRole('button', { name: '第25题，可练3题' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: '开始练习' })).not.toBeDisabled();
   });
 
   it('无可用试卷 / 无可练题 / 无档位三种空态', () => {

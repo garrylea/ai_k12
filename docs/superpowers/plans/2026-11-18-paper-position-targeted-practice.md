@@ -2,15 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development (recommended) or executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在数学专项练习里新增第三种选题方式「试卷题号」：按年级 + 学期 + 题号，从该范围所有试卷的同题号题中抽题，错题本未清的优先、从未做过的补足。
+**Goal:** 在数学专项练习里新增第三种选题方式「试卷题号」：按年级 + 学期 + 题号，从该范围所有试卷的同题号题中抽题，从未做过的优先、未清错题次之、做过的最久没碰的兜底（2026-11-25 改）。
 
-**Architecture:** 只读现有题库表，无 schema 变更。仓储层（`questions.repo.ts`）承担选项统计与两段抽题 SQL；服务层（`training.service.ts`）算众数、校验组合与题号、拼接两池；控制器（`training.controller.ts`）扩展既有 `/training/targeted/start` 并新增一个只读 GET；前端新增纯展示面板，接入既有 `TargetedConfigPage`，作答/判题/积分/错题本全部复用。
+**Architecture:** 只读现有题库表，无 schema 变更。仓储层（`questions.repo.ts`）承担选项统计与三段抽题 SQL；服务层（`training.service.ts`）算众数、校验组合与题号、拼接两池；控制器（`training.controller.ts`）扩展既有 `/training/targeted/start` 并新增一个只读 GET；前端新增纯展示面板，接入既有 `TargetedConfigPage`，作答/判题/积分/错题本全部复用。
 
 **Tech Stack:** NestJS + mysql2 (pool.query) + vitest（后端）；React 18 + TypeScript + Tailwind CSS 变量 + vitest/Testing Library（前端）。
 
 ## Global Constraints
 
 - 设计真源：`docs/superpowers/specs/2026-11-18-paper-position-targeted-practice-design.md`。
+- 2026-11-25 抽题顺序改为「未做 → 未清错题 → 做过最久」，可练数改读 `total`；下方 Task 2/4 里「错题优先 + 未做补足」的旧表述以 spec 为准。
 - **只做数学**（`subjectId=1`），非数学接口 400、前端不渲染入口。
 - **不改 schema**；不新建表、不加列、不写迁移。
 - 题池谓词统一：`q.is_active=1 AND q.answer <> '' AND 不在该生 student_hidden_questions`。

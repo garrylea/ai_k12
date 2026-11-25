@@ -571,7 +571,7 @@ describe('中考模型模式', () => {
 describe('试卷题号模式', () => {
   const POSITIONS = [
     { questionNo: 1, total: 5, wrongCount: 2, untriedCount: 3 },
-    { questionNo: 24, total: 6, wrongCount: 1, untriedCount: 1 },
+    { questionNo: 24, total: 2, wrongCount: 1, untriedCount: 1 },
   ];
 
   beforeEach(() => {
@@ -614,6 +614,27 @@ describe('试卷题号模式', () => {
       paperQuestionNo: 24,
       type: null,
       count: 2,
+    }));
+  });
+
+  it('全部做过的题号按 total 参与档位过滤，仍可开练', async () => {
+    getPaperPositionsMock.mockImplementation(async (_s, grade) => grade
+      ? { options: [{ grade: '初三', semester: 'first', paperCount: 7, typicalQuestionCount: 28 }],
+          grade: '初三', semester: 'first', typicalQuestionCount: 28,
+          positions: [{ questionNo: 24, total: 3, wrongCount: 0, untriedCount: 0 }] }
+      : { options: [{ grade: '初三', semester: 'first', paperCount: 7, typicalQuestionCount: 28 }],
+          grade: null, semester: null, typicalQuestionCount: null, positions: [] });
+
+    await renderPage('/?subjectId=1');
+    fireEvent.click(screen.getByRole('button', { name: '试卷题号' }));
+    fireEvent.click(await screen.findByRole('button', { name: '第24题，可练3题' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^3 题/ })).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /^5 题/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /^3 题/ }));
+    fireEvent.click(screen.getByRole('button', { name: '开始练习' }));
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith({
+      subjectId: 1, grade: '初三', semester: 'first', paperQuestionNo: 24, type: null, count: 3,
     }));
   });
 

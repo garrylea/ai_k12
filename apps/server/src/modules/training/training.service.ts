@@ -958,9 +958,10 @@ export class TrainingService {
    * **模型微专题（2026-11-15）**：传 `modelSpecial` 时改按模型标签抽题，会话 `ref_type='model'`；
    * 题数不足 `count` 直接 400（模型微专题是定量的「练这组题」，不像 KP 模式可少给几题）。
    *
-   * **试卷题号（2026-11-18）**：传 `paperPosition` 时按「年级 + 学期 + 题号」抽题，
-   * 该生**错题在前、未做补足**，会话 `ref_type='paper_position'`、`ref_id=题号`；
-   * 可练题数不足 `count` 同样 400（学生指定了题号，少给题等于练了别的卷面）。
+   * **试卷题号（2026-11-18，2026-11-25 调整顺序）**：传 `paperPosition` 时按「年级 + 学期 + 题号」抽题，
+   * 该生**从未做过 → 未清错题 → 做过里最久没碰的**，每池只补足剩余题数；
+   * 会话 `ref_type='paper_position'`、`ref_id=题号`；
+   * 三池加起来不足 `count` 同样 400（学生指定了题号，少给题等于练了别的卷面）。
    */
   async startTargetedPractice(input: {
     studentId: number;
@@ -1004,18 +1005,26 @@ export class TrainingService {
     const modelSpecial = input.modelSpecial ?? null;
     let rows: QuestionRow[];
     if (paperPosition) {
-      const wrong = await this.questionsRepo.findPaperPositionWrongQuestions(
+      // 做对过的题优先级降低：先抽从未做过的，再抽未清错题，最后才回头抽做过最久的。
+      const untried = await this.questionsRepo.findPaperPositionUntriedQuestions(
         input.studentId, input.subjectId,
         paperPosition.grade, paperPosition.semester, paperPosition.questionNo, input.count,
       );
-      const remaining = input.count - wrong.length;
-      const untried = remaining > 0
-        ? await this.questionsRepo.findPaperPositionUntriedQuestions(
+      const afterUntried = input.count - untried.length;
+      const wrong = afterUntried > 0
+        ? await this.questionsRepo.findPaperPositionWrongQuestions(
             input.studentId, input.subjectId,
-            paperPosition.grade, paperPosition.semester, paperPosition.questionNo, remaining,
+            paperPosition.grade, paperPosition.semester, paperPosition.questionNo, afterUntried,
           )
         : [];
-      rows = [...wrong, ...untried];
+      const afterWrong = afterUntried - wrong.length;
+      const answered = afterWrong > 0
+        ? await this.questionsRepo.findPaperPositionAnsweredQuestions(
+            input.studentId, input.subjectId,
+            paperPosition.grade, paperPosition.semester, paperPosition.questionNo, afterWrong,
+          )
+        : [];
+      rows = [...untried, ...wrong, ...answered];
     } else if (modelSpecial) {
       rows = await this.questionsRepo.findModelSpecialQuestions(
         input.studentId, input.subjectId, modelSpecial.category,

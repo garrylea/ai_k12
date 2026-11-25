@@ -8,6 +8,28 @@
 
 ---
 
+## 2026-11-25 按知识点抽题（六科）：纯随机改为未做优先 + 做过最久兜底
+
+用户裁决把「做对后优先级降低」推广到其它学科。改共用原语 `findRandomByKpAndType`（`questions.repo.ts:228`），
+一处覆盖数学/语文/英语/物理/化学/道法的按知识点专项：LEFT JOIN 三张作答表合并出的最后作答时间，
+`ORDER BY (ans.question_id IS NULL) DESC` 让没做过的排前（池内仍 `RAND()`），
+做过的按 `UNIX_TIMESTAMP(ans.answered_at) ASC` 从久到新补；主线跳过未答不算做过。
+派生表抽成 `ANSWERED_TIMES_SQL`，与试卷题号模式共用，避免两处口径漂移。
+未动「倍长中线」固定 `q.id ASC`（有意例外）、语文三专项、英语词库、补偿套题。
+PRD / API 文档 / 架构文档同步。验证：仓库单测 24/24、关键服务 132/132，`tsc --noEmit` 干净。
+
+## 2026-11-25 数学专项「试卷题号」：每次抽到同一题 → 改为未做 → 错题 → 做过最久
+
+**问题**：`findPaperPositionUntriedQuestions` 用 `ORDER BY q.id ASC`、错题池用确定性排序，没有随机也没有轮换；
+做对后题退出池子，剩下的永远是 id 最小那几道，卡在错题本里的题则每次排第一。全部做过时两池皆空，服务层直接 400，
+前端又把「可练数」算成 `wrongCount + untriedCount`，全部做过的题号显示 0 并置灰，新池根本走不到。
+
+**修法（用户裁决：未做 → 未清错题 → 做过最久）**：
+- 仓储层新增 `findPaperPositionAnsweredQuestions`：三张作答表 `UNION ALL` 取 `MAX(COALESCE(judged_at, created_at))`，
+  按 `last_answered_at ASC` 取最久没碰的；排除未清错题，避免与错题池重复。口径与未做池同源（主线 `method='unanswered'` 不算做过）。
+- 服务层 paper 分支改为三个池按剩余题数依次补足；前端两处可练数改读后端 `total`。
+- 设计 spec（抽题顺序唯一真源）、计划、测试同步更新。验证：后端 2913 用例 + 前端 1983 用例全过，两端 `tsc --noEmit` 干净。
+
 ## 2026-11-25 草稿白板：手写笔被 cancel/捕获丢失打断时，撤销一次退掉多笔
 
 **问题**：落笔在 `pointerdown` 就把新 Stroke 追加进 `strokesRef`，但只有正常 `pointerup` 才落盘 + `pushHistory`。

@@ -306,9 +306,8 @@ export default function TargetedConfigPage() {
     () => paperPositions.find((p) => p.questionNo === paperQuestionNo) ?? null,
     [paperPositions, paperQuestionNo],
   );
-  const paperAvailable = selectedPosition
-    ? selectedPosition.wrongCount + selectedPosition.untriedCount
-    : 0;
+  // 做过的题也要能回头练，档位上限按后端 total（含做过最久的池）。
+  const paperAvailable = selectedPosition?.total ?? 0;
   const eligiblePaperTiers = useMemo(() => {
     if (!selectedPosition || tiers == null) return [];
     return tiers.filter((t) => {

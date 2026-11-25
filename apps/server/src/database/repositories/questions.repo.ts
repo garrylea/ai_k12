@@ -24,6 +24,25 @@ const PAPER_QUESTION_NO_SQL = `COALESCE((
   LIMIT 1
 ), q.group_order)`;
 
+/** 该生「做过 + 最后作答时间」派生表，3 个 ? 依次是 student_id。
+ *  与「从未做过」判定同源：专项/考试已判 + 主线非跳过未答。 */
+const ANSWERED_TIMES_SQL = `SELECT sar.question_id AS question_id, MAX(COALESCE(sar.judged_at, sar.created_at)) AS answered_at
+  FROM special_answer_records sar
+  JOIN special_practice_sessions sps ON sps.id = sar.session_id
+  WHERE sps.student_id = ? AND sar.is_correct IS NOT NULL
+  GROUP BY sar.question_id
+UNION ALL
+SELECT ea.question_id, MAX(COALESCE(ea.judged_at, ea.created_at))
+  FROM exam_answers ea
+  JOIN exam_sessions es ON es.id = ea.session_id
+  WHERE es.student_id = ? AND ea.is_correct IS NOT NULL
+  GROUP BY ea.question_id
+UNION ALL
+SELECT pr.question_id, MAX(COALESCE(pr.judged_at, pr.created_at))
+  FROM practice_results pr
+  WHERE pr.student_id = ? AND pr.method <> 'unanswered'
+  GROUP BY pr.question_id`;
+
 export interface PaperPositionOptionRow extends RowDataPacket {
   grade: string;
   semester: string;
@@ -210,6 +229,9 @@ export class QuestionsRepository {
    * 「不再展示」排除（2026-09-04）：LEFT JOIN student_hidden_questions，
    * 该生已标记的题 shq.id 非空 -> WHERE shq.id IS NULL 过滤掉。
    * studentId 由 TrainingService 从 controller JWT user.sub 透传。
+   *
+   * 2026-11-25：没做过的题优先（池内仍 RAND()），全做过后按最后作答时间从久到新补，
+   * 与试卷题号模式同一口径；六科共用的按知识点抽题都走这里。
    */
   async findRandomByKpAndType(
     studentId: number,
@@ -223,13 +245,18 @@ export class QuestionsRepository {
       JOIN question_knowledge_points qkp ON qkp.question_id = q.id
       LEFT JOIN student_hidden_questions shq
         ON shq.question_id = q.id AND shq.student_id = ?
+      LEFT JOIN (${ANSWERED_TIMES_SQL}) ans ON ans.question_id = q.id
       WHERE q.subject_id = ? AND qkp.knowledge_point_id = ? AND q.is_active = 1${typeFilter}
         AND q.answer <> ''
         AND shq.id IS NULL
-      ORDER BY RAND() LIMIT ?`;
+      ORDER BY (ans.question_id IS NULL) DESC,
+        CASE WHEN ans.question_id IS NULL THEN RAND() ELSE UNIX_TIMESTAMP(ans.answered_at) END ASC,
+        q.id ASC
+      LIMIT ?`;
+    // 2026-11-25：没做过的优先（池内仍随机），全做过后按最后作答时间从久到新补。
     const params = type != null
-      ? [studentId, subjectId, kpId, type, count]
-      : [studentId, subjectId, kpId, count];
+      ? [studentId, studentId, studentId, studentId, subjectId, kpId, type, count]
+      : [studentId, studentId, studentId, studentId, subjectId, kpId, count];
     // Use pool.query (client-side escaping) instead of pool.execute (server-side
     // prepared statements): MySQL rejects `LIMIT ?` as a prepared-statement
     // placeholder with "Incorrect arguments to mysqld_stmt_execute"（联调实测；
@@ -441,6 +468,46 @@ export class QuestionsRepository {
       [subjectId, grade, semester, questionNo, studentId, subjectId,
         studentId, subjectId, studentId, studentId, studentId, limit],
     );
+    return rows as QuestionRow[];
+  }
+
+  /** 补足池②：做过的题里按最后作答时间升序取（最久没碰的在前）；
+   *  排除未清错题，避免与先取的错题池重复。作答判定与未做池同源：专项/考试已判 + 主线非「跳过未答」。 */
+  async findPaperPositionAnsweredQuestions(
+    studentId: number,
+    subjectId: number,
+    grade: string,
+    semester: string,
+    questionNo: number,
+    limit: number,
+  ): Promise<QuestionRow[]> {
+    const sql = `SELECT q.*, MIN(pq.question_no) AS question_no,
+        MAX(ans.answered_at) AS last_answered_at
+      FROM paper_questions pq
+      JOIN exam_papers p ON p.id = pq.paper_id
+      JOIN questions q ON q.id = pq.question_id
+      JOIN (${ANSWERED_TIMES_SQL}) ans ON ans.question_id = q.id
+      WHERE p.subject_id = ? AND p.grade = ? AND p.semester = ? AND pq.question_no = ?
+        AND q.is_active = 1 AND q.answer <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM student_hidden_questions shq
+          WHERE shq.student_id = ? AND shq.subject_id = ? AND shq.question_id = q.id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM main_error_books meb
+          WHERE meb.student_id = ? AND meb.subject_id = ?
+            AND meb.question_id = q.id AND meb.is_cleared = 0
+        )
+      GROUP BY q.id
+      ORDER BY last_answered_at ASC, q.id ASC
+      LIMIT ?`;
+    // pool.query：同上，LIMIT ? 不能走 execute 的 server-side prepare。
+    const [rows] = await this.pool.query<RowDataPacket[]>(sql, [
+      studentId, studentId, studentId,
+      subjectId, grade, semester, questionNo,
+      studentId, subjectId, studentId, subjectId,
+      limit,
+    ]);
     return rows as QuestionRow[];
   }
 

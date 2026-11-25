@@ -88,11 +88,11 @@ export function PaperPositionPanel(props: PaperPositionPanelProps) {
   const displayGrade = grade ?? gradeOptions[0] ?? '';
   const semesterOptions = options.filter((o) => o.grade === displayGrade);
   const displaySemester = semester ?? semesterOptions[0]?.semester ?? '';
-  const allZero = positions.length === 0
-    || positions.every((p) => p.wrongCount + p.untriedCount === 0);
+  // 可练数用后端 total（错题 + 未做 + 做过最久）；做过的题也要能回头练。
+  const allZero = positions.length === 0 || positions.every((p) => p.total === 0);
   const selectedPosition = positions.find((p) => p.questionNo === selectedQuestionNo);
   const canStart = selectedPosition != null
-    && selectedPosition.wrongCount + selectedPosition.untriedCount > 0
+    && selectedPosition.total > 0
     && tierKey != null
     && eligibleTiers.some((t) => t.tierKey === tierKey)
     && !starting;
@@ -147,7 +147,7 @@ export function PaperPositionPanel(props: PaperPositionPanelProps) {
         ) : (
           <div className="grid grid-cols-7 sm:grid-cols-10 gap-2">
             {positions.map((p) => {
-              const available = p.wrongCount + p.untriedCount;
+              const available = p.total;
               const disabled = available === 0;
               const active = selectedQuestionNo === p.questionNo;
               return (
