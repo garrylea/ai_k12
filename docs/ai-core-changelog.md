@@ -8,6 +8,18 @@
 
 ---
 
+## 2026-11-25 草稿白板：手写笔被 cancel/捕获丢失打断时，撤销一次退掉多笔
+
+**问题**：落笔在 `pointerdown` 就把新 Stroke 追加进 `strokesRef`，但只有正常 `pointerup` 才落盘 + `pushHistory`。
+`pointercancel` / `lostpointercapture` 只清 `drawingRef`，笔画仍留在数组和画面上却不在历史里；
+下一笔 `push` 时这些「孤儿笔画」被一起打包成一个状态，按一次撤销就连带退掉好几笔（用户报「全回退了」）。
+手写板/触控笔驱动更容易在完成抬手前发出 cancel / 丢捕获，普通鼠标正常路径复现不到。
+
+**修法**：抽 `finishPenStroke()` 统一收尾，`pointerup` / `pointercancel` / `handleLostPointerCapture`
+三条路径共用：已追加的笔画一律落盘并记一步，保证「一笔 = 一步」；正常抬手后还会来的
+`lostpointercapture` 因 `drawingRef` 已清而幂等无害。回归测试用 `pointercancel` + `lostPointerCapture`
+打断两笔，连撤三次验证逐笔回退。验证：draft 2 文件 53 用例全过。
+
 ## 2026-11-25 数据管线：答案表 colspan/格内题号 + 粘连答案切分 + 丢题号的题干恢复
 
 **问题**：多份 2025 数学卷的答案区与题干各有 OCR 变形，旧规则静默漏解析（答案从某题直接跳到下一段，

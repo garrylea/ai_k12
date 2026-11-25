@@ -749,6 +749,16 @@ export function DraftWhiteboard({
     pushHistory();
   }, [pushHistory]);
 
+  /** 手写笔收尾：pointerdown 时笔画已经追加进 strokesRef，必须让 pointerup / pointercancel /
+   *  lostpointercapture 三条路径都把它落盘并记一步。任何一条漏记，笔画就留在数组和画面上却不在历史里，
+   *  下一笔 push 时会把它和下一笔合成一个状态，撤销一次连带退掉多笔（手写板/触控笔的 cancel 更常见）。 */
+  const finishPenStroke = useCallback(() => {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    if (persist) setDraft(questionId, strokesRef.current);
+    pushHistory();
+  }, [persist, questionId, pushHistory]);
+
   /** 画板可视尺寸（CSS px）：旋转旋钮的夹取边界。只读 ref，dep-free 的 redraw 也是同一口径 */
   const boardSize = () => {
     const c = canvasRef.current;
@@ -1729,11 +1739,7 @@ export function DraftWhiteboard({
     // 收尾按「起手时的手势」而不是「当前工具」：手势进行中被切走工具（触屏第二指/手掌点到工具条）时，
     // 旧写法只跑当前工具的分支，起手那个手势的 ref 永远留着 —— gestureBusy() 恒为 true，
     // 撤销/重做从此静默失效，移动过的坐标也只改了内存没落盘。各收尾函数对「无该手势」都是幂等的。
-    if (drawingRef.current) {
-      drawingRef.current = false;
-      if (persist) setDraft(questionId, strokesRef.current);
-      pushHistory();
-    }
+    finishPenStroke();
     if (eraserActiveRef.current) {
       eraserActiveRef.current = false;
       flushEraserHistory();
@@ -1745,10 +1751,11 @@ export function DraftWhiteboard({
     if (triDragRef.current !== null) triangleUp();
   };
 
-  // 系统打断（来电/手势接管）或捕获丢失：指针从表中移除；中断单指笔迹不落盘、圆规/选中手势收尾
+  // 系统打断（来电/手势接管）或捕获丢失：指针从表中移除；笔画已追加进数组，按落笔收尾记一步，
+  // 否则它会成为「历史外的孤儿笔画」，与下一笔合成一步让撤销一次退掉多笔。
   const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
     endPointer(e);
-    drawingRef.current = false;
+    finishPenStroke();
     eraserActiveRef.current = false; // 系统打断橡皮拖拽：手势结束，撤销恢复可用
     flushEraserHistory(); // 对无橡皮手势幂等
     cancelCompass();
@@ -1759,8 +1766,8 @@ export function DraftWhiteboard({
   const handleLostPointerCapture = (e: React.PointerEvent<HTMLCanvasElement>) => {
     endPointer(e);
     // 捕获真的丢了（元素被移除/被别的元素抢走）时 pointerup 可能永远不来：
-    // 不清 drawingRef 就是「撤销被 gestureBusy 永久挡住」；与 pointercancel 同口径（中断的笔迹不落盘）
-    drawingRef.current = false;
+    // 与 pointercancel 同口径，按落笔收尾记一步（笔画已进数组，不记就会并入下一笔）
+    finishPenStroke();
     eraserActiveRef.current = false; // 捕获丢失等同抬手：橡皮手势结束
     flushEraserHistory(); // 对无橡皮手势幂等
     cancelCompass(); // 正常抬手后此事件仍会触发，各 cancel 对无手势态幂等

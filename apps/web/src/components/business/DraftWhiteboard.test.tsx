@@ -281,6 +281,31 @@ describe('草稿白板：撤销 / 重做', () => {
     penLine(canvas, 100);
     expect(btn().disabled).toBe(false);
   });
+
+  it('手写笔手势被 pointercancel / lostpointercapture 打断：每笔也各记一步，撤销只退最后一笔', () => {
+    const { canvas } = setup();
+    penLine(canvas, 100); // 第一笔正常抬手
+    expect(getDraft('q1')).toHaveLength(1);
+
+    // 第二笔：落笔后被系统打断（手写板驱动/系统手势接管时 pointerup 可能不来）
+    fireEvent.pointerDown(canvas, { pointerId: 31, pointerType: 'pen', button: 0, clientX: 100, clientY: 160 });
+    fireEvent.pointerMove(canvas, { pointerId: 31, pointerType: 'pen', buttons: 1, clientX: 180, clientY: 160 });
+    fireEvent.pointerCancel(canvas, { pointerId: 31, pointerType: 'pen', clientX: 180, clientY: 160 });
+    expect(getDraft('q1')).toHaveLength(2); // 笔画已落盘，不能只是画面上有、历史里没有
+
+    // 第三笔：捕获丢失（元素被移除/被别的元素抢走），同样必须记一步
+    fireEvent.pointerDown(canvas, { pointerId: 32, pointerType: 'pen', button: 0, clientX: 100, clientY: 220 });
+    fireEvent.pointerMove(canvas, { pointerId: 32, pointerType: 'pen', buttons: 1, clientX: 180, clientY: 220 });
+    fireEvent.lostPointerCapture(canvas, { pointerId: 32, pointerType: 'pen', clientX: 180, clientY: 220 });
+    expect(getDraft('q1')).toHaveLength(3);
+
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(2); // 若漏记，这一步会连带把前两笔一起退掉
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(1);
+    undoKey();
+    expect(getDraft('q1')).toHaveLength(0);
+  });
 });
 
 describe('草稿白板：题干图拖入', () => {
