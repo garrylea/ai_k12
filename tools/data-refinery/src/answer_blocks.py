@@ -9,6 +9,8 @@ import html
 import re
 from dataclasses import dataclass
 
+from page_markers import is_page_marker_line
+
 
 @dataclass(frozen=True)
 class AnswerQuestion:
@@ -54,6 +56,148 @@ class AnswerParseResult:
     fragments: list[AnswerFragment]
     blocks: list[AnswerBlock]
     issues: list[AnswerIssue]
+
+
+_GROUP_HEADER_RE = re.compile(
+    r"^#{0,6}\s*([一二三四五六七八九十]+)、\s*(.*)$"
+)
+_INLINE_NUMBER_RE = re.compile(r"(?<!\d)\d{1,2}\s*[.．]")
+_SECTION_HEADER_RE = re.compile(
+    r"^#{0,6}\s*[（(]\s*[一二三四五六七八九十]+\s*[）)]"
+)
+_ANSWER_HEADING_PREFIX_RE = re.compile(r"^#{0,6}\s*")
+
+
+def is_answer_structure_line(line: str) -> bool:
+    """答案区里不属于答案正文的页码/小节标题。"""
+    return is_page_marker_line(line) or bool(_SECTION_HEADER_RE.match(line))
+
+
+def _split_group_header_with_tail(line: str) -> tuple[str | None, str]:
+    match = _GROUP_HEADER_RE.match(line)
+    if match is None:
+        return None, line.strip()
+    body = match.group(2).strip()
+    inline = _INLINE_NUMBER_RE.search(body)
+    tail = body[inline.start():].strip() if inline else ""
+    return match.group(1), tail
+
+
+def _strip_answer_heading(line: str) -> tuple[bool, str]:
+    stripped = _ANSWER_HEADING_PREFIX_RE.sub("", line).strip()
+    for marker in ("参考答案", "评分参考", "答案及评分"):
+        position = stripped.find(marker)
+        if position < 0:
+            continue
+        tail = stripped[position + len(marker):].strip()
+        tail = re.sub(r"^及评分(?:标准)?\s*", "", tail).strip()
+        return True, tail
+    return False, line
+
+
+def prepare_answer_lines(
+    lines: list[str], first_line_no: int
+) -> list[AnswerLine]:
+    """清洗答案结构行，保留原行号、大题标题和正文空行。"""
+    out: list[AnswerLine] = []
+    for offset, raw in enumerate(lines):
+        text = raw.rstrip()
+        is_heading, tail = _strip_answer_heading(text)
+        if is_heading and not tail:
+            continue
+        if is_heading:
+            text = tail
+        if is_answer_structure_line(text):
+            continue
+        out.append(AnswerLine(line_no=first_line_no + offset, text=text))
+    return out
+
+
+def split_answer_blocks(
+    lines: list[AnswerLine],
+    questions: list[AnswerQuestion],
+) -> list[AnswerBlock]:
+    """把答案区切成互不重叠的版式块。"""
+    expected = {question.no for question in questions}
+    working_lines = list(lines)
+    blocks: list[AnswerBlock] = []
+    group_id: str | None = None
+    index = 0
+
+    while index < len(working_lines):
+        line = working_lines[index]
+        text = line.text.strip()
+        if not text:
+            index += 1
+            continue
+
+        header_group, tail = _split_group_header_with_tail(text)
+        if header_group is not None:
+            group_id = header_group
+            if not tail:
+                index += 1
+                continue
+            line = AnswerLine(line_no=line.line_no, text=tail)
+            working_lines[index] = line
+            text = tail
+
+        if text.startswith("<table"):
+            end = index
+            while end < len(working_lines) and "</table>" not in working_lines[end].text:
+                end += 1
+            if end < len(working_lines):
+                end += 1
+            blocks.append(AnswerBlock(
+                "table", tuple(working_lines[index:end]), group_id
+            ))
+            index = end
+            continue
+
+        if re.fullmatch(r"[A-Da-d](?:\s*[A-Da-d])+", text):
+            blocks.append(AnswerBlock("compact_choice", (line,), group_id))
+            index += 1
+            continue
+
+        if any(re.search(rf"(?<!\d){number}\s*[.．]", text) for number in expected):
+            end = index + 1
+            while end < len(working_lines):
+                next_text = working_lines[end].text.strip()
+                if _split_group_header_with_tail(next_text)[0] is not None:
+                    break
+                if next_text.startswith("<table") or re.fullmatch(
+                    r"[A-Da-d](?:\s*[A-Da-d])+", next_text
+                ):
+                    break
+                if any(
+                    re.search(rf"(?<!\d){number}\s*[.．]", next_text)
+                    for number in expected
+                ):
+                    break
+                end += 1
+            blocks.append(AnswerBlock(
+                "numbered", tuple(working_lines[index:end]), group_id
+            ))
+            index = end
+            continue
+
+        end = index + 1
+        while end < len(working_lines):
+            next_text = working_lines[end].text.strip()
+            if _split_group_header_with_tail(next_text)[0] is not None:
+                break
+            if next_text.startswith("<table") or re.fullmatch(
+                r"[A-Da-d](?:\s*[A-Da-d])+", next_text
+            ):
+                break
+            if any(re.search(rf"(?<!\d){number}\s*[.．]", next_text) for number in expected):
+                break
+            end += 1
+        blocks.append(AnswerBlock(
+            "unknown", tuple(working_lines[index:end]), group_id
+        ))
+        index = end
+
+    return blocks
 
 
 _CELL_DIGITS_RE = re.compile(r"^\d{1,2}$")

@@ -9,8 +9,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from answer_blocks import answer_table_numbers, parse_answer_table
-from page_markers import is_page_marker_line
+from answer_blocks import (
+    answer_table_numbers,
+    is_answer_structure_line,
+    parse_answer_table,
+)
 
 # 主题号（行首）：1-2 位数字 + . + 非数字字符（不要求空格，兼容 9.xxx / 9. xxx / 9.$...$），
 # 或 + 4 位年份+中文（'6.2025年...'，. 后是年份数字仍算题号），或 + :（'21: 在...' 冒号格式）。
@@ -87,14 +90,6 @@ _MATERIAL_HEAD_RE = re.compile(r'^#{0,6}\s*材料\s*[一二三四五六七八九
 def is_date_trap(line: str) -> bool:
     """行首是否为日期/页码格式（如 2026.5），不当题号。"""
     return bool(_DATE_TRAP_RE.match(line))
-
-
-def is_answer_structure_line(line: str) -> bool:
-    """答案区里不属于答案正文的结构行：页码标记 / 小节标题。
-
-    用 ``is_page_marker_line``（已含表格行护栏），避免把整行 ``<table>`` 跳过。
-    """
-    return is_page_marker_line(line) or bool(_SECTION_HEADER_RE.match(line))
 
 
 def _header_key(line: str) -> str:
