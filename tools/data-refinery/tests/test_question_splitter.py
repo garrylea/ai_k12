@@ -1924,3 +1924,75 @@ def test_post_stem_material_attaches_to_citing_question():
 
     assert "太行" in q[13].material_text
     assert "行香子" not in q[13].material_text
+
+
+# ---------- 答案区题号/答案形态（2026 东城、北京中学实测） ----------
+
+def test_compact_choice_answer_key_assigns_by_position():
+    """答案区裸字母串 'B C A D' 按位置对应 Q1–Q4。"""
+    from pathlib import Path as _Path
+    from question_splitter import split_page
+
+    text = (
+        "1. 下列图形是轴对称图形的是（ ）\nA.甲 B.乙 C.丙 D.丁\n\n"
+        "2. 下列实数最小的是（ ）\nA.甲 B.乙 C.丙 D.丁\n\n"
+        "3. 下列计算正确的是（ ）\nA.甲 B.乙 C.丙 D.丁\n\n"
+        "4. 下列结论正确的是（ ）\nA.甲 B.乙 C.丙 D.丁\n\n"
+        "# 参考答案\n\n## 一、选择题\n\nB C A D\n"
+    )
+    qs = split_page(text, _Path("x.md"))
+    assert [q.answer for q in qs] == ["B", "C", "A", "D"]
+
+
+def test_bare_answer_stem_line_starts_new_answer():
+    """答案区题号独占一行（'19.'）时，正文另起一行也算该题答案。"""
+    from pathlib import Path as _Path
+    from question_splitter import split_page
+
+    text = (
+        "18. 已知 a 的值，求代数式的值。\n\n"
+        "19. 画出函数图象并写出取值范围。\n\n"
+        "# 参考答案\n\n"
+        "18. 解：代入得 7。\n\n"
+        "19.\n\n"
+        "（1）图略\n"
+        "(2) y 的取值范围\n"
+    )
+    qs = split_page(text, _Path("x.md"))
+    by_no = {q.group_order: q.answer for q in qs}
+    assert by_no[18] == "代入得 7。"
+    assert "图略" in by_no[19] and "19." not in by_no[18]
+
+
+def test_second_answer_block_does_not_pollute_last_question():
+    """第一套答案到 Q3 后，第二套从 1 重写的详解不得拼进 Q3 或重复写 Q1。"""
+    from pathlib import Path as _Path
+    from question_splitter import split_page
+
+    text = (
+        "1. 题一\nA.甲 B.乙 C.丙 D.丁\n\n"
+        "2. 题二\nA.甲 B.乙 C.丙 D.丁\n\n"
+        "3. 题三\nA.甲 B.乙 C.丙 D.丁\n\n"
+        "# 参考答案\n\nB C A\n\n"
+        "1. 答案：B\n\n解析：第一题说明。\n\n"
+        "3. 答案：A\n\n解析：第三题说明。\n"
+    )
+    qs = split_page(text, _Path("x.md"))
+    assert [q.answer for q in qs] == ["B", "C", "A"]
+
+
+def test_answer_section_score_detail_is_not_new_question():
+    """答案区回退的小题号（作文评分细则）仍当上一题续行，不新建题。"""
+    from pathlib import Path as _Path
+    from question_splitter import split_page
+
+    text = (
+        "24. 请以「疾风知劲草」为题写一篇文章。\n\n"
+        "# 参考答案\n\n"
+        "24. 略\n\n"
+        "1. 字数不足 600 字扣 2 分。\n\n"
+        "2. 错别字每 3 个扣 1 分。\n"
+    )
+    qs = split_page(text, _Path("x.md"))
+    assert [q.group_order for q in qs] == [24]
+    assert "字数不足 600 字" in qs[0].answer

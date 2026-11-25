@@ -200,6 +200,10 @@ def is_sub_stem(line: str) -> bool:
 # 裸题号：行首 `11 在平面直角坐标系…`（OCR 把题号后的点丢了）。规则级只在题号连续、
 # 独立成段、后文有下一题号或边界时才认，否则交给 LLM 复核（见 extract 第二遍）。
 _BARE_STEM_RE = re.compile(r"^\s*#{0,6}\s*(\d{1,2})\s+(?=[^\d\s])")
+# 答案区里题号独占一行（`19.` 后内容另起一行）：`_MAIN_STEM_RE` 要求点号后有
+# 字符，裸题号认不出（2026 北京中学期末实测 Q19 答案被吞进 Q18）。只在答案区
+# 生效，避免题干区的孤立数字行被切出空题。
+_BARE_ANSWER_STEM_RE = re.compile(r"^\s*#{0,6}\s*(\d{1,2})\s*[.．]\s*$")
 
 
 def _starts_with_measure_word(rest: str) -> bool:
@@ -298,6 +302,19 @@ def split_inline_stems(line: str) -> list[tuple[int, str]]:
         text = line[start:end].strip()
         results.append((n, text))
     return results
+
+
+# 选择题答案裸串：'BBCA CACC' / 'ABCABCD'（无题号，按字母位置对应题号）。
+# 仅在答案区使用；至少两个字母，避免把单个选项字母当答案表。
+_COMPACT_ANSWER_KEY_RE = re.compile(r"^\s*([A-Da-d]+(?:\s+[A-Da-d]+)+)\s*$")
+
+
+def split_compact_answer_key(line: str) -> list[str]:
+    """答案区的选择题裸答案串 → 按序排列的大写字母列表，非裸串返回 []。"""
+    m = _COMPACT_ANSWER_KEY_RE.match(line)
+    if not m:
+        return []
+    return [c.upper() for c in re.sub(r"\s+", "", m.group(1))]
 
 
 def _split_glued_next_stem(line: str, expected: int) -> tuple[str, int, str] | None:
@@ -1028,6 +1045,10 @@ def split_page(text: str, md_path: Path,
         current_answer_lines = []
         current_answer_n = None
 
+    def _answer_filled(n: int) -> bool:
+        """题号 n 是否已有答案（用于跳过同一卷里第二套答案的重复条目）。"""
+        return any(q.group_order == n and (q.answer or "").strip() for q in questions)
+
     lines = text.split('\n')
     current_part_kind: str | None = None  # 状态机：当前所在部分（'choice'/'non_choice'）
     for i, line in enumerate(lines):
@@ -1190,6 +1211,25 @@ def split_page(text: str, md_path: Path,
             # 不跳过会拼进上一题答案（海淀 2026 题10 实测）。
             if is_answer_structure_line(line):
                 continue
+            # 裸题号独占一行（`19.`）：答案正文另起一行，补认成新答案段。
+            if not ok:
+                bare = _BARE_ANSWER_STEM_RE.match(line)
+                if bare and int(bare.group(1)) > last_answer_n:
+                    ok, n = True, int(bare.group(1))
+            # 选择题裸答案串（'BBCA CACC'）：按字母位置依次对应题号。
+            # 东城 2026 期末实测：选择题答案只写成裸串，没有「1.B 2.B …」，
+            # 整行会被当作无题号续行丢掉，Q1–8 全空。
+            compact_key = split_compact_answer_key(line)
+            if compact_key:
+                _flush_answer()
+                for letter in compact_key:
+                    target = last_answer_n + 1
+                    if not _answer_filled(target):
+                        current_answer_n = target
+                        current_answer_lines = [letter]
+                        _flush_answer()
+                current_answer_n = None
+                continue
             # HTML 答案表（选择题与填空题共用）：不在这里维护 A-D/公式两套分支。
             if '<table>' in line or '<table ' in line:
                 table_answers = parse_answer_table(line)
@@ -1213,16 +1253,30 @@ def split_page(text: str, md_path: Path,
                     current_answer_n = None
                 continue
             if inline_stems:
-                # 紧凑格式：一行多题号答案（只收递增题号；回退数字是评分细则编号）
-                fresh = [(sn, st) for sn, st in inline_stems if sn > last_answer_n]
+                # 紧凑格式：一行多题号答案（只收递增题号；回退数字是评分细则编号）。
+                # 例外：行内写法明确带「答案：」且该题还没有答案时，允许作为第二套
+                # 答案块写入（东城 2026 期末：题4解析行尾粘着「5. 答案：C」）。
+                fresh = [
+                    (sn, st) for sn, st in inline_stems
+                    if sn > last_answer_n
+                    or (_ANSWER_MARK_RE.match(st.strip()) and not _answer_filled(sn))
+                ]
                 if not fresh:
-                    if current_answer_n is not None:
+                    # 回退题号且明确带「答案：」、该题已有答案 → 第二套答案块的
+                    # 重复条目：结掉上一题后丢弃，别把整段详解拼进上一题答案。
+                    if any(_ANSWER_MARK_RE.match(st.strip()) and _answer_filled(sn)
+                           for sn, st in inline_stems):
+                        _flush_answer()
+                    elif current_answer_n is not None:
                         current_answer_lines.append(line)
                     continue
                 _flush_answer()  # 先把上一段答案塞入
                 if len(fresh) == 1:
                     current_answer_n = fresh[0][0]
                     current_answer_lines = [fresh[0][1]]
+                    # 题号一旦开始就登记，别等 flush：否则回退守卫读到旧的
+                    # last_answer_n，评分细则的「1. …」会被当成新题答案。
+                    last_answer_n = max(last_answer_n, current_answer_n)
                 else:
                     # 多个题号一行：每个题号独立成段，立即 flush
                     for stem_n, stem_text in fresh:
@@ -1231,17 +1285,27 @@ def split_page(text: str, md_path: Path,
                         _flush_answer()
                     current_answer_n = None
             elif ok:
+                rest = _strip_main_stem_prefix(line)
                 if n <= last_answer_n:
                     # 题号回退（如作文评分细则 '1．字数不足600字…'）：当作当前答案续行，
-                    # 不新建答案段——否则会串到第 1 题（2025 海淀语文卷实测事故）
-                    if current_answer_n is not None:
+                    # 不新建答案段——否则会串到第 1 题（2025 海淀语文卷实测事故）。
+                    # 例外：同一份 md 出现第二套从 1 开始、明确写「答案：」的详解块，
+                    # 且该题尚未有答案时允许写入（东城 2026 期末实测）。
+                    if _ANSWER_MARK_RE.match(rest.strip()):
+                        # 明确是第二套答案块：先结掉上一题，避免后续解析行继续
+                        # 拼到上一题答案里；该题已有答案就整段跳过，不重复写。
+                        _flush_answer()
+                        if not _answer_filled(n):
+                            current_answer_n = n
+                            current_answer_lines = [rest]
+                    elif current_answer_n is not None:
                         current_answer_lines.append(line)
                     continue
                 # 展开格式：行首单题号，开始新答案段
                 _flush_answer()
-                rest = _strip_main_stem_prefix(line)
                 current_answer_n = n
                 current_answer_lines = [rest] if rest else []
+                last_answer_n = max(last_answer_n, n)
             else:
                 # 答案段的续行（含小问号行 (1)(2)）
                 if current_answer_n is not None:
