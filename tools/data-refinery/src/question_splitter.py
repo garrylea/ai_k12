@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from answer_blocks import (
+    AnswerLine,
+    AnswerParseResult,
+    AnswerQuestion,
     answer_table_numbers,
     is_answer_structure_line,
     parse_answer_table,
@@ -898,10 +901,10 @@ def is_junk_question(q: RawQuestion) -> bool:
     return True
 
 
-def split_page(text: str, md_path: Path,
-               strategy=None, *,
-               forced_stem_lines: set[int] | None = None,
-               suspects_out: list | None = None) -> list[RawQuestion]:
+def _split_questions_only(text: str, md_path: Path,
+                          strategy=None, *,
+                          forced_stem_lines: set[int] | None = None,
+                          suspects_out: list | None = None) -> list[RawQuestion]:
     """按题号切分试卷 MD 并对齐答案，返回 RawQuestion 列表。
 
     Args:
@@ -930,10 +933,6 @@ def split_page(text: str, md_path: Path,
     # 当前分组的分数状态：unified（组内每题统一分）或 map（逐题给分）
     current_unified_score: int | None = None
     current_score_map: dict[int, int] | None = None
-    in_answer_section = False
-    current_answer_lines: list[str] = []  # 当前累积的答案文本（多行）
-    current_answer_n: int | None = None  # 当前答案属于哪个题号
-    last_answer_n = 0  # 答案段已见最大题号（守卫：题号必须递增，回退数字是评分细则编号）
     last_stem_no = 0   # 题干区已建的最大题号（纠正 OCR 十位错认，如 23→33）
     seen_stems: set[int] = set()  # 已建题号（防答案区/考试说明重复建题）
     warned_dup = False            # 重复题号只告警一次，避免刷屏
@@ -969,29 +968,6 @@ def split_page(text: str, md_path: Path,
             scope_has_stem = True
         return scope_materials.get(scope_id)
 
-    def _flush_answer():
-        """把累积的答案塞入对应题。"""
-        nonlocal current_answer_lines, current_answer_n, last_answer_n
-        if current_answer_n is None or not current_answer_lines:
-            current_answer_lines = []
-            current_answer_n = None
-            return
-        answer_text = _strip_answer_prefix("\n".join(current_answer_lines))
-        for q in questions:
-            if q.group_order == current_answer_n:
-                if q.answer:
-                    q.answer += "\n" + answer_text  # 多段答案合并
-                else:
-                    q.answer = answer_text
-                break
-        last_answer_n = max(last_answer_n, current_answer_n)
-        current_answer_lines = []
-        current_answer_n = None
-
-    def _answer_filled(n: int) -> bool:
-        """题号 n 是否已有答案（用于跳过同一卷里第二套答案的重复条目）。"""
-        return any(q.group_order == n and (q.answer or "").strip() for q in questions)
-
     lines = text.split('\n')
     current_part_kind: str | None = None  # 状态机：当前所在部分（'choice'/'non_choice'）
     for i, line in enumerate(lines):
@@ -1008,15 +984,12 @@ def split_page(text: str, md_path: Path,
         if part_ok:
             # 卷内部分标题（'## 第二部分 非选择题'）：关闭当前题、丢弃该行，
             # 不改 group_id/分数状态（大题分组由后续 '一、选择题' 决定）
-            if not in_answer_section:
-                key = _header_key(line)
-                if current is not None and key in seen_part_headers:
-                    print(f"[WARN] {md_path.stem}: 重复部分标题「{key}」出现在第 {i + 1} 行，"
-                          f"当前题 {current.group_order} 可能被截断，请核对 PDF", flush=True)
-                seen_part_headers.add(key)
-            if in_answer_section:
-                _flush_answer()
-            elif current is not None:
+            key = _header_key(line)
+            if current is not None and key in seen_part_headers:
+                print(f"[WARN] {md_path.stem}: 重复部分标题「{key}」出现在第 {i + 1} 行，"
+                      f"当前题 {current.group_order} 可能被截断，请核对 PDF", flush=True)
+            seen_part_headers.add(key)
+            if current is not None:
                 questions.append(current)
                 current = None
             current_part_kind = part_kind
@@ -1034,7 +1007,7 @@ def split_page(text: str, md_path: Path,
         # （2026-11-21 实测 5175/5461/5475 三卷 8 题）。
         # 标题只做边界：**不**进 pending —— 阅读小节有正文会盖过它，但默写等无文章
         # 小节会把它当成唯一材料（东城模拟一 Q6「(一)默写。(共4分)」实测）。
-        if policy.attach and not in_answer_section and is_section_header(line):
+        if policy.attach and is_section_header(line):
             if current is not None:
                 questions.append(current)
                 current = None
@@ -1046,7 +1019,7 @@ def split_page(text: str, md_path: Path,
         # 题干区行内粘连（MinerU 把选项行与下一题合并成一行）：
         # '…6层以下楼房。16.根据材料三…'。不拆的话整段被吞进上一题的选项 D，
         # 题16 直接消失（大兴 2024 实测）。只在题号 == 上一题+1 时生效。
-        if not ok and not in_answer_section and current is not None:
+        if not ok and current is not None:
             glued = _split_glued_next_stem(line, current.group_order + 1)
             if glued is not None:
                 head, tail_no, tail = glued
@@ -1075,18 +1048,14 @@ def split_page(text: str, md_path: Path,
                 continue
 
         if ok:
-            if not in_answer_section:
-                key = _header_key(line)
-                if current is not None and key in seen_group_headers:
-                    print(f"[WARN] {md_path.stem}: 重复大题标题「{key}」出现在第 {i + 1} 行，"
-                          f"当前题 {current.group_order} 可能被截断，请核对 PDF", flush=True)
-                seen_group_headers.add(key)
-            if in_answer_section:
-                _flush_answer()
-            else:
-                if current is not None:
-                    questions.append(current)
-                    current = None
+            key = _header_key(line)
+            if current is not None and key in seen_group_headers:
+                print(f"[WARN] {md_path.stem}: 重复大题标题「{key}」出现在第 {i + 1} 行，"
+                      f"当前题 {current.group_order} 可能被截断，请核对 PDF", flush=True)
+            seen_group_headers.add(key)
+            if current is not None:
+                questions.append(current)
+                current = None
             current_group_id = gid
             # 「多项选择题」大题：这一节所有题都是多选（2026-11-01 人大附卷实测）
             current_multi = ("多项选择" in line) or ("多选题" in line)
@@ -1105,33 +1074,23 @@ def split_page(text: str, md_path: Path,
                 current_score_map = None
             continue
 
-        if not in_answer_section and is_answer_keyword(line):
+        if is_answer_keyword(line):
             if current is not None:
                 questions.append(current)
                 current = None
-            in_answer_section = True
-            continue
-
-        # 主题号处理（含紧凑格式一行多题号）
-        inline_stems = split_inline_stems(line) if in_answer_section else []
-        if in_answer_section:
-            fill_blank_stems = split_inline_fill_blank_answers(
-                line, last_answer_n + 1
-            )
-            if len(fill_blank_stems) > len(inline_stems):
-                inline_stems = fill_blank_stems
+            break
         # 题号判定走学科策略（`is_stem`），内核不再自己判——
         # 各科的 is_stem 目前都委托 is_main_stem，行为等价。
         ok, n = strategy.is_stem(line)
         accepted_bare = False
-        if not ok and not in_answer_section and current_part_kind == 'choice':
+        if not ok and current_part_kind == 'choice':
             # 状态机：选择题区行首 '数字.数字'（题号+年份 '6.2025年' 或疑似小数
             # '9.5'）——若后续存在更大题号（'7.'），说明当前行是题号而非小数
             amb = _AMBIGUOUS_NUM_RE.match(line)
             if amb and _has_next_stem(lines, i + 1, int(amb.group(1)),
                                       is_stem=strategy.is_stem):
                 ok, n = True, int(amb.group(1))
-        if not ok and not in_answer_section and has_blank_before \
+        if not ok and has_blank_before \
                 and last_stem_no > 0:
             orphan = _ORPHAN_STEM_DOT_RE.match(line)
             if orphan:
@@ -1141,7 +1100,7 @@ def split_page(text: str, md_path: Path,
                     ok, n = True, last_stem_no + 1
         # 裸题号（OCR 丢了点）：`11 在平面直角坐标系…`。规则级 4 条全满足才认；
         # 拿不准的攒进 suspects_out 交 LLM 复核，第二遍带 forced_stem_lines 直接采纳。
-        if not ok and not in_answer_section:
+        if not ok:
             cand = _bare_stem_candidate(line)
             if cand is not None:
                 bn, rest = cand
@@ -1163,159 +1122,8 @@ def split_page(text: str, md_path: Path,
                         "after": "\n".join(lines[i + 1:i + 3]),
                     })
 
-        if in_answer_section:
-            # 页码标记 / 小节标题（（二）（共 5 分））不属于答案正文；
-            # 不跳过会拼进上一题答案（海淀 2026 题10 实测）。
-            if is_answer_structure_line(line):
-                continue
-            # 裸题号独占一行（`19.`）：答案正文另起一行，补认成新答案段。
-            if not ok:
-                bare = _BARE_ANSWER_STEM_RE.match(line)
-                if bare and int(bare.group(1)) > last_answer_n:
-                    ok, n = True, int(bare.group(1))
-            # 选择题裸答案串（'BBCA CACC'）：按字母位置依次对应题号。
-            # 东城 2026 期末实测：选择题答案只写成裸串，没有「1.B 2.B …」，
-            # 整行会被当作无题号续行丢掉，Q1–8 全空。
-            compact_key = split_compact_answer_key(line)
-            if compact_key:
-                _flush_answer()
-                for letter in compact_key:
-                    target = last_answer_n + 1
-                    if not _answer_filled(target):
-                        current_answer_n = target
-                        current_answer_lines = [letter]
-                        _flush_answer()
-                current_answer_n = None
-                continue
-            # HTML 答案表（选择题与填空题共用）：不在这里维护 A-D/公式两套分支。
-            if '<table>' in line or '<table ' in line:
-                table_answers = parse_answer_table(line)
-                if table_answers:
-                    # 自检：表里明明列了题号，却有几个没解析出答案（版式不识别/列数不齐）。
-                    # 旧版这里是静默丢的 —— 缺答案的题会被后续「补空答案」随意填，
-                    # 而 answer_verified=1 又把错值标成已核验（北师大实验 2024 物理卷事故）。
-                    missing = sorted(answer_table_numbers(line) - set(table_answers))
-                    if missing:
-                        print(f"[WARN] 答案表有题号没解析出答案：{missing}"
-                              f"（该表其它题已写入，这几个题请人工核对）", flush=True)
-                if not table_answers and current_answer_n is not None:
-                    # 题号/答案表解析不出（如作文评分标准表）：作为当前题答案续行
-                    current_answer_lines.append(line)
-                else:
-                    _flush_answer()
-                    for tn, tans in table_answers.items():
-                        current_answer_n = tn
-                        current_answer_lines = [tans]
-                        _flush_answer()
-                    current_answer_n = None
-                continue
-            if inline_stems:
-                # 紧凑格式：一行多题号答案（只收递增题号；回退数字是评分细则编号）。
-                # 例外：行内写法明确带「答案：」且该题还没有答案时，允许作为第二套
-                # 答案块写入（东城 2026 期末：题4解析行尾粘着「5. 答案：C」）。
-                fresh = [
-                    (sn, st) for sn, st in inline_stems
-                    if sn > last_answer_n
-                    or (_ANSWER_MARK_RE.match(st.strip()) and not _answer_filled(sn))
-                ]
-                if not fresh:
-                    # 回退题号且明确带「答案：」、该题已有答案 → 第二套答案块的
-                    # 重复条目：结掉上一题后丢弃，别把整段详解拼进上一题答案。
-                    if any(_ANSWER_MARK_RE.match(st.strip()) and _answer_filled(sn)
-                           for sn, st in inline_stems):
-                        _flush_answer()
-                    elif current_answer_n is not None:
-                        current_answer_lines.append(line)
-                    continue
-                _flush_answer()  # 先把上一段答案塞入
-                if len(fresh) == 1:
-                    current_answer_n = fresh[0][0]
-                    current_answer_lines = [fresh[0][1]]
-                    # 题号一旦开始就登记，别等 flush：否则回退守卫读到旧的
-                    # last_answer_n，评分细则的「1. …」会被当成新题答案。
-                    last_answer_n = max(last_answer_n, current_answer_n)
-                else:
-                    # 多个题号一行：每个题号独立成段，立即 flush
-                    for stem_n, stem_text in fresh:
-                        current_answer_n = stem_n
-                        current_answer_lines = [stem_text]
-                        _flush_answer()
-                    current_answer_n = None
-            elif ok:
-                rest = _strip_main_stem_prefix(line)
-                if n <= last_answer_n:
-                    # 题号回退（如作文评分细则 '1．字数不足600字…'）：当作当前答案续行，
-                    # 不新建答案段——否则会串到第 1 题（2025 海淀语文卷实测事故）。
-                    # 例外：同一份 md 出现第二套从 1 开始、明确写「答案：」的详解块，
-                    # 且该题尚未有答案时允许写入（东城 2026 期末实测）。
-                    if _ANSWER_MARK_RE.match(rest.strip()):
-                        # 明确是第二套答案块：先结掉上一题，避免后续解析行继续
-                        # 拼到上一题答案里；该题已有答案就整段跳过，不重复写。
-                        _flush_answer()
-                        if not _answer_filled(n):
-                            current_answer_n = n
-                            current_answer_lines = [rest]
-                    elif current_answer_n is not None:
-                        current_answer_lines.append(line)
-                    continue
-                # 展开格式：行首单题号，开始新答案段
-                _flush_answer()
-                current_answer_n = n
-                current_answer_lines = [rest] if rest else []
-                last_answer_n = max(last_answer_n, n)
-                glued_answers = _split_glued_answers(rest, n)
-                if glued_answers is not None:
-                    head, parts = glued_answers
-                    current_answer_lines = [head] if head else []
-                    for answer_no, answer_text in parts:
-                        _flush_answer()
-                        current_answer_n = answer_no
-                        current_answer_lines = [answer_text] if answer_text else []
-                        last_answer_n = max(last_answer_n, answer_no)
-                else:
-                    score_split = _split_score_prefixed_answer(
-                        rest, n, {q.group_order for q in questions}
-                    )
-                    if score_split is not None:
-                        head, tail = score_split
-                        current_answer_lines = [head] if head else []
-                        _flush_answer()
-                        current_answer_n = n + 1
-                        current_answer_lines = [tail]
-                        last_answer_n = max(last_answer_n, current_answer_n)
-            else:
-                # 答案段的续行（含小问号行 (1)(2)）
-                if current_answer_n is not None:
-                    glued_answers = _split_glued_answers(line, current_answer_n)
-                    if glued_answers is None:
-                        score_split = _split_score_prefixed_answer(
-                            line, current_answer_n,
-                            {q.group_order for q in questions},
-                        )
-                        if score_split is None:
-                            current_answer_lines.append(line)
-                        else:
-                            head, tail = score_split
-                            next_answer_n = current_answer_n + 1
-                            if head:
-                                current_answer_lines.append(head)
-                            _flush_answer()
-                            current_answer_n = next_answer_n
-                            current_answer_lines = [tail]
-                            last_answer_n = max(last_answer_n, current_answer_n)
-                    else:
-                        head, parts = glued_answers
-                        if head:
-                            current_answer_lines.append(head)
-                        for answer_no, answer_text in parts:
-                            _flush_answer()
-                            current_answer_n = answer_no
-                            current_answer_lines = [answer_text] if answer_text else []
-                            last_answer_n = max(last_answer_n, answer_no)
-            continue
-
         # 题干区
-        if policy.attach and not in_answer_section:
+        if policy.attach:
             # 文段标题（「绿绸叠翠」「流光溢彩」）：下一题换材料，上一题到此结束
             if current is not None and has_blank_before and policy.is_material_title(lines, i, line):
                 questions.append(current)
@@ -1470,28 +1278,9 @@ def split_page(text: str, md_path: Path,
         if policy.attach and not scope_has_stem:
             scope_pending.append(line)
 
-    # 末尾 flush 残留答案 + 残留题
-    if in_answer_section:
-        _flush_answer()
+    # 末尾 flush 残留题
     if current is not None:
         questions.append(current)
-
-    # 题前共享材料（物理/化学科技阅读题：`请阅读《…》并回答第 N 题` + 材料 + `N. 请根据上述材料`）。
-    # 这是策略的可选钩子：generic/语文/英语没有这个方法，行为不变。
-    attach_pre = getattr(strategy, "attach_pre_material", None)
-    if callable(attach_pre):
-        attach_pre(questions, lines)
-    # 题后材料/材料规整（语文、英语）：与 attach_pre 对称的可选钩子，
-    # 其它学科没有此方法，行为不变。
-    attach_post = getattr(strategy, "attach_post_material", None)
-    if callable(attach_post):
-        attach_post(questions, lines, md_path.stem)
-
-    # 题内小问拆分（道法）：把「材料→(1)→材料→(2)」拆成多条题。
-    # 可选钩子，数学/语文/英语/物化都没有这个方法，行为不变。
-    expand_subs = getattr(strategy, "expand_subquestions", None)
-    if callable(expand_subs):
-        questions = expand_subs(questions)
 
     if jump_warnings:
         detail = "、".join(f"{a}→{b}@{line}" for a, b, line in jump_warnings[:8])
@@ -1500,3 +1289,106 @@ def split_page(text: str, md_path: Path,
               f"（{detail}{more}），可能是跨页假题号/OCR 缺题，请核对 PDF", flush=True)
 
     return questions
+
+
+@dataclass
+class SplitPageResult:
+    questions: list[RawQuestion]
+    answer_result: AnswerParseResult | None
+
+
+def _find_answer_boundary(lines: list[str]) -> int | None:
+    for index, line in enumerate(lines):
+        if is_answer_keyword(line):
+            return index
+    return None
+
+
+def _apply_strategy_finalizers(
+    questions: list[RawQuestion],
+    lines: list[str],
+    md_path: Path,
+    strategy,
+) -> list[RawQuestion]:
+    attach_pre = getattr(strategy, "attach_pre_material", None)
+    if callable(attach_pre):
+        attach_pre(questions, lines)
+    attach_post = getattr(strategy, "attach_post_material", None)
+    if callable(attach_post):
+        attach_post(questions, lines, md_path.stem)
+    expand_subs = getattr(strategy, "expand_subquestions", None)
+    if callable(expand_subs):
+        questions = expand_subs(questions)
+    return questions
+
+
+def split_page_result(
+    text: str,
+    md_path: Path,
+    strategy=None,
+    *,
+    forced_stem_lines: set[int] | None = None,
+    suspects_out: list | None = None,
+) -> SplitPageResult:
+    """切分题干后，把答案区整体交给策略的块级解析器。"""
+    if strategy is None:
+        from subject_strategies import get_strategy
+        strategy = get_strategy("generic")
+
+    lines = text.split("\n")
+    answer_index = _find_answer_boundary(lines)
+    if answer_index is None:
+        question_text = text
+        answer_lines: list[AnswerLine] = []
+        first_line_no = 1
+    else:
+        question_text = "\n".join(lines[:answer_index])
+        answer_lines = [
+            AnswerLine(line_no=index + 1, text=line)
+            for index, line in enumerate(lines[answer_index:], start=answer_index)
+        ]
+        first_line_no = answer_index + 1
+
+    questions = _split_questions_only(
+        question_text,
+        md_path,
+        strategy,
+        forced_stem_lines=forced_stem_lines,
+        suspects_out=suspects_out,
+    )
+    answer_result = None
+    if answer_lines:
+        answer_questions = [
+            AnswerQuestion(no=question.group_order, group_id=question.group_id)
+            for question in questions
+        ]
+        answer_result = strategy.parse_answers(
+            answer_lines,
+            answer_questions,
+            first_line_no=first_line_no,
+        )
+        by_number: dict[int, list[str]] = {}
+        for fragment in answer_result.fragments:
+            by_number.setdefault(fragment.question_no, []).append(fragment.text)
+        for question in questions:
+            question.answer = "\n".join(by_number.get(question.group_order, []))
+
+    questions = _apply_strategy_finalizers(questions, lines, md_path, strategy)
+    return SplitPageResult(questions=questions, answer_result=answer_result)
+
+
+def split_page(
+    text: str,
+    md_path: Path,
+    strategy=None,
+    *,
+    forced_stem_lines: set[int] | None = None,
+    suspects_out: list | None = None,
+) -> list[RawQuestion]:
+    return split_page_result(
+        text,
+        md_path,
+        strategy,
+        forced_stem_lines=forced_stem_lines,
+        suspects_out=suspects_out,
+    ).questions

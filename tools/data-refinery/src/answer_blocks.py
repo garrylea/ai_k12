@@ -201,7 +201,23 @@ def split_answer_blocks(
 
 
 _MATH_OPERATORS = set("=+-×÷")
-_STRONG_PREFIXES = set("；。$")
+_STRONG_PREFIXES = set("；。.$")
+_ANSWER_MARK_RE = re.compile(
+    r'^\s*(?:答案(?:示例|要点)?\s*\d*\s*[:：]\s*|(?:解|证明|原式|原不等式组)[：:]\s*)'
+)
+_TRAILING_SCORE_RE = re.compile(r'[（(]\s*(?:共)?\s*\d+(?:\.\d+)?\s*分\s*[）)]\s*$')
+_SCORE_BOUNDARY_RE = re.compile(
+    r"(?P<score>\d{1,2}\s*分)\s*(?=(?:解|证明|答案)[：:]\s*[（(]\s*1\s*[）)])"
+)
+
+
+def _strip_answer_prefix(text: str) -> str:
+    text = _ANSWER_MARK_RE.sub("", text.strip(), count=1)
+    while True:
+        stripped = _TRAILING_SCORE_RE.sub("", text).rstrip()
+        if stripped == text:
+            return text
+        text = stripped
 
 
 def _line_start_offsets(text: str) -> set[int]:
@@ -220,9 +236,13 @@ def _marker_allowed(
     raw_previous = text[match.start() - 1:match.start()] if match.start() else ""
     at_line_start = match.start() in line_starts or not before
     has_dot = match.group("dot") is not None
-    followed_by_digit = bool(re.match(r"\d", text[match.end():]))
+    dot_end = match.end("dot") if has_dot else match.end()
+    followed_by_digit = has_dot and text[dot_end:dot_end + 1].isdigit()
 
-    if raw_previous and (raw_previous.isalnum() or raw_previous in _MATH_OPERATORS):
+    if raw_previous and (
+        (raw_previous.isalnum() and raw_previous != "分")
+        or raw_previous in _MATH_OPERATORS
+    ):
         return False
     if has_dot and followed_by_digit and not at_line_start:
         return previous in _STRONG_PREFIXES or previous == "分"
@@ -230,6 +250,7 @@ def _marker_allowed(
         at_line_start
         or raw_previous.isspace()
         or previous in _STRONG_PREFIXES
+        or previous == "分"
         or previous in ")]）】"
     )
 
@@ -242,7 +263,8 @@ def _find_marker(
 ) -> re.Match[str] | None:
     digits = r"\s*".join(str(expected_no))
     pattern = re.compile(
-        rf"(?<!\d)(?P<number>{digits})\s*(?P<dot>[.．])?\s*(?=\S)"
+        rf"(?<!\d)(?P<number>{digits})\s*(?P<dot>[.．])?"
+        rf"(?:\s*(?=\S)|(?=\n|$))"
     )
     for match in pattern.finditer(text, start):
         if _marker_allowed(text, match, line_starts):
@@ -277,26 +299,43 @@ def parse_numbered_block(
         current_formula = marker.start() > 0 and text[marker.start() - 1] == "$"
         if current_formula and answer.endswith("$"):
             answer = answer[:-1].rstrip()
+        answer = _strip_answer_prefix(answer)
         line_start = block.lines[0].line_no
         line_end = block.lines[-1].line_no
-        if not answer:
-            issues.append(AnswerIssue(
-                code="answer_empty",
-                severity="error",
-                message=f"第 {number} 题答案为空",
-                question_no=number,
+        answer_parts = [(number, answer)]
+        next_expected = next(
+            (candidate for candidate in expected_numbers if candidate > number),
+            None,
+        )
+        if (
+            has_next and markers[index + 1][0] == number + 2
+        ) or (
+            not has_next and next_expected == number + 1
+        ):
+            boundary = _SCORE_BOUNDARY_RE.search(answer)
+            if boundary is not None:
+                head = answer[:boundary.end()].strip()
+                tail = _strip_answer_prefix(answer[boundary.end():])
+                answer_parts = [(number, head), (number + 1, tail)]
+        for answer_no, answer_text in answer_parts:
+            if not answer_text:
+                issues.append(AnswerIssue(
+                    code="answer_empty",
+                    severity="error",
+                    message=f"第 {answer_no} 题答案为空",
+                    question_no=answer_no,
+                    line_start=line_start,
+                    line_end=line_end,
+                    excerpt="",
+                ))
+                continue
+            fragments.append(AnswerFragment(
+                question_no=answer_no,
+                text=answer_text,
+                block_kind="numbered",
                 line_start=line_start,
                 line_end=line_end,
-                excerpt="",
             ))
-            continue
-        fragments.append(AnswerFragment(
-            question_no=number,
-            text=answer,
-            block_kind="numbered",
-            line_start=line_start,
-            line_end=line_end,
-        ))
     return fragments, issues
 
 

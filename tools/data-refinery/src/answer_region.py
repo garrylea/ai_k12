@@ -1,5 +1,7 @@
 """答案区编排：块解析、首套答案优先与完整覆盖校验。"""
 
+import re
+
 from answer_blocks import (
     AnswerBlock,
     AnswerFragment,
@@ -42,25 +44,32 @@ def _block_span(block: AnswerBlock) -> tuple[int, int, str]:
 def _parse_block(
     block: AnswerBlock,
     questions: list[AnswerQuestion],
+    assigned_numbers: set[int],
 ) -> tuple[list[AnswerFragment], list[AnswerIssue]]:
-    expected = _group_numbers(block, questions)
+    expected = [
+        number
+        for number in _group_numbers(block, questions)
+        if number not in assigned_numbers
+    ]
     line_start, line_end, text = _block_span(block)
 
     if block.kind == "compact_choice":
-        if block.group_id is None:
-            return [], [AnswerIssue(
-                code="group_scope_unresolved",
-                severity="error",
-                message="裸选择答案找不到所属大题",
-                question_no=None,
-                line_start=line_start,
-                line_end=line_end,
-                excerpt=text[:200],
-            )]
         return parse_compact_choice(block, expected)
 
     if block.kind == "numbered":
-        return parse_numbered_block(block, expected)
+        fragments, issues = parse_numbered_block(block, expected)
+        for number in sorted(assigned_numbers):
+            if re.search(rf"(?m)^\s*{number}\s*[.．]", text):
+                issues.append(AnswerIssue(
+                    code="answer_duplicate_ignored",
+                    severity="warning",
+                    message=f"第 {number} 题已有首套答案，后续独立答案块已忽略",
+                    question_no=number,
+                    line_start=line_start,
+                    line_end=line_end,
+                    excerpt=text[:200],
+                ))
+        return fragments, issues
 
     if block.kind == "table":
         answers = parse_answer_table(text)
@@ -142,7 +151,9 @@ def parse_answer_region(
     issues: list[AnswerIssue] = []
 
     for block in blocks:
-        block_fragments, block_issues = _parse_block(block, questions)
+        block_fragments, block_issues = _parse_block(
+            block, questions, set(assigned)
+        )
         issues.extend(block_issues)
         for fragment in block_fragments:
             if fragment.question_no in assigned:

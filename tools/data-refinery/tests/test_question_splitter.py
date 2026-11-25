@@ -2126,3 +2126,60 @@ def test_answer_section_score_detail_is_not_new_question():
     qs = split_page(text, _Path("x.md"))
     assert [q.group_order for q in qs] == [24]
     assert "字数不足 600 字" in qs[0].answer
+
+
+MIYUN_BLOCK_PAPER = """9. 第 9 题
+
+10. 第 10 题
+
+11. 第 11 题
+
+12. 第 12 题
+
+13. 第 13 题
+
+14. 第 14 题
+
+15. 第 15 题
+
+16. 第 16 题
+
+# 参考答案
+
+二、填空题(本题共 16分，每小题 2分)9. (-1,-2) 10.x1=4，x2=-4 11. <
+
+12.2（本题答案不唯一） $1 3 . 2(1+x)^2=5.8$ 14. $\\sqrt{3}$
+15. $20^\\circ$ 16. ① 2 ②1 ${ \\leqslant } m { \\leqslant } 4$
+"""
+
+
+def test_split_page_result_recovers_miyun_9_to_13():
+    from question_splitter import split_page_result
+    from subject_strategies import get_strategy
+
+    result = split_page_result(
+        MIYUN_BLOCK_PAPER,
+        Path("x.md"),
+        strategy=get_strategy("math"),
+    )
+    by_no = {question.group_order: question.answer for question in result.questions}
+
+    assert by_no[9] == "(-1,-2)"
+    assert by_no[10] == "x1=4，x2=-4"
+    assert by_no[11] == "<"
+    assert by_no[12] == "2（本题答案不唯一）"
+    assert by_no[13] == "2(1+x)^2=5.8"
+    assert result.answer_result is not None
+
+
+def test_split_page_wrapper_keeps_list_contract():
+    from question_splitter import split_page
+    from subject_strategies import get_strategy
+
+    questions = split_page(
+        MIYUN_BLOCK_PAPER,
+        Path("x.md"),
+        strategy=get_strategy("math"),
+    )
+    assert isinstance(questions, list)
+    assert questions[0].group_order == 9
