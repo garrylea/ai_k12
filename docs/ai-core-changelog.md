@@ -42,6 +42,26 @@
 
 ---
 
+## 2026-11-24 修复交互选卷后关键词重新扩张
+
+**问题**：`import_cli` 交互选中短卷
+`英语-初三(上)-202607-西城-期末-试卷` 后，下游仍把完整相对路径交给 `--file`
+分词过滤。短卷全部词也包含在三帆卷
+`英语-初三(上)-202607-西城·三帆中学-期末-试卷` 中，因此 extract 重新命中两份；
+`--redo` 转成 `--reconvert`，把两份 extracted JSONL 都删除并重抽。
+
+**改法**：保留公开 `--file` 的关键词语义；入口解析出唯一素材后改传精确路径。
+`scope_filter` 新增 `file_exact` / `match_exact_file()`，兼容 `卷/卷.md`、
+`卷/卷.jsonl` 嵌套产物；extract/publish/meta/db_loader 用 `--file-exact`，
+convert 用 `--materials-exact`。答案回填、识别扫描、主动重录、补题 apply/
+publish 回灌也按精确 source 收窄，避免只修 extract 后其它阶段继续串卷。
+
+**验证**：真实目录下 convert/extract/publish/meta/db_loader 的精确选择均只命中
+目标卷 1 份；新增“短卷名是长卷名关键词子集”回归后，data-refinery
+`2269 passed / 10 skipped`。
+
+---
+
 ## 2026-11-24 英语答案区间格式单独解析
 
 **问题**：三帆 2026 初三英语期末把选择题答案印成 `1-5 CBBCD`、`6-10 CBABC`、`11-12 BB`

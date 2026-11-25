@@ -27,6 +27,7 @@ def parse_args(argv=None):
     parser.add_argument("--input-dir", help="md 输入目录（默认 output/md）")
     parser.add_argument("--output-dir", help="output 根目录（默认 config.output_dir）")
     add_scope_args(parser)
+    parser.add_argument("--file-exact", help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true", help="只打印，不写 sidecar")
     parser.add_argument("--no-llm", action="store_true", help="只用规则，不调 LLM 兜底")
     return parser.parse_args(argv)

@@ -92,6 +92,21 @@ def match_keyword(path: Path | str, keyword: str | None) -> bool:
     return all(token in haystack for token in tokens)
 
 
+def match_exact_file(path: Path | str, exact_file: str | None) -> bool:
+    """精确素材路径匹配；同时兼容嵌套产物 `卷/卷.md`、`卷/卷.jsonl`。"""
+    if not exact_file:
+        return True
+    rel = Path(path)
+    target = normalize_path(exact_file)
+    if normalize_path(rel) == target:
+        return True
+    stem = rel.with_suffix("") if rel.suffix.lower() in _KNOWN_SUFFIXES else rel
+    return (
+        stem.name == stem.parent.name
+        and normalize_path(stem.parent) == target
+    )
+
+
 def scope_prefix(subject: str | None = None, stage: str | None = None,
                  term: str | None = None, year: str | None = None) -> str:
     """把维度参数拼成 `道法/初中/first/2026` 形式的范围说明（0 命中文案用）。"""
@@ -139,6 +154,7 @@ class Scope:
     terms: frozenset[str] | None = None     # first/second
     years: frozenset[str] | None = None     # '2025'
     file: str | None = None                 # 关键词原文（describe 用）
+    file_exact: str | None = None           # import_cli 解析后的精确相对路径
     # 关键词分词结果（缓存；构造时派生，hasattr 判定避免 dataclass 默认值问题）
     _file_tokens: tuple[str, ...] = ()
 
@@ -152,12 +168,13 @@ class Scope:
 
     @property
     def active(self) -> bool:
-        return any((self.subjects, self.stages, self.terms, self.years, self._file_tokens))
+        return any((self.subjects, self.stages, self.terms, self.years,
+                    self._file_tokens, self.file_exact))
 
 
 def build_scope(subject: str | None = None, stage: str | None = None,
                 term: str | None = None, year: str | None = None,
-                file: str | None = None) -> Scope:
+                file: str | None = None, file_exact: str | None = None) -> Scope:
     """把原始参数归一成 Scope（中文名/code、上/下/上册 等别名统一）。"""
     subjects = {_CODE_TO_NAME.get(s, s) for s in _split(subject)}
     stages = {STAGE_ALIASES.get(s, s) for s in _split(stage)}
@@ -169,6 +186,7 @@ def build_scope(subject: str | None = None, stage: str | None = None,
         terms=frozenset(terms) or None,
         years=frozenset(years) or None,
         file=file or None,
+        file_exact=file_exact or None,
     )
 
 
@@ -177,6 +195,8 @@ def match_scope(rel_path: Path | str, scope: Scope) -> bool:
     if not scope.active:
         return True
     rel = Path(rel_path)
+    if not match_exact_file(rel, scope.file_exact):
+        return False
     if scope.file_tokens and not match_keyword(rel, scope.file):
         return False
     dims = parse_dimensions(rel)
@@ -202,12 +222,17 @@ def add_scope_args(parser: argparse.ArgumentParser) -> None:
 
 def scope_from_args(args) -> Scope:
     """从 argparse 结果构造 Scope（CLI 主流程用）。"""
+    file_exact = (
+        getattr(args, "file_exact", None)
+        or getattr(args, "_resolved_rel", None)
+    )
     return build_scope(
         subject=getattr(args, "subject", None),
         stage=getattr(args, "stage", None),
         term=getattr(args, "term", None),
         year=getattr(args, "year", None),
-        file=getattr(args, "file", None),
+        file=None if file_exact else getattr(args, "file", None),
+        file_exact=file_exact,
     )
 
 
@@ -217,12 +242,12 @@ def scope_argv(args, include_file: bool = True) -> list[str]:
     include_file=False 用于不支持 --file 的阶段（如 convert_cli 用 --materials）。
     """
     out: list[str] = []
-    flags = ("subject", "stage", "term", "year", "file") if include_file \
+    flags = ("subject", "stage", "term", "year", "file", "file_exact") if include_file \
         else ("subject", "stage", "term", "year")
     for flag in flags:
         value = getattr(args, flag, None)
         if value:
-            out.extend([f"--{flag}", str(value)])
+            out.extend([f"--{flag.replace('_', '-')}", str(value)])
     return out
 
 
@@ -239,4 +264,6 @@ def describe(scope: Scope) -> str:
         parts.append(f"year={'/'.join(sorted(scope.years))}")
     if scope.file:
         parts.append(f"file~{scope.file}")
+    if scope.file_exact:
+        parts.append(f"file={scope.file_exact}")
     return " ".join(parts) if parts else "all"

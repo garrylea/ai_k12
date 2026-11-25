@@ -69,6 +69,7 @@ def parse_args(argv=None):
     parser.add_argument("--output-dir", help="published 输出目录（默认 output/published）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all", help="素材来源过滤")
     parser.add_argument("--book", help="只发布命中的教材/试卷（空格等分隔符分词，所有词都命中 rel_path，如 '九年级 上册'）")
+    parser.add_argument("--file-exact", help=argparse.SUPPRESS)
     parser.add_argument("--pages", help="页码过滤，如 '1-6' 或 '1,3,5-8'")
     parser.add_argument("--subject", help="学科过滤（中文名或 code，如 语文 / chinese），逗号分隔多个")
     parser.add_argument("--stage", help="学段过滤（初中/小学/高中 或 junior/primary/senior），逗号分隔多个")
@@ -211,7 +212,10 @@ def main(argv=None):
         jsonl_files = [p for p in jsonl_files if _match_pages(p.name, page_nums)]
 
     # 统一范围过滤（学科/学段/学期/年份），与 extract/db_loader 同语义
-    scope = build_scope(subject=args.subject, stage=args.stage, term=args.term, year=args.year)
+    scope = build_scope(
+        subject=args.subject, stage=args.stage, term=args.term, year=args.year,
+        file_exact=args.file_exact,
+    )
     if scope.active:
         jsonl_files = [
             p for p in jsonl_files

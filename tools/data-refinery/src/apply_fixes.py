@@ -364,6 +364,7 @@ def _renumber(cur, paper_id: int) -> int:
 
 
 def pending_records(subject: str | None = None, source: str | None = None,
+                    *, sources: set[str] | None = None,
                     fixes_dir: Path | None = None) -> list[dict]:
     """还没写进库的补题记录（applied!=True），可按学科 / 卷名子串收窄。"""
     out: list[dict] = []
@@ -373,6 +374,8 @@ def pending_records(subject: str | None = None, source: str | None = None,
                 continue
             if subject and Path(rec.get("rel_path", "")).parts[:1] != (subject,):
                 continue
+            if sources is not None and rec.get("source") not in sources:
+                continue
             if source and not match_keyword(rec.get("source", ""), source):
                 continue
             rec["_file"] = str(f)
@@ -381,6 +384,7 @@ def pending_records(subject: str | None = None, source: str | None = None,
 
 
 def needing_replay(subject: str | None = None, source: str | None = None,
+                   *, sources: set[str] | None = None,
                    fixes_dir: Path | None = None) -> list[dict]:
     """已标 applied、但库里已经不成立（题没了 / 被停用）的补题记录。
 
@@ -394,6 +398,8 @@ def needing_replay(subject: str | None = None, source: str | None = None,
             if not rec.get("applied"):
                 continue
             if subject and Path(rec.get("rel_path", "")).parts[:1] != (subject,):
+                continue
+            if sources is not None and rec.get("source") not in sources:
                 continue
             if source and not match_keyword(rec.get("source", ""), source):
                 continue
@@ -1147,7 +1153,7 @@ def _rescan(applied: dict[str, dict[str, set[int]]]) -> None:
                       f"请对照原卷补全后再录一次", flush=True)
 
 
-def _publish_sources(sources: set[str]) -> None:
+def _publish_sources(sources: set[str] | dict[str, str]) -> None:
     """补题/材料改完后同步 published，并把 published 回灌数据库（一条命令内完成）。
 
     页面读的是库，apply_fixes 先把人工内容直接写库；但 publish 还会做**题后材料
@@ -1167,8 +1173,11 @@ def _publish_sources(sources: set[str]) -> None:
 
     print("\n[发布] 同步 published 并回灌库（改写过的卷）：", flush=True)
     for src in sorted(sources):
+        exact_rel = sources.get(src) if isinstance(sources, dict) else None
         try:
-            rc = publish_main(["--book", src])
+            rc = publish_main(
+                ["--file-exact", exact_rel] if exact_rel else ["--book", src]
+            )
         except Exception as exc:            # noqa: BLE001 - 库已提交，发布失败不影响页面
             print(f"  ! {src}: publish 失败（库已写入，不影响页面）：{exc}", flush=True)
             continue
@@ -1179,7 +1188,11 @@ def _publish_sources(sources: set[str]) -> None:
         # 增量回灌：--load-cards 不触发 full-reload，按 (paper_id, group_order)
         # 原地更新，question id 不变（进行中的考试/作答关联不会断）。
         try:
-            rc = loader_main(["--load-cards", "--questions-only", "--file", src])
+            rc = loader_main(
+                ["--load-cards", "--questions-only", "--file-exact", exact_rel]
+                if exact_rel else
+                ["--load-cards", "--questions-only", "--file", src]
+            )
             print(f"  · {src}: 回灌 {'ok' if rc in (None, 0) else f'返回 {rc}'}", flush=True)
         except Exception as exc:            # noqa: BLE001 - published 已是正确版本
             print(f"  ! {src}: 回灌失败（published 已更新，下次导入会自愈）：{exc}", flush=True)
@@ -1190,6 +1203,7 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
     parser.add_argument("--fixes-dir", default=str(FIXES_DIR))
     parser.add_argument("--subject", help="学科中文名过滤（按 rel_path 首段）")
     parser.add_argument("--source", help="卷名子串过滤（如 一零一中学）")
+    parser.add_argument("--source-exact", help="精确卷名过滤（import_cli 已解析单卷时内部使用）")
     parser.add_argument("--apply", action="store_true", help="真正写库（默认只预览）")
     parser.add_argument("--dry-run", action="store_true", help="只预览（与默认行为一致，便于显式声明）")
     parser.add_argument("--force", action="store_true", help="连 applied=true 的记录也重放")
@@ -1213,7 +1227,7 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
     applied_keys: list[tuple[str, int, str]] = []
     rejected_keys: list[tuple[str, int, str, str]] = []
     applied_sources: dict[str, dict[str, set[int]]] = {}   # 学科目录 -> 卷名 -> 题号
-    material_sources: set[str] = set()                     # 改过材料/题干的卷 → 需重发
+    material_sources: dict[str, str] = {}                  # 卷名 → rel_path，需精确重发
     # 补题文件的 applied 标记必须在事务提交**之后**落盘。否则同一批里后面的记录
     # 抛异常 → conn.rollback()，但前面文件已写成 applied=True，库里却没写，
     # needing_replay 又认不出，题就永久丢了（2026-11-21 实测复现）。
@@ -1237,6 +1251,8 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                     todo = [r for r in todo if Path(r["rel_path"]).parts[0] == args.subject]
                 if args.source:
                     todo = [r for r in todo if args.source in r["source"]]
+                if args.source_exact:
+                    todo = [r for r in todo if r["source"] == args.source_exact]
                 if args.group_order is not None:
                     todo = [r for r in todo
                             if _go_int(r.get("group_order")) == args.group_order]
@@ -1279,7 +1295,7 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                     if (rec.get("material_target") or rec.get("material_scope")
                             or "material_url" in rec
                             or (rec.get("material_text") or "").strip()):
-                        material_sources.add(rec["source"])
+                        material_sources[rec["source"]] = rec.get("rel_path", "")
                     subject_cn = Path(rec["rel_path"]).parts[0]
                     applied_sources.setdefault(subject_cn, {}).setdefault(
                         rec["source"], set()).add(go)

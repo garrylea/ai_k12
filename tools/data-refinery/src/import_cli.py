@@ -17,6 +17,7 @@
   不会空跑后面 9 步；
 - 命中 1 份 → 打印命中的是哪一份，继续；
 - 命中多份 → 列编号选一份（非交互终端直接报错退出，不猜）。
+解析出唯一素材后，后续阶段改用完整相对路径的精确选择器，不再重新分词匹配。
 
 设计原则（与 db_loader 的 P0/P1 一致）：
 - **只碰指定范围**：每个子阶段都带同样的范围参数；未指定范围时才会全量。
@@ -186,19 +187,23 @@ def _common(args) -> list[str]:
     return ["--source", args.source] + scope_argv(args, include_file=False)
 
 
-def _stage_file(args) -> str | None:
-    """传给各阶段的文件范围：入口解析出唯一一份时用精确相对路径，否则用原始关键词。"""
-    return getattr(args, "_resolved_rel", None) or args.file
+def _resolved_source(args) -> str | None:
+    """入口解析出的精确卷名（source / 文件名）；未解析时返回 None。"""
+    exact = getattr(args, "_resolved_rel", None)
+    return Path(exact).name if exact else None
 
 
 def convert_argv(args) -> list[str]:
-    """convert：--file 映射为 --materials（试卷 + 配对答案，逗号 OR）。"""
+    """convert：入口已解析时传精确素材路径，否则传公开关键词。"""
     argv = _common(args)
     entries = [
-        e for e in (_stage_file(args), getattr(args, "_paired_answer_rel", None)) if e
+        e for e in (getattr(args, "_resolved_rel", None),
+                    getattr(args, "_paired_answer_rel", None)) if e
     ]
     if entries:
-        argv += ["--materials", ",".join(entries)]
+        argv += ["--materials-exact", ",".join(entries)]
+    elif args.file:
+        argv += ["--materials", args.file]
     if args.dry_run:
         argv.append("--dry-run")
     if args.reconvert or args.redo:
@@ -208,8 +213,11 @@ def convert_argv(args) -> list[str]:
 
 def extract_argv(args) -> list[str]:
     argv = _common(args)
-    if _stage_file(args):
-        argv += ["--file", _stage_file(args)]
+    exact = getattr(args, "_resolved_rel", None)
+    if exact:
+        argv += ["--file-exact", exact]
+    elif args.file:
+        argv += ["--file", args.file]
     if args.dry_run or args.preview:
         argv.append("--dry-run")
     if args.re_extract or args.redo:
@@ -226,8 +234,11 @@ def extract_argv(args) -> list[str]:
 def publish_argv(args) -> list[str]:
     """publish：没有 --file，用 --book（同一套关键词匹配）。"""
     argv = _common(args)
-    if _stage_file(args):
-        argv += ["--book", _stage_file(args)]
+    exact = getattr(args, "_resolved_rel", None)
+    if exact:
+        argv += ["--file-exact", exact]
+    elif args.file:
+        argv += ["--book", args.file]
     if args.dry_run:
         argv.append("--dry-run")
     if args.re_publish or args.redo:
@@ -238,8 +249,11 @@ def publish_argv(args) -> list[str]:
 def meta_argv(args) -> list[str]:
     """paper_meta_cli：与 extract 同样用 --file。"""
     argv = _common(args)
-    if _stage_file(args):
-        argv += ["--file", _stage_file(args)]
+    exact = getattr(args, "_resolved_rel", None)
+    if exact:
+        argv += ["--file-exact", exact]
+    elif args.file:
+        argv += ["--file", args.file]
     if args.dry_run:
         argv.append("--dry-run")
     return argv
@@ -254,8 +268,11 @@ def load_argv(args) -> list[str]:
         if args.dry_run:
             argv.append("--dry-run")
         return argv
-    if _stage_file(args):
-        argv += ["--file", _stage_file(args)]
+    exact = getattr(args, "_resolved_rel", None)
+    if exact:
+        argv += ["--file-exact", exact]
+    elif args.file:
+        argv += ["--file", args.file]
     argv.append("--load-cards")
     if args.questions_only:
         argv.append("--questions-only")
@@ -474,7 +491,7 @@ def _answers_entry(args):
     return run
 
 
-def _lookup_paper_id(cfg, keyword: str) -> int | None:
+def _lookup_paper_id(cfg, keyword: str, *, exact_rel: str | None = None) -> int | None:
     """按卷名/来源键子串在 exam_papers 里查 paper_id；唯一命中才返回。"""
     import pymysql
 
@@ -487,10 +504,18 @@ def _lookup_paper_id(cfg, keyword: str) -> int | None:
     )
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM exam_papers WHERE title LIKE %s OR source_key LIKE %s",
-                (f"%{escaped}%", f"%{escaped}%"),
-            )
+            if exact_rel:
+                leaf = Path(exact_rel).name
+                cur.execute(
+                    "SELECT DISTINCT id FROM exam_papers "
+                    "WHERE source_key IN (%s, %s) OR title = %s",
+                    (exact_rel, f"{exact_rel}/{leaf}", leaf),
+                )
+            else:
+                cur.execute(
+                    "SELECT id FROM exam_papers WHERE title LIKE %s OR source_key LIKE %s",
+                    (f"%{escaped}%", f"%{escaped}%"),
+                )
             rows = cur.fetchall()
         return int(rows[0][0]) if len(rows) == 1 else None
     finally:
@@ -514,6 +539,11 @@ def _pdf_paper_id(cfg, args, pdf: Path) -> tuple[int | None, str]:
     """(paper_id, 匹配依据)：显式 --paper-id > --file 反查 > 文件名去「答案」。"""
     if args.paper_id is not None:
         return args.paper_id, "显式 --paper-id"
+    exact_rel = getattr(args, "_resolved_rel", None)
+    if exact_rel:
+        pid = _lookup_paper_id(cfg, args.file, exact_rel=exact_rel)
+        if pid is not None:
+            return pid, f"入口解析卷「{exact_rel}」"
     if args.file:
         pid = _lookup_paper_id(cfg, args.file)
         if pid is not None:
@@ -621,6 +651,13 @@ def _answers_file_entry(args):
                       f"--paper-id {args.paper_id} 已忽略", flush=True)
         elif args.paper_id is not None:
             argv += ["--paper-id", str(args.paper_id)]
+        elif getattr(args, "_resolved_rel", None):
+            pid = _lookup_paper_id(
+                RefineryConfig.from_env(), args.file,
+                exact_rel=args._resolved_rel,
+            )
+            if pid is not None:
+                argv += ["--paper-id", str(pid)]
         elif args.file:
             pid = _lookup_paper_id(RefineryConfig.from_env(), args.file)
             if pid is not None:
@@ -635,8 +672,12 @@ def _scan_entry(args):
     """识别问题扫描：按本次范围（学科 + 卷名子串）扫已提取的 jsonl。"""
     def _run(_argv) -> int:
         from recognition_scan import run as scan_run
+        source = _resolved_source(args)
         issues = scan_run(args.subject or getattr(args, "_resolved_subject", None) or "物理",
-                          args.file, write=not args.dry_run, redo=args.redo)
+                          None if source else args.file,
+                          write=not args.dry_run,
+                          sources={source} if source else None,
+                          redo=args.redo)
         args._scanned_sources = {i["source"] for i in issues}
         if args.dry_run:
             for it in issues:
@@ -673,7 +714,12 @@ def _fix_entry(args):
         # 扫描只报它认得出的结构问题；PDF→MD 阶段丢图/丢字它未必能发现
         # （2026-11-03 汇文题6 一张图没截出来）。所以每次都在交互终端里问一句
         # 「还有哪道题要主动重录」，用户可直接粘「材料+题干+选项+图片」整段。
-        review_by_numbers(args.subject or getattr(args, "_resolved_subject", None), args.file)
+        source = _resolved_source(args)
+        review_by_numbers(
+            args.subject or getattr(args, "_resolved_subject", None),
+            None if source else args.file,
+            sources={source} if source else None,
+        )
         return 0
     return _run
 
@@ -765,7 +811,8 @@ def _execute(args) -> int:
 
     # 入口解析：把 --file 关键词在「当前维度范围」里解析成一份素材。
     # 0 命中就说清没命中什么（直接退出，不跑 9 步），多命中就让人选一份；
-    # 解析完 args.file 变成精确卷名，后续各阶段不会再靠模糊词扫到别的卷。
+    # 解析完 args._resolved_rel 记录精确素材路径，后续各阶段用 --file-exact /
+    # --materials-exact 与精确 source 收窄，不再把完整路径重新拆成关键词。
     resolve_rc = _resolve_file(args, RefineryConfig.from_env())
     if resolve_rc is not None:
         return resolve_rc
@@ -828,7 +875,9 @@ def _execute(args) -> int:
             # 让第 9 步能写库（--redo 与首次导入得到同样的结果）。
             if rebuild and args.file and not args.dry_run and label.startswith("2/9 extract"):
                 from manual_fix import discard_fixes_for_source
-                n = discard_fixes_for_source(args.file)
+                source = _resolved_source(args)
+                n = (discard_fixes_for_source(source, exact=True)
+                     if source else discard_fixes_for_source(args.file))
                 if n:
                     print(f"[rebuild] 该题已重抽恢复，旧补题记录作废（移入 _discarded/）："
                           f"{n} 条", flush=True)
@@ -879,8 +928,12 @@ def _apply_entry(args):
     def _run(_argv) -> int:
         from apply_fixes import needing_replay, pending_records, run as apply_run
 
-        recs = pending_records(args.subject, args.file)
-        lost = needing_replay(args.subject, args.file)
+        source = _resolved_source(args)
+        exact_sources = {source} if source else None
+        recs = pending_records(
+            args.subject, None if source else args.file, sources=exact_sources)
+        lost = needing_replay(
+            args.subject, None if source else args.file, sources=exact_sources)
         if not recs and not lost:
             print("[补题] 已是最新：没有待写入、也没有丢失的补题", flush=True)
             return 0
@@ -888,7 +941,9 @@ def _apply_entry(args):
         scope = []
         if args.subject:
             scope += ["--subject", args.subject]
-        if args.file:
+        if source:
+            scope += ["--source-exact", source]
+        elif args.file:
             scope += ["--source", args.file]
         head = f"{len(recs)} 条待写入"
         if lost:

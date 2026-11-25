@@ -128,6 +128,16 @@ class TestMatchMaterials:
         # 条目之间 OR：第一条整条不中，第二条中，仍算命中
         assert _match_materials(m, ["九年级 下册", "书A"]) is True
 
+    def test_exact_entry_does_not_match_keyword_superset(self):
+        """入口已解析出短卷时，精确路径不能命中包含它全部关键词的三帆卷。"""
+        short = Path(
+            "英语/初中/first/2026/英语-初三(上)-202607-西城-期末-试卷")
+        superset = Path(
+            "英语/初中/first/2026/英语-初三(上)-202607-西城·三帆中学-期末-试卷")
+
+        assert _match_materials(_paper(short.as_posix()), [], [short.as_posix()])
+        assert not _match_materials(_paper(superset.as_posix()), [], [short.as_posix()])
+
 
 class TestParseDimensions:
     def test_paper_flat_layout(self):

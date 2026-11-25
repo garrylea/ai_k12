@@ -1088,6 +1088,28 @@ def test_publish_sources_reloads_db_from_published(monkeypatch):
     assert "--file" in load_argv and src in load_argv
 
 
+def test_publish_sources_uses_exact_rel_when_known(monkeypatch):
+    """短卷名与三帆卷互为关键词子集时，补题后的 publish/回灌仍只碰目标卷。"""
+    import publish_cli
+    import db_loader_cli
+
+    calls = []
+    monkeypatch.setattr(
+        publish_cli, "main",
+        lambda argv=None: (calls.append(("publish", list(argv or []))), 0)[1])
+    monkeypatch.setattr(
+        db_loader_cli, "main",
+        lambda argv=None: (calls.append(("load", list(argv or []))), 0)[1])
+
+    src = "英语-初三(上)-202607-西城-期末-试卷"
+    rel = "英语/初中/first/2026/英语-初三(上)-202607-西城-期末-试卷"
+    _impl._publish_sources({src: rel})
+
+    assert calls[0] == ("publish", ["--file-exact", rel])
+    assert calls[1][1][:2] == ["--load-cards", "--questions-only"]
+    assert calls[1][1][2:4] == ["--file-exact", rel]
+
+
 def test_apply_refuses_ambiguous_group_order_without_sub_no():
     """同号多小问、记录没有 sub_no → 不写库，返回跳过原因。"""
     cur = FakeCursor(paper=(862, 3), existing=None, orphan_id=None,

@@ -808,7 +808,8 @@ def _keep_prior_images(old: dict | None, new: dict) -> None:
     console().warn("同题号的后一条记录没有配图，已把前一条的图补回（避免图被覆盖丢失）")
 
 
-def discard_fixes_for_source(source_file: str, *, fixes_dir: Path | None = None) -> int:
+def discard_fixes_for_source(source_file: str, *, fixes_dir: Path | None = None,
+                             exact: bool = False) -> int:
     """重转卷后只作废「已经被重新抽出来」的旧补题，保留仍需人工补的记录。
 
     - `applied=True` 永远保留：这是 `needing_replay` 在重导清掉关联后恢复题号的唯一信号，
@@ -826,7 +827,12 @@ def discard_fixes_for_source(source_file: str, *, fixes_dir: Path | None = None)
     for f in sorted(out_dir.glob("*.jsonl")):
         # 文件名就是卷名（manual_fix 落盘约定）。source_file 通常是精确卷名（import_cli
         # 解析后的 chosen.name）；也兼容关键词——只要两边分词互相命中即可。
-        if not (match_keyword(f.stem, source_file) or match_keyword(source_file, f.stem)):
+        matched = (
+            f.stem.casefold() == source_file.casefold()
+            if exact
+            else match_keyword(f.stem, source_file) or match_keyword(source_file, f.stem)
+        )
+        if not matched:
             continue
         rows = _read_jsonl(f)
         keep: list[dict] = []
@@ -2542,7 +2548,8 @@ def _review_loop(todo: list[dict], all_issues: list[dict], out_dir: Path,
 
 # ── 主动重录（用户指定题号，不依赖扫描清单）────────────────────────────────
 
-def papers_in_scope(subject: str | None, file: str | None) -> list[dict]:
+def papers_in_scope(subject: str | None, file: str | None,
+                    sources: set[str] | None = None) -> list[dict]:
     """按学科/卷名子串列出范围内已提取的卷，用于主动重录。
 
     返回 [{source, rel_path, md, pdf}]，按 source 排序。
@@ -2559,6 +2566,8 @@ def papers_in_scope(subject: str | None, file: str | None) -> list[dict]:
         if subject and str(rel_dir).split("/")[0] != subject:
             continue
         source = jsonl.stem
+        if sources is not None and source not in sources:
+            continue
         if file and not match_keyword(source, file):
             continue
         md = md_root / rel_dir / f"{source}.md"
@@ -2602,7 +2611,8 @@ def _pick_paper(papers: list[dict]) -> dict | None:
 
 
 def review_by_numbers(subject: str | None, file: str | None,
-                      fixes_dir: Path | None = None) -> int:
+                      fixes_dir: Path | None = None,
+                      *, sources: set[str] | None = None) -> int:
     """主动重录：用户直接说「第 N 题有问题」，不依赖扫描清单。
 
     为什么需要：扫描只报它认得出的结构问题；PDF→MD 阶段丢图/丢字它未必能发现
@@ -2615,7 +2625,7 @@ def review_by_numbers(subject: str | None, file: str | None,
     Returns: 本次记录的题数。
     """
     c = console()
-    papers = papers_in_scope(subject, file)
+    papers = papers_in_scope(subject, file, sources=sources)
     if not papers:
         c.warn("范围内没找到已提取的卷，无法主动重录")
         c.info("先跑一次 import_cli（至少到 extract 阶段）再来重录")

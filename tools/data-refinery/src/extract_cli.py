@@ -91,6 +91,7 @@ def parse_args(argv=None):
     parser.add_argument("--output-dir", help="输出根目录（JSONL 落 {该目录}/extracted/ 下；默认 output/extracted 所在的 output 根）")
     parser.add_argument("--source", choices=["all", "zgkao", "smartedu"], default="all")
     parser.add_argument("--file", help="关键词（空格等分隔符分词，所有词都命中相对路径；单卷/单书）")
+    parser.add_argument("--file-exact", help=argparse.SUPPRESS)
     parser.add_argument("--pages", help="只提取指定页码，如 '1-6' 或 '1,3,5-8'")
     parser.add_argument("--book", help="只提取指定教材（同上分词匹配，如 '九年级 上册'）")
     parser.add_argument("--subject", help="学科过滤（中文名或 code，如 语文 / chinese），逗号分隔多个")
@@ -510,14 +511,13 @@ def main(argv=None):
     err_log_path = config.output_dir / "labeling_errors.jsonl"
 
     sources = [s for s in scanner.scan() if _match_source(s, args.source)]
-    scope = build_scope(subject=args.subject, stage=args.stage, term=args.term, year=args.year)
+    scope = build_scope(
+        subject=args.subject, stage=args.stage, term=args.term, year=args.year,
+        file=args.file, file_exact=args.file_exact,
+    )
     if scope.active:
         sources = [s for s in sources if match_scope(s.rel_path / s.md_path.name, scope)]
         print(f"[scope] {describe(scope)} -> {len(sources)} 个文件", flush=True)
-    if args.file:
-        sources = [s for s in sources
-                   if match_keyword(s.rel_path / s.md_path.name, args.file)]
-        print(f"[file] {args.file} -> {len(sources)} 个文件", flush=True)
     if args.pages:
         page_nums = _parse_pages(args.pages)
         sources = [s for s in sources if _match_pages(s.md_path.name, page_nums)]

@@ -4,6 +4,31 @@ from unittest.mock import patch
 
 
 class TestDbLoaderCliDryRun:
+    def test_file_exact_does_not_match_keyword_superset(self, tmp_path, capsys):
+        """精确入库短卷时，不能同时入库包含短卷全部关键词的三帆卷。"""
+        published = tmp_path / "published"
+        root = published / "英语" / "初中" / "first" / "2026"
+        short = root / "英语-初三(上)-202607-西城-期末-试卷"
+        superset = root / "英语-初三(上)-202607-西城·三帆中学-期末-试卷"
+        short.mkdir(parents=True)
+        superset.mkdir(parents=True)
+        item = '{"subject_id":"english","type":"choice","difficulty":1,"content":"q","answer":"A"}'
+        (short / f"{short.name}.jsonl").write_text(item, encoding="utf-8")
+        (superset / f"{superset.name}.jsonl").write_text(item, encoding="utf-8")
+
+        rel = short.relative_to(published).as_posix()
+        with patch("db_loader_cli.RefineryConfig"):
+            from db_loader_cli import main
+            main([
+                "--input-dir", str(published),
+                "--file-exact", rel,
+                "--dry-run",
+            ])
+
+        out = capsys.readouterr().out
+        assert f"{short.name}.jsonl" in out
+        assert f"{superset.name}.jsonl" not in out
+
     def test_dry_run_lists_files_with_kind(self, tmp_path, capsys):
         published = tmp_path / "published"
         book = published / "数学" / "初中" / "人教版" / "九年级" / "下册" / "书名"

@@ -6,7 +6,7 @@ import pytest
 
 import import_cli
 from import_cli import (
-    convert_argv, extract_argv, load_argv, parse_args, publish_argv,
+    convert_argv, extract_argv, load_argv, meta_argv, parse_args, publish_argv,
 )
 
 
@@ -174,7 +174,7 @@ def test_single_hit_rewrites_selector_for_all_stages(monkeypatch, capsys):
     assert rc == 0
     assert "[解析] 2026 海淀 → 道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治" in out
     for name, argv in seen:
-        flag = "--materials" if name == "convert_main" else ("--book" if name == "publish_main" else "--file")
+        flag = "--materials-exact" if name == "convert_main" else "--file-exact"
         assert argv[argv.index(flag) + 1] == "道法/初中/first/2026/2026北京海淀初三（上）期中道德与法治"
 
 
@@ -200,6 +200,151 @@ def test_multi_hit_tty_selects_one(monkeypatch, capsys):
         joined = " ".join(argv)
         assert "人大附中" in joined
         assert "2026北京海淀初三（上）期中道德与法治" not in joined
+
+
+def test_short_interactive_selection_uses_exact_path_for_downstream(monkeypatch):
+    """选短卷时，长卷包含短卷全部关键词也不能被下游重新命中。"""
+    short = Path(
+        "英语/初中/first/2026/英语-初三(上)-202607-西城-期末-试卷")
+    superset = Path(
+        "英语/初中/first/2026/英语-初三(上)-202607-西城·三帆中学-期末-试卷")
+    monkeypatch.setattr(import_cli, "_collect_candidates",
+                        lambda cfg: ([short, superset], []))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdin.readline", lambda: "1\n")
+
+    args = parse_args([
+        "--subject", "英语", "--year", "2026",
+        "--file", "初三 西城 期末 试卷",
+    ])
+    assert import_cli._resolve_file(args, object()) is None
+
+    argv = extract_argv(args)
+    assert argv[argv.index("--file-exact") + 1] == short.as_posix()
+    assert "--file" not in argv
+
+    for build_argv in (meta_argv, load_argv, publish_argv):
+        downstream = build_argv(args)
+        assert downstream[downstream.index("--file-exact") + 1] == short.as_posix()
+        assert "--file" not in downstream
+        assert "--book" not in downstream
+
+    conversion = convert_argv(args)
+    assert conversion[conversion.index("--materials-exact") + 1] == short.as_posix()
+    assert "--materials" not in conversion
+
+
+def test_short_interactive_selection_scan_uses_exact_source(monkeypatch):
+    """选短卷后，识别扫描按精确 source 收窄，不能再扫到三帆卷。"""
+    short = Path(
+        "英语/初中/first/2026/英语-初三(上)-202607-西城-期末-试卷")
+    superset = Path(
+        "英语/初中/first/2026/英语-初三(上)-202607-西城·三帆中学-期末-试卷")
+    monkeypatch.setattr(import_cli, "_collect_candidates",
+                        lambda cfg: ([short, superset], []))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdin.readline", lambda: "1\n")
+    args = parse_args([
+        "--subject", "英语", "--year", "2026",
+        "--file", "初三 西城 期末 试卷",
+    ])
+    assert import_cli._resolve_file(args, object()) is None
+
+    seen = {}
+
+    def fake_scan(subject, file, *, write, sources=None, redo=False):
+        seen.update(subject=subject, file=file, write=write, sources=sources, redo=redo)
+        return []
+
+    import recognition_scan
+    monkeypatch.setattr(recognition_scan, "run", fake_scan)
+    import_cli._scan_entry(args)([])
+
+    assert seen == {
+        "subject": "英语",
+        "file": None,
+        "write": True,
+        "sources": {short.name},
+        "redo": False,
+    }
+
+
+def test_short_interactive_selection_manual_review_uses_exact_source(monkeypatch):
+    """主动重录也不能把短卷关键词再匹配到三帆卷。"""
+    short = Path(
+        "英语/初中/first/2026/英语-初三(上)-202607-西城-期末-试卷")
+    superset = Path(
+        "英语/初中/first/2026/英语-初三(上)-202607-西城·三帆中学-期末-试卷")
+    monkeypatch.setattr(import_cli, "_collect_candidates",
+                        lambda cfg: ([short, superset], []))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdin.readline", lambda: "1\n")
+    args = parse_args([
+        "--subject", "英语", "--year", "2026",
+        "--file", "初三 西城 期末 试卷",
+    ])
+    assert import_cli._resolve_file(args, object()) is None
+
+    seen = {}
+
+    def fake_review(subject, file, *, sources=None, fixes_dir=None):
+        seen.update(subject=subject, file=file, sources=sources)
+        return 0
+
+    import manual_fix
+    monkeypatch.setattr(manual_fix, "review_by_numbers", fake_review)
+    import_cli._fix_entry(args)([])
+
+    assert seen == {
+        "subject": "英语",
+        "file": None,
+        "sources": {short.name},
+    }
+
+
+def test_short_interactive_selection_applies_fixes_to_exact_source(monkeypatch):
+    """补题预览/写库也按精确 source 过滤，不能按短卷名的关键词串到三帆卷。"""
+    short = Path(
+        "英语/初中/first/2026/英语-初三(上)-202607-西城-期末-试卷")
+    superset = Path(
+        "英语/初中/first/2026/英语-初三(上)-202607-西城·三帆中学-期末-试卷")
+    monkeypatch.setattr(import_cli, "_collect_candidates",
+                        lambda cfg: ([short, superset], []))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdin.readline", lambda: "1\n")
+    args = parse_args([
+        "--subject", "英语", "--year", "2026",
+        "--file", "初三 西城 期末 试卷",
+    ])
+    assert import_cli._resolve_file(args, object()) is None
+    args.dry_run = True
+
+    seen = {"pending": [], "replay": [], "run": []}
+
+    def fake_pending(subject, source=None, *, sources=None):
+        seen["pending"].append((subject, source, sources))
+        return [{"source": short.name, "group_order": 1}]
+
+    def fake_replay(subject, source=None, *, sources=None):
+        seen["replay"].append((subject, source, sources))
+        return []
+
+    def fake_run(argv, *, via_pipeline=False):
+        seen["run"].append((argv, via_pipeline))
+        return 0
+
+    import apply_fixes
+    monkeypatch.setattr(apply_fixes, "pending_records", fake_pending)
+    monkeypatch.setattr(apply_fixes, "needing_replay", fake_replay)
+    monkeypatch.setattr(apply_fixes, "run", fake_run)
+    import_cli._apply_entry(args)([])
+
+    assert seen["pending"] == [("英语", None, {short.name})]
+    assert seen["replay"] == [("英语", None, {short.name})]
+    argv, via_pipeline = seen["run"][0]
+    assert argv[argv.index("--source-exact") + 1] == short.name
+    assert "--source" not in argv
+    assert via_pipeline is True
 
 
 def test_cancel_multi_hit_does_nothing(monkeypatch, capsys):
@@ -471,8 +616,8 @@ def _apply_args(extra=None):
 
 def test_apply_entry_no_pending(monkeypatch, capsys):
     import apply_fixes
-    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [])
-    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f: [])
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f, **kw: [])
+    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f, **kw: [])
 
     assert import_cli._apply_entry(_apply_args())([]) == 0
     assert "已是最新" in capsys.readouterr().out
@@ -481,8 +626,8 @@ def test_apply_entry_no_pending(monkeypatch, capsys):
 def test_apply_entry_dry_run_only_previews(monkeypatch):
     import apply_fixes
     calls = []
-    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
-    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f: [])
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f, **kw: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f, **kw: [])
     monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
 
     assert import_cli._apply_entry(_apply_args(["--dry-run"]))([]) == 0
@@ -492,8 +637,8 @@ def test_apply_entry_dry_run_only_previews(monkeypatch):
 def test_apply_entry_non_tty_prints_command(monkeypatch, capsys):
     import apply_fixes
     calls = []
-    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
-    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f: [])
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f, **kw: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f, **kw: [])
     monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr("sys.stdin", _FakeStdin(tty=False))
 
@@ -507,9 +652,9 @@ def test_apply_entry_replays_lost_records(monkeypatch, capsys):
     """补过但被重导冲掉的记录：没有 pending 也要进闸门、也要问用户。"""
     import apply_fixes
     calls = []
-    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [])
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f, **kw: [])
     monkeypatch.setattr(apply_fixes, "needing_replay",
-                        lambda s, f: [{"source": "卷A", "group_order": 16}])
+                            lambda s, f, **kw: [{"source": "卷A", "group_order": 16}])
     monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr("sys.stdin", _TtyStdin("y\n"))
 
@@ -523,8 +668,8 @@ def test_apply_entry_replays_lost_records(monkeypatch, capsys):
 def test_apply_entry_writes_after_yes(monkeypatch, capsys):
     import apply_fixes
     calls = []
-    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
-    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f: [])
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f, **kw: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f, **kw: [])
     monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr("sys.stdin", _TtyStdin("y\n"))
 
@@ -537,8 +682,8 @@ def test_apply_entry_writes_after_yes(monkeypatch, capsys):
 def test_apply_entry_declined_keeps_records(monkeypatch, capsys):
     import apply_fixes
     calls = []
-    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f: [{"source": "卷A"}])
-    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f: [])
+    monkeypatch.setattr(apply_fixes, "pending_records", lambda s, f, **kw: [{"source": "卷A"}])
+    monkeypatch.setattr(apply_fixes, "needing_replay", lambda s, f, **kw: [])
     monkeypatch.setattr(apply_fixes, "run", lambda argv, **kw: calls.append(argv))
     monkeypatch.setattr("sys.stdin", _TtyStdin("\n"))
 
@@ -909,11 +1054,11 @@ def test_file_matching_paper_and_answer_pair_resolves_to_paper(monkeypatch, caps
     assert "先选一份" not in out
     for name, argv in seen:
         if name == "convert_main":
-            value = argv[argv.index("--materials") + 1]
+            value = argv[argv.index("--materials-exact") + 1]
             assert value == ("语文/初中/second/2026/海淀九年级语文（上）期中语文试题,"
                              "语文/初中/second/2026/海淀九年级语文（上）期中语文试题_答案")
         else:
-            flag = "--book" if name == "publish_main" else "--file"
+            flag = "--file-exact"
             assert argv[argv.index(flag) + 1] == "语文/初中/second/2026/海淀九年级语文（上）期中语文试题"
 
 
@@ -921,7 +1066,7 @@ def test_scan_entry_passes_redo_to_scan_run(monkeypatch):
     """--redo 必须传到第 7 步扫描，否则重新转出的卷旧 issue 记录不会被清。"""
     seen = {}
 
-    def fake_scan_run(subject, file, *, write, redo=False):
+    def fake_scan_run(subject, file, *, write, sources=None, redo=False):
         seen.update(subject=subject, file=file, write=write, redo=redo)
         return []
 
@@ -1035,7 +1180,7 @@ def test_convert_includes_paired_answer():
     a._resolved_rel = "物理/初中/second/2026/X-试卷"
     a._paired_answer_rel = "物理/初中/second/2026/X-答案"
     argv = convert_argv(a)
-    value = argv[argv.index("--materials") + 1]
+    value = argv[argv.index("--materials-exact") + 1]
     assert value == "物理/初中/second/2026/X-试卷,物理/初中/second/2026/X-答案"
 
 
@@ -1044,7 +1189,7 @@ def test_convert_without_pair_keeps_single_material():
     a._resolved_rel = "物理/初中/second/2026/X-试卷"
     a._paired_answer_rel = None
     argv = convert_argv(a)
-    assert argv[argv.index("--materials") + 1] == "物理/初中/second/2026/X-试卷"
+    assert argv[argv.index("--materials-exact") + 1] == "物理/初中/second/2026/X-试卷"
 
 
 def test_files_batch_pairs_each_keyword(monkeypatch):
@@ -1060,7 +1205,7 @@ def test_files_batch_pairs_each_keyword(monkeypatch):
     ], []))
 
     import_cli.main(["--subject", "物理", "--files", "A-试卷,B-试卷", "--skip-review"])
-    materials = [argv[argv.index("--materials") + 1]
+    materials = [argv[argv.index("--materials-exact") + 1]
                  for name, argv in seen if name == "convert_main"]
     assert materials[0] == ("物理/初中/second/2026/A-试卷,"
                             "物理/初中/second/2026/A-答案")

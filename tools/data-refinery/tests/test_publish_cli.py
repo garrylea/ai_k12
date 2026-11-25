@@ -26,6 +26,35 @@ def _setup(tmp_path: Path) -> Path:
 
 
 class TestPublishCli:
+    def test_file_exact_does_not_match_keyword_superset(self, tmp_path, capsys):
+        """精确发布短卷时，不能同时发布包含短卷全部关键词的三帆卷。"""
+        out = tmp_path / "out"
+        root = out / "extracted" / "英语" / "初中" / "first" / "2026"
+        short = root / "英语-初三(上)-202607-西城-期末-试卷"
+        superset = root / "英语-初三(上)-202607-西城·三帆中学-期末-试卷"
+        short.mkdir(parents=True)
+        superset.mkdir(parents=True)
+        item = json.dumps({
+            "subject_id": "english", "type": "short_answer", "difficulty": 1,
+            "content": "q", "answer": "A",
+        }, ensure_ascii=False)
+        (short / f"{short.name}.jsonl").write_text(item + "\n", encoding="utf-8")
+        (superset / f"{superset.name}.jsonl").write_text(item + "\n", encoding="utf-8")
+
+        rel = short.relative_to(out / "extracted").as_posix()
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main([
+                "--input-dir", str(out / "extracted"),
+                "--output-dir", str(out / "published"),
+                "--file-exact", rel,
+                "--dry-run",
+            ])
+
+        stdout = capsys.readouterr().out
+        assert f"{short.name}.jsonl" in stdout
+        assert f"{superset.name}.jsonl" not in stdout
+
     def test_legacy_checkpoint_without_version_is_republished(self, tmp_path, capsys):
         """旧版 checkpoint 没有口径版本 → 自动重发，用户不用记 --force。"""
         out = _setup(tmp_path)

@@ -303,6 +303,8 @@ python src/import_cli.py --subject 数学 --files "西城35中" \
 python src/import_cli.py --answers output/answers/西城35中期中练习1.md
 ```
 
+交互选中一份后，`import_cli` 会把该卷的完整相对路径作为精确选择器传给 convert/extract/publish/meta/db_loader/扫描/补题；即使另一份卷名包含所选短卷的全部关键词，也不会被再次匹配。公开 `--file` 仍保持“空格等分词、全部命中”的语义。
+
 **只给 `--answers`（不带 `--file/--files/--subject` 等范围参数、也不带 `--re-*`）时，自动跳过 convert~入库与识别扫描/补题，只做答案导入** —— 避免为了补答案把全库管线重跑一遍。想「新卷导入 + 答案一次走完」就同时给范围参数（`--subject/--files`）。
 
 `.md` 定位优先级：**显式 `--paper-id` > `--file/--files` 卷名关键词反查（须唯一命中）> 文档里的 `# 试卷：` 标题**。卷名重名（如「昌平一中」同时命中语文卷和数学卷）时用 `--paper-id` 指定，不要用 `--file`（给了范围参数会连带跑前 5 步）：

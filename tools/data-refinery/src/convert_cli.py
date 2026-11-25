@@ -7,7 +7,7 @@ from checkpoint import RefineryCheckpoint
 from config import RefineryConfig
 from convert import Converter, MineruRunner, token_problem_message
 from scanner import Material, MaterialScanner
-from scope_filter import build_scope, match_keyword, match_scope
+from scope_filter import build_scope, match_keyword, match_scope, normalize_path
 from scope_filter import parse_dimensions as _parse_dimensions  # 兼容旧引用/单测
 
 
@@ -21,6 +21,7 @@ def parse_args(argv=None):
     parser.add_argument("--dry-run", action="store_true", help="只打印将要处理的素材")
     parser.add_argument("--materials", help="只处理 rel_path 命中的素材：逗号分隔多条（条目间 OR），"
                                             "单条内按空格等分隔符分词、所有词都命中（单卷/单书）")
+    parser.add_argument("--materials-exact", help=argparse.SUPPRESS)
     parser.add_argument("--materials-file", help="素材列表文件，一行一个子串，# 开头为注释，空行忽略")
     parser.add_argument("--subject", help="学科过滤，精确匹配目录第 1 段（如 数学、语文），逗号分隔多个")
     parser.add_argument("--stage", help="学段过滤，第 2 段（初中/小学/高中，或 junior/primary/senior），逗号分隔多个")
@@ -81,9 +82,14 @@ def _load_material_entries(materials: str | None, materials_file: str | None) ->
     return [e for e in entries if e]
 
 
-def _match_materials(material: Material, entries: list[str]) -> bool:
+def _match_materials(material: Material, entries: list[str],
+                     exact_entries: list[str] | None = None) -> bool:
     """条目之间 OR；单个条目内按关键词分词，所有词都命中才算（与 --file 同语义）。"""
-    if not entries:
+    exact_entries = exact_entries or []
+    if not entries and not exact_entries:
+        return True
+    rel = normalize_path(material.rel_path)
+    if any(rel == normalize_path(entry) for entry in exact_entries):
         return True
     return any(match_keyword(material.rel_path, entry) for entry in entries)
 
@@ -119,12 +125,15 @@ def main(argv=None):
     scanned = scanner.scan()
     materials = [m for m in scanned if _match_source(m, args.source)]
     entries = _load_material_entries(args.materials, args.materials_file)
-    materials = [m for m in materials if _match_materials(m, entries)]
+    exact_entries = [
+        e.strip() for e in (args.materials_exact or "").split(",") if e.strip()
+    ]
+    materials = [m for m in materials if _match_materials(m, entries, exact_entries)]
     materials = [
         m for m in materials
         if _match_filters(m, subject=args.subject, stage=args.stage, term=args.term, year=args.year)
     ]
-    filters_active = bool(entries) or args.source != "all" or any(
+    filters_active = bool(entries or exact_entries) or args.source != "all" or any(
         (args.subject, args.stage, args.term, args.year)
     )
     if args.dry_run:

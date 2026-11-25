@@ -42,6 +42,16 @@ def test_match_scope_file_tokens():
     assert not match_scope("道法/初中/first/2025/2025北京海淀初三（上）期中道德与法治", scope)
 
 
+def test_match_scope_file_exact_does_not_match_keyword_superset():
+    """精确卷名是相等匹配；短卷名不能命中包含它全部关键词的兄弟卷。"""
+    short = "英语/初中/first/2026/英语-初三(上)-202607-西城-期末-试卷"
+    superset = "英语/初中/first/2026/英语-初三(上)-202607-西城·三帆中学-期末-试卷"
+    scope = build_scope(file_exact=short)
+
+    assert match_scope(short, scope)
+    assert not match_scope(superset, scope)
+
+
 def test_match_keyword_separators_and_case():
     paper = Path("语文/初中/second/2025/语文-初三(下)-202507-海淀-模拟二-试卷")
     # 空格 / 全角空格 / 横线 / 下划线 / 斜杠 / 中点 / 顿号 都算分隔符

@@ -433,6 +433,43 @@ class TestExtractCliFileFilter:
         assert "2024/西城-试卷.md" in out
         assert "2025/西城-试卷.md" not in out
 
+    def test_file_exact_does_not_match_keyword_superset(self, tmp_path, capsys):
+        """import_cli 交互选短卷后，extract 不能再选中包含短卷全部词的三帆卷。"""
+        root = Path("英语/初中/first/2026")
+        short = root / "英语-初三(上)-202607-西城-期末-试卷"
+        superset = root / "英语-初三(上)-202607-西城·三帆中学-期末-试卷"
+
+        with patch("extract_cli.RefineryConfig") as mock_config, \
+             patch("extract_cli.MarkdownScanner") as mock_scanner:
+            mock_config.from_env.return_value = MagicMock(
+                input_dir=tmp_path,
+                output_dir=tmp_path / "out",
+                llm_api_key="fake",
+                llm_model="gpt-4o",
+                llm_base_url=None,
+                llm_timeout=120,
+                llm_max_retries=0,
+                llm_thinking=False,
+                llm_enable_cache=False,
+            )
+            mock_scanner.return_value.scan.return_value = [
+                MarkdownSource(md_path=tmp_path / short.with_suffix(".md"),
+                               rel_path=short.parent, kind="questions"),
+                MarkdownSource(md_path=tmp_path / superset.with_suffix(".md"),
+                               rel_path=superset.parent, kind="questions"),
+            ]
+
+            from extract_cli import main
+            main([
+                "--input-dir", str(tmp_path),
+                "--file-exact", short.as_posix(),
+                "--dry-run",
+            ])
+
+        out = capsys.readouterr().out
+        assert short.name + ".md" in out
+        assert superset.name + ".md" not in out
+
 
 class TestExtractCliMultiPage:
     def test_multi_page_textbook_writes_one_jsonl_per_page(self, tmp_path):

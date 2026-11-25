@@ -1024,6 +1024,27 @@ def test_discard_fixes_for_source_keyword(tmp_path, monkeypatch):
     assert not target.exists()
 
 
+def test_discard_fixes_for_source_exact_does_not_match_keyword_superset(tmp_path, monkeypatch):
+    """import_cli 已选短卷时必须精确匹配，不能把三帆卷的补题一起作废。"""
+    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
+    fixes = tmp_path / "manual_fixes"
+    fixes.mkdir()
+    short = "英语-初三(上)-202607-西城-期末-试卷"
+    superset = "英语-初三(上)-202607-西城·三帆中学-期末-试卷"
+    short_file = fixes / f"{short}.jsonl"
+    superset_file = fixes / f"{superset}.jsonl"
+    for source, path in ((short, short_file), (superset, superset_file)):
+        _write(path, [{"group_order": 1, "content": "旧补题", "source": source,
+                       "rel_path": f"英语/初中/first/2026/{source}"}])
+        ext = tmp_path / "output" / "extracted" / "英语" / "初中" / "first" / "2026" / source
+        ext.mkdir(parents=True)
+        _write(ext / f"{source}.jsonl", [{"group_order": 1, "content": "重抽出来的题"}])
+
+    assert manual_fix.discard_fixes_for_source(short, fixes_dir=fixes, exact=True) == 1
+    assert not short_file.exists()
+    assert superset_file.exists()
+
+
 def test_discard_keeps_pending_when_still_missing_and_applied_always(tmp_path, monkeypatch):
     """仍缺题的 pending 补题与 applied=True 的重放信号都不能被 redo 清掉。"""
     monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
