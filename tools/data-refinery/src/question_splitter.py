@@ -5,12 +5,18 @@
 docs/superpowers/specs/2026-09-05-exam-question-splitter-design.md。
 """
 
-import html
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from page_markers import is_page_marker_line
+from answer_blocks import (
+    AnswerLine,
+    AnswerParseResult,
+    AnswerQuestion,
+    answer_table_numbers,
+    is_answer_structure_line,
+    parse_answer_table,
+)
 
 # 主题号（行首）：1-2 位数字 + . + 非数字字符（不要求空格，兼容 9.xxx / 9. xxx / 9.$...$），
 # 或 + 4 位年份+中文（'6.2025年...'，. 后是年份数字仍算题号），或 + :（'21: 在...' 冒号格式）。
@@ -87,14 +93,6 @@ _MATERIAL_HEAD_RE = re.compile(r'^#{0,6}\s*材料\s*[一二三四五六七八九
 def is_date_trap(line: str) -> bool:
     """行首是否为日期/页码格式（如 2026.5），不当题号。"""
     return bool(_DATE_TRAP_RE.match(line))
-
-
-def is_answer_structure_line(line: str) -> bool:
-    """答案区里不属于答案正文的结构行：页码标记 / 小节标题。
-
-    用 ``is_page_marker_line``（已含表格行护栏），避免把整行 ``<table>`` 跳过。
-    """
-    return is_page_marker_line(line) or bool(_SECTION_HEADER_RE.match(line))
 
 
 def _header_key(line: str) -> str:
@@ -807,302 +805,6 @@ def split_options(content: str) -> tuple[str, list[dict] | None]:
     return _shift_images_to_options(stem, opts)
 
 
-_CELL_DIGITS_RE = re.compile(r"^\d{1,2}$")
-_CELL_CHOICE_RE = re.compile(r"^[A-D]{1,4}$")
-_CELL_SPACED_CHOICE_RE = re.compile(r"^[A-D](?:\s+[A-D]){0,3}$")
-_ANSWER_LABEL_RE = re.compile(r"答案|选项|解答|answer|key", re.IGNORECASE)
-
-
-def _compact_choice_cells(cells: list[str]) -> list[str]:
-    """把空格分隔的多选答案格（'A B C'）压成连续字母（'ABC'）。
-
-    西城 2026 期末物理卷答案表的多选写作 `B D` / `A B C`，直接套
-    _CELL_CHOICE_RE 会整组不匹配、被静默跳过（单选单字母正常，故只有多选全丢）。
-    只动这类「字母+空白+字母」的格，其余单元格原样返回。
-    """
-    return [re.sub(r"\s+", "", c) if _CELL_SPACED_CHOICE_RE.match(c) else c
-            for c in cells]
-
-
-@dataclass(frozen=True)
-class _TableCell:
-    text: str
-    colspan: int = 1
-
-
-def _table_cell_rows(line: str) -> list[list[_TableCell]]:
-    """HTML 表格 → 行×单元格（保留题号/答案格的 colspan）。"""
-    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", line, re.DOTALL)
-    result: list[list[_TableCell]] = []
-    for row in rows:
-        cells: list[_TableCell] = []
-        for attrs, body in re.findall(
-            r"<td([^>]*)>(.*?)</td>", row, re.DOTALL
-        ):
-            span_match = re.search(
-                r"\bcolspan\s*=\s*[\"']?(\d+)", attrs, re.IGNORECASE
-            )
-            colspan = int(span_match.group(1)) if span_match else 1
-            cells.append(_TableCell(
-                text=html.unescape(re.sub(r"<[^>]+>", "", body)).strip(),
-                colspan=max(1, colspan),
-            ))
-        result.append(cells)
-    return result
-
-
-def _table_rows(line: str) -> list[list[str]]:
-    """HTML 表格 → 行×格文本（剥标签、去首尾空白；rowspan/colspan 只留空文本）。"""
-    return [
-        [cell.text for cell in row]
-        for row in _table_cell_rows(line)
-    ]
-
-
-def _strip_leading_label(cells: list[str], ok) -> list[str]:
-    """丢掉行首「不是内容」的那一格。
-
-    标签文字各卷不一样（题号/答案/题目/选项/得分…），只能按「它不像本题行的内容」
-    判断，不能维护白名单（数学卷实测有 `选项`）。空格不在此丢 —— 空角格另有对齐规则。
-    """
-    body = list(cells)
-    if body and body[0] and not ok(body[0]):
-        body = body[1:]
-    return body
-
-
-def _number_cells(cells: list[str]) -> list[str]:
-    """取出题号行的数字格；不是题号行返回 []。"""
-    body = _strip_leading_label(cells, lambda c: bool(_CELL_DIGITS_RE.match(c)))
-    while body and not body[-1]:
-        body.pop()  # 合并单元格占位在行尾
-    if len(body) >= 2 and all(_CELL_DIGITS_RE.match(c) for c in body):
-        return body
-    return []
-
-
-def _choice_body(cells: list[str]) -> list[str]:
-    body = _strip_leading_label(_compact_choice_cells(cells),
-                                lambda c: bool(_CELL_CHOICE_RE.match(c)))
-    while body and not body[-1]:
-        body.pop()
-    return body
-
-
-def _looks_like_choice_row(cells: list[str]) -> bool:
-    """像答案行（全是 A–D 组合），但未必和题号行对齐 —— 用来区分「答案表错位」与「非答案表」。"""
-    body = _choice_body(cells)
-    return len(body) >= 2 and any(body) and all(
-        not c or _CELL_CHOICE_RE.match(c) for c in body)
-
-
-def _choice_cells(cells: list[str], expected: int) -> list[str]:
-    """取出答案行的选项格；不是答案行、或列数对不上返回 []。
-
-    允许空串（该题缺答案）；`expected` 用来识别空角格：答案行比题号行多一格且首格
-    为空，说明那是表格左上角的空标签位，不是某一题的答案。
-    """
-    body = _choice_body(cells)
-    if len(body) == expected + 1 and body[0] == "":
-        body = body[1:]
-    if len(body) == expected and any(body) and all(
-            not c or _CELL_CHOICE_RE.match(c) for c in body):
-        return body
-    return []
-
-
-def _is_answer_label(cell: str) -> bool:
-    """答案表行首标签（答案/选项/正确答案/answer/key…）。"""
-    text = re.sub(r"[\s:：]+", "", cell or "")
-    return bool(text and _ANSWER_LABEL_RE.search(text))
-
-
-def _freeform_cells(cells: list[str], expected: int) -> list[str]:
-    """提取带「答案」标签的自由文本答案格。
-
-    填空题答案可能是公式、数值或比较符，不能复用 A-D 校验。为避免把数学数据表
-    （``x | 0 | 1 | 2`` + ``y | 0 | 1 | 4``）误当答案，只有明确答案标签才接受；
-    无标签或空标签的数据行即使列数吻合也整组拒绝。空角格只用于选择题答案，
-    自由文本没有明确标签时无法证明语义，不能猜。
-    """
-    body = list(cells)
-    while body and not body[-1]:
-        body.pop()
-    if len(body) == expected + 1:
-        if not _is_answer_label(body[0]):
-            return []
-        body = body[1:]
-    else:
-        return []
-    if len(body) != expected or not any(c.strip() for c in body):
-        return []
-    return body
-
-
-def _span_aligned_answers(
-    number_row: list[_TableCell],
-    answer_row: list[_TableCell],
-) -> dict[int, str]:
-    """按题号行的 colspan 把答案格合并回每一题。
-
-    门头沟 2025 数学第 16 题题号跨两列，对应两格答案「略」「A,B,E」。
-    只有答案行明确带「答案」标签（允许自由文本）或其余格全像 A–D 时才接受；
-    否则数学数据表仍会被拒绝。
-    """
-    header = list(number_row)
-    if header and not _CELL_DIGITS_RE.match(header[0].text):
-        header = header[1:]
-    if len(header) < 2 or not all(
-        _CELL_DIGITS_RE.match(cell.text) for cell in header
-    ):
-        return {}
-
-    answer_cells = list(answer_row)
-    labeled = bool(answer_cells and _is_answer_label(answer_cells[0].text))
-    if labeled:
-        answer_cells = answer_cells[1:]
-
-    slots: list[str] = []
-    for cell in answer_cells:
-        slots.append(cell.text)
-        slots.extend("" for _ in range(cell.colspan - 1))
-
-    header_width = sum(cell.colspan for cell in header)
-    if len(slots) != header_width:
-        return {}
-    if not labeled and not all(
-        not text or _CELL_CHOICE_RE.match(_compact_choice_cells([text])[0])
-        for text in slots
-    ):
-        return {}
-
-    result: dict[int, str] = {}
-    offset = 0
-    for cell in header:
-        values = slots[offset:offset + cell.colspan]
-        offset += cell.colspan
-        merged = "；".join(value for value in values if value)
-        if merged:
-            result[int(cell.text)] = merged
-    return result
-
-
-def _parse_horizontal(
-    rows: list[list[str]],
-    cell_rows: list[list[_TableCell]] | None = None,
-) -> dict[int, str]:
-    """横向表：数字行 + 下一行答案行，一张表里可以有多组（11–15 常在第二组）。"""
-    result: dict[int, str] = {}
-    for i in range(len(rows) - 1):
-        nums = _number_cells(rows[i])
-        if not nums:
-            continue
-        answers = _choice_cells(rows[i + 1], len(nums))
-        if not answers:
-            answers = _freeform_cells(rows[i + 1], len(nums))
-        if not answers and cell_rows is not None:
-            aligned = _span_aligned_answers(cell_rows[i], cell_rows[i + 1])
-            if aligned:
-                result.update(aligned)
-                continue
-        if not answers:
-            # 列数对不齐（OCR 拆并格）：这一组不写，宁空不猜。
-            # 只对「答案行」喊话 —— 数学/统计表（题号 + 分值）在答案段里很常见，
-            # 它们不喊，否则每跑一次都刷一屏无关告警。
-            if _looks_like_choice_row(rows[i + 1]):
-                print(f"[WARN] 答案表列数不齐（题号 {nums[:3]}…，答案 "
-                      f"{len(_choice_body(rows[i + 1]))} 格），该组不写", flush=True)
-            continue
-        for n, a in zip(nums, answers):
-            if a:
-                result[int(n)] = a
-    return result
-
-
-def _parse_vertical(rows: list[list[str]]) -> dict[int, str]:
-    """纵向表：一行一对「题号 | 答案」，表头行（题号/答案）自动跳过。"""
-    result: dict[int, str] = {}
-    pairs = 0
-    has_answer_header = any(
-        _is_answer_label(cell)
-        for row in rows
-        for cell in row
-    )
-    for row in rows:
-        body = [c for c in _compact_choice_cells(row) if c]  # 空角格/合并占位不参与
-        if len(body) != 2 or not _CELL_DIGITS_RE.match(body[0]):
-            continue
-        if not (_CELL_CHOICE_RE.match(body[1]) or has_answer_header):
-            continue
-        pairs += 1
-        result[int(body[0])] = body[1]
-    return result if pairs >= 2 else {}
-
-
-_NUMBERED_ANSWER_CELL_RE = re.compile(
-    r"^\s*(\d{1,2})\s*[.．]\s*(.+?)\s*$"
-)
-
-
-def _parse_cell_numbered(
-    rows: list[list[_TableCell]]
-) -> dict[int, str]:
-    """解析每格都写成「题号. 答案」的答案网格。
-
-    石景山 2025 数学 9–16 题就是两行四列的网格，没有独立的题号行。
-    只有所有非空格都带题号、且题号按行序连续时才接受，避免把普通数据表
-    里的数字格误当答案。
-    """
-    result: dict[int, str] = {}
-    for row in rows:
-        for cell in row:
-            text = cell.text.strip()
-            if not text:
-                continue
-            match = _NUMBERED_ANSWER_CELL_RE.match(text)
-            if match is None:
-                return {}
-            result[int(match.group(1))] = match.group(2).strip()
-
-    numbers = list(result)
-    if len(numbers) < 2:
-        return {}
-    if numbers != list(range(numbers[0], numbers[-1] + 1)):
-        return {}
-    return result
-
-
-def answer_table_numbers(line: str) -> set[int]:
-    """这张表里「声明了有答案」的题号集合（供调用方核对有没有解析漏）。"""
-    return {int(n) for row in _table_rows(line) for n in _number_cells(row)}
-
-
-def parse_answer_table(line: str) -> dict[int, str]:
-    """解析 HTML 答案表（题号→答案），按版式分派而非按位置猜。
-
-    真实试卷的答案表有三种版式（2026-11 实测 47 份带答案段的 md）：
-    ① 双标签：`题号|1|2…` + `答案|A|B…` —— 两行各有一个标签格；
-    ② 单标签：`题号|1|2…` + `A|B…`    —— 只有数字行有标签格；
-    ③ 无表头：`1|2|3…` + `C|D|A…`     —— 第一格就是题号 1，一格都不能丢。
-    旧实现按①写死「每行跳过第 0 格」，②③ 会把首题答案整格丢掉（北师大实验
-    2024 物理卷第 1 题 C 丢失、入库成了别的值）。
-
-    填空题答案表（数学/物理/化学/英语等）也走这里：答案格可以是公式、数值或比较符。
-    这类自由文本必须带明确的「答案/选项/解答」标签，不能仅凭列数猜。
-    非答案表（数学的数据表 `x|…|0|1|2` + 数值行）整表返回 {}；列数对不齐的那一组
-    不写。HTML 实体在这里统一反转义，`&lt;` 会作为答案 `<` 进入后续流程。
-    """
-    cell_rows = _table_cell_rows(line)
-    rows = [[cell.text for cell in row] for row in cell_rows]
-    if len(rows) < 2:
-        return {}
-    return (
-        _parse_horizontal(rows, cell_rows)
-        or _parse_vertical(rows)
-        or _parse_cell_numbered(cell_rows)
-    )
-
-
 @dataclass
 class RawQuestion:
     """切分后的原始题（answer/explanation 由答案对齐阶段填入）。"""
@@ -1199,10 +901,10 @@ def is_junk_question(q: RawQuestion) -> bool:
     return True
 
 
-def split_page(text: str, md_path: Path,
-               strategy=None, *,
-               forced_stem_lines: set[int] | None = None,
-               suspects_out: list | None = None) -> list[RawQuestion]:
+def _split_questions_only(text: str, md_path: Path,
+                          strategy=None, *,
+                          forced_stem_lines: set[int] | None = None,
+                          suspects_out: list | None = None) -> list[RawQuestion]:
     """按题号切分试卷 MD 并对齐答案，返回 RawQuestion 列表。
 
     Args:
@@ -1231,10 +933,6 @@ def split_page(text: str, md_path: Path,
     # 当前分组的分数状态：unified（组内每题统一分）或 map（逐题给分）
     current_unified_score: int | None = None
     current_score_map: dict[int, int] | None = None
-    in_answer_section = False
-    current_answer_lines: list[str] = []  # 当前累积的答案文本（多行）
-    current_answer_n: int | None = None  # 当前答案属于哪个题号
-    last_answer_n = 0  # 答案段已见最大题号（守卫：题号必须递增，回退数字是评分细则编号）
     last_stem_no = 0   # 题干区已建的最大题号（纠正 OCR 十位错认，如 23→33）
     seen_stems: set[int] = set()  # 已建题号（防答案区/考试说明重复建题）
     warned_dup = False            # 重复题号只告警一次，避免刷屏
@@ -1270,29 +968,6 @@ def split_page(text: str, md_path: Path,
             scope_has_stem = True
         return scope_materials.get(scope_id)
 
-    def _flush_answer():
-        """把累积的答案塞入对应题。"""
-        nonlocal current_answer_lines, current_answer_n, last_answer_n
-        if current_answer_n is None or not current_answer_lines:
-            current_answer_lines = []
-            current_answer_n = None
-            return
-        answer_text = _strip_answer_prefix("\n".join(current_answer_lines))
-        for q in questions:
-            if q.group_order == current_answer_n:
-                if q.answer:
-                    q.answer += "\n" + answer_text  # 多段答案合并
-                else:
-                    q.answer = answer_text
-                break
-        last_answer_n = max(last_answer_n, current_answer_n)
-        current_answer_lines = []
-        current_answer_n = None
-
-    def _answer_filled(n: int) -> bool:
-        """题号 n 是否已有答案（用于跳过同一卷里第二套答案的重复条目）。"""
-        return any(q.group_order == n and (q.answer or "").strip() for q in questions)
-
     lines = text.split('\n')
     current_part_kind: str | None = None  # 状态机：当前所在部分（'choice'/'non_choice'）
     for i, line in enumerate(lines):
@@ -1309,15 +984,12 @@ def split_page(text: str, md_path: Path,
         if part_ok:
             # 卷内部分标题（'## 第二部分 非选择题'）：关闭当前题、丢弃该行，
             # 不改 group_id/分数状态（大题分组由后续 '一、选择题' 决定）
-            if not in_answer_section:
-                key = _header_key(line)
-                if current is not None and key in seen_part_headers:
-                    print(f"[WARN] {md_path.stem}: 重复部分标题「{key}」出现在第 {i + 1} 行，"
-                          f"当前题 {current.group_order} 可能被截断，请核对 PDF", flush=True)
-                seen_part_headers.add(key)
-            if in_answer_section:
-                _flush_answer()
-            elif current is not None:
+            key = _header_key(line)
+            if current is not None and key in seen_part_headers:
+                print(f"[WARN] {md_path.stem}: 重复部分标题「{key}」出现在第 {i + 1} 行，"
+                      f"当前题 {current.group_order} 可能被截断，请核对 PDF", flush=True)
+            seen_part_headers.add(key)
+            if current is not None:
                 questions.append(current)
                 current = None
             current_part_kind = part_kind
@@ -1335,7 +1007,7 @@ def split_page(text: str, md_path: Path,
         # （2026-11-21 实测 5175/5461/5475 三卷 8 题）。
         # 标题只做边界：**不**进 pending —— 阅读小节有正文会盖过它，但默写等无文章
         # 小节会把它当成唯一材料（东城模拟一 Q6「(一)默写。(共4分)」实测）。
-        if policy.attach and not in_answer_section and is_section_header(line):
+        if policy.attach and is_section_header(line):
             if current is not None:
                 questions.append(current)
                 current = None
@@ -1347,7 +1019,7 @@ def split_page(text: str, md_path: Path,
         # 题干区行内粘连（MinerU 把选项行与下一题合并成一行）：
         # '…6层以下楼房。16.根据材料三…'。不拆的话整段被吞进上一题的选项 D，
         # 题16 直接消失（大兴 2024 实测）。只在题号 == 上一题+1 时生效。
-        if not ok and not in_answer_section and current is not None:
+        if not ok and current is not None:
             glued = _split_glued_next_stem(line, current.group_order + 1)
             if glued is not None:
                 head, tail_no, tail = glued
@@ -1376,18 +1048,14 @@ def split_page(text: str, md_path: Path,
                 continue
 
         if ok:
-            if not in_answer_section:
-                key = _header_key(line)
-                if current is not None and key in seen_group_headers:
-                    print(f"[WARN] {md_path.stem}: 重复大题标题「{key}」出现在第 {i + 1} 行，"
-                          f"当前题 {current.group_order} 可能被截断，请核对 PDF", flush=True)
-                seen_group_headers.add(key)
-            if in_answer_section:
-                _flush_answer()
-            else:
-                if current is not None:
-                    questions.append(current)
-                    current = None
+            key = _header_key(line)
+            if current is not None and key in seen_group_headers:
+                print(f"[WARN] {md_path.stem}: 重复大题标题「{key}」出现在第 {i + 1} 行，"
+                      f"当前题 {current.group_order} 可能被截断，请核对 PDF", flush=True)
+            seen_group_headers.add(key)
+            if current is not None:
+                questions.append(current)
+                current = None
             current_group_id = gid
             # 「多项选择题」大题：这一节所有题都是多选（2026-11-01 人大附卷实测）
             current_multi = ("多项选择" in line) or ("多选题" in line)
@@ -1406,33 +1074,23 @@ def split_page(text: str, md_path: Path,
                 current_score_map = None
             continue
 
-        if not in_answer_section and is_answer_keyword(line):
+        if is_answer_keyword(line):
             if current is not None:
                 questions.append(current)
                 current = None
-            in_answer_section = True
-            continue
-
-        # 主题号处理（含紧凑格式一行多题号）
-        inline_stems = split_inline_stems(line) if in_answer_section else []
-        if in_answer_section:
-            fill_blank_stems = split_inline_fill_blank_answers(
-                line, last_answer_n + 1
-            )
-            if len(fill_blank_stems) > len(inline_stems):
-                inline_stems = fill_blank_stems
+            break
         # 题号判定走学科策略（`is_stem`），内核不再自己判——
         # 各科的 is_stem 目前都委托 is_main_stem，行为等价。
         ok, n = strategy.is_stem(line)
         accepted_bare = False
-        if not ok and not in_answer_section and current_part_kind == 'choice':
+        if not ok and current_part_kind == 'choice':
             # 状态机：选择题区行首 '数字.数字'（题号+年份 '6.2025年' 或疑似小数
             # '9.5'）——若后续存在更大题号（'7.'），说明当前行是题号而非小数
             amb = _AMBIGUOUS_NUM_RE.match(line)
             if amb and _has_next_stem(lines, i + 1, int(amb.group(1)),
                                       is_stem=strategy.is_stem):
                 ok, n = True, int(amb.group(1))
-        if not ok and not in_answer_section and has_blank_before \
+        if not ok and has_blank_before \
                 and last_stem_no > 0:
             orphan = _ORPHAN_STEM_DOT_RE.match(line)
             if orphan:
@@ -1442,7 +1100,7 @@ def split_page(text: str, md_path: Path,
                     ok, n = True, last_stem_no + 1
         # 裸题号（OCR 丢了点）：`11 在平面直角坐标系…`。规则级 4 条全满足才认；
         # 拿不准的攒进 suspects_out 交 LLM 复核，第二遍带 forced_stem_lines 直接采纳。
-        if not ok and not in_answer_section:
+        if not ok:
             cand = _bare_stem_candidate(line)
             if cand is not None:
                 bn, rest = cand
@@ -1464,159 +1122,8 @@ def split_page(text: str, md_path: Path,
                         "after": "\n".join(lines[i + 1:i + 3]),
                     })
 
-        if in_answer_section:
-            # 页码标记 / 小节标题（（二）（共 5 分））不属于答案正文；
-            # 不跳过会拼进上一题答案（海淀 2026 题10 实测）。
-            if is_answer_structure_line(line):
-                continue
-            # 裸题号独占一行（`19.`）：答案正文另起一行，补认成新答案段。
-            if not ok:
-                bare = _BARE_ANSWER_STEM_RE.match(line)
-                if bare and int(bare.group(1)) > last_answer_n:
-                    ok, n = True, int(bare.group(1))
-            # 选择题裸答案串（'BBCA CACC'）：按字母位置依次对应题号。
-            # 东城 2026 期末实测：选择题答案只写成裸串，没有「1.B 2.B …」，
-            # 整行会被当作无题号续行丢掉，Q1–8 全空。
-            compact_key = split_compact_answer_key(line)
-            if compact_key:
-                _flush_answer()
-                for letter in compact_key:
-                    target = last_answer_n + 1
-                    if not _answer_filled(target):
-                        current_answer_n = target
-                        current_answer_lines = [letter]
-                        _flush_answer()
-                current_answer_n = None
-                continue
-            # HTML 答案表（选择题与填空题共用）：不在这里维护 A-D/公式两套分支。
-            if '<table>' in line or '<table ' in line:
-                table_answers = parse_answer_table(line)
-                if table_answers:
-                    # 自检：表里明明列了题号，却有几个没解析出答案（版式不识别/列数不齐）。
-                    # 旧版这里是静默丢的 —— 缺答案的题会被后续「补空答案」随意填，
-                    # 而 answer_verified=1 又把错值标成已核验（北师大实验 2024 物理卷事故）。
-                    missing = sorted(answer_table_numbers(line) - set(table_answers))
-                    if missing:
-                        print(f"[WARN] 答案表有题号没解析出答案：{missing}"
-                              f"（该表其它题已写入，这几个题请人工核对）", flush=True)
-                if not table_answers and current_answer_n is not None:
-                    # 题号/答案表解析不出（如作文评分标准表）：作为当前题答案续行
-                    current_answer_lines.append(line)
-                else:
-                    _flush_answer()
-                    for tn, tans in table_answers.items():
-                        current_answer_n = tn
-                        current_answer_lines = [tans]
-                        _flush_answer()
-                    current_answer_n = None
-                continue
-            if inline_stems:
-                # 紧凑格式：一行多题号答案（只收递增题号；回退数字是评分细则编号）。
-                # 例外：行内写法明确带「答案：」且该题还没有答案时，允许作为第二套
-                # 答案块写入（东城 2026 期末：题4解析行尾粘着「5. 答案：C」）。
-                fresh = [
-                    (sn, st) for sn, st in inline_stems
-                    if sn > last_answer_n
-                    or (_ANSWER_MARK_RE.match(st.strip()) and not _answer_filled(sn))
-                ]
-                if not fresh:
-                    # 回退题号且明确带「答案：」、该题已有答案 → 第二套答案块的
-                    # 重复条目：结掉上一题后丢弃，别把整段详解拼进上一题答案。
-                    if any(_ANSWER_MARK_RE.match(st.strip()) and _answer_filled(sn)
-                           for sn, st in inline_stems):
-                        _flush_answer()
-                    elif current_answer_n is not None:
-                        current_answer_lines.append(line)
-                    continue
-                _flush_answer()  # 先把上一段答案塞入
-                if len(fresh) == 1:
-                    current_answer_n = fresh[0][0]
-                    current_answer_lines = [fresh[0][1]]
-                    # 题号一旦开始就登记，别等 flush：否则回退守卫读到旧的
-                    # last_answer_n，评分细则的「1. …」会被当成新题答案。
-                    last_answer_n = max(last_answer_n, current_answer_n)
-                else:
-                    # 多个题号一行：每个题号独立成段，立即 flush
-                    for stem_n, stem_text in fresh:
-                        current_answer_n = stem_n
-                        current_answer_lines = [stem_text]
-                        _flush_answer()
-                    current_answer_n = None
-            elif ok:
-                rest = _strip_main_stem_prefix(line)
-                if n <= last_answer_n:
-                    # 题号回退（如作文评分细则 '1．字数不足600字…'）：当作当前答案续行，
-                    # 不新建答案段——否则会串到第 1 题（2025 海淀语文卷实测事故）。
-                    # 例外：同一份 md 出现第二套从 1 开始、明确写「答案：」的详解块，
-                    # 且该题尚未有答案时允许写入（东城 2026 期末实测）。
-                    if _ANSWER_MARK_RE.match(rest.strip()):
-                        # 明确是第二套答案块：先结掉上一题，避免后续解析行继续
-                        # 拼到上一题答案里；该题已有答案就整段跳过，不重复写。
-                        _flush_answer()
-                        if not _answer_filled(n):
-                            current_answer_n = n
-                            current_answer_lines = [rest]
-                    elif current_answer_n is not None:
-                        current_answer_lines.append(line)
-                    continue
-                # 展开格式：行首单题号，开始新答案段
-                _flush_answer()
-                current_answer_n = n
-                current_answer_lines = [rest] if rest else []
-                last_answer_n = max(last_answer_n, n)
-                glued_answers = _split_glued_answers(rest, n)
-                if glued_answers is not None:
-                    head, parts = glued_answers
-                    current_answer_lines = [head] if head else []
-                    for answer_no, answer_text in parts:
-                        _flush_answer()
-                        current_answer_n = answer_no
-                        current_answer_lines = [answer_text] if answer_text else []
-                        last_answer_n = max(last_answer_n, answer_no)
-                else:
-                    score_split = _split_score_prefixed_answer(
-                        rest, n, {q.group_order for q in questions}
-                    )
-                    if score_split is not None:
-                        head, tail = score_split
-                        current_answer_lines = [head] if head else []
-                        _flush_answer()
-                        current_answer_n = n + 1
-                        current_answer_lines = [tail]
-                        last_answer_n = max(last_answer_n, current_answer_n)
-            else:
-                # 答案段的续行（含小问号行 (1)(2)）
-                if current_answer_n is not None:
-                    glued_answers = _split_glued_answers(line, current_answer_n)
-                    if glued_answers is None:
-                        score_split = _split_score_prefixed_answer(
-                            line, current_answer_n,
-                            {q.group_order for q in questions},
-                        )
-                        if score_split is None:
-                            current_answer_lines.append(line)
-                        else:
-                            head, tail = score_split
-                            next_answer_n = current_answer_n + 1
-                            if head:
-                                current_answer_lines.append(head)
-                            _flush_answer()
-                            current_answer_n = next_answer_n
-                            current_answer_lines = [tail]
-                            last_answer_n = max(last_answer_n, current_answer_n)
-                    else:
-                        head, parts = glued_answers
-                        if head:
-                            current_answer_lines.append(head)
-                        for answer_no, answer_text in parts:
-                            _flush_answer()
-                            current_answer_n = answer_no
-                            current_answer_lines = [answer_text] if answer_text else []
-                            last_answer_n = max(last_answer_n, answer_no)
-            continue
-
         # 题干区
-        if policy.attach and not in_answer_section:
+        if policy.attach:
             # 文段标题（「绿绸叠翠」「流光溢彩」）：下一题换材料，上一题到此结束
             if current is not None and has_blank_before and policy.is_material_title(lines, i, line):
                 questions.append(current)
@@ -1771,28 +1278,9 @@ def split_page(text: str, md_path: Path,
         if policy.attach and not scope_has_stem:
             scope_pending.append(line)
 
-    # 末尾 flush 残留答案 + 残留题
-    if in_answer_section:
-        _flush_answer()
+    # 末尾 flush 残留题
     if current is not None:
         questions.append(current)
-
-    # 题前共享材料（物理/化学科技阅读题：`请阅读《…》并回答第 N 题` + 材料 + `N. 请根据上述材料`）。
-    # 这是策略的可选钩子：generic/语文/英语没有这个方法，行为不变。
-    attach_pre = getattr(strategy, "attach_pre_material", None)
-    if callable(attach_pre):
-        attach_pre(questions, lines)
-    # 题后材料/材料规整（语文、英语）：与 attach_pre 对称的可选钩子，
-    # 其它学科没有此方法，行为不变。
-    attach_post = getattr(strategy, "attach_post_material", None)
-    if callable(attach_post):
-        attach_post(questions, lines, md_path.stem)
-
-    # 题内小问拆分（道法）：把「材料→(1)→材料→(2)」拆成多条题。
-    # 可选钩子，数学/语文/英语/物化都没有这个方法，行为不变。
-    expand_subs = getattr(strategy, "expand_subquestions", None)
-    if callable(expand_subs):
-        questions = expand_subs(questions)
 
     if jump_warnings:
         detail = "、".join(f"{a}→{b}@{line}" for a, b, line in jump_warnings[:8])
@@ -1801,3 +1289,106 @@ def split_page(text: str, md_path: Path,
               f"（{detail}{more}），可能是跨页假题号/OCR 缺题，请核对 PDF", flush=True)
 
     return questions
+
+
+@dataclass
+class SplitPageResult:
+    questions: list[RawQuestion]
+    answer_result: AnswerParseResult | None
+
+
+def _find_answer_boundary(lines: list[str]) -> int | None:
+    for index, line in enumerate(lines):
+        if is_answer_keyword(line):
+            return index
+    return None
+
+
+def _apply_strategy_finalizers(
+    questions: list[RawQuestion],
+    lines: list[str],
+    md_path: Path,
+    strategy,
+) -> list[RawQuestion]:
+    attach_pre = getattr(strategy, "attach_pre_material", None)
+    if callable(attach_pre):
+        attach_pre(questions, lines)
+    attach_post = getattr(strategy, "attach_post_material", None)
+    if callable(attach_post):
+        attach_post(questions, lines, md_path.stem)
+    expand_subs = getattr(strategy, "expand_subquestions", None)
+    if callable(expand_subs):
+        questions = expand_subs(questions)
+    return questions
+
+
+def split_page_result(
+    text: str,
+    md_path: Path,
+    strategy=None,
+    *,
+    forced_stem_lines: set[int] | None = None,
+    suspects_out: list | None = None,
+) -> SplitPageResult:
+    """切分题干后，把答案区整体交给策略的块级解析器。"""
+    if strategy is None:
+        from subject_strategies import get_strategy
+        strategy = get_strategy("generic")
+
+    lines = text.split("\n")
+    answer_index = _find_answer_boundary(lines)
+    if answer_index is None:
+        question_text = text
+        answer_lines: list[AnswerLine] = []
+        first_line_no = 1
+    else:
+        question_text = "\n".join(lines[:answer_index])
+        answer_lines = [
+            AnswerLine(line_no=index + 1, text=line)
+            for index, line in enumerate(lines[answer_index:], start=answer_index)
+        ]
+        first_line_no = answer_index + 1
+
+    questions = _split_questions_only(
+        question_text,
+        md_path,
+        strategy,
+        forced_stem_lines=forced_stem_lines,
+        suspects_out=suspects_out,
+    )
+    answer_result = None
+    if answer_lines:
+        answer_questions = [
+            AnswerQuestion(no=question.group_order, group_id=question.group_id)
+            for question in questions
+        ]
+        answer_result = strategy.parse_answers(
+            answer_lines,
+            answer_questions,
+            first_line_no=first_line_no,
+        )
+        by_number: dict[int, list[str]] = {}
+        for fragment in answer_result.fragments:
+            by_number.setdefault(fragment.question_no, []).append(fragment.text)
+        for question in questions:
+            question.answer = "\n".join(by_number.get(question.group_order, []))
+
+    questions = _apply_strategy_finalizers(questions, lines, md_path, strategy)
+    return SplitPageResult(questions=questions, answer_result=answer_result)
+
+
+def split_page(
+    text: str,
+    md_path: Path,
+    strategy=None,
+    *,
+    forced_stem_lines: set[int] | None = None,
+    suspects_out: list | None = None,
+) -> list[RawQuestion]:
+    return split_page_result(
+        text,
+        md_path,
+        strategy,
+        forced_stem_lines=forced_stem_lines,
+        suspects_out=suspects_out,
+    ).questions

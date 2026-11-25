@@ -23,7 +23,7 @@ from pathlib import Path
 from question_splitter import (
     is_answer_keyword, is_main_stem, split_options as split_options_kernel,
 )
-from subject_strategies.generic import extract_generic_answers
+from subject_strategies.generic import BlockAnswerMixin, extract_generic_answers
 from subject_strategies.types import ExtractedAnswer, MaterialPolicy
 
 _PASSAGE_LABELS = {"A", "B", "C", "D", "E"}
@@ -196,7 +196,7 @@ class EnglishMaterialPolicy(MaterialPolicy):
         return bool(opts) and len(opts) >= 3 and all(o["text"].strip() for o in opts)
 
 
-class EnglishStrategy:
+class EnglishStrategy(BlockAnswerMixin):
     code = "english"
 
     def is_stem(self, line: str) -> tuple[bool, int | None]:

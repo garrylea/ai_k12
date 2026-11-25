@@ -19,6 +19,7 @@ question_splitter.py 里；搬到这里之后内核不再出现任何学科判�
 import re
 from pathlib import Path
 
+from answer_blocks import AnswerLine, AnswerParseResult, AnswerQuestion
 from page_markers import is_page_marker_line
 from question_splitter import (
     is_answer_keyword,
@@ -164,6 +165,21 @@ class ChineseStrategy:
 
     def extract_answers(self, text: str, md_path: Path) -> list[ExtractedAnswer]:
         return extract_chinese_answers(text, md_path)
+
+    def parse_answers(
+        self,
+        answer_lines: list[AnswerLine],
+        questions: list[AnswerQuestion],
+        *,
+        first_line_no: int,
+    ) -> AnswerParseResult:
+        from legacy_answer_parser import legacy_parse_answer_lines
+
+        return legacy_parse_answer_lines(
+            answer_lines,
+            questions,
+            first_line_no=first_line_no,
+        )
 
 
 # 模块级单例：材料谓词判「上一题选项是否已完整」时要拆选项，不必每次新建策略。
