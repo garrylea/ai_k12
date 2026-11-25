@@ -8,6 +8,33 @@
 
 ---
 
+## 2026-11-25 数据管线：答案解析改为版式块 + 完整覆盖校验
+
+**根因**：9–16 题答案经常以“大题标题与答案同行”“两行四列视觉网格”“题号被包进
+LaTeX 公式”“答案以数字开头”等形式出现在 MinerU Markdown 中。旧
+`split_page` 用同一个全局答案游标逐行猜边界：标题行先被消费，`12.2` 被当小数，
+公式内 `1 3 .` 被遮罩，导致密云 2025 数学 Q9–13 整段从答案文档消失。
+
+**改法**：
+
+1. `question_splitter` 只负责定位答案区，`split_page_result()` 把原始答案行交给
+   `strategy.parse_answers()`；`split_page()` 保持只返回题目列表的兼容契约。
+2. 新增 `answer_blocks.py` / `answer_region.py`：按表格、裸选择、统一编号块和未知块
+   分派解析，按期望题号逐题定向查找；点后数字、公式内题号、标题同行答案分别有
+   明确边界规则。
+3. 多个独立答案块对同一题遵循“第一套非空答案优先”；后续块不覆盖首套标准答案。
+4. `answer_missing`、`table_incomplete`、`answer_block_unparsed`、
+   `answer_region_no_assignments` 等 issue 透传到 `answer_issues.jsonl`；
+   有答案区但零命中时 CLI 返回 2，批量回填计 failed。
+5. 语文通过 `legacy_answer_parser.py` 保持既有 `RawQuestion.answer` 行为；
+   英语继续在通用块结果上合并 `1-5 CBBCD` 等区间答案。
+
+**验证**：密云 2025 数学 Q9–13 恢复，答案区不再从 8 直接跳到 14；
+`tools/data-refinery` 全量 `pytest -q` **2335 passed / 11 skipped**；
+真实密云卷 `answer_extract_cli --dry-run` 提取 28 题、27 题有答案。
+
+---
+
 ## 2026-11-25 数据管线：答案表 colspan/格内题号 + 粘连答案切分 + 丢题号的题干恢复
 
 **问题**：多份 2025 数学卷的答案区与题干各有 OCR 变形，旧规则静默漏解析（答案从某题直接跳到下一段，
