@@ -861,8 +861,8 @@ def review_by_numbers(subject: str | None, file: str | None,
     （2026-11-03 汇文题6 一张图没截出来）。这时要能主动点名重录。
 
     粘贴内容可以是一整段「材料 + 题干 + 小问 + 选项 + 图片」：
-    `_ask_one` 先 `split_material` 拆材料、再 `split_options` 拆选项，
-    分别落到 material_text / content / options；图片引用由 apply_fixes 统一物化。
+    题干槽用 `split_questions` 按题号拆、`split_material_and_options` 拆材料和选项，
+    图片引用由 apply_fixes 统一物化；改完在卡片上按回车落记录。
 
     Returns: 本次记录的题数。
     """
