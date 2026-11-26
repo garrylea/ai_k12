@@ -276,3 +276,58 @@ describe('self-assessment settlement: confirmSelfAssessment correct', () => {
     }));
   });
 });
+
+describe('self-assessment settlement: confirmSelfAssessment incorrect', () => {
+  const confirmInput = {
+    studentId: 2, questionId: 5034, assessment: 'incorrect' as const,
+    source: 'targeted', sessionUid: 'u-1',
+  };
+  const defaultRow = {
+    is_correct: 0, self_assess_state: 'default_incorrect', answer_text: '解',
+  };
+
+  it('default_incorrect + incorrect：只追加 incorrect 留痕 + state=confirmed_incorrect，不改 is_correct/错题本/掌握度', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue(defaultRow);
+
+    await svc.confirmSelfAssessment(confirmInput);
+
+    expect(mocks.selfAssess.create).toHaveBeenCalledWith(expect.objectContaining({
+      assessment: 'incorrect',
+    }), conn);
+    expect(mocks.answers.transitionState).toHaveBeenCalledWith(expect.objectContaining({
+      state: 'confirmed_incorrect', isCorrect: 0,
+    }), conn);
+    expect(mocks.errorBooks.findOrCreateUncleared).not.toHaveBeenCalled();
+    expect(mocks.mastery.upsertOnJudge).not.toHaveBeenCalled();
+    expect(mocks.mastery.revertOneError).not.toHaveBeenCalled();
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.rollback).not.toHaveBeenCalled();
+  });
+
+  it('confirmed_incorrect + incorrect：幂等，不重复留痕', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue({
+      is_correct: 0, self_assess_state: 'confirmed_incorrect', answer_text: '解',
+    });
+
+    const r = await svc.confirmSelfAssessment(confirmInput);
+
+    expect(r.idempotent).toBe(true);
+    expect(mocks.selfAssess.create).not.toHaveBeenCalled();
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.rollback).not.toHaveBeenCalled();
+  });
+
+  it('confirmed_correct + incorrect：409', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue({
+      is_correct: 1, self_assess_state: 'confirmed_correct', answer_text: '解',
+    });
+
+    await expect(svc.confirmSelfAssessment(confirmInput)).rejects.toMatchObject({ status: 409 });
+    expect(mocks.selfAssess.create).not.toHaveBeenCalled();
+    expect(conn.rollback).toHaveBeenCalled();
+    expect(conn.commit).not.toHaveBeenCalled();
+  });
+});

@@ -168,7 +168,29 @@ export class SelfAssessmentSettlementService {
         // state === NULL（迁移前旧行）：旧语义补偿见 Task 9，此处按状态缺失拒绝。
         throw new HttpException({ code: 1002, message: '作答记录状态缺失，请重新提交' }, 409);
       }
-      // incorrect 分支见 Task 7。
+      if (input.assessment === 'incorrect') {
+        if (state === 'confirmed_incorrect') {
+          await conn.commit();
+          return { idempotent: true };
+        }
+        if (state === 'confirmed_correct') {
+          throw new HttpException({ code: 1001, message: '该题自评结果已确认' }, 409);
+        }
+        if (state === 'default_incorrect') {
+          await this.selfAssess.create({
+            studentId: input.studentId, questionId: input.questionId,
+            assessment: 'incorrect', source: input.source,
+          }, conn);
+          await this.answers.transitionState({
+            sessionId, questionId: input.questionId, state: 'confirmed_incorrect',
+            isCorrect: 0, judgedAt: new Date(),
+          }, conn);
+          await conn.commit();
+          return {};
+        }
+        // state === NULL（迁移前旧行）：旧语义补偿见 Task 9，此处按状态缺失拒绝。
+        throw new HttpException({ code: 1002, message: '作答记录状态缺失，请重新提交' }, 409);
+      }
       throw new HttpException({ code: 1002, message: '暂不支持的自评结果' }, 409);
     } catch (e) {
       await conn.rollback();
