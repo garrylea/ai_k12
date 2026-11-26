@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { PoolConnection } from 'mysql2/promise';
 import { QuestionsRepository } from '../../database/repositories/questions.repo.js';
 import { StudentKnowledgeMasteryRepository } from '../../database/repositories/student-knowledge-mastery.repo.js';
 
@@ -68,5 +69,32 @@ export class MasteryService {
       questionId: input.questionId,
       isCorrect: input.assessment === 'correct',
     });
+  }
+
+  /**
+   * 把一道题此前记的「错」回退为「对」（改答案 / 自纠正场景）。
+   *
+   * 按题查它绑的所有 KP，逐 KP 回退：0 行只 warn、不抛（0 行不是失败）；
+   * 任何异常只 warn、不阻断主链路（与规则④同口径）。
+   *
+   * 注意：这是**非事务**的旧语义路径。事务结算（Task 8）里要的是「异常冒泡、
+   * 由外层回滚」，那种场景应直接调 `masteryRepo.revertOneError(...executor)`，
+   * 不要走本方法吞掉异常。
+   */
+  async revertErrorToCorrect(input: {
+    studentId: number;
+    questionId: number;
+    executor?: PoolConnection;
+  }): Promise<void> {
+    if (input.questionId == null) return;
+    try {
+      const kpIds = await this.questionsRepo.findKnowledgePointIdsByQuestion(input.questionId);
+      for (const kpId of kpIds) {
+        const n = await this.masteryRepo.revertOneError(input.studentId, kpId, input.executor);
+        if (n === 0) this.logger.warn(`revertOneError 0 行（student=${input.studentId}, kp=${kpId}）；不回滚`);
+      }
+    } catch (err) {
+      this.logger.warn('掌握度回退失败（已忽略）', err);
+    }
   }
 }

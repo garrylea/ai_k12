@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import type { Pool, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 export interface WeakMasteryRow {
   knowledgePointId: number;
@@ -42,12 +42,18 @@ export class StudentKnowledgeMasteryRepository {
    *
    *    分母 `NULLIF(..., 0)` 防除零（首插时分子分母都非零，防御的是极端历史数据）。
    */
-  async upsertOnJudge(studentId: number, knowledgePointId: number, isCorrect: boolean): Promise<void> {
+  async upsertOnJudge(
+    studentId: number,
+    knowledgePointId: number,
+    isCorrect: boolean,
+    executor?: PoolConnection,
+  ): Promise<void> {
+    const db = executor ?? this.pool;
     const correctDelta = isCorrect ? 1 : 0;
     const errorDelta = isCorrect ? 0 : 1;
     const score = isCorrect ? 1 : 0;
     const level = isCorrect ? 5 : 0;
-    await this.pool.execute(
+    await db.execute(
       `INSERT INTO student_knowledge_mastery
          (student_id, knowledge_point_id, correct_count, error_count, mastery_score, level, last_seen_at)
        VALUES (?, ?, ?, ?, ?, ?, NOW(3)) AS new
@@ -61,6 +67,31 @@ export class StudentKnowledgeMasteryRepository {
          last_seen_at  = NOW(3)`,
       [studentId, knowledgePointId, correctDelta, errorDelta, score, level],
     );
+  }
+
+  /**
+   * 把一条错题「回退」为答对（P2 修复：0 行不是失败）。
+   *
+   * ⚠️ SET 从左到右求值、后面的表达式读到的是**已更新**的列值，因此 score/level
+   * 必须直接引用 `correct_count` / `error_count`（controller 已用真实 DB 实测：
+   * 这样得 6/2=0.75、level 3；若写成 `(correct_count + 1)` 会得 0.875，是错的）。
+   *
+   * 更新 0 行（该生该 KP 没有掌握度行）返回 0，**不抛异常、不回滚**——0 行不是失败；
+   * 只有 SQL 本身抛异常才由调用方决定如何处理（事务路径让它冒泡，非事务路径只 warn）。
+   */
+  async revertOneError(studentId: number, kpId: number, executor?: PoolConnection): Promise<number> {
+    const db = executor ?? this.pool;
+    const [r] = await db.execute<ResultSetHeader>(
+      `UPDATE student_knowledge_mastery
+       SET correct_count = correct_count + 1,
+           error_count   = GREATEST(error_count - 1, 0),
+           mastery_score = correct_count / NULLIF(correct_count + error_count, 0),
+           level         = FLOOR(5 * (correct_count / NULLIF(correct_count + error_count, 0))),
+           last_seen_at  = NOW(3)
+       WHERE student_id = ? AND knowledge_point_id = ?`,
+      [studentId, kpId],
+    );
+    return r.affectedRows;
   }
 
   /** 最弱的 N 个知识点（家长端 `/mastery`）；`limit` 由 controller 校验为 1..50（越界 400，不钳制）。 */

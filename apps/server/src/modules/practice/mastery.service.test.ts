@@ -1,9 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { MasteryService } from './mastery.service.js';
 
 const mk = () => ({
   questionsRepo: { findKnowledgePointIdsByQuestion: vi.fn().mockResolvedValue([42]) },
-  masteryRepo: { upsertOnJudge: vi.fn().mockResolvedValue(undefined) },
+  masteryRepo: {
+    upsertOnJudge: vi.fn().mockResolvedValue(undefined),
+    revertOneError: vi.fn().mockResolvedValue(1),
+  },
 });
 const mkSvc = (d = mk()) =>
   new MasteryService(d.questionsRepo as any, d.masteryRepo as any);
@@ -90,5 +94,53 @@ describe('MasteryService.recordFromSelfAssessment', () => {
 
     expect(d.questionsRepo.findKnowledgePointIdsByQuestion).not.toHaveBeenCalled();
     expect(d.masteryRepo.upsertOnJudge).not.toHaveBeenCalled();
+  });
+});
+
+describe('MasteryService.revertErrorToCorrect', () => {
+  it('按题查 KP，逐 KP 回退并透传 executor', async () => {
+    const d = mk();
+    d.questionsRepo.findKnowledgePointIdsByQuestion.mockResolvedValue([42, 43]);
+    const exec = { execute: vi.fn() };
+
+    await mkSvc(d).revertErrorToCorrect({ studentId: 11, questionId: 330, executor: exec as any });
+
+    expect(d.questionsRepo.findKnowledgePointIdsByQuestion).toHaveBeenCalledWith(330);
+    expect(d.masteryRepo.revertOneError).toHaveBeenCalledTimes(2);
+    expect(d.masteryRepo.revertOneError).toHaveBeenCalledWith(11, 42, exec);
+    expect(d.masteryRepo.revertOneError).toHaveBeenCalledWith(11, 43, exec);
+  });
+
+  it('questionId 为 null → 不查不回退', async () => {
+    const d = mk();
+
+    await mkSvc(d).revertErrorToCorrect({ studentId: 11, questionId: null as any });
+
+    expect(d.questionsRepo.findKnowledgePointIdsByQuestion).not.toHaveBeenCalled();
+    expect(d.masteryRepo.revertOneError).not.toHaveBeenCalled();
+  });
+
+  it('回退 0 行只 warn 不抛（0 行不是失败）', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const d = mk();
+    d.masteryRepo.revertOneError.mockResolvedValue(0);
+
+    await expect(
+      mkSvc(d).revertErrorToCorrect({ studentId: 11, questionId: 330 }),
+    ).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('仓储抛错只 warn 不冒泡（非事务旧语义路径）', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const d = mk();
+    d.masteryRepo.revertOneError.mockRejectedValue(new Error('db down'));
+
+    await expect(
+      mkSvc(d).revertErrorToCorrect({ studentId: 11, questionId: 330 }),
+    ).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

@@ -145,3 +145,55 @@ describe('StudentKnowledgeMasteryRepository.countQuestionCoverageBySubject', () 
     expect(params).toEqual([1, 1]);
   });
 });
+
+describe('StudentKnowledgeMasteryRepository.revertOneError', () => {
+  it('用更新后列值重算 score/level（SET 从左到右求值，不得写 +1 重算）', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]) };
+    const repo = new StudentKnowledgeMasteryRepository(pool as any);
+
+    const n = await repo.revertOneError(11, 5);
+
+    const [sql] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('correct_count = correct_count + 1');
+    expect(sql).toContain('GREATEST(error_count - 1, 0)');
+    // score/level 直接引用**更新后的列名**，不能写 (correct_count + 1) 之类（controller 实测会得 0.875）
+    expect(sql).toMatch(/mastery_score\s*=\s*correct_count/i);
+    expect(sql).toMatch(/level\s*=\s*FLOOR\(5\s*\*\s*\(correct_count/i);
+    expect(n).toBe(1);
+  });
+
+  it('更新 0 行返回 0、不抛异常（P2 修复核心：0 行不是失败）', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }]) };
+    const repo = new StudentKnowledgeMasteryRepository(pool as any);
+
+    await expect(repo.revertOneError(11, 5)).resolves.toBe(0);
+  });
+
+  it('传 executor 时走该连接、不碰 pool（事务内回退）', async () => {
+    const pool = { execute: vi.fn(), query: vi.fn() };
+    const exec = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]), query: vi.fn() };
+    const repo = new StudentKnowledgeMasteryRepository(pool as any);
+
+    await repo.revertOneError(11, 5, exec as any);
+
+    expect(pool.execute).not.toHaveBeenCalled();
+    expect(exec.execute).toHaveBeenCalledTimes(1);
+    const [sql, params] = exec.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('UPDATE student_knowledge_mastery');
+    expect(params).toEqual([11, 5]);
+  });
+});
+
+describe('StudentKnowledgeMasteryRepository.upsertOnJudge executor', () => {
+  it('传 executor 时用该连接而非 pool（未传时行为不变）', async () => {
+    const pool = { execute: vi.fn(), query: vi.fn() };
+    const exec = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]), query: vi.fn() };
+    const repo = new StudentKnowledgeMasteryRepository(pool as any);
+
+    await repo.upsertOnJudge(11, 42, true, exec as any);
+
+    expect(pool.execute).not.toHaveBeenCalled();
+    expect(exec.execute).toHaveBeenCalledTimes(1);
+    expect(exec.execute.mock.calls[0][1]).toEqual([11, 42, 1, 0, 1, 5]);
+  });
+});
