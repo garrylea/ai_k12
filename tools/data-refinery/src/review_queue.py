@@ -260,10 +260,20 @@ def mark_issue(source: str, group_order: int, status: str, *,
     - recorded ：已补录，但还没写进库（等 apply_fixes_cli --apply）
     - resolved ：已写进库；`verdict=no_change` 是「人工确认无问题、未改动」的收口
     """
+    try:
+        go = int(group_order)
+    except (TypeError, ValueError):
+        return 0                      # 题号本身非法（如「第七题」）：没有任何行能匹配
     rows = _read_jsonl(ISSUES_FILE)
     changed = 0
     for rec in rows:
-        if rec.get("source") != source or int(rec.get("group_order", -1)) != int(group_order):
+        if rec.get("source") != source:
+            continue
+        try:
+            rec_go = int(rec.get("group_order"))
+        except (TypeError, ValueError):
+            continue
+        if rec_go != go:
             continue
         if sub_no is not None and int(rec.get("sub_no") or 0) != int(sub_no):
             continue
