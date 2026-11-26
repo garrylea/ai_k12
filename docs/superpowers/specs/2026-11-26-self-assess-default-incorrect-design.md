@@ -1,221 +1,388 @@
-# 主观题自评确定性设计：提交即落「错」，点对覆盖结算（2026-11-26）
+# 主观题自评确定性设计：默认错 + 事务化真实自评结算（2026-11-26）
 
-> 本版取代同文件早先的「提交写假留痕 + 点对撤销」草案。核心变化：**不写任何"默认错"的假自评留痕**，
-> 留痕表只在学生真实表态时追加；幂等与精确撤销靠「作答历史行」做锚点。
+> 本版取代同文件早先的「提交写假留痕 + 点对撤销」草案，也取代「仅靠 is_correct=0 条件 UPDATE
+> 做幂等」的修订稿。核心原则：**默认错不是学生自评；最终对错必须确定；真实自评只追加一次；
+> 作答结果、错题本、掌握度、自评留痕必须在同一数据库事务内结算。**
 
-## 1. 需求与目标
+## 1. 需求、范围与硬约束
 
-**用户需求（2026-11-26）**：自评题**一定要有对/错**，绝不能停在"待评（NULL）"；学生**不做任何自评时默认按做错处理**。
+**用户需求（2026-11-26）**：自评题一定要有确定的对/错，不能停在待评 `NULL`；学生不做任何
+自评时，按做错处理。
 
-由此推导的硬约束：
-- 主观题一经提交，其判定结果必须是确定的 `0`（错）或 `1`（对），不允许 NULL 落库/落表。
-- 下游（作答历史、抽题"做过"判定、错题本、掌握度）不再需要为"待评"单独兜底。
-- 学生明确点「我做对了」→ 改判为对；点「我做错了」→ 维持错；不点 → 维持错。
-
-**不变的部分**：考试主观题（`source='exam'`）仍是交卷后中性待评（考试成绩只算客观题）；单题重做（redo）仍"不记录不计分"。
-
-## 2. 适用范围
+本设计把该需求限定在**训练轨题库类即时自评**：
 
 | 场景 | source | 是否适用 | 说明 |
 |---|---|---|---|
-| 专项练习 | `targeted`（非 redo） | ✅ | 提交即落错、点对覆盖 |
-| 错题练习 | `error_practice` | ✅ | 同上；**本版新增写入作答历史**（原不写，见 §4.2） |
-| 考试结果页自评 | `exam` | ❌ | 保持中性待评，交卷后才自评 |
-| 单题重做 | `targeted`（redo） | ❌ | redo 本意"不记录不计分"，不适用 |
+| 专项练习 | `targeted`（非 redo） | 是 | 带 `sessionUid` 时，提交即默认错；真实自评后事务化结算 |
+| 错题练习 | `error_practice` | 是 | 同上；本版同时补写作答历史和会话完成时间 |
+| 考试结果页自评 | `exam` | 否 | 保持交卷后中性待评，考试成绩只算客观题 |
+| 单题重做 | `targeted`（redo） | 否 | 保持“不记录、不计分” |
+| 主线课堂练习 | `practice` | 否 | 仍走既有卡中心自评；如未来也要求默认错，另立设计 |
 
-**分流开关 = 是否携带 `sessionUid`**：带 `sessionUid` 的 `targeted/error_practice` 走新语义；不带 `sessionUid`（exam、redo、老客户端）走旧语义。这一条同时覆盖了"exam/redo 不适用"，无需额外的 source×mode 矩阵。前端在 redo 模式与考试结果页本就不传 `sessionUid`。
+**分流开关**：请求携带有效 `sessionUid` 的 `targeted/error_practice` 走本设计；不带 `sessionUid`
+（考试、redo、老客户端）走旧语义。后端仍需同时校验 `source`，不能只凭客户端传入的 uid 决定。
 
-## 3. 核心设计：一次落错，覆盖结算
+硬约束：
 
-### 3.1 提交答案（`judgeQuestion` 路由 1c，带 sessionUid）
+1. 新路径提交后，`special_answer_records.is_correct` 必须是 `0` 或 `1`，不允许 `NULL`。
+2. `is_correct=0` 只表达最终对错，不能单独表达“默认错”还是“学生已确认错”；两者必须由内部状态区分。
+3. 默认错不写 `question_self_assessments`；只有学生真实点对/点错时才追加一条。
+4. 默认错提交、确认对/错、错题本联动、掌握度回写、作答历史回写必须全成或全败，不允许只落一部分。
+5. 重复请求必须幂等；同一题收到互相矛盾的自评结论时，不得静默覆盖，返回冲突错误。
+6. 失败必须可重试。不得出现数据库已标记结算成功、但错题本或掌握度尚未完成的状态。
 
-```
-学生提交主观题答案
-  → judgeQuestion()：路由 1c（主观题 self_assess）且 source∈{targeted,error_practice}
-  → ① 写错题本：writeErrorBookOrReuse({studentId, subjectId, questionId, source})
-  → ② 掌握度：finishJudge 出口按 isCorrect=false 记 error+1（现有统一出口）
-  → ③ 作答历史：judgeTraining 旁路写 special_answer_records.is_correct=0（带 sessionUid 时）
-  → ④ 不写自评留痕（关键：默认错不是"学生自评"，不进留痕表）
-  → 返回 JudgeOutput：{ isCorrect:false, method:'self_assess', needsSelfAssessment:true,
-                        errorBookId, referenceAnswer, explanation, pointsAwarded:0 }
-  → 前端照常展开自评视图（强制对照答案表态）
-```
+## 2. 状态模型
 
-要点：
-- `isCorrect` 由 `null` 改为 `false`；`needsSelfAssessment=true` 不变（前端仍强制表态，学生才看得到为什么错）。
-- 掌握度沿用 `finishJudge`（`isCorrect=false` 即写 error+1），与客观题答错同公式，零额外代码。
-- **不写留痕**：留痕表 `question_self_assessments` 的定位是"学生真实自评序列"（见 repo 头注释），
-  "提交即默认错"是系统兜底，不该伪造一条 `incorrect`。
+### 2.1 作答记录新增内部状态
 
-### 3.2 点「我做对了」（`selfAssess('correct')`，带 sessionUid）
+`special_answer_records` 新增：
 
-以「作答历史行」为锚点做原子覆盖结算：
-
-```
-① UPDATE special_answer_records sar JOIN special_practice_sessions sps
-     SET sar.is_correct = 1, sar.judged_at = NOW(3)
-   WHERE sps.session_uid=? AND sps.student_id=? AND sar.question_id=? AND sar.is_correct = 0
-   → 返回 affectedRows
-② affectedRows = 0：已结算过（重复点对/重试）→ 幂等，直接返回成功，什么都不再做
-③ affectedRows = 1（首次从默认错翻对）：
-   a. 掌握度：revertErrorToCorrect({studentId, questionId}) —— 对该题每个 KP：
-      error_count = GREATEST(error_count-1, 0)、correct_count = correct_count+1，同公式重算 score/level
-   b. 错题本清零：clearUnclearedByStudentQuestionId（现有逻辑）
-   c. 自评留痕：selfAssessRepo.create({assessment:'correct', source}) —— 追加一条（纯 append）
-   d. **不发 error_fix 订正积分**：这次错是兜底虚构的，抹掉后应从未存在，不发分
-   e. 作答历史 is_correct 已在 ① 置 1（不再重复写）
+```sql
+self_assess_state VARCHAR(24) DEFAULT NULL
+  COMMENT 'default_incorrect|confirmed_correct|confirmed_incorrect；NULL=非本设计路径或旧数据'
 ```
 
-**为什么用条件 UPDATE 而不是先读后写**：`WHERE is_correct = 0` + 受影响行数判定，把"是否首次结算"
-做成数据库原子判断，天然幂等、并发安全，不引入事务/锁；且精确只撤销**本次提交**的默认错，
-不会误伤历史真错（历史错落在别的 session 行）。
+该列只表达自评结算状态，不替代 `is_correct`：
 
-### 3.3 点「我做错了」（`selfAssess('incorrect')`，带 sessionUid）
+| `self_assess_state` | `is_correct` | 含义 |
+|---|---:|---|
+| `default_incorrect` | `0` | 学生提交后未表态；系统最终按错处理 |
+| `confirmed_correct` | `1` | 学生对真实表态“我做对了”，已完成覆盖结算 |
+| `confirmed_incorrect` | `0` | 学生对真实表态“我做错了”，已是终态 |
+| `NULL` | 旧值 | 非本设计路径、考试/redo、老客户端或迁移前数据 |
 
-提交时已是错态（is_correct=0、已入错题本、掌握度已 error+1），点错只是**确认**：
-- 只追加一条 `question_self_assessments(incorrect)` 留痕（纯 append，记录学生真实表态）。
-- **不**再调 `writeErrorBookOrReuse`、**不**再记掌握度、**不**再改 is_correct（镜像提交态即正确）。
-- 重复点错的重复留痕：前端点完即放行下一题、按钮 `disabled`，实际只可能点一次；服务端不做去重
-  （重复留痕只影响"自评次数"统计，不影响对错/错题本/掌握度，可接受）。
+`self_assess_state` 不对外新增响应字段。客户端仍只读 `isCorrect`、`method`、`needsSelfAssessment`
+等既有字段。
 
-### 3.4 什么都不点
+### 2.2 状态迁移
 
-停在 3.1 的提交态 = 错：`is_correct=0`、已在错题本、掌握度已 error+1、无留痕。
-这就是"自评题一定有对错"的保证——字段自始至终没有 NULL。
+| 当前状态 | 请求 | 结果 |
+|---|---|---|
+| 不存在 | 首次提交 | 建 `default_incorrect` + `is_correct=0` |
+| `default_incorrect` | 重复提交同答案 | 幂等返回原结果，不重复记错题本/掌握度 |
+| `default_incorrect` | `correct` | `confirmed_correct` + `is_correct=1`，执行覆盖结算 |
+| `default_incorrect` | `incorrect` | `confirmed_incorrect`，只追加真实自评留痕 |
+| `confirmed_correct` | `correct` | 幂等成功，不重复执行 |
+| `confirmed_correct` | `incorrect` | 冲突，返回 409，不改变任何状态 |
+| `confirmed_incorrect` | `incorrect` | 幂等成功，不重复追加留痕 |
+| `confirmed_incorrect` | `correct` | 冲突，返回 409，不改变任何状态 |
+| `NULL` | 带 uid 的自评 | 走迁移兼容路径；补充真实自评留痕与状态，不做默认错回退 |
 
-### 3.5 旧语义（不带 sessionUid：exam / redo / 老客户端）
+同一 `sessionUid + questionId` 代表本题的一次作答。若需重新作答，应生成新的 `sessionUid`，不能在
+同一作答行上覆盖已确认结论。
 
-`recordSelfAssessment` 保持现状：`correct` 清错题本（并走现有发分判决）、`incorrect` 写错题本；
-掌握度按 `correct|incorrect` 记一次；留痕追加一条。考试 `source='exam'` 与 redo 的 existing 行为完全不变。
+## 3. 架构与事务边界
 
-## 4. 数据与契约
+新增应用服务 `SelfAssessmentSettlementService`，只负责本设计的作答结算：
 
-### 4.1 数据写入时机总表
+- 输入：`studentId`、`subjectId`、`questionId`、`source`、`sessionUid`、题目元数据、答案或自评结论。
+- 输出：最终 `isCorrect`、可选 `errorBookId`、是否幂等命中。
+- 依赖：`DATABASE_POOL` 与现有会话、作答、错题本、知识点、掌握度、自评留痕仓储。
 
-| 事件 | 作答历史 `is_correct` | 错题本 | 掌握度 | 自评留痕 |
-|---|---|---|---|---|
-| 提交（带 uid） | 0 | 入本 | error+1 | 不写 |
-| 点对（带 uid，首次） | 0→1 | 清零 | error−1、correct+1 | +correct |
-| 点对（带 uid，重试） | 1（不变） | 已清 | 不动（affected=0） | 不写 |
-| 点错（带 uid） | 0（不变） | 已入 | 已 error（不动） | +incorrect |
-| 不点 | 0 | 已入 | 已 error | 无 |
-| 不带 uid（exam/redo） | 旧逻辑 | 旧逻辑 | 旧逻辑 | 旧逻辑 |
+事务实现要求：
 
-### 4.2 `error_practice` 补写作答历史
+1. 服务显式 `pool.getConnection()`，在单连接上 `beginTransaction()`。
+2. 现有仓储写方法增加可选 `executor?: PoolConnection` 参数；事务内所有 SQL 必须使用同一连接。
+3. 结束时只在 `try` 成功分支 `commit()`；任何异常先 `rollback()`，再保留原始错误抛出。
+4. `finally` 中释放连接。
+5. 事件埋点和解析生成在事务提交后执行；它们失败不得回滚主结算，也不得反向阻断接口成功。
+6. `sessionUid` 是客户端提供的全局唯一键。命中已有 uid 时必须校验 `studentId + subjectId + module`
+   与当前请求一致；跨学生或跨场景碰撞返回 409，绝不能把答案写进别人的会话。
 
-现状：`ErrorPracticeRunPage` 的 judge/selfAssess 均不传 `sessionUid`，作答不落 `special_answer_records`，
-因此没有"本次提交"的锚点。本版纳入后：
-- 前端 `ErrorPracticeRunPage` 生成 `sessionUid`（`newSessionUid()`），judge 传
-  `sessionUid + title='错题练习' + questionCount + questionOrder + plannedQuestionIds`，self-assess 传 `sessionUid`。
-- 后端无需特判：`judgeTraining`/`selfAssess` 已按 `sessionUid` 存在与否分流。
-- **副作用**：错题练习会出现在学生端"练习记录"里（`special_practice_sessions` 新增一行，
-  `module = targetedSessionModule(subjectId)`）。这是可接受的（错题练习本就是一次练习），
-  需在验收时确认展示文案为「错题练习」而非「专项练习」。
+不采用以下方案：
 
-### 4.3 后端契约（相比上一版大幅简化）
+- **仅用条件 UPDATE 的“CAS 幂等”**：只能证明某一列被改过一次，无法证明跨表副作用已经完成。
+- **fire-and-forget 掌握度 + 事后补偿**：初始错与回退之间存在乱序，且失败后没有可靠恢复点。
+- **默认错也写一条自评留痕再改状态**：违反“留痕只记录真实学生表态”的数据语义。
 
-- `JudgeOutput` **不需要** `selfAssessId`。
-- `SelfAssessTrainingDto` **不需要** `selfAssessId`；继续用既有 `sessionUid`（2026-11-26 B 引入）。
-- `special-answer-records.repo.markSelfAssessCorrectness` 改造为**条件更新并返回受影响行数**：
-  ```ts
-  /** 默认错 -> 对的一次性覆盖：只在 is_correct=0 时置 1，返回 affectedRows 做幂等判定。 */
-  async markCorrectFromDefault(input: { sessionUid, studentId, questionId }): Promise<number>
-  ```
-  原 B 版本（无条件 upsert 为 1）废弃，避免重复结算。
+## 4. 核心数据流
 
-### 4.4 新增仓储/服务能力
+### 4.1 首次提交主观题
 
-- `mastery.service.revertErrorToCorrect({studentId, questionId})`：按题查 KP，逐 KP 调
-  `masteryRepo.revertOneError`；fire-and-forget、失败只 warn（复用 `recordFromJudge` 的 KP 查询与容错）。
-- `student-knowledge-mastery.repo.revertOneError(studentId, kpId)`：
-  ```sql
-  UPDATE student_knowledge_mastery
-  SET correct_count = correct_count + 1,
-      error_count   = GREATEST(error_count - 1, 0),
-      mastery_score = (correct_count + 1) / NULLIF(correct_count + 1 + GREATEST(error_count - 1, 0), 0),
-      level         = FLOOR(5 * ((correct_count + 1) / NULLIF(correct_count + 1 + GREATEST(error_count - 1, 0), 0))),
-      last_seen_at  = NOW(3)
-  WHERE student_id = ? AND knowledge_point_id = ?
-  ```
-  公式与 `upsertOnJudge` 必须一致（引用更新后的列值，防自引用错值——见该文件头注释）。
-- **不再需要** `question-self-assessments.repo.updateAssessment`（不写假留痕，自然不需要改留痕）。
+触发条件：
 
-## 5. 后端改动清单
+- `judgeQuestion()` 命中主观题 self-assess 路由；
+- `source ∈ {targeted, error_practice}`；
+- 请求携带 `sessionUid`。
+
+流程：
+
+```text
+开始事务
+  → 按 sessionUid + studentId 幂等 upsert special_practice_sessions
+  → 锁查 special_answer_records(session_id, question_id)
+      ├─ 不存在：写入 answer_text + is_correct=0 + method='self_assess'
+      │           + self_assess_state='default_incorrect'
+      ├─ default_incorrect 且答案相同：幂等返回既有结果
+      ├─ default_incorrect 但答案不同：409
+      └─ confirmed_*：409，不重开已确认作答
+  → 仅“首次插入”分支继续：
+      → find-or-create main_error_books（source 使用本次训练来源）
+      → 对该题每个 KP 执行 upsertOnJudge(studentId, kpId, false)
+  → 提交事务
+  → 提交后可选写入其余未作答占位行（best-effort，不属于核心结算事务）
+  → 返回 isCorrect=false、needsSelfAssessment=true、errorBookId、参考答案与解析
+```
+
+约束：
+
+- `JudgeCore` 只负责判题路由与返回参考答案；本路径不得在 `JudgeCore.finishJudge` 中另行异步写掌握度。
+- 错题本、掌握度、作答历史由 `SelfAssessmentSettlementService` 在同一事务中统一写入。
+- 事务提交前不返回判题成功响应。因此学生看到自评按钮时，默认错对应的错题本和掌握度已经落定。
+- 重复提交必须复用同一题的作答行和未清零错题条目，不得重复 `error+1`。
+- “答案相同”按 `answer_text` 原值精确比较；占位行和未作答行不能当作已提交。
+- 其余题单占位行是作答历史的展示增强，提交后单独 best-effort 写入；失败不得回滚已成形的本题作答。
+- 已有 uid 若属于其他学生、其他学科或错误 module，整笔事务回滚并返回冲突错误。
+
+### 4.2 点「我做对了」
+
+```text
+开始事务
+  → SELECT special_answer_records ... JOIN special_practice_sessions ... FOR UPDATE
+  → 校验 studentId 归属
+  → 按 self_assess_state 分流：
+      ├─ confirmed_correct：幂等成功，直接提交并返回
+      ├─ confirmed_incorrect：409，不改变任何数据
+      ├─ NULL：走旧语义补偿，不执行默认错回退
+      └─ default_incorrect：
+          ① 追加 question_self_assessments(correct)
+          ② UPDATE main_error_books：清零该生该题全部未清记录
+          ③ 对该题每个 KP：error_count−1、correct_count+1，并同公式重算 score/level
+          ④ UPDATE 作答行：
+               is_correct=1,
+               self_assess_state='confirmed_correct',
+               judged_at=NOW(3)
+          ⑤ 提交事务
+  → 提交成功后发 error_book_cleared 事件（仅 clearedCount>0）
+  → 不发 error_fix 积分
+```
+
+若任何一步失败：整笔回滚，由前端保留自评页并提示重试；不能把作答行先改成 1 再静默失败。
+
+### 4.3 点「我做错了」
+
+```text
+开始事务
+  → 锁查作答行并校验归属
+  → 按 self_assess_state 分流：
+      ├─ confirmed_incorrect：幂等成功，不追加重复留痕
+      ├─ confirmed_correct：409，不改变任何数据
+      ├─ NULL：走旧语义补偿
+      └─ default_incorrect：
+          ① 追加 question_self_assessments(incorrect)
+          ② self_assess_state='confirmed_incorrect'
+          ③ 不改 is_correct、错题本、掌握度（提交事务时已落定）
+  → 提交事务
+  → 事务成功后 fire-and-forget 触发解析缓存兜底生成
+```
+
+### 4.4 什么都不点
+
+作答行保持：
+
+- `is_correct=0`
+- `self_assess_state='default_incorrect'`
+- 已在错题本
+- 掌握度已 `error+1`
+- 无真实自评留痕
+
+这已经是一次确定的错，不需要后台补结算，也不会出现 `NULL`。
+
+### 4.5 不带 `sessionUid` 的旧语义
+
+考试、redo、老客户端继续调用既有 `recordSelfAssessment`：
+
+- `correct`：追加留痕、清零错题、按旧规则回写掌握度与发分判决；
+- `incorrect`：追加留痕、写入/复用错题、按旧规则回写掌握度；
+- 考试仍保持 `is_correct=NULL + method='self_assess'`，不进入本状态机。
+
+迁移前已存在、但没有 `self_assess_state` 的专项作答行，首次收到带 uid 的自评时按旧语义处理，
+成功后补写 `confirmed_correct|confirmed_incorrect`；不做批量历史回填。
+
+## 5. 掌握度回退公式
+
+新增 `masteryRepo.revertOneError(studentId, kpId, executor)`。由于 MySQL 的 `SET` 子句从左到右
+求值，计数列更新后，score/level 必须直接引用“更新后的列值”，不能再把本次增量写一次：
+
+```sql
+UPDATE student_knowledge_mastery
+SET correct_count = correct_count + 1,
+    error_count   = GREATEST(error_count - 1, 0),
+    mastery_score = correct_count
+                  / NULLIF(correct_count + error_count, 0),
+    level         = FLOOR(5 * (
+                      correct_count
+                      / NULLIF(correct_count + error_count, 0)
+                    )),
+    last_seen_at  = NOW(3)
+WHERE student_id = ? AND knowledge_point_id = ?
+```
+
+事务内每个应回退的 KP 都必须恰好更新 1 行。若默认错提交事务已成功，但这里出现 0 行，属于数据
+不一致，回滚整个自评结算并告警，不得跳过。
+
+## 6. 数据与接口契约
+
+### 6.1 数据库
+
+新增幂等迁移：
+
+```text
+tools/db/migrations/2026-11-26_special_answer_self_assess_state.sql
+```
+
+要求：
+
+- 只在列不存在时新增 `self_assess_state VARCHAR(24) NULL`；
+- 同步更新 `tools/db/schema.sql` 的 `special_answer_records` 定义与注释；
+- 不新增触发器；
+- 不批量回填旧行；
+- 收尾运行 `python3 tools/db/schema_reconcile.py`。
+
+### 6.2 判题接口
+
+`POST /api/training/judge` 不新增请求字段，继续使用既有 `sessionUid`。
+
+带 uid 的主观题 self-assess 响应：
+
+```json
+{
+  "questionId": 5034,
+  "isCorrect": false,
+  "method": "self_assess",
+  "needsSelfAssessment": true,
+  "referenceAnswer": "...",
+  "explanation": "...",
+  "errorBookId": 123,
+  "pointsAwarded": 0
+}
+```
+
+不带 uid 的主观题仍返回 `isCorrect=null`。客观题、AI 判题、无参考答案守卫不变。
+
+### 6.3 自评接口
+
+`POST /api/training/self-assess` 继续使用 `{questionId, subjectId, assessment, source, sessionUid?}`。
+
+- 带 uid 且状态允许：返回既有成功结构；
+- 重复提交同一结论：幂等成功；
+- 结论冲突：HTTP 409，业务码 `1001`，文案「该题自评结果已确认」；
+- 作答行不存在或不属于本人：HTTP 409，业务码 `1002`，文案「作答记录不存在或已失效，请重新提交」；
+- 事务失败：HTTP 500，前端保留自评页允许重试。
+
+### 6.4 专项会话完成
+
+新增：
+
+```text
+POST /api/training/special-sessions/{sessionUid}/complete
+```
+
+- student JWT；
+- 按 `sessionUid + studentId` 把 `special_practice_sessions.completed_at` 幂等置为当前时间；
+- 不存在或非本人返回 404/1002；
+- 正常完成专项练习或错题练习时由前端调用；
+- 未完成的提前退出会话仍保持 `completed_at=NULL`，继续显示「进行中」。
+
+### 6.5 内部仓储契约
+
+- `SpecialPracticeSessionsRepository.upsertSession(..., executor?)`
+- `SpecialPracticeSessionsRepository.markCompletedByUid(sessionUid, studentId, executor?)`
+- `SpecialAnswerRecordsRepository.findForUpdate(...)`
+- `SpecialAnswerRecordsRepository.insertOrReadDefaultIncorrect(...)`
+- `SpecialAnswerRecordsRepository.transitionSelfAssessState(...)`
+- `MainErrorBooksRepository.findOrCreateUncleared(..., executor?)`
+- `MainErrorBooksRepository.clearUnclearedByStudentQuestionId(..., executor?)`
+- `StudentKnowledgeMasteryRepository.upsertOnJudge(..., executor?)`
+- `StudentKnowledgeMasteryRepository.revertOneError(..., executor?)`
+- `QuestionSelfAssessmentsRepository.create(..., executor?)`
+
+具体方法命名可在实施时按现有代码风格微调，但必须保持“同一事务同一连接”和“状态迁移显式化”
+两个约束。
+
+## 7. 前端改动
 
 | 文件 | 改动 |
 |---|---|
-| `judge-core.service.ts` | 路由 1c（带 sessionUid 的 targeted/error_practice）：`isCorrect=false`、`writeErrorBookOrReuse`、不写留痕、`needsSelfAssessment=true`；`recordSelfAssessment` 按"是否带 sessionUid"分流：带 uid 的 correct→条件覆盖结算，带 uid 的 incorrect→只追加留痕；不带 uid→旧逻辑 |
-| `special-answer-records.repo.ts` | `markSelfAssessCorrectness` 改为条件更新 `markCorrectFromDefault` 返回 affectedRows |
-| `mastery.service.ts` | 新增 `revertErrorToCorrect` |
-| `student-knowledge-mastery.repo.ts` | 新增 `revertOneError` |
-| `training.service.ts` | `selfAssess`/`judgeTraining` 沿用 `sessionUid`；`selfAssess` 依据 affectedRows 决定是否 revert/清本/发分 |
-| `question-self-assessments.repo.ts` | **不改**（仍只有 create / findLatest） |
+| `ErrorPracticeRunPage.tsx` | 生成 `sessionUid`；judge/self-assess 均透传；判题时带 title、questionCount、questionOrder、plannedQuestionIds；正常完成后调用会话完成端点 |
+| `TargetedRunPage.tsx` | 非 redo 继续传 `sessionUid`；正常完成后调用会话完成端点；redo 不传 uid |
+| `ExamResultPage.tsx` | 不改，继续走旧语义 |
+| `QuestionRunner.tsx` | `isCorrect=false + needsSelfAssessment=true` 仍进入自评视图；同步自评题在请求成功前不得清空本地答案/草稿，接口失败时保留当前题和作答、显示可重试错误，不得静默前进 |
+| `api.ts` | 只新增专项会话完成端点封装；自评/判题请求字段不新增 |
 
-## 6. 前端改动清单
+“不点默认错”不等于取消强制自评 UI。学生仍在当前题看到参考答案和「我做对了 / 我做错了」；
+只有直接关闭页面、断网离开或未完成自评时，提交态才作为最终错保留下来。
 
-| 文件 | 改动 |
-|---|---|
-| `ErrorPracticeRunPage.tsx` | 生成 `sessionUid`；judge 与 self-assess 均透传 `sessionUid`（+ title/questionCount/questionOrder/plannedQuestionIds）；无 redo 概念，全部走新语义 |
-| `TargetedRunPage.tsx` | 已是带 uid（非 redo）传 sessionUid；**无需改**（本方案不引入 selfAssessId） |
-| `ExamResultPage.tsx` | **不改**（不传 uid，走旧语义） |
-| `QuestionRunner.tsx` / `types.ts` / `api.ts` | **无需改**（不新增字段） |
+## 8. 错误处理与可观测性
 
-## 7. 边界、幂等与竞态
+- 核心结算失败：事务回滚，接口返回 5xx，前端可重试；不存在“提交成功但只结算一半”的中间态。
+- 重复点对/点错：按状态幂等成功，不重复写留痕、错题本或掌握度。
+- 点对与点错冲突：409，不覆盖先到的真实结论。
+- 自评留痕、错题本、掌握度处于同一事务，任一步异常都整体回滚。
+- 事务提交后的埋点和解析生成仍按项目口径 best-effort，失败只 warn。
+- 默认错提交不追加 `question_self_assessments`。
+- 默认错提交不额外触发 `consecutive_failures`；学生明确点「我做错了」后才视为真实自评错。
+- 自评正确时仍可发 `error_book_cleared`，但不发 `error_fix` 积分。
 
-- **重复点对**：条件 UPDATE `WHERE is_correct=0`，第二次 affected=0 → 跳过掌握度/清本/留痕/发分，完全幂等。
-- **点对与点错交替**：点对后 is_correct=1；再点错（带 uid）只追加 incorrect 留痕，不改 is_correct/掌握度/错题本
-  （避免"对→错"再次翻转的复杂度；实际 UI 不会允许已自评题再点）。记录为已知简化。
-- **异步写入顺序**：提交时掌握度 error+1 由 `finishJudge` `void` 异步写；点对 revert 亦异步。
-  理论乱序由 `revertOneError` 的 `GREATEST(error-1,0)` 兜底（不为负）；且"读答案→点按钮"有自然时延，
-  实际乱序概率极低。本期不上队列/锁，作为已知可接受风险。
-- **撤销失败**：掌握度 revert / 清本失败只 warn，不阻断自评；但 is_correct=1 已在 ① 落库，
-  最坏情况是"作答历史对、掌握度没回扣"——偏差可观测、可人工修，不会卡学生。
-- **作答行缺失的降级**：锚点是作答历史行。正常路径下 judge 带 uid 必先写该行（is_correct=0），
-  点对 affected 必为 1。极端情况（judge 时旁路写答案行失败，被 try/catch 吞掉）会导致点对 affected=0，
-  此时按幂等分支处理——不回扣掌握度、不清本、不写留痕（点对不完整）。属"异常叠加异常"的低概率场景，
-  可观测，接受；不为此引入跨表事务。
-- **redo**：不带 uid，走旧语义，不受影响。
-- **exam**：`source='exam'`、不带 uid，走旧语义（交卷后结果页自评，中性待评）。
-- **error_practice 无 sessionUid 的老客户端**：不带 uid → 旧语义；新客户端走新语义。
+## 9. 测试计划
 
-## 8. 测试计划（回归钉子）
+### 9.1 后端事务与状态机
 
-后端（vitest）：
-1. `judgeQuestion` 路由 1c + `source='targeted'` + 带 sessionUid：`isCorrect=false`、调 `writeErrorBookOrReuse`、
-   **不调** `selfAssessRepo.create`、`needsSelfAssessment=true`。
-2. `source='exam'`：`isCorrect=null`、不写错题本、不写留痕（不变）。
-3. `selfAssess('correct', 带 uid)`：先条件 UPDATE 作答历史；affected=1 → `revertErrorToCorrect` 一次 +
-   清错题本 + `selfAssessRepo.create('correct')` + **不发订正分**。
-4. `selfAssess('correct', 带 uid)` 且 affected=0（重复）：`revertErrorToCorrect`/create/发分均**不调用**，返回成功。
-5. `selfAssess('incorrect', 带 uid)`：只 `selfAssessRepo.create('incorrect')`；不写错题本、不记掌握度、不改 is_correct。
-6. 无 sessionUid（exam/redo/老客户端）：correct/incorrect 行为与变更前逐字一致。
-7. `revertOneError` SQL：correct+1、error=GREATEST(error−1,0)、字段引用更新后值、同公式。
-8. revert 失败只 warn，自评仍返回成功。
-9. `markCorrectFromDefault` 返回 affectedRows（0/1）。
+1. 首次提交：同一事务写入会话、作答行 `0/default_incorrect`、错题本、掌握度 `error+1`；不写自评留痕。
+2. 强制让错题本或掌握度写入抛错：事务回滚，作答行、会话、错题本、掌握度均不新增。
+3. 重复提交相同答案：幂等返回，不重复 `error+1`、不新增错题本。
+4. 同一作答行提交不同答案：409。
+5. `default_incorrect + correct`：一次写入 correct 留痕、清错题本、回退掌握度、更新 `1/confirmed_correct`，不发订正分。
+6. 重复 `correct`：不重复留痕、清本、掌握度或事件。
+7. `default_incorrect + incorrect`：只写 incorrect 留痕并更新 `confirmed_incorrect`，不重复写错题本/掌握度。
+8. 重复 `incorrect`：不重复留痕。
+9. `confirmed_correct + incorrect` 与 `confirmed_incorrect + correct`：均 409，数据不变。
+10. 作答行缺失、uid 不存在、uid 属于别的学生、uid 同学科/module 冲突：按 409/404 处理，不能静默成功或串写。
+11. `revertOneError`：用如 5 对 3 错的历史计数验证最终 score 为 `6/8`，不是重复增量后的错误值。
+12. 迁移前 `self_assess_state=NULL` 的专项作答行：按旧语义完成一次真实自评后补状态。
 
-前端：
-10. `ErrorPracticeRunPage`：judge 与 self-assess 均带 sessionUid（title='错题练习'）。
-11. `TargetedRunPage` 现有 uid 透传不回归。
+### 9.2 路由与回归
 
-手动验收：
-12. 专项练习做一道证明题 → 不点自评直接离开：作答历史显示"错"、题在错题本。
-13. 重进该题点「我做对了」→ 作答历史变"对"、错题本清除、掌握度未冤枉扣分（error 回退、correct+1）。
-14. 点「我做错了」→ 掌握度 error 只 +1（不重复）、留痕一条 incorrect。
-15. 错题练习做一道主观题 → 练习记录里出现「错题练习」、其自评同样"不点即错"。
+13. 带 uid 的 targeted/error_practice 主观题：`isCorrect=false`、`needsSelfAssessment=true`。
+14. 不带 uid：`isCorrect=null`，行为与变更前一致。
+15. exam：仍为 `isCorrect=null`，不写训练作答历史、不默认错。
+16. redo：不记录、不计分、不进入状态机。
+17. 客观题、AI 判题、无参考答案守卫无回归。
 
-## 9. 文档同步
+### 9.3 前端
 
-- `docs/API接口与数据流设计文档.md` §5.19：补"提交即落错 + 点对覆盖结算 + 不写假留痕"时序。
-- `docs/api/openapi.yaml`：`/training/self-assess` 与 `/training/judge` 说明 `sessionUid` 的新语义与
-  "带 uid 时提交即记错"；本方案不新增请求字段。
-- `docs/ai-core-changelog.md`：新增 2026-11-26 条目（取代早先 A+B 的"自评回写 NULL"描述，二选一保留最终态）。
-- 若架构文档有自评时序图，同步。
+18. `QuestionRunner` 收到 `isCorrect=false + needsSelfAssessment=true` 仍展开自评视图，未表态不放行。
+19. `ErrorPracticeRunPage` judge/self-assess 使用同一 `sessionUid`，标题为「错题练习」。
+20. 专项/错题练习正常完成后调用会话完成端点；提前退出不调用。
+21. 练习记录中错题练习标题正确，完成后不再显示「进行中」。
+22. 自评题提交接口 5xx：留在当前题、保留答案并显示重试；用户重试同一答案后走幂等成功。
 
-## 10. 非目标
+### 9.4 手动验收
 
-- 不改考试主观题自评（保持中性待评）。
-- 不改 redo（保持不记录）。
-- 不改客观题 / AI 判题 / 空答案守卫。
-- 不把掌握度重构成明细表（revert 用 GREATEST 兜底即可）。
-- 不回填历史存量 NULL（只改新提交行为；存量由 A（抽题判定纳入自评表）与 B 已保证不再误判）。
-- 不处理"已自评后再改判"的复杂翻转（UI 不允许，见 §7）。
+23. 专项练习做一道主观题，不点自评直接离开：作答历史为错、题在错题本、掌握度计一次错。
+24. 重新进入同一题点「我做对了」：历史变对、错题本清除、掌握度从该次默认错准确回退。
+25. 点「我做错了」：不重复计错，留痕恰好一条 incorrect。
+26. 快速重复点击、网络重试、并发点对/点错：不产生重复数据或矛盾终态。
+27. 错题练习做一道主观题：新增「错题练习」记录，完成后状态为已完成。
+
+## 10. 文档同步
+
+实施时必须同步：
+
+- `docs/K12智学系统-产品需求文档.md`：明确训练轨即时自评“不表态默认错”；
+- `docs/constraints/ai-core.md`：更新 `self_assess` 默认错与真实自评状态机口径；
+- `docs/API接口与数据流设计文档.md` §4.18、§5.19：更新 judge/self-assess 语义、409 冲突和会话完成端点；
+- `docs/api/openapi.yaml`：同步端点、响应分支、409 错误和 `sessionUid` 行为；
+- `docs/K12智学系统-数据库设计文档.md` 与 `tools/db/schema.sql`：补 `special_answer_records.self_assess_state`；
+- `docs/ai-core-changelog.md`：新增 2026-11-26 最终态条目，取代 A+B 的 NULL 回写描述；
+- 如架构文档或 UX 文档仍写“待评后回填 NULL”，同步修订。
+
+## 11. 非目标
+
+- 不把考试主观题改成默认错。
+- 不把主线课堂练习纳入本状态机。
+- 不修改 redo 的“不记录、不计分”语义。
+- 不修改客观题、AI 判题与无参考答案守卫。
+- 不把掌握度重构成逐题明细表。
+- 不为迁移前数据批量制造默认错或回填 `self_assess_state`。
+- 不支持同一作答行内把已确认的对/错再次翻转；需要重做时创建新会话。
