@@ -1636,6 +1636,7 @@ CREATE TABLE IF NOT EXISTS special_answer_records (
   is_correct      TINYINT(1)  DEFAULT NULL COMMENT 'NULL=在途/未判',
   score           DECIMAL(3,2) DEFAULT NULL,
   method          VARCHAR(20) DEFAULT NULL COMMENT 'exact|ai|self_assess|unanswered|failed',
+  self_assess_state VARCHAR(24) DEFAULT NULL COMMENT 'default_incorrect|confirmed_correct|confirmed_incorrect；NULL=非本设计/旧数据',
   analysis        TEXT,
   judged_at       DATETIME(3) DEFAULT NULL,
   created_at      DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
