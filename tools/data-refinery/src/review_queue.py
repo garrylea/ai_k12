@@ -164,13 +164,18 @@ class ReviewItem:
                 (f for f in self.flags if f.get("suspect_group_order")),
                 None,
             )
-            if flag:
-                suspect = int(flag["suspect_group_order"])
-                suspect_sub = int(flag.get("suspect_sub_no") or 0)
-                if (suspect, suspect_sub) != (self.group_order, self.sub_no):
+            # 旧实现（manual_fix._targets）有 isinstance 守卫：issues.jsonl 可能被手改，
+            # suspect 是字符串时不能 int() 硬转，更不能让整轮校对崩掉 —— 退化成本题目标。
+            raw = flag.get("suspect_group_order") if flag else None
+            if isinstance(raw, int):
+                try:
+                    suspect_sub = int(flag.get("suspect_sub_no") or 0)
+                except (TypeError, ValueError):
+                    suspect_sub = 0
+                if (raw, suspect_sub) != (self.group_order, self.sub_no):
                     seq.append(
                         ReviewTarget(
-                            suspect,
+                            raw,
                             suspect_sub,
                             "这一题的正文里混进了下一题，请只保留本题自己的内容",
                         )

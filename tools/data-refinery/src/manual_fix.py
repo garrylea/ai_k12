@@ -1064,6 +1064,7 @@ def _ask_repair_truncated(issue: dict, paper_md_dir: Path,
     if verdict == "keep":
         # 修复后没问题：按卷+题号关掉该题所有 flag，一个字段都不写库
         mark_issue(issue["source"], issue["group_order"], "resolved",
+                   sub_no=issue.get("sub_no"),
                    note="人工校对：保留修复后版本", verdict="no_change",
                    content_sig=issue.get("content_sig"))
         c.ok(f"第 {_issue_no(issue)} 题已标记「确认无问题」，题库未改动")
@@ -1359,6 +1360,7 @@ def _ask_slots(issue: dict, paper_md_dir: Path) -> list[dict]:
             return [base]
         # 三段都没改：用户看过原卷后确认无事，按「确认无问题」收口
         mark_issue(issue["source"], issue["group_order"], "resolved",
+                   sub_no=issue.get("sub_no"),
                    note="人工确认无问题，未改动",
                    verdict="no_change", content_sig=issue.get("content_sig"))
         c.ok(f"第 {_issue_no(issue)} 题已标记「确认无问题」，题库未改动")
@@ -1421,6 +1423,7 @@ def _ask(issue: dict, paper_md_dir: Path,
         verdict = _ask_verdict(issue)
         if verdict == "ok":
             mark_issue(issue["source"], issue["group_order"], "resolved",
+                       sub_no=issue.get("sub_no"),
                        note="人工确认无问题，未改动",
                        verdict="no_change",
                        content_sig=issue.get("content_sig"))

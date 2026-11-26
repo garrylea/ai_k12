@@ -48,3 +48,24 @@ def test_recorded_flags_does_not_downgrade_resolved(tmp_path, monkeypatch):
     review_queue.recorded_flags(item, "fixes/卷A.jsonl", "t0")
     saved = [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines()]
     assert [r["status"] for r in saved] == ["recorded", "resolved"]
+
+
+def test_targets_puts_suspect_before_self():
+    rows = [
+        {"source": "卷A", "group_order": 19, "sub_no": 0, "kind": "missing",
+         "status": "pending", "suspect_group_order": 18, "suspect_sub_no": 0},
+    ]
+    item = review_queue.group_items(rows)[0]
+    got = [(t.group_order, t.sub_no) for t in item.targets()]
+    assert got == [(18, 0), (19, 0)], "先问把下一题吞进来的那道，再问本题"
+    assert item.note() == "题目缺失或被吞，请按原卷补录"
+
+
+def test_targets_ignores_non_integer_suspect():
+    """旧实现有 isinstance 守卫；手改过的 issues 里 suspect 可能是字符串，不能崩。"""
+    rows = [
+        {"source": "卷A", "group_order": 19, "sub_no": 0, "kind": "missing",
+         "status": "pending", "suspect_group_order": "18"},
+    ]
+    item = review_queue.group_items(rows)[0]
+    assert [(t.group_order, t.sub_no) for t in item.targets()] == [(19, 0)]
