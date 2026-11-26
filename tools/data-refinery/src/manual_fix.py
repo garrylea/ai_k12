@@ -900,89 +900,57 @@ def _ask_image_mode(count: int) -> str:
         c.warn("请输入 1、2、3 或 4")
 
 
-def _natural_key(p: Path):
-    """文件名按数字自然序：crop_2.png < crop_10.png（裁剪软件常这样导出）。"""
-    return [int(s) if s.isdigit() else s.lower() for s in re.split(r"(\d+)", p.name)]
-
-
-def _confirm_image_order(c, paths: list[Path]) -> list[Path] | None:
-    """列出图片清单让用户确认顺序；回车确认，或输入 3,1,2 重排，s 取消。"""
-    c.write(f"  识别到 {len(paths)} 张（按文件名顺序）：")
-    for i, p in enumerate(paths, 1):
-        c.write(f"    图{i}  {p.name}")
-    while True:
-        c.prompt("顺序对吗？回车确认 / 输入新顺序如 3,1,2 / s 取消 › ")
-        raw = (_read_line() or "").strip().lower()
-        if raw in ("", "y", "ok"):
-            return paths
-        if raw == "s":
-            return None
-        idx = [int(x) for x in re.split(r"[,，\s]+", raw) if x.isdigit()]
-        if sorted(idx) == list(range(1, len(paths) + 1)):
-            return [paths[i - 1] for i in idx]
-        c.warn(f"请输入 1..{len(paths)} 的一个排列，或回车确认")
-
-
 def _ask_new_images(paper_md_dir: Path) -> list[str]:
-    """配图：图片路径 / @目录（按文件名顺序批量导入）/ 回车剪贴板 → 原样拷进 images/。"""
+    """配图：图片路径（多个用逗号，按书写顺序即图1、图2…）/ 回车剪贴板 → 原样拷进 images/。
+
+    剪贴板取到的 png 落在临时目录里，它必须活到「拷图」之后才删：
+    临时目录只包住取图那一步的话，用户一回车就只剩「拷图失败」（2026-11-26）。
+    """
     c = console()
-    while True:
-        c.prompt("图片路径（@目录=批量导入；多个用逗号；回车读剪贴板；s 取消）› ")
-        raw = _read_line()
-        if raw is None:
-            return []
-        raw = raw.strip()
-        if raw.lower() == "s":
-            return []
-        paths: list[Path] = []
-        if not raw:
-            with tempfile.TemporaryDirectory(prefix="refinery-clip-") as tmp:
-                clip = _clipboard_to_path(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="refinery-clip-") as clip_dir:
+        while True:
+            c.prompt("图片路径（多个用逗号；回车读剪贴板；s 取消）› ")
+            raw = _read_line()
+            if raw is None:
+                return []
+            raw = raw.strip()
+            if raw.lower() == "s":
+                return []
+            paths: list[Path] = []
+            if not raw:
+                clip = _clipboard_to_path(Path(clip_dir))
                 if clip is not None and clip.suffix.lower() in IMAGE_SUFFIXES:
                     paths = [clip]
                 elif clip is not None:
                     c.warn("剪贴板里不是图片")
                     continue
-        else:
-            for part in re.split(r"[,，]", raw):
-                token = part.strip().strip("'\"")
-                if token.startswith("@"):
-                    d = Path(token[1:]).expanduser()
-                    if not d.is_absolute():
-                        d = Path.cwd() / d
-                    if not d.is_dir():
-                        c.warn(f"找不到目录：{d}")
+            else:
+                for part in re.split(r"[,，]", raw):
+                    token = part.strip().strip("'\"")
+                    if not token:
+                        continue        # 末尾/连续逗号：空片段不等于当前目录
+                    p = Path(token).expanduser()
+                    if not p.is_absolute():
+                        p = Path.cwd() / p
+                    if not p.exists():
+                        c.warn(f"找不到文件：{p}")
                         continue
-                    imgs = sorted((p for p in d.iterdir()
-                                   if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES),
-                                  key=_natural_key)
-                    if not imgs:
-                        c.warn(f"目录里没有图片：{d}")
+                    if p.suffix.lower() not in IMAGE_SUFFIXES:
+                        c.warn(f"不是图片：{p.name}")
                         continue
-                    paths.extend(imgs)
-                    continue
-                p = Path(token).expanduser()
-                if not p.is_absolute():
-                    p = Path.cwd() / p
-                if not p.exists():
-                    c.warn(f"找不到文件：{p}")
-                    continue
-                if p.suffix.lower() not in IMAGE_SUFFIXES:
-                    c.warn(f"不是图片：{p.name}")
-                    continue
-                paths.append(p)
-        if not paths:
-            c.warn("没有收到图片，请重新给路径，或按 s 取消本题")
-            continue
-        confirmed = _confirm_image_order(c, paths)
-        if not confirmed:
-            continue
-        refs = _copy_new_images(confirmed, paper_md_dir)
-        if refs:
-            c.ok(f"已拷入 {len(refs)} 张图：" + "、".join(r.split("/")[-1] for r in refs))
-            c.info("[图1]=第1张、[图2]=第2张…（正文里按这个写占位符）")
-            return refs
-        c.warn("拷图失败，请重新给路径，或按 s 取消本题")
+                    paths.append(p)
+            if not paths:
+                c.warn("没有收到图片，请重新给路径，或按 s 取消本题")
+                continue
+            refs = _copy_new_images(paths, paper_md_dir)
+            if refs:
+                c.ok(f"已拷入 {len(refs)} 张图" + (
+                    "" if len(refs) == 1
+                    else "：" + "、".join(r.split("/")[-1] for r in refs)))
+                if len(refs) > 1:
+                    c.info("[图1]=第1张、[图2]=第2张…（正文里按这个写占位符）")
+                return refs
+            c.warn("拷图失败，请重新给路径，或按 s 取消本题")
 
 
 def _collect_multi_image_flow(paper_md_dir: Path, out_refs: list[str]) -> str | None:

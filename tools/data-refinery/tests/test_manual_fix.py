@@ -1160,72 +1160,52 @@ def test_ask_image_mode_zero_refs_not_called_when_no_orig_images(monkeypatch):
     assert manual_fix._ask_image_mode(2) == "ocr"
 
 
-def test_natural_key_digits():
-    names = ["crop_10.png", "crop_2.png", "crop_1.png"]
-    got = sorted((Path(n) for n in names), key=manual_fix._natural_key)
-    assert [p.name for p in got] == ["crop_1.png", "crop_2.png", "crop_10.png"]
-
-
-def test_confirm_image_order_accepts_reorder(monkeypatch):
+def test_ask_new_images_multiple_paths_keep_typed_order(tmp_path, monkeypatch):
+    """逗号分隔多个路径：书写顺序就是图1、图2（2026-11-26 起不再有排序确认）。"""
     import io
-    paths = [Path("a.png"), Path("b.png"), Path("c.png")]
-    monkeypatch.setattr("sys.stdin", io.StringIO("3,1,2\n"))
-    got = manual_fix._confirm_image_order(manual_fix.console(), paths)
-    assert [p.name for p in got] == ["c.png", "a.png", "b.png"]
+    import hashlib
+    a, b, c = (tmp_path / n for n in ("a.png", "b.png", "c.png"))
+    for img in (a, b, c):
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + img.name.encode())
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{c},{a},{b}\n"))
+    refs = manual_fix._ask_new_images(tmp_path / "paper")
+    assert len(refs) == 3
+    want = "manual_" + hashlib.sha1(c.read_bytes()).hexdigest()[:16] + ".png"
+    assert refs[0].endswith(want)
 
 
-def test_confirm_image_order_enter_keeps(monkeypatch):
+def test_ask_new_images_clipboard_one_enter(tmp_path, monkeypatch, capsys):
+    """剪贴板取到的图落在临时目录里：回车之后它必须还在，且一次回车就拷完。"""
     import io
-    paths = [Path("a.png"), Path("b.png")]
+
+    def fake_clip(tmp_dir):
+        p = Path(tmp_dir) / "clipboard.png"
+        p.write_bytes(b"\x89PNG\r\n\x1a\nclip")
+        return p
+
+    monkeypatch.setattr(manual_fix, "_clipboard_to_path", fake_clip)
     monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
-    assert manual_fix._confirm_image_order(manual_fix.console(), paths) == paths
-
-
-def test_confirm_image_order_rejects_bad_permutation(monkeypatch):
-    import io
-    paths = [Path("a.png"), Path("b.png")]
-    # 第一次非法，第二次合法
-    monkeypatch.setattr("sys.stdin", io.StringIO("1,1\n2,1\n"))
-    got = manual_fix._confirm_image_order(manual_fix.console(), paths)
-    assert [p.name for p in got] == ["b.png", "a.png"]
-
-
-def test_ask_new_images_directory_natural_order(tmp_path, monkeypatch):
-    import io
-    src = tmp_path / "crop"
-    src.mkdir()
-    for n in ("crop_10.png", "crop_2.png", "crop_1.png", "notes.txt"):
-        (src / n).write_bytes(b"\x89PNG\r\n\x1a\n" + n.encode())
-    monkeypatch.setattr("sys.stdin", io.StringIO(f"@{src}\n\n"))  # 目录 + 回车确认顺序
     refs = manual_fix._ask_new_images(tmp_path / "paper")
-    assert len(refs) == 3
-    # 顺序按文件名自然序：crop_1 → crop_2 → crop_10
-    stem_order = [r.split("/")[-1] for r in refs]
-    assert len(set(stem_order)) == 3  # 三张不同的图
-    # 占位符提示出现
-    assert all(r.startswith("images/manual_") for r in refs)
+    assert len(refs) == 1
+    assert (tmp_path / "paper" / refs[0]).read_bytes().endswith(b"clip")
+    assert "顺序对吗" not in capsys.readouterr().out
 
 
-def test_ask_new_images_directory_reorder(tmp_path, monkeypatch):
+def test_ask_new_images_trailing_comma_ignored(tmp_path, monkeypatch, capsys):
+    """`a.png,` 末尾的空片段不能被当成当前目录（会误报「不是图片：data-refinery」）。"""
     import io
-    src = tmp_path / "crop"
-    src.mkdir()
-    for n in ("a.png", "b.png", "c.png"):
-        (src / n).write_bytes(b"\x89PNG\r\n\x1a\n" + n.encode())
-    monkeypatch.setattr("sys.stdin", io.StringIO(f"@{src}\n3,1,2\n"))
+    a = tmp_path / "a.png"
+    a.write_bytes(b"\x89PNG\r\n\x1a\na")
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{a},\n"))
     refs = manual_fix._ask_new_images(tmp_path / "paper")
-    assert len(refs) == 3
-    # c 排第一 → 它的 sha1 文件名应是 refs[0]
-    c_hash = "manual_" + __import__("hashlib").sha1((src / "c.png").read_bytes()).hexdigest()[:16] + ".png"
-    assert c_hash in refs[0]
+    assert len(refs) == 1
+    assert "不是图片" not in capsys.readouterr().out
 
 
-def test_ask_new_images_no_images_reprompts(tmp_path, monkeypatch):
+def test_ask_new_images_missing_file_reprompts(tmp_path, monkeypatch):
     import io
-    src = tmp_path / "empty"
-    src.mkdir()
-    (src / "notes.txt").write_text("x")
-    monkeypatch.setattr("sys.stdin", io.StringIO(f"@{src}\ns\n"))  # 空目录重问，s 取消
+    missing = tmp_path / "nope.png"
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{missing}\ns\n"))
     assert manual_fix._ask_new_images(tmp_path / "paper") == []
 
 
@@ -1242,8 +1222,7 @@ def test_content_issue_with_placeholder_triggers_image_attach(tmp_path, monkeypa
         "1\n"
         "19. 二次函数图象如图所示 [图1] 求解析式\nEOF\n"
         "1\n"
-        f"@{img_dir}\n"
-        "\n"
+        f"{img_dir / 'crop_1.png'}\n"
         "\n"
     ))
     res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
