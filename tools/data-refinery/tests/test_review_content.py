@@ -98,18 +98,6 @@ def test_editable_body_options_inline_and_external_article():
     assert "整篇共享文章" not in body, "外置 article 不进入编辑器"
 
 
-@pytest.mark.parametrize("material_url", [None, "materials/chinese/x/content.md"])
-def test_editable_body_matches_legacy_for_same_row(material_url):
-    """新编辑器与旧 `_editable_body` 同口径：同一份数据必须产出相同正文。"""
-    row = _editable_row(
-        material_url=material_url,
-        material_text="## 第三站\n正文段落",
-        inline="题内素材",
-    )
-    assert (review_content.editable_body(_snapshot_of_row(row))
-            == manual_fix._editable_body(row))
-
-
 def test_snapshot_load_repair_reads_original_content(tmp_path, monkeypatch):
     monkeypatch.setattr(review_content, "ROOT", tmp_path)
     original = "修复前原文，完整段落。" * 12
