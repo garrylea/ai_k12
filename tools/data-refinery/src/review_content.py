@@ -6,20 +6,13 @@
 旧流程不受影响。
 """
 
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from review_editor import ROOT
+from review_queue import _read_jsonl
 from subject_codes import subject_code_for_path
-
-
-def _read_jsonl(path: Path) -> list[dict]:
-    # Task 3 会改为 from review_queue import；先留在本模块，避免 import 循环。
-    if not path.exists():
-        return []
-    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
 _STEM_PREFIX_RE = re.compile(r"^\s*\d{1,2}\s*[.．、:：]\s*")

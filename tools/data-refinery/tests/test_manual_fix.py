@@ -7,6 +7,17 @@ import manual_fix
 import review_editor
 
 
+def _patch_issues(monkeypatch, path):
+    """队列层已搬到 review_queue：两个模块的名字都要指到同一个临时文件。
+
+    `manual_fix` 用具名 import 拿的是快照，只改 review_queue 时旧模块还看老路径；
+    只改 manual_fix 时 `mark_issue/recorded_flags`（在 review_queue）又会写真实文件。
+    """
+    import manual_fix, review_queue
+    monkeypatch.setattr(review_queue, "ISSUES_FILE", path)
+    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+
+
 def _write(path, rows):
     path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
                     encoding="utf-8")
@@ -26,7 +37,7 @@ def test_pending_issues_filters_by_exact_sources(tmp_path, monkeypatch):
     ]
     path = tmp_path / "issues.jsonl"
     _write(path, issues)
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
 
     got = manual_fix.pending_issues({"物理-卷A-试卷"})
     assert [i["group_order"] for i in got] == [7], "只取指定卷、且只要 pending"
@@ -40,7 +51,7 @@ def test_pending_issues_filters_by_substring(tmp_path, monkeypatch):
         {"source": "物理-海淀·一零一中学-（上）期中-试卷", "group_order": 28,
          "kind": "missing", "status": "pending"},
     ])
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
 
     assert [i["group_order"] for i in manual_fix.pending_issues(file="人大附中")] == [7]
 
@@ -72,7 +83,7 @@ def _prep(tmp_path, monkeypatch, order=28):
              "excerpt": "", "pdf": None, "md": str(md_dir / "卷A.md"), "status": "pending"}
     issues_file = tmp_path / "issues.jsonl"
     issues_file.write_text(_json.dumps(issue, ensure_ascii=False) + "\n", encoding="utf-8")
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", issues_file)
+    _patch_issues(monkeypatch, issues_file)
     return issue, issues_file
 
 
@@ -188,7 +199,7 @@ def _prep_n(tmp_path, monkeypatch, n=1):
     path = tmp_path / "issues.jsonl"
     path.write_text("".join(_json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
                     encoding="utf-8")
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
     return path
 
 
@@ -265,7 +276,7 @@ def test_review_skips_issue_without_md(tmp_path, monkeypatch):
         "source": "物理-卷A-试卷", "rel_path": "物理/初中/first/2024/卷A",
         "group_order": 5, "kind": "missing", "reasons": [], "md": None,
         "status": "pending"}, ensure_ascii=False) + "\n", encoding="utf-8")
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
 
     res = manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
     assert res["skipped"] == 1 and res["fixed"] == 0
@@ -332,7 +343,7 @@ def _prep_pair(tmp_path, monkeypatch):
              "pdf": None, "md": str(md_dir / "卷A.md"), "status": "pending"}
     path = tmp_path / "issues.jsonl"
     path.write_text(_json.dumps(issue, ensure_ascii=False) + "\n", encoding="utf-8")
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
     return issue, path
 
 
@@ -431,7 +442,7 @@ def test_mark_issue_moves_all_kinds_of_same_question(tmp_path, monkeypatch):
         {"source": "卷A", "group_order": 18, "kind": "punct_stem", "status": "recorded"},
         {"source": "卷A", "group_order": 19, "kind": "missing", "status": "pending"},
     ]), encoding="utf-8")
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
 
     changed = manual_fix.mark_issue("卷A", 18, "resolved", note="已写入题库",
                                     fix_file="/tmp/x.jsonl")
@@ -450,7 +461,7 @@ def test_mark_issue_reopen_clears_resolved_marks(tmp_path, monkeypatch):
                                  "status": "resolved", "resolved_at": "2026-10-31T13:00:00",
                                  "fix_file": "/old.jsonl"}, ensure_ascii=False) + "\n",
                     encoding="utf-8")
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
 
     manual_fix.mark_issue("卷A", 7, "pending", note="补录内容被拒，请重新补录")
 
@@ -750,7 +761,7 @@ def _prep_content(tmp_path, monkeypatch, *, kind="incomplete_content", order=27,
              "content_sig": content_sig, "suspect_group_order": suspect}
     path = tmp_path / "issues.jsonl"
     path.write_text(_json.dumps(issue, ensure_ascii=False) + "\n", encoding="utf-8")
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
     return issue, path
 
 
@@ -1571,7 +1582,7 @@ def _prep_material_only(tmp_path, monkeypatch, *, with_url=True, post_material=N
              "pdf": None, "md": str(md), "status": "pending"}
     path = tmp_path / "issues.jsonl"
     path.write_text(_json.dumps(issue, ensure_ascii=False) + "\n", encoding="utf-8")
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
     return issue, md.parent
 
 
@@ -1691,7 +1702,7 @@ def _prep_missing_chinese(tmp_path, monkeypatch, *, published_url=None):
              "pdf": None, "md": str(md), "status": "pending"}
     path = tmp_path / "issues.jsonl"
     path.write_text(_json.dumps(issue, ensure_ascii=False) + "\n", encoding="utf-8")
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
     return issue, md.parent
 
 
@@ -2087,7 +2098,7 @@ def _prep_repair(tmp_path, monkeypatch, *, with_original=True, swap=False):
         rows.reverse()
     path = tmp_path / "issues.jsonl"
     _write(path, rows)
-    monkeypatch.setattr(manual_fix, "ISSUES_FILE", path)
+    _patch_issues(monkeypatch, path)
     return path
 
 

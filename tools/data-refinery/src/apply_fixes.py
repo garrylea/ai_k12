@@ -29,7 +29,7 @@ from checkpoint import RefineryCheckpoint  # noqa: E402
 from config import RefineryConfig  # noqa: E402
 from db_loader import content_hash  # noqa: E402
 from image_rewrite import MissingImageError, rewrite_fields  # noqa: E402
-from manual_fix import mark_issue  # noqa: E402
+from review_queue import mark_issue  # noqa: E402
 from scope_filter import match_keyword  # noqa: E402
 from subject_codes import subject_code_for_parts  # noqa: E402
 
@@ -443,7 +443,7 @@ def _sync_applied_hashes(hash_map: dict, output_dir: Path,
 
     按 source 过滤：卷内 key 后不同卷的同一段内容各有 URL，不能串着改。
     """
-    from manual_fix import _read_jsonl, _write_jsonl
+    from review_queue import _read_jsonl, _write_jsonl
 
     for f in (output_dir / "manual_fixes").glob("*.jsonl"):
         rows = _read_jsonl(f)
@@ -468,7 +468,7 @@ def _sync_extracted_article(rec: dict, new_body: str, old_body: str | None,
     新正文后，publish 只会有一组、一个 URL（2026-11-22 Q21 实测）。
     """
     from chinese_material_doc import same_article
-    from manual_fix import _read_jsonl, _write_jsonl
+    from review_queue import _read_jsonl, _write_jsonl
 
     rel, src = rec.get("rel_path"), rec.get("source")
     if not rel or not src:
@@ -501,7 +501,7 @@ def _sync_extracted_article_groups(rec: dict, new_body: str,
     挪到 ``_post_material_text``（题后素材通道），publish 会再注回 material_text。
     """
     from chinese_material_doc import same_article
-    from manual_fix import _read_jsonl, _write_jsonl
+    from review_queue import _read_jsonl, _write_jsonl
 
     rel, src = rec.get("rel_path"), rec.get("source")
     if not rel or not src:
@@ -612,7 +612,7 @@ def _correct_article_doc(cur, rec, material_text: str, old_url: str,
     """
     from chinese_material_doc import write_material_doc
     from image_rewrite import _resolve_src
-    from manual_fix import _read_jsonl, _write_jsonl
+    from review_queue import _read_jsonl, _write_jsonl
 
     assets_dir = output_dir / "assets"
     md_images_dir = output_dir / "md" / Path(rec.get("rel_path", ""))

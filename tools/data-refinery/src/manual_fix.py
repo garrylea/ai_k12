@@ -28,7 +28,6 @@
 
 import getpass
 import hashlib
-import json
 import re
 import shutil
 import sys
@@ -78,84 +77,17 @@ from review_editor import (  # noqa: F401
     looks_like_ui_echo,
     looks_like_wrapped_copy,
 )
-
-ISSUES_FILE = ROOT / "output" / "recognition_issues.jsonl"
-FIXES_DIR = ROOT / "output" / "manual_fixes"
-
-
-_REASON_TEXT = {
-    "missing_stem": "题号缺失",
-    "md_has_no_such_stem": "原 Markdown 里找不到该题号",
-    "md_uses_punct_separator": "原 Markdown 用的是顿号题号（如「18、」）",
-    "prev_has_two_option_blocks": "上一题里混入了两组选项",
-    "prev_has_second_subq_series": "上一题里出现了第二组小问",
-    "next_starts_with_subq_no_stem": "下一题以 (1) 开头却没有题干",
-    "content_looks_like_page_chrome": "这行是卷首页脚/署名，不是题目",
-    "subq_starts_at_2": "小问从 (2) 开始，缺了 (1)",
-    "empty_stem": "题干是空的（正文里没有有效文字）",
-    "llm_marked_incomplete": "标注时判定题干不完整",
-    "flagged_needs_review": "入库时被标为待复核（内容不完整）",
-    "answer_empty": "题库里这道题的答案为空",
-}
-
-
-def humanize_reasons(reasons: list[str]) -> list[str]:
-    """把扫描器的机器标记翻成人话（认不出的原样保留）。"""
-    out: list[str] = []
-    for reason in reasons or []:
-        if reason in _REASON_TEXT:
-            out.append(_REASON_TEXT[reason])
-            continue
-        m = re.match(r"options_(\d+)of(\d+)", reason)
-        if m:
-            out.append(f"选项只有 {m.group(1)} 个（应为 {m.group(2)} 个，可能 PDF 转换丢失）")
-            continue
-        m = re.match(r"prev_len_(\d+)_vs_median_(\d+)", reason)
-        if m:
-            out.append(f"上一题 {m.group(1)} 字（全卷中位 {m.group(2)} 字）")
-            continue
-        m = re.match(r"prev_repair_shrank_(\d+)_to_(\d+)", reason)
-        if m:
-            out.append(f"上一题被自动修复砍短（{m.group(1)}→{m.group(2)} 字）")
-            continue
-        m = re.match(r"repair_shrank_(\d+)_to_(\d+)", reason)
-        if m:
-            out.append(f"自动修复把内容砍短（{m.group(1)}→{m.group(2)} 字）")
-            continue
-        m = re.match(r"md_stem_appears_(\d+)x", reason)
-        if m:
-            out.append(f"原 Markdown 里该题号出现 {m.group(1)} 次")
-            continue
-        m = re.match(r"body_contains_stem_(\d+)$", reason)
-        if m:
-            out.append(f"本题正文里出现了第 {m.group(1)} 题的题号（下一题可能被吞进来了）")
-            continue
-        m = re.match(r"body_belongs_to_stem_(\d+)$", reason)
-        if m:
-            out.append(f"这段正文在原 Markdown 里属于第 {m.group(1)} 题（本题可能装错了内容）")
-            continue
-        m = re.match(r"type_outlier_(\w+?)_(\d+)of(\d+)$", reason)
-        if m:
-            name = {"choice": "选择题", "short_answer": "简答题",
-                    "fill_blank": "填空题", "calculation": "计算题"}.get(m.group(1), m.group(1))
-            out.append(f"同一大题 {m.group(3)} 题里有 {m.group(2)} 题是{name}，本题不是"
-                       "（选择题丢选项就会这样）")
-            continue
-        out.append(reason)
-    return out
-
-
-def _read_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
-
-
-def _write_jsonl(path: Path, rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
-                    encoding="utf-8")
-
+from review_queue import (  # noqa: F401
+    CONTENT_KINDS,
+    FIXES_DIR,
+    ISSUES_FILE,
+    KIND_TEXT,
+    _read_jsonl,
+    _write_jsonl,
+    humanize_reasons,
+    mark_issue,
+    pending_issues,
+)
 
 def _confirm_text(text: str, label: str = "题干") -> tuple[str, str]:
     """录入后必须显式选号确认；返回 (动作, 正文)，动作 ∈ ok / redo / clear / skip。
@@ -531,24 +463,9 @@ def _collect_content(paper_md_dir: Path, *, allow_images: bool = True,
         return text
 
 
-_KIND_TEXT = {
-    "missing": "题号缺失",
-    "punct_stem": "顿号题号未识别",
-    "repair_truncated": "自动修复砍短了内容",
-    "junk_question": "卷首页脚被当成题目",
-    "incomplete_content": "内容不完整",
-    "merged_content": "前后题可能被合并",
-    "type_mismatch": "题型与同大题不一致",
-    "options_incomplete": "题不完整（选项缺失）",
-    "answer_missing": "答案缺失",
-    "manual_override": "主动重录",
-}
-
-# 内容层问题：先问「你看来有没有问题」，确认没问题就只落结论、不写库
-# repair_truncated 也在此列（2026-11-23）：它走自己的「双版本校对」分支，
-# 绝不再按「缺失/被吞」直接强制整题重录。
-_CONTENT_KINDS = ("incomplete_content", "merged_content", "type_mismatch",
-                  "options_incomplete", "answer_missing", "repair_truncated")
+# 队列层常量已搬到 review_queue（Task 3）；旧名保留给本模块的交互文案用。
+_KIND_TEXT = KIND_TEXT
+_CONTENT_KINDS = CONTENT_KINDS
 
 
 # material_url 的三态哨兵：_KEEP_URL=字段不写（兼容旧记录，apply_fixes 不碰该列），
@@ -1526,58 +1443,6 @@ def _ask(issue: dict, paper_md_dir: Path,
     for i, (no, note) in enumerate(targets, 1):
         records.extend(_ask_one(issue, no, note, paper_md_dir, strategy, i, len(targets)))
     return records
-
-
-def mark_issue(source: str, group_order: int, status: str, *,
-               note: str | None = None, fix_file: str | None = None,
-               kind: str | None = None, **extra) -> int:
-    """把某卷**某题**的所有识别问题切到指定状态；返回改动条数。
-
-    2026-11-23 起不再按 kind 过滤（`kind` 参数仅为兼容旧调用保留、已忽略）：
-    人工对同一道题答一次「没问题」或一次成功写库，就必须关掉该题**全部** flag，
-    否则同一道题会换个 kind 再问一遍（西城模拟一题18 实测）。
-
-    状态语义（2026-10-31 修订）：
-    - pending  ：待人工补录
-    - recorded ：已补录，但还没写进库（等 apply_fixes_cli --apply）
-    - resolved ：已写进库；`verdict=no_change` 是「人工确认无问题、未改动」的收口
-    """
-    rows = _read_jsonl(ISSUES_FILE)
-    changed = 0
-    for rec in rows:
-        if rec.get("source") != source or int(rec.get("group_order", -1)) != int(group_order):
-            continue
-
-        if rec.get("status") == status and note is None:
-            continue
-        rec["status"] = status
-        if status == "resolved":
-            rec["resolved_at"] = datetime.now().isoformat(timespec="seconds")
-        else:
-            rec.pop("resolved_at", None)
-        if fix_file:
-            rec["fix_file"] = fix_file
-        if note is not None:
-            rec["note"] = note
-        for key, value in extra.items():
-            if value is None:
-                continue
-            rec[key] = value
-        changed += 1
-    if changed:
-        _write_jsonl(ISSUES_FILE, rows)
-    return changed
-
-
-def pending_issues(sources: set[str] | None = None,
-                   file: str | None = None) -> list[dict]:
-    """取待处理的识别问题；sources 精确限定卷（import_cli 用），file 是卷名关键词。"""
-    issues = [i for i in _read_jsonl(ISSUES_FILE) if i.get("status") == "pending"]
-    if sources is not None:
-        issues = [i for i in issues if i["source"] in sources]
-    if file:
-        issues = [i for i in issues if match_keyword(i["source"], file)]
-    return issues
 
 
 def _print_table(issues: list[dict]) -> None:
