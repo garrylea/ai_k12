@@ -101,6 +101,33 @@ describe('SpecialAnswerRecordsRepository', () => {
     expect(pool.query).not.toHaveBeenCalled();
   });
 
+  it('findForUpdate 用 FOR UPDATE 且带 session_id+question_id', async () => {
+    const exec = { execute: vi.fn().mockResolvedValue([[], []]) };
+    const repo = new SpecialAnswerRecordsRepository({} as any);
+    await repo.findForUpdate(1, 5034, exec as any);
+    const [sql, params] = exec.execute.mock.calls[0];
+    expect(sql).toContain('FOR UPDATE');
+    expect(params).toEqual([1, 5034]);
+  });
+  it('insertDefaultIncorrect 写 is_correct=0/self_assess_state=default_incorrect', async () => {
+    const exec = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]) };
+    const repo = new SpecialAnswerRecordsRepository({} as any);
+    await repo.insertDefaultIncorrect({ sessionId: 1, questionId: 5034, questionOrder: 1, answerText: 'x', method: 'self_assess' }, exec as any);
+    const [sql, params] = exec.execute.mock.calls[0];
+    expect(sql).toContain('self_assess_state');
+    // 固定常量写进 SQL 字面量（brief 逐字 SQL），不占绑定参数位
+    expect(sql).toContain(", 0, ?, 'default_incorrect', NOW(3))");
+    expect(params).toEqual([1, 5034, 1, 'x', 'self_assess']);
+  });
+  it('transitionState 更新 is_correct/state/judged_at', async () => {
+    const exec = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]) };
+    const repo = new SpecialAnswerRecordsRepository({} as any);
+    await repo.transitionState({ sessionId: 1, questionId: 5034, state: 'confirmed_correct', isCorrect: 1, judgedAt: new Date() }, exec as any);
+    const [sql] = exec.execute.mock.calls[0];
+    expect(sql).toContain('self_assess_state');
+    expect(sql).toContain('is_correct');
+  });
+
   it('listBySession 用 q.content 列名（questions 表无 text 列，防 ER_BAD_FIELD_ERROR 回归）', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([[], []]);

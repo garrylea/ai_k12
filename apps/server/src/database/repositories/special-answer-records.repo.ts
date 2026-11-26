@@ -65,6 +65,38 @@ export class SpecialAnswerRecordsRepository {
     );
   }
 
+  /** 事务内锁定作答行（自评状态机入口）：必传 executor，不回退 pool。 */
+  async findForUpdate(sessionId: number, questionId: number, executor: PoolConnection): Promise<AnswerRow | null> {
+    const [rows] = await executor.execute<RowDataPacket[]>(
+      `SELECT * FROM special_answer_records WHERE session_id = ? AND question_id = ? FOR UPDATE`,
+      [sessionId, questionId],
+    );
+    return (rows[0] as AnswerRow) ?? null;
+  }
+
+  /** 事务内写「默认错」占位行（自评为未判先按错计）：必传 executor，不回退 pool。 */
+  async insertDefaultIncorrect(input: {
+    sessionId: number; questionId: number; questionOrder: number; answerText: string; method: string;
+  }, executor: PoolConnection): Promise<void> {
+    await executor.execute(
+      `INSERT INTO special_answer_records
+       (session_id, question_id, question_order, answer_text, is_correct, method, self_assess_state, judged_at)
+       VALUES (?, ?, ?, ?, 0, ?, 'default_incorrect', NOW(3))`,
+      [input.sessionId, input.questionId, input.questionOrder, input.answerText, input.method],
+    );
+  }
+
+  /** 事务内结算自评状态机到终态：必传 executor，不回退 pool。 */
+  async transitionState(input: {
+    sessionId: number; questionId: number; state: 'confirmed_correct' | 'confirmed_incorrect'; isCorrect: 0 | 1; judgedAt: Date;
+  }, executor: PoolConnection): Promise<void> {
+    await executor.execute(
+      `UPDATE special_answer_records SET is_correct = ?, self_assess_state = ?, judged_at = ?
+       WHERE session_id = ? AND question_id = ?`,
+      [input.isCorrect, input.state, input.judgedAt, input.sessionId, input.questionId],
+    );
+  }
+
   /**
    * 自评回写对错（2026-11-26）：主观题提交时 is_correct=NULL（在途/未判），
    * 自评端点据此把行补成最终结果，避免作答历史永远停在 NULL。
