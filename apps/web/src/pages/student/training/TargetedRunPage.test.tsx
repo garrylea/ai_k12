@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import TargetedRunPage from './TargetedRunPage';
 import {
+  completeSpecialSession,
   completeTrainingSession,
   generateRemediationSet,
   getMyPoints,
@@ -38,6 +39,7 @@ vi.mock('@/services/api', async (importOriginal) => {
     judgeTraining: vi.fn(),
     getTrainingExplanations: vi.fn(),
     completeTrainingSession: vi.fn(),
+    completeSpecialSession: vi.fn(),
     getMyPoints: vi.fn(),
     generateRemediationSet: vi.fn(),
   };
@@ -45,6 +47,7 @@ vi.mock('@/services/api', async (importOriginal) => {
 
 const judgeMock = vi.mocked(judgeTraining);
 const completeMock = vi.mocked(completeTrainingSession);
+const completeSpecialMock = vi.mocked(completeSpecialSession);
 const explanationsMock = vi.mocked(getTrainingExplanations);
 const getMyPointsMock = vi.mocked(getMyPoints);
 const generateMock = vi.mocked(generateRemediationSet);
@@ -141,12 +144,14 @@ describe('TargetedRunPage 完成发分', () => {
   beforeEach(() => {
     judgeMock.mockReset();
     completeMock.mockReset();
+    completeSpecialMock.mockReset();
     explanationsMock.mockReset();
     getMyPointsMock.mockReset();
     generateMock.mockReset();
     judgeMock.mockResolvedValue(JUDGED);
     explanationsMock.mockResolvedValue({ explanations: {} });
     getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
+    completeSpecialMock.mockResolvedValue({ completed: true });
   });
 
   it('正常完成：用交接来的 sessionId 调 complete，并把发分结果 push 到 store', async () => {
@@ -480,5 +485,30 @@ describe('TargetedRunPage 完成发分', () => {
     expect(screen.queryByRole('button', { name: '继续答题' })).toBeNull();
     // 且确实导航离开了答题页
     expect(await screen.findByText('已回到配置页')).toBeTruthy();
+  });
+
+  /**
+   * Task 10（2026-11-26）：专项会话完成端点让「只判了没自评完」的会话也能收尾。
+   * 用与 judge 相同的 sessionUid；redo 不建会话，故不得调用。
+   */
+  it('完成时调 completeSpecialSession，且用的是判题那条会话的 uid', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+
+    await answerOnlyQuestion();
+
+    await waitFor(() => expect(completeSpecialMock).toHaveBeenCalledTimes(1));
+    const uid = (judgeMock.mock.calls[0][0] as Record<string, unknown>).sessionUid;
+    expect(completeSpecialMock).toHaveBeenCalledWith(uid);
+  });
+
+  it('redo 模式不调 completeSpecialSession（不建专项会话）', async () => {
+    sessionStorage.setItem(KEY, JSON.stringify({
+      sessionId: null, questions: [QUESTION], mode: 'redo', title: '重做：卷 · 第 1 题',
+    }));
+
+    await answerOnlyQuestion();
+
+    expect(completeSpecialMock).not.toHaveBeenCalled();
   });
 });

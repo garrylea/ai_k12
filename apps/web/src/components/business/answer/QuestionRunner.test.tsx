@@ -946,3 +946,80 @@ describe('QuestionRunner 来源行的题号', () => {
     expect(screen.getByText(/试卷第 26 题\(2\)/)).toBeTruthy();
   });
 });
+
+// P1（2026-11-26）：自评题默认错之后，回退改答案再交会让后端结算冲突。
+// 前端两道闸：① 入口拦「已作答的自评题」；② 409 兜底停留当前题、不 advance。
+describe('P1：回退已作答自评题拦截与 409 兜底', () => {
+  const SA_TWO: RunnerQuestion[] = [
+    { n: '1', text: '第一道自评题', type: 'proof' },
+    { n: '2', text: '第二道自评题', type: 'proof' },
+  ];
+  const BLOCK_MSG = '本题已作答，如需重做请重新进入练习';
+
+  it('回退到已作答自评题再提交：不调用 onSubmit，停留当前题并显示提示', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async (): Promise<RunnerJudgeOutcome> => ({
+      isCorrect: null, method: 'self_assess', needsSelfAssessment: true, referenceAnswer: '参考答案',
+    }));
+    render(
+      <QuestionRunner
+        questions={SA_TWO}
+        subjectId={1}
+        draftKeyPrefix="p1-back"
+        variant="embedded"
+        draftDisabled
+        onSubmit={onSubmit}
+        onFinish={() => {}}
+      />,
+    );
+
+    // 第一题提交 → 自评「我做对了」写入 resultsRef → 前进到第二题
+    await user.type(screen.getByRole('textbox'), '第一题答案');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    expect(await screen.findByRole('button', { name: '我做对了' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '我做对了' }));
+    expect(await screen.findByText('第二道自评题')).toBeTruthy();
+
+    // 回退到第一题（resultsRef 已有该题结果），答案已回填 → 再次提交必须被拦下
+    await user.click(screen.getByRole('button', { name: '上一题' }));
+    expect(screen.getByText('第一道自评题')).toBeTruthy();
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('第一题答案');
+    const callsBefore = onSubmit.mock.calls.length;
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(callsBefore);
+    expect(screen.getByText('第一道自评题')).toBeTruthy();
+    expect(screen.getByTestId('submit-blocked')).toHaveTextContent(BLOCK_MSG);
+  });
+
+  it('judge 返回 409：停留当前题、不 advance、显示提示', async () => {
+    const user = userEvent.setup();
+    const onFinish = vi.fn();
+    const onSubmit = vi.fn(async (): Promise<RunnerJudgeOutcome> => {
+      const err = new Error('该题已有不同作答或已确认') as Error & { status: number };
+      err.status = 409;
+      throw err;
+    });
+    render(
+      <QuestionRunner
+        questions={SA_TWO}
+        subjectId={1}
+        draftKeyPrefix="p1-409"
+        variant="embedded"
+        draftDisabled
+        onSubmit={onSubmit}
+        onFinish={onFinish}
+      />,
+    );
+
+    await user.type(screen.getByRole('textbox'), '我的证明');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('submit-blocked')).toHaveTextContent(BLOCK_MSG));
+    // 仍在当前题、没切下一题、没触发收尾（网络/5xx 才走原 failed+advance 逻辑）
+    expect(screen.getByText('第一道自评题')).toBeTruthy();
+    expect(screen.queryByText('第二道自评题')).toBeNull();
+    expect(onFinish).not.toHaveBeenCalled();
+  });
+});

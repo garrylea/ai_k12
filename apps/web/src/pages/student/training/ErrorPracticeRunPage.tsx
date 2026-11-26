@@ -12,6 +12,7 @@ import { Modal } from '@/components/base';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
 import {
   bumpTrainingErrorLevels,
+  completeSpecialSession,
   getTrainingExplanations,
   getTrainingHint,
   getTrainingVariations,
@@ -22,6 +23,7 @@ import {
   type TrainingVariationItem,
 } from '@/services/api';
 import { normalizeOptions } from './normalizeOptions';
+import { newSessionUid } from '@/utils/sessionUid';
 import { usePointsFeedback } from './points-feedback';
 import { parseSubjectId, subjectName } from '@/constants';
 import { PrintIconButton } from '@/components/business/print/PrintIconButton';
@@ -37,6 +39,8 @@ export default function ErrorPracticeRunPage() {
   const [searchParams] = useSearchParams();
   const subjectId = parseSubjectId(searchParams.get('subjectId'));
   const subjectQuery = `?subjectId=${subjectId}`;
+  // 作答历史 / 事务结算用的本轮练习会话 uid：判题、自评、收尾必须共用同一个
+  const sessionUid = useMemo(() => newSessionUid(), []);
 
   const [phase, setPhase] = useState<Phase>('answering');
   const [hints, setHints] = useState<Record<string, string>>({});
@@ -107,6 +111,13 @@ export default function ErrorPracticeRunPage() {
     return map;
   }, [entries]);
 
+  // 题号 = 题单里的 1-based 位置（作答历史回放用），不是 errorBookId
+  const orderByN = useMemo(() => {
+    const map = new Map<string, number>();
+    (entries ?? []).forEach((e, i) => map.set(String(e.errorBookId), i + 1));
+    return map;
+  }, [entries]);
+
   const questions: RunnerQuestion[] = useMemo(
     () =>
       (entries ?? []).map((e) => ({
@@ -132,16 +143,21 @@ export default function ErrorPracticeRunPage() {
         throw new Error('该题未入库，无法判题');
       }
       // 发分是后端的事，这里只读响应；答对但本无未清错题（not_cleared）等 0 分由决策层静默
+      // 带 sessionUid 走事务结算：主观题默认错并写作答历史，供自评确认时一次性落定。
       const res = await judgeTraining({
         questionId: entry.questionId,
         subjectId,
         studentAnswer: answer,
         source: 'error_practice',
+        sessionUid,
+        title: '错题练习',
+        questionCount: questions.length,
+        questionOrder: orderByN.get(q.n) ?? 1,
       });
       award({ pointsAwarded: res.pointsAwarded, awardReason: res.awardReason, title: '错题订正' });
       return res;
     },
-    [entryByN, award, subjectId],
+    [entryByN, award, subjectId, sessionUid, questions.length, orderByN],
   );
 
   const handleRequestHint = useCallback(
@@ -165,6 +181,10 @@ export default function ErrorPracticeRunPage() {
       // 末题已答完 = 会话结束：立刻解除导航守卫，否则结果页「确认」的 navigate 会被
       // RunExitGuard 拦成「确认离开/继续答题」。守卫只保护「没答完就想走」。
       guardRef.current = false;
+
+      // 专项会话收尾（Task 10）：置 completed_at，让作答历史里的本轮会话有结束状态。
+      // best-effort：失败不阻断结果页（本页发分在判题响应里，不依赖这个端点）。
+      completeSpecialSession(sessionUid).catch(() => {});
 
       // 仍错的题：递增错题级别（答对的由后端 judge 端点清零，failed 不算答错不 bump）
       const stillWrongIds = (entries ?? [])
@@ -226,7 +246,7 @@ export default function ErrorPracticeRunPage() {
 
       setPhase('result');
     },
-    [entries],
+    [entries, sessionUid],
   );
 
   // mount 读取中 / 空题单（正在被踢回列表页）：不渲染内容
@@ -286,6 +306,8 @@ export default function ErrorPracticeRunPage() {
                       subjectId,
                       assessment,
                       source: 'error_practice',
+                      // 与判题同一个会话 uid：自评确认据此回写作答历史的 is_correct
+                      sessionUid,
                     });
                   }}
                   onFinish={handleFinish}

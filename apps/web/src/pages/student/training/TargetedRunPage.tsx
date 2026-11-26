@@ -13,6 +13,7 @@ import { Modal } from '@/components/base';
 import { CelebrationOverlay } from '@/components/business';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
 import {
+  completeSpecialSession,
   getTrainingExplanations,
   getTrainingHint,
   judgeTraining,
@@ -235,6 +236,12 @@ export default function TargetedRunPage() {
     // sessionId 为 null 时 hook 内部直接跳过——不发分、不反馈、不报错。
     completeSession();
 
+    // 专项会话收尾（Task 10）：判题已写 special_answer_records，此处置会话 completed_at。
+    // redo 不建会话故不调；best-effort，不阻断发分与结果页。
+    if (mode !== 'redo') {
+      completeSpecialSession(sessionUid).catch(() => {});
+    }
+
     // 末题判题完成后：收集需要解析的 questionId 批量拉取（后端等 in-flight 生成，60s 兜底）。
     // 解析为题级公开数据，题单条目必来自题库（questionId 非空）。
     const wrongIds: number[] = [];
@@ -263,7 +270,7 @@ export default function TargetedRunPage() {
     // 与错题重做的差异点：专项练习答错已由后端 judge 端点自动入错题本，
     // 收尾无需 bump，直接进结果页。
     setPhase('result');
-  }, [entryByN, questions, completeSession]);
+  }, [entryByN, questions, completeSession, mode, sessionUid]);
 
   const confirmMarkHidden = useCallback(async () => {
     if (markConfirm.questionId == null) return;

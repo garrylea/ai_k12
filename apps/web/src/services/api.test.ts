@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
   cancelBillingOrder,
+  completeSpecialSession,
   confirmBillingOrderPaid,
   createBillingOrder,
   endStudySession,
@@ -71,6 +72,16 @@ function requestInit(fetchMock: ReturnType<typeof vi.fn>, call = 0): RequestInit
 function requestBody(fetchMock: ReturnType<typeof vi.fn>, call = 0): Record<string, unknown> {
   return JSON.parse(requestInit(fetchMock, call).body as string) as Record<string, unknown>;
 }
+
+describe('专项会话完成端点（Task 10）', () => {
+  it('completeSpecialSession：POST /training/special-sessions/:sessionUid/complete', async () => {
+    const fetchMock = stubFetch(200, { code: 0, message: 'ok', data: { completed: true } });
+
+    await expect(completeSpecialSession('uid-abc')).resolves.toEqual({ completed: true });
+    expect(requestUrl(fetchMock)).toBe('/api/training/special-sessions/uid-abc/complete');
+    expect(requestInit(fetchMock).method).toBe('POST');
+  });
+});
 
 describe('fetchApi 错误形状', () => {
   it('业务码非 0 时抛 ApiError，且带上 HTTP status（401 → 1003）', async () => {

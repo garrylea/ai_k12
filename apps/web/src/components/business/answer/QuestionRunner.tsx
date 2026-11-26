@@ -177,6 +177,8 @@ export function QuestionRunner({
   const previewScrollSync = useRef<PreviewScrollSync>({ ratio: 0 });
   // answering：作答中；judging：末题已交，等待后台判题全部完成；self_assess：主观题自评视图
   const [phase, setPhase] = useState<'answering' | 'judging' | 'self_assess'>('answering');
+  // P1（2026-11-26）：自评题已作答 / 判题 409 时的拦截提示；停留当前题，不重发请求、不 advance。
+  const [submitBlocked, setSubmitBlocked] = useState<string | null>(null);
   const [hintState, setHintState] = useState<{ show: boolean; loading: boolean; error: boolean }>({
     show: false,
     loading: false,
@@ -253,6 +255,7 @@ export function QuestionRunner({
   // 避免旧题答案在新题上闪一帧。
   useLayoutEffect(() => {
     setHintState({ show: false, loading: false, error: false });
+    setSubmitBlocked(null); // 切题后清掉上一题的拦截提示（409 留在本题时不会触发本 effect）
     const nq = questions[idx];
     setAnswer(nq ? (answerByNRef.current[nq.n] ?? '') : '');
     // 上传归属上一题的文本，切题后必须归零：切到选择题时 LatexEditor 会卸载，它不再回传 false；
@@ -284,6 +287,23 @@ export function QuestionRunner({
     const submittedAnswer = answer;
     const question = q;
 
+    // 主观题/新学科非客观题：同步等判题返回——needsSelfAssessment 时进入自评视图。
+    // 名单由 subjectConfig.selfAssessEligible 统一口径（数学与历史行为逐字一致）。
+    // `question.type ?? ''`：RunnerQuestion.type 可选（types.ts:10），但 selfAssessEligible
+    // 形参要求 string——空串既不在 OBJECTIVE_TYPES、也不是 short_answer/proof，
+    // 数学返回 false（fire-and-forget，与历史 `undefined === 'short_answer'` 行为一致），
+    // 非数学返回 true（走自评），符合旧逻辑。
+    const inlineSelfAssess = showResultFeedback && selfAssessEligible(subjectId, question.type ?? '');
+
+    // P1：回退到已作答的自评题再次提交，会让后端结算撞「已有不同作答/已确认」409。
+    // 前端在入口拦住：不发请求、不写失败结果、不 advance，停留本题并提示重做入口。
+    // **仅自评题生效**：客观题回退改答案的既有行为不变（继续走下方重交流程）。
+    if (inlineSelfAssess && resultsRef.current[question.n] != null) {
+      setSubmitBlocked('本题已作答，如需重做请重新进入练习');
+      return;
+    }
+    setSubmitBlocked(null);
+
     clearDraft(`${draftKeyPrefix}-${question.n}`);
     setAnswer('');
 
@@ -293,13 +313,6 @@ export function QuestionRunner({
     // 主观题（解答/证明）：同步等待判题返回——self_assess 模式即时返回待自评
     // （进入自评视图，强制自评后放行）；ai 模式返回判定结果（记录后切题）。
     // showResultFeedback=false（考试）：不在此自评（交卷后结果页自评），走 fire-and-forget。
-    // 主观题/新学科非客观题：同步等判题返回——needsSelfAssessment 时进入自评视图。
-    // 名单由 subjectConfig.selfAssessEligible 统一口径（数学与历史行为逐字一致）。
-    // `question.type ?? ''`：RunnerQuestion.type 可选（types.ts:10），但 selfAssessEligible
-    // 形参要求 string——空串既不在 OBJECTIVE_TYPES、也不是 short_answer/proof，
-    // 数学返回 false（fire-and-forget，与历史 `undefined === 'short_answer'` 行为一致），
-    // 非数学返回 true（走自评），符合旧逻辑。
-    const inlineSelfAssess = showResultFeedback && selfAssessEligible(subjectId, question.type ?? '');
     if (inlineSelfAssess) {
       setPhase('judging');
       try {
@@ -328,8 +341,15 @@ export function QuestionRunner({
           studentAnswer: submittedAnswer,
         };
         advance(thisIdx);
-      } catch {
+      } catch (e: unknown) {
         if (seqRef.current[question.n] !== seq) return;
+        // 409 = 后端结算判定这题已有不同作答/已确认（通常是回退改答案绕过了前置拦截）。
+        // 与网络/5xx 区别对待：停留当前题 + 提示，**不**写 failed、**不** advance。
+        if ((e as { status?: number } | null)?.status === 409) {
+          setPhase('answering');
+          setSubmitBlocked('本题已作答，如需重做请重新进入练习');
+          return;
+        }
         resultsRef.current[question.n] = {
           isCorrect: false, method: 'ai', errorType: null, studentAnswer: submittedAnswer, failed: true,
         };
@@ -365,7 +385,7 @@ export function QuestionRunner({
     pendingRef.current.set(thisIdx, p);
 
     advance(thisIdx);
-  }, [answer, phase, q, idx, draftKeyPrefix, showResultFeedback, onSubmit, advance]);
+  }, [answer, phase, q, idx, draftKeyPrefix, showResultFeedback, subjectId, onSubmit, advance]);
 
   // 自评提交：学生点「我做对了/我做错了」——先经父层落库（onSelfAssess 可缺省），
   // 成功后本地记录布尔结果并放行；落库失败留在自评视图可重试。
@@ -737,6 +757,17 @@ export function QuestionRunner({
             </div>
           )}
         </div>
+
+        {/* P1 拦截提示（已作答的自评题 / 判题 409）：停留当前题，不重发请求 */}
+        {submitBlocked && (
+          <p
+            data-testid="submit-blocked"
+            role="alert"
+            className="shrink-0 px-3 pb-2 text-sm text-[var(--error)]"
+          >
+            {submitBlocked}
+          </p>
+        )}
 
         {/* 底部：关闭（可选）/ 上一题 / 提交 */}
         <div className="shrink-0 flex items-center justify-between p-3 border-t border-[var(--bg-subtle)]">

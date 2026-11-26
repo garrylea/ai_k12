@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import ErrorPracticeRunPage from './ErrorPracticeRunPage';
 import {
   bumpTrainingErrorLevels,
+  completeSpecialSession,
   getTrainingExplanations,
   getTrainingVariations,
   judgeTraining,
+  selfAssessTraining,
   type JudgeResult,
   type TrainingErrorBookEntry,
 } from '@/services/api';
@@ -45,6 +48,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     bumpTrainingErrorLevels: vi.fn(),
     getTrainingExplanations: vi.fn(),
     getTrainingVariations: vi.fn(),
+    selfAssessTraining: vi.fn(),
+    completeSpecialSession: vi.fn(),
   };
 });
 
@@ -52,6 +57,8 @@ const judgeMock = vi.mocked(judgeTraining);
 const bumpMock = vi.mocked(bumpTrainingErrorLevels);
 const explanationsMock = vi.mocked(getTrainingExplanations);
 const variationsMock = vi.mocked(getTrainingVariations);
+const selfAssessMock = vi.mocked(selfAssessTraining);
+const completeSpecialMock = vi.mocked(completeSpecialSession);
 
 const ENTRY: TrainingErrorBookEntry = {
   errorBookId: 9001,
@@ -105,9 +112,11 @@ describe('ErrorPracticeRunPage 发分反馈', () => {
     bumpMock.mockReset();
     explanationsMock.mockReset();
     variationsMock.mockReset();
+    completeSpecialMock.mockReset();
     bumpMock.mockResolvedValue(undefined);
     explanationsMock.mockResolvedValue({ explanations: {} });
     variationsMock.mockResolvedValue({ variations: [] });
+    completeSpecialMock.mockResolvedValue({ completed: true });
     sessionStorage.setItem('training:errors', JSON.stringify([ENTRY]));
   });
 
@@ -171,9 +180,11 @@ describe('ErrorPracticeRunPage 变式提示卡（2026-10-11）', () => {
     bumpMock.mockReset();
     explanationsMock.mockReset();
     variationsMock.mockReset();
+    completeSpecialMock.mockReset();
     bumpMock.mockResolvedValue(undefined);
     explanationsMock.mockResolvedValue({ explanations: {} });
     variationsMock.mockResolvedValue({ variations: [] });
+    completeSpecialMock.mockResolvedValue({ completed: true });
     sessionStorage.setItem('training:errors', JSON.stringify([ENTRY]));
   });
 
@@ -282,5 +293,64 @@ describe('ErrorPracticeRunPage 变式提示卡（2026-10-11）', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * Task 10（2026-11-26）：错题练习补会话 uid，让判题/自评进事务结算；
+ * 完成后 best-effort 调专项会话完成端点。uid 由页面生成，三处必须同一个。
+ */
+describe('ErrorPracticeRunPage 会话 uid 与完成端点（Task 10）', () => {
+  beforeEach(() => {
+    judgeMock.mockReset();
+    bumpMock.mockReset();
+    explanationsMock.mockReset();
+    variationsMock.mockReset();
+    selfAssessMock.mockReset();
+    completeSpecialMock.mockReset();
+    bumpMock.mockResolvedValue(undefined);
+    explanationsMock.mockResolvedValue({ explanations: {} });
+    variationsMock.mockResolvedValue({ variations: [] });
+    selfAssessMock.mockResolvedValue({});
+    completeSpecialMock.mockResolvedValue({ completed: true });
+    sessionStorage.setItem('training:errors', JSON.stringify([ENTRY]));
+  });
+
+  it('judge 带 sessionUid/title/题数/题号，完成时调 completeSpecialSession(同一 uid)', async () => {
+    judgeMock.mockResolvedValue(judged({ pointsAwarded: 0 }));
+
+    await answerOnlyQuestion();
+    await screen.findByText('答题结果');
+
+    const arg = judgeMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(typeof arg.sessionUid).toBe('string');
+    expect((arg.sessionUid as string).length).toBeGreaterThan(0);
+    expect(arg).toMatchObject({
+      title: '错题练习', questionCount: 1, questionOrder: 1, source: 'error_practice',
+    });
+    expect(completeSpecialMock).toHaveBeenCalledWith(arg.sessionUid);
+  });
+
+  it('主观题自评带与判题相同的 sessionUid', async () => {
+    const proof: TrainingErrorBookEntry = {
+      ...ENTRY, errorBookId: 9002, questionId: 102, questionText: '证明题', type: 'proof',
+    };
+    sessionStorage.setItem('training:errors', JSON.stringify([proof]));
+    judgeMock.mockResolvedValue(judged({
+      questionId: 102, isCorrect: null, method: 'self_assess', needsSelfAssessment: true,
+    }));
+
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(screen.getByRole('textbox'), '我的证明');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    expect(await screen.findByRole('button', { name: '我做对了' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '我做对了' }));
+    await screen.findByText('答题结果');
+
+    const uid = (judgeMock.mock.calls[0][0] as Record<string, unknown>).sessionUid;
+    expect(selfAssessMock).toHaveBeenCalledWith(expect.objectContaining({
+      sessionUid: uid, source: 'error_practice', questionId: 102,
+    }));
   });
 });

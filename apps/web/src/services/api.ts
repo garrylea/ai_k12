@@ -2608,6 +2608,19 @@ export function completeTrainingSession(sessionId: number): Promise<CompleteTrai
   });
 }
 
+/**
+ * 专项会话收尾（Task 9/10）：按 sessionUid + JWT 学生 id 置 `completed_at`。
+ * 用于「只判了、没走发分会话」的专项练习（错题练习 / 数学专项），让作答历史里
+ * 的会话行有明确结束状态。只置状态、**不发分**（发分仍归判题响应 / completeTrainingSession）。
+ * 与会话完成端点不同：重复调用不是幂等成功，而是 404/1002，故调用方须 best-effort
+ * （`.catch(() => {})`），绝不让它阻断结果页。
+ */
+export function completeSpecialSession(sessionUid: string): Promise<{ completed: true }> {
+  return fetchApi<{ completed: true }>(`/training/special-sessions/${sessionUid}/complete`, {
+    method: 'POST',
+  });
+}
+
 // --- Parent: points & rewards（家长端积分配置 / 奖励清单 / 兑换 / 兑换记录 / 兑换设置） ---
 // 字段与后端 modules/points/parent-points.controller.ts 的 wire 形状一一对应；契约见
 // docs/api/openapi.yaml 的 /parent/students/{id}*。类型**复用**上面 Points 分区的定义
