@@ -704,7 +704,7 @@ def _correct_article_doc(cur, rec, material_text: str, old_url: str,
 
 def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None,
                  output_dir: Path | None = None) -> str:
-    from manual_fix import looks_like_ui_echo, looks_like_wrapped_copy
+    from review_editor import looks_like_ui_echo, looks_like_wrapped_copy
 
     if looks_like_ui_echo(rec.get("content") or ""):
         return "跳过：内容疑似终端界面文字（不是真题），请重新补录"

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import manual_fix
+import review_editor
 
 
 def _write(path, rows):
@@ -152,7 +153,7 @@ def test_collect_content_image_goes_through_mineru(tmp_path, monkeypatch):
         called["image"] = image
         return "OCR 出来的题干"
 
-    monkeypatch.setattr(manual_fix, "_image_to_markdown", fake_convert)
+    monkeypatch.setattr(review_editor, "_image_to_markdown", fake_convert)
 
     assert manual_fix._collect_content(tmp_path) == "OCR 出来的题干"
     assert called["image"] == img
@@ -163,7 +164,7 @@ def test_collect_content_image_rejected_asks_again(tmp_path, monkeypatch):
     img.write_bytes(b"png")
     # 第一次给图片并回 n，第二次直接粘贴文本
     monkeypatch.setattr("sys.stdin", io.StringIO(f"2\n{img}\nr\n手工题干\nEOF\n1\n\n"))
-    monkeypatch.setattr(manual_fix, "_image_to_markdown", lambda i, d: "OCR 题干")
+    monkeypatch.setattr(review_editor, "_image_to_markdown", lambda i, d: "OCR 题干")
 
     assert manual_fix._collect_content(tmp_path) == "手工题干"
 
@@ -484,7 +485,7 @@ def test_menu_2_missing_image_reports_and_reprompts(tmp_path, monkeypatch, capsy
 def _fake_clipboard(monkeypatch, tmp_path, suffix=".png", content=b"png"):
     img = tmp_path / f"clip{suffix}"
     img.write_bytes(content)
-    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: img)
+    monkeypatch.setattr(review_editor, "_clipboard_to_path", lambda d: img)
     return img
 
 
@@ -497,7 +498,7 @@ def test_menu_4_reads_clipboard_image(tmp_path, monkeypatch):
         called["image"] = image
         return "剪贴板题干"
 
-    monkeypatch.setattr(manual_fix, "_image_to_markdown", fake_convert)
+    monkeypatch.setattr(review_editor, "_image_to_markdown", fake_convert)
 
     assert manual_fix._collect_content(tmp_path) == "剪贴板题干"
     assert called["image"] == img
@@ -507,20 +508,20 @@ def test_empty_line_picks_up_clipboard_image(tmp_path, monkeypatch):
     """⌘V 图片时终端送不出字符，用户接着按的回车（空行）要能落到剪贴板图片上。"""
     _fake_clipboard(monkeypatch, tmp_path)
     monkeypatch.setattr("sys.stdin", io.StringIO("\n1\n\n"))
-    monkeypatch.setattr(manual_fix, "_image_to_markdown", lambda i, d: "剪贴板题干")
+    monkeypatch.setattr(review_editor, "_image_to_markdown", lambda i, d: "剪贴板题干")
 
     assert manual_fix._collect_content(tmp_path) == "剪贴板题干"
 
 
 def test_empty_line_without_clipboard_still_reads_pasted_text(tmp_path, monkeypatch):
-    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: None)
+    monkeypatch.setattr(review_editor, "_clipboard_to_path", lambda d: None)
     monkeypatch.setattr("sys.stdin", io.StringIO("\n正文\nEOF\n1\n\n"))
 
     assert manual_fix._collect_content(tmp_path) == "正文"
 
 
 def test_menu_4_without_clipboard_image_reprompts(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: None)
+    monkeypatch.setattr(review_editor, "_clipboard_to_path", lambda d: None)
     monkeypatch.setattr("sys.stdin", io.StringIO("4\n正文\nEOF\n1\n\n"))
 
     assert manual_fix._collect_content(tmp_path) == "正文"
@@ -531,7 +532,7 @@ def test_clipboard_copied_file_is_read_as_text(tmp_path, monkeypatch):
     """Finder 里 ⌘C 一个 .md：剪贴板里是文件路径，按文件读，别当图片 OCR。"""
     src = tmp_path / "q.md"
     src.write_text("从剪贴板文件来的题干", encoding="utf-8")
-    monkeypatch.setattr(manual_fix, "_clipboard_to_path", lambda d: src)
+    monkeypatch.setattr(review_editor, "_clipboard_to_path", lambda d: src)
 
     assert manual_fix._from_clipboard(tmp_path) == "从剪贴板文件来的题干"
 
@@ -540,7 +541,7 @@ def test_clipboard_probe_none_when_osascript_missing(tmp_path, monkeypatch):
     def boom(*a, **kw):
         raise FileNotFoundError("osascript")
 
-    monkeypatch.setattr(manual_fix.subprocess, "run", boom)
+    monkeypatch.setattr(review_editor.subprocess, "run", boom)
 
     assert manual_fix._clipboard_to_path(tmp_path) is None
 
@@ -549,9 +550,9 @@ def test_clipboard_probe_parses_file_and_png(tmp_path, monkeypatch):
     img = tmp_path / "clipboard.png"
     img.write_bytes(b"png")
     out = {"stdout": f"PNG:{img}"}
-    monkeypatch.setattr(manual_fix.subprocess, "run",
+    monkeypatch.setattr(review_editor.subprocess, "run",
                         lambda *a, **kw: type("R", (), out))
-    monkeypatch.setattr(manual_fix.sys, "platform", "darwin")
+    monkeypatch.setattr(review_editor.sys, "platform", "darwin")
 
     assert manual_fix._clipboard_to_path(tmp_path) == img
 
@@ -2002,7 +2003,7 @@ def test_line_edit_restores_swallowed_label_in_edited_line(monkeypatch):
         ". ![](c.jpg)", "说明C", "D. ![](d.jpg)", "说明D",
     ])
     seq = iter(["c 6 . ![](c.jpg)", "w"])
-    monkeypatch.setattr(manual_fix, "_read_line", lambda: next(seq))
+    monkeypatch.setattr(review_editor, "_read_line", lambda: next(seq))
     out = manual_fix._line_edit(text)
     assert out.splitlines()[5].startswith("C. ")
 
@@ -2184,9 +2185,9 @@ def test_confirm_menu_option_5_uses_file_edit(monkeypatch):
 
 def test_file_edit_reads_back_saved_file(tmp_path, monkeypatch):
     """没有编辑器时打印路径、回车后读回文件内容。"""
-    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
-    monkeypatch.setattr(manual_fix, "_find_editor", lambda: None)
-    monkeypatch.setattr(manual_fix, "_read_line", lambda: "")
+    monkeypatch.setattr(review_editor, "ROOT", tmp_path)
+    monkeypatch.setattr(review_editor, "_find_editor", lambda: None)
+    monkeypatch.setattr(review_editor, "_read_line", lambda: "")
 
     got, _path = manual_fix._file_edit("原始题干")
 
@@ -2195,9 +2196,9 @@ def test_file_edit_reads_back_saved_file(tmp_path, monkeypatch):
 
 def test_file_edit_cancel_returns_none(tmp_path, monkeypatch):
     """编辑后按 c 取消：不读内容，返回 None 交给调用方处理。"""
-    monkeypatch.setattr(manual_fix, "ROOT", tmp_path)
-    monkeypatch.setattr(manual_fix, "_find_editor", lambda: None)
-    monkeypatch.setattr(manual_fix, "_read_line", lambda: "c")
+    monkeypatch.setattr(review_editor, "ROOT", tmp_path)
+    monkeypatch.setattr(review_editor, "_find_editor", lambda: None)
+    monkeypatch.setattr(review_editor, "_read_line", lambda: "c")
 
     got, path = manual_fix._file_edit("原始题干")
 
