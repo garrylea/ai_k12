@@ -658,17 +658,19 @@ def _collect_image_paths(c, *, clipboard_only: bool = False) -> list[Path]:
     seen: set[str] = set()
     grabs = 0                    # 每次读剪贴板换一个子目录，避免同一文件被覆盖
 
-    def take(path: Path) -> None:
+    def take(path: Path) -> bool:
+        """收一张图；返回 False 表示内容重复（调用方据此结束剪贴板连收）。"""
         try:
             digest = hashlib.sha1(path.read_bytes()).hexdigest()
         except OSError:
             c.warn(f"读不了图片：{path}")
-            return
+            return False
         if digest in seen:
             c.warn(f"这张和已收的图内容相同，已跳过：{path.name}")
-            return
+            return False
         seen.add(digest)
         paths.append(path)
+        return True
 
     while True:
         if clipboard_only:
@@ -706,7 +708,12 @@ def _collect_image_paths(c, *, clipboard_only: bool = False) -> list[Path]:
         if clip.suffix.lower() not in IMAGE_SUFFIXES:
             c.warn("剪贴板里不是图片")
             continue
-        take(clip)
+        if not take(clip):
+            # 剪贴板还停在上一张：把它当成「收图结束」，否则回车会永远循环
+            c.info("剪贴板还是同一张图，收图结束（重新裁剪后再回车可继续）")
+            break
+        c.ok(f"已收到第 {len(paths)} 张；再回车继续收，eof 结束")
+        _clear_clipboard()
     return paths
 
 

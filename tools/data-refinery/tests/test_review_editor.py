@@ -76,9 +76,24 @@ def test_read_images_collects_clipboard_until_empty(tmp_path, monkeypatch):
     two.write_bytes(b"two-content")
     seq = iter([one, two, None])
     monkeypatch.setattr(ed, "_clipboard_to_path", lambda d: next(seq, None))
+    monkeypatch.setattr(ed, "_clear_clipboard", lambda: None)
     monkeypatch.setattr("sys.stdin", io.StringIO("\n\n\n"))
 
     mode, paths = ed.read_images(_c(), [], tmp_path)
 
     assert mode == "append"
     assert [p.name for p in paths] == ["one.png", "two.png"], "第三次无图 = eof"
+
+
+def test_read_images_stops_when_clipboard_keeps_same_image(tmp_path, monkeypatch):
+    """剪贴板停在上一张时，回车不能无限循环：收下第一张后视为结束。"""
+    one = tmp_path / "one.png"
+    one.write_bytes(b"same-content")
+    monkeypatch.setattr(ed, "_clipboard_to_path", lambda d: one)
+    monkeypatch.setattr(ed, "_clear_clipboard", lambda: None)
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n\n\n\n"))
+
+    mode, paths = ed.read_images(_c(), [], tmp_path)
+
+    assert mode == "append"
+    assert [p.name for p in paths] == ["one.png"]
