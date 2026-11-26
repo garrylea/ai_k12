@@ -8,6 +8,30 @@
 
 ---
 
+## 2026-11-26 专项抽题漏判自评过的题 + 作答历史对错停在 NULL（A+B 修复）
+
+**问题**：学生昨晚做完数学试卷第 27 题（proof，主观题）并自评「正确」，今天选专项练习又抽到它。
+根因两条：① 主观题提交时 `judgeTraining` 写入 `special_answer_records.is_correct=NULL`（在途/未判），
+自评端点 `self-assess` 只写 `question_self_assessments`，没回写作答历史；② 2026-11-25 的抽题顺序改成
+「未做 → 错题 → 做过最久」后，「做过」判定（三张作答表 `is_correct IS NOT NULL`）不认自评表，
+把自评过的题误判成「从未做过」优先抽出。实证：学生 2 / 题 5034 自评 correct，
+但两张表口径下一题在「未做池(旧)」、一题在「做过回填池(新)」。
+
+**A 抽题判定纳入自评表**：`ANSWERED_TIMES_SQL`（六科按知识点 + 试卷题号做过回填池共用）加第四处
+`question_self_assessments`，外层按 `question_id` 聚合去重（自评回写后同一题同时命中 sar 与自评表，
+不去重会让 `findRandomByKpAndType` 的 LEFT JOIN 抽出重复题）；试卷题号的未做池/可练数统计同步补
+自评表 NOT EXISTS。四处 studentId 参数依序补齐。
+
+**B 自评回写作答历史**：`special_answer_records.repo` 新增 `markSelfAssessCorrectness`，按
+`session_uid + student_id + question_id` 归属定位，只改 `is_correct`/`judged_at`；
+DTO + controller + service + 前端 `api.ts`/`TargetedRunPage` 打通 `sessionUid` 透传（重做 mode=redo 不传、考试
+source=exam 不回写）；写入是旁路、失败只 warn 不阻断自评主链路。
+
+**存量**：33 条已自评但 `is_correct=NULL` 的历史行未回填（6 组同生同题多会话、自评表无 session_uid 无法可靠对应）；
+但 A 已让这些题不再被误判为未做。新增自评走 B 后两表一致。
+
+验证：后端三处相关测试 143/143、全量 2920/2920；前后端 `tsc --noEmit` 干净；真实数据 SQL 验证 5034 落池纠正。
+
 ## 2026-11-25 按知识点抽题（六科）：纯随机改为未做优先 + 做过最久兜底
 
 用户裁决把「做对后优先级降低」推广到其它学科。改共用原语 `findRandomByKpAndType`（`questions.repo.ts:228`），

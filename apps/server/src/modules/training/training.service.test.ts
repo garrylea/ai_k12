@@ -59,6 +59,7 @@ const mk = (overrides: any = {}) => ({
     upsertAnswer: vi.fn().mockResolvedValue(undefined),
     upsertSpecialAnswer: vi.fn().mockResolvedValue(undefined),
     ensurePlannedQuestions: vi.fn().mockResolvedValue(undefined),
+    markSelfAssessCorrectness: vi.fn().mockResolvedValue(undefined),
   },
   ...overrides,
   // 用例常只覆盖 questionsRepo 的部分方法，补齐默认桩，别让新增抽题池把老用例打崩。
@@ -210,6 +211,47 @@ describe('TrainingService.selfAssess', () => {
     expect(deps.judgeCore.recordSelfAssessment).toHaveBeenCalledWith({ studentId: 1, questionId: 10, subjectId: 1, assessment: 'correct', source: 'exam', sourceRefId: 5 });
     expect(deps.explanationCache.ensureExplanation).not.toHaveBeenCalled();
   });
+
+  // 2026-11-26：自评回写作答历史对错（主观题提交时 is_correct=NULL）
+  it('带 sessionUid + targeted -> 回写 is_correct（correct->true / incorrect->false）', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(userQ) },
+      judgeCore: { recordSelfAssessment: vi.fn().mockResolvedValue({ errorBookId: undefined }) },
+    });
+    const svc = mkSvc(deps);
+    await svc.selfAssess({ studentId: 2, questionId: 5034, subjectId: 1, assessment: 'correct', source: 'targeted', sessionUid: 'uid-abc' });
+    await svc.selfAssess({ studentId: 2, questionId: 5034, subjectId: 1, assessment: 'incorrect', source: 'targeted', sessionUid: 'uid-abc' });
+    expect(deps.specialAnswersRepo.markSelfAssessCorrectness).toHaveBeenNthCalledWith(1, {
+      sessionUid: 'uid-abc', studentId: 2, questionId: 5034, isCorrect: true,
+    });
+    expect(deps.specialAnswersRepo.markSelfAssessCorrectness).toHaveBeenNthCalledWith(2, {
+      sessionUid: 'uid-abc', studentId: 2, questionId: 5034, isCorrect: false,
+    });
+  });
+
+  it('无 sessionUid / exam 来源 -> 不回写作答历史', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(userQ) },
+      judgeCore: { recordSelfAssessment: vi.fn().mockResolvedValue({ errorBookId: undefined }) },
+    });
+    const svc = mkSvc(deps);
+    await svc.selfAssess({ studentId: 1, questionId: 10, subjectId: 1, assessment: 'correct', source: 'targeted' });
+    await svc.selfAssess({ studentId: 1, questionId: 10, subjectId: 1, assessment: 'correct', source: 'exam', sourceRefId: 5, sessionUid: 'uid-x' });
+    expect(deps.specialAnswersRepo.markSelfAssessCorrectness).not.toHaveBeenCalled();
+  });
+
+  it('回写失败只 warn 不阻断自评主链路', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(userQ) },
+      judgeCore: { recordSelfAssessment: vi.fn().mockResolvedValue({ errorBookId: 7 }) },
+    });
+    deps.specialAnswersRepo.markSelfAssessCorrectness.mockRejectedValueOnce(new Error('DB down'));
+    const r = await mkSvc(deps).selfAssess({
+      studentId: 2, questionId: 5034, subjectId: 1, assessment: 'incorrect', source: 'targeted', sessionUid: 'uid-abc',
+    });
+    expect(r.errorBookId).toBe(7);
+    expect(deps.judgeCore.recordSelfAssessment).toHaveBeenCalled();
+  });
 });
 
 describe('TrainingController.selfAssess 校验', () => {
@@ -252,7 +294,15 @@ describe('TrainingController.selfAssess 校验', () => {
     const svc: any = { selfAssess: vi.fn().mockResolvedValue({ errorBookId: 42 }) };
     const c = mkController(svc);
     await c.selfAssess({ questionId: 10, subjectId: 1, assessment: 'incorrect', source: 'exam', sourceRefId: 5 }, user);
-    expect(svc.selfAssess).toHaveBeenCalledWith({ studentId: 7, questionId: 10, subjectId: 1, assessment: 'incorrect', source: 'exam', sourceRefId: 5, suppressErrorFixPoints: false });
+    expect(svc.selfAssess).toHaveBeenCalledWith({ studentId: 7, questionId: 10, subjectId: 1, assessment: 'incorrect', source: 'exam', sourceRefId: 5, sessionUid: undefined, suppressErrorFixPoints: false });
+  });
+
+  it('sessionUid 透传 service（非字符串按 undefined）', async () => {
+    const svc: any = { selfAssess: vi.fn().mockResolvedValue({ errorBookId: undefined }) };
+    const c = mkController(svc);
+    await c.selfAssess({ questionId: 10, subjectId: 1, assessment: 'correct', source: 'targeted', sessionUid: 'uid-abc' } as any, user);
+    await c.selfAssess({ questionId: 10, subjectId: 1, assessment: 'correct', source: 'targeted', sessionUid: 123 } as any, user);
+    expect(svc.selfAssess.mock.calls.map((call: any[]) => call[0].sessionUid)).toEqual(['uid-abc', undefined]);
   });
 
   it('suppressErrorFixPoints 只认 true，非布尔值按 false 透传', async () => {

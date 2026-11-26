@@ -1416,6 +1416,8 @@ export function selfAssessTraining(payload: {
   assessment: 'correct' | 'incorrect';
   source: 'targeted' | 'error_practice' | 'exam';
   sourceRefId?: number;
+  /** 专项练习本轮会话 uid（2026-11-26）：自评后据此把作答历史的 `is_correct` 从 NULL 补成最终结果。 */
+  sessionUid?: string;
   /** 单题重做：不记录、不发错题积分（见 `judgeTraining` 同名参数）。 */
   suppressErrorFixPoints?: boolean;
 }): Promise<{ errorBookId?: number }> {

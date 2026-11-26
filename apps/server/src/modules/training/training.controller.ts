@@ -116,6 +116,7 @@ export class TrainingController {
       assessment: dto.assessment,
       source: dto.source,
       sourceRefId: dto.sourceRefId ?? null,
+      sessionUid: typeof dto.sessionUid === 'string' ? dto.sessionUid : undefined,
       // 单题重做（2026-11-06）：只接受真正的 true，其它值一律按不压制处理。
       suppressErrorFixPoints: dto.suppressErrorFixPoints === true,
     });

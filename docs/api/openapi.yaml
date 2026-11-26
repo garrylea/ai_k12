@@ -6238,6 +6238,9 @@ paths:
         question_self_assessments 留痕；incorrect 写入/复用
         main_error_books（source 落库为训练/考试来源）并触发解析缓存兜底生成；
         correct 清零该题所有未清记录。题目不存在 404。
+        可选 sessionUid（2026-11-26）：专项练习传本轮会话 uid 时，把作答历史
+        （special_answer_records）的 is_correct 从 NULL 补成自评结果；考试来源
+        （exam）不回写；回写失败只 warn 不影响自评。
       operationId: selfAssessTraining
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -11730,6 +11733,12 @@ components:
           type: integer
           nullable: true
           description: 考试来源传 sessionId；其余来源不传或传 null
+        sessionUid:
+          type: string
+          description: >-
+            可选（2026-11-26）：专项练习本轮会话 uid（与判题 /judge 同一个）。传了则自评后把
+            special_answer_records 对应作答行的 is_correct 从 NULL 补成最终结果；
+            考试来源（exam）不回写。非字符串按不传处理，回写失败只 warn 不影响自评。
         suppressErrorFixPoints:
           type: boolean
           description: >-

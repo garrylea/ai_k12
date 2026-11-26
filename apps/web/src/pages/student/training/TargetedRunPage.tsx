@@ -376,6 +376,8 @@ export default function TargetedRunPage() {
                       subjectId,
                       assessment,
                       source: 'targeted',
+                      // 自评回写作答历史对错（2026-11-26）：重做不记录，故同 judge 不传 uid
+                      ...(mode === 'redo' ? {} : { sessionUid }),
                       // 重做不计分：错题本仍要更新，但不得触发错题积分
                       suppressErrorFixPoints: mode === 'redo',
                     });

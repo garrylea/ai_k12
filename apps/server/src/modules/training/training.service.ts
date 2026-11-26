@@ -717,12 +717,15 @@ export class TrainingService {
   }
 
   /** 主观题自评：校验题目存在后委托 JudgeCore.recordSelfAssessment（留痕 + 错题本写入/清零）。
-   *  自评 incorrect 与其他判错路径对齐：触发解析缓存兜底生成（题缺解析时）。 */
+   *  自评 incorrect 与其他判错路径对齐：触发解析缓存兜底生成（题缺解析时）。
+   *  带 sessionUid 时旁路回写作答历史的 is_correct（提交时是 NULL，2026-11-26）——
+   *  失败只 warn 不阻断自评主链路。 */
   async selfAssess(input: {
     studentId: number; questionId: number; subjectId: number;
     assessment: 'correct' | 'incorrect';
     source: 'targeted' | 'error_practice' | 'exam';
     sourceRefId?: number | null;
+    sessionUid?: string;
     /** 单题重做（2026-11-06）：自评对仍清零错题，但不发错题订正分（透传给 JudgeCore）。 */
     suppressErrorFixPoints?: boolean;
   }) {
@@ -731,6 +734,22 @@ export class TrainingService {
       throw new NotFoundException(`题目不存在：${input.questionId}`);
     }
     const result = await this.judgeCore.recordSelfAssessment({ ...input, sourceRefId: input.sourceRefId ?? null });
+    // 作答历史回写（旁路）：subjective 提交时 is_correct=NULL，自评后补成最终结果。
+    // 考试结果页自评（source='exam'）走 exam_answers，没有专项作答行，跳过。
+    if (input.sessionUid && input.source !== 'exam' && this.specialAnswersRepo) {
+      try {
+        await this.specialAnswersRepo.markSelfAssessCorrectness({
+          sessionUid: input.sessionUid,
+          studentId: input.studentId,
+          questionId: input.questionId,
+          isCorrect: input.assessment === 'correct',
+        });
+      } catch (err) {
+        this.logger.warn(
+          `special_answer_records 自评回写失败（已忽略，不影响自评）: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
     if (input.assessment === 'incorrect') {
       this.explanationCache.ensureExplanation(q);
     }
