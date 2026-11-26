@@ -152,6 +152,7 @@ class CardState:
     paper_dir: Path
     index: int = 1
     total: int = 1
+    armed: str | None = None      # "ok"/"skip"：有未保存修改时第二次确认才生效
 
     @property
     def view(self) -> View:
@@ -570,6 +571,8 @@ def run_card(item: ReviewItem, target: ReviewTarget, snap: Snapshot,
             c, is_repair=item.is_repair,
             has_original=bool(snap.repair_original),
             has_content=bool(state.view.content))
+        if action not in ("ok", "skip"):
+            state.armed = None
         if action == "slot":
             if arg == "1":
                 res = edit_content_slot(state)
@@ -590,9 +593,17 @@ def run_card(item: ReviewItem, target: ReviewTarget, snap: Snapshot,
         elif action == "restore":
             use_repair_original(state)
         elif action == "ok":
+            if has_changes(state.draft.patch) and state.armed != "ok":
+                state.armed = "ok"
+                c.warn("本题有未保存的修改：回车=保存修改；再按一次 k = 丢弃修改并标「确认无问题」")
+                continue
             close_as_ok(item, target)
             return CardResult("ok")
         elif action == "skip":
+            if has_changes(state.draft.patch) and state.armed != "skip":
+                state.armed = "skip"
+                c.warn("本题有未保存的修改：回车=保存修改；再按一次 s = 丢弃修改、稍后再处理")
+                continue
             return CardResult("skip")
         elif action == "enter":
             changed = has_changes(state.draft.patch)

@@ -247,3 +247,22 @@ def test_pick_sub_no_asks_when_same_number_has_two_sub_questions(tmp_path, monke
          issues=[])
     monkeypatch.setattr("sys.stdin", io.StringIO("2\n"))
     assert manual_fix._pick_sub_no(REL, SOURCE, 26) == 2
+
+
+def test_k_after_edit_warns_once_then_discards(tmp_path, monkeypatch, capsys):
+    """有未保存修改时，第一次 k 只警告；第二次 k 才丢弃并标无问题。"""
+    issues = _prep(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n新题干\nEOF\nk\nk\n"))
+    manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+    out = capsys.readouterr().out
+    assert "有未保存的修改" in out
+    assert not (tmp_path / "fixes" / f"{SOURCE}.jsonl").exists()
+    assert json.loads(issues.read_text(encoding="utf-8"))["status"] == "resolved"
+
+
+def test_enter_after_edit_then_k_not_needed(tmp_path, monkeypatch):
+    """回车保存后直接结束，不应留下未保存提示。"""
+    _prep(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n新题干\nEOF\n\n"))
+    manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+    assert _records(tmp_path)[0]["content"].startswith("新题干")
