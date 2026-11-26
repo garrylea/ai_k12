@@ -9,6 +9,7 @@
 - ``read_images``：图片槽（追加/替换/清空/回车读剪贴板），按内容 hash 去重。
 """
 
+import atexit
 import hashlib
 import re
 import shutil
@@ -648,9 +649,11 @@ def _collect_image_paths(c, *, clipboard_only: bool = False) -> list[Path]:
 
     ``clipboard_only=True``（菜单处直接回车）时只读剪贴板，连续回车可连续收图；
     没有图即结束，等价于 ``eof``（设计 §4.5）。
-    剪贴板 png 落在临时目录里，必须活到调用方拷图之后，所以这里不清理。
+    剪贴板 png 落在临时目录里，必须活到调用方拷图之后，所以这里不立即清理；
+    但要在**进程退出时**删掉，否则每次调用都会在 /tmp 留下一份用户截图。
     """
     root = Path(tempfile.mkdtemp(prefix="refinery-clip-"))
+    atexit.register(shutil.rmtree, root, ignore_errors=True)
     paths: list[Path] = []
     seen: set[str] = set()
     grabs = 0                    # 每次读剪贴板换一个子目录，避免同一文件被覆盖
