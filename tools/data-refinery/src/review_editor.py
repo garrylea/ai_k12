@@ -488,8 +488,14 @@ def _file_edit(text: str | None, label: str = "题干",
         edits = ROOT / "output" / "edits"
         edits.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-        path = edits / f"{label}_{stamp}.md"
-        path.write_text((text or "").rstrip() + "\n", encoding="utf-8")
+        # label 里可能带「/」（如「题干/选项」）：不能直接进文件名，否则会去写不存在的子目录
+        safe = re.sub(r'[\\/:*?"<>|\s]+', "_", label).strip("_") or "编辑"
+        path = edits / f"{safe}_{stamp}.md"
+        try:
+            path.write_text((text or "").rstrip() + "\n", encoding="utf-8")
+        except OSError as exc:
+            c.warn(f"写不了编辑文件：{exc}")
+            return None, path
     c.info(f"编辑文件：{path}")
 
     # 非交互环境（管道/测试）不拉起图形编辑器，避免 code --wait 之类把管道挂住

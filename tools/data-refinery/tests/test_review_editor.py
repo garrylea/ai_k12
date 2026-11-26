@@ -136,3 +136,16 @@ def test_read_slot_prints_hint_on_its_own_line(monkeypatch, capsys):
     ed.read_slot(_c(), label="题干/选项", hint=":e 编辑器 · :c 清空",
                  current="", paper_md_dir=Path("."))
     assert ":e 编辑器" in capsys.readouterr().out
+
+
+def test_file_edit_sanitizes_label_with_slash(tmp_path, monkeypatch):
+    """槽位名「题干/选项」里的斜杠不能当目录分隔符。"""
+    monkeypatch.setattr(ed, "ROOT", tmp_path)
+    monkeypatch.setattr(ed, "_find_editor", lambda: None)
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
+
+    got, path = ed._file_edit("原始题干", "题干/选项")
+
+    assert got == "原始题干"
+    assert path.parent == tmp_path / "output" / "edits"
+    assert "/" not in path.name and "题干_选项" in path.name
