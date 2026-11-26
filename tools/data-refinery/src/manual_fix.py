@@ -301,13 +301,21 @@ def close_as_ok(item: ReviewItem, target: ReviewTarget) -> None:
     note = "人工确认无问题，未改动"
     if item.kinds == {"junk_question"}:
         note = "人工确认：这行不是题目，忽略"
-    elif ("missing" in item.kinds
-          and target.group_order == item.group_order
-          and not snapshot_for(item, target.group_order, target.sub_no).content):
+    elif (target.group_order, target.sub_no) != (item.group_order, item.sub_no):
+        note = "人工确认：关联题没有问题"
+    elif "missing" in item.kinds:
         note = "人工确认：卷面本来没有这道题"
-    sig = next((f.get("content_sig") for f in item.flags if f.get("content_sig")), None)
-    mark_issue(item.source, target.group_order, "resolved", note=note,
-               verdict="no_change", content_sig=sig, sub_no=target.sub_no)
+    flag = next(
+        (
+            f for f in item.flags
+            if int(f.get("group_order") or item.group_order) == target.group_order
+            and int(f.get("sub_no") or 0) == target.sub_no
+        ),
+        item.flags[0] if item.flags else {},
+    )
+    mark_issue(item.source, target.group_order, "resolved",
+               sub_no=target.sub_no, statuses={"pending"}, note=note,
+               verdict="no_change", content_sig=flag.get("content_sig"))
     c.ok(f"第 {_label(target.group_order, target.sub_no)} 题已标记「确认无问题」，题库未改动")
 
 
@@ -536,6 +544,14 @@ def edit_whole_in_editor(state: CardState) -> None:
         state.draft.set_inline(material)
 
 
+def use_repair_original(state: CardState) -> None:
+    original = state.snap.repair_original
+    if not original:
+        console().warn("找不到修复前原文")
+        return
+    state.draft.use_restore_original(original)
+
+
 def run_card(item: ReviewItem, target: ReviewTarget, snap: Snapshot,
              index: int, total: int) -> CardResult:
     c = console()
@@ -572,7 +588,7 @@ def run_card(item: ReviewItem, target: ReviewTarget, snap: Snapshot,
         elif action == "replace":
             replace_all(state)
         elif action == "restore":
-            state.draft.use_restore_original(snap.repair_original or "")
+            use_repair_original(state)
         elif action == "ok":
             close_as_ok(item, target)
             return CardResult("ok")
@@ -692,7 +708,7 @@ def review_pending(sources: set[str] | None = None,
     unapplied = 0
     try:
         from apply_fixes import pending_records
-        unapplied = len(pending_records())
+        unapplied = len(pending_records(fixes_dir=out_dir))
     except Exception:                              # noqa: BLE001 - 统计失败不能挡住收尾
         unapplied = 0
     stats = [("本次补录", f"{result['fixed']} 题"),
@@ -805,6 +821,37 @@ def _pick_paper(papers: list[dict]) -> dict | None:
         c.warn(f"请输入 1–{len(papers)}")
 
 
+def _sub_no_choices(rel_path: str, source: str, no: int) -> list[int]:
+    """该卷该题号在 extracted 里出现过哪些 sub_no（同号多小问时用来消歧）。"""
+    import review_content                       # 用它的 ROOT，测试只 patch 那里
+    path = review_content.ROOT / "output" / "extracted" / rel_path / f"{source}.jsonl"
+    subs: list[int] = []
+    for row in _read_jsonl(path):
+        if int(row.get("group_order") or 0) == no:
+            sub = int(row.get("sub_no") or 0)
+            if sub not in subs:
+                subs.append(sub)
+    return sorted(subs)
+
+
+def _pick_sub_no(rel_path: str, source: str, no: int) -> int:
+    subs = _sub_no_choices(rel_path, source, no)
+    if len(subs) <= 1:
+        return subs[0] if subs else 0
+    c = console()
+    c.write(f"第 {no} 题有多个小问：")
+    for i, sub in enumerate(subs, 1):
+        c.write(f"  {i}) {no}({sub})")
+    while True:
+        c.prompt("选哪个小问（回车=0 整题）› ")
+        raw = _read_line()
+        if raw is None or not raw.strip():
+            return 0
+        if raw.strip().isdigit() and 1 <= int(raw) <= len(subs):
+            return subs[int(raw) - 1]
+        c.warn(f"请输入 1–{len(subs)}")
+
+
 def review_by_numbers(subject: str | None, file: str | None,
                       fixes_dir: Path | None = None,
                       *, sources: set[str] | None = None) -> int:
@@ -859,7 +906,7 @@ def review_by_numbers(subject: str | None, file: str | None,
                 source=paper["source"],
                 rel_path=str(paper["rel_path"]),
                 group_order=no,
-                sub_no=0,
+                sub_no=_pick_sub_no(str(paper["rel_path"]), paper["source"], no),
                 manual=True,
                 flags=[{
                     "kind": "manual_override",

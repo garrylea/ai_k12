@@ -185,3 +185,65 @@ def test_placeholder_plus_image_slot_replaces_ref(tmp_path, monkeypatch):
     assert "[图1]" not in rec["content"]
     assert "![](images/manual_" in rec["content"]
     assert list((tmp_path / "output" / "md" / REL / "images").glob("manual_*.png"))
+
+
+def test_repair_u_returns_to_card_then_enter_records(tmp_path, monkeypatch):
+    _prep(tmp_path, monkeypatch, kind="repair_truncated")
+    lab = tmp_path / "output" / "labeling_issues.jsonl"
+    lab.write_text(json.dumps({
+        "source": SOURCE,
+        "group_order": 19,
+        "sub_no": 0,
+        "original_content": "修复前完整原文",
+        "regenerated": {"content": "短"},
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO("u\n\n"))
+    manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+    rec = _records(tmp_path)[0]
+    assert rec["content"] == "修复前完整原文"
+    assert rec["content_only"] is True
+
+
+def test_r_clears_material_url_and_images_but_keeps_answer(tmp_path, monkeypatch):
+    _prep(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("R\n1\n新题面\nEOF\n\n"))
+    manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+    rec = _records(tmp_path)[0]
+    assert rec["content"] == "新题面"
+    assert rec["answer"] == "甲"
+    assert rec["material_url"] is None
+    assert "images/" not in rec["content"]
+
+
+def test_cli_non_tty_does_not_enter_review(tmp_path, monkeypatch):
+    import sys
+
+    import fix_question_cli
+
+    class NonTTY(io.StringIO):
+        def isatty(self):
+            return False
+
+        def readline(self):
+            raise AssertionError("非 TTY 不得读取 stdin")
+
+    monkeypatch.setattr(sys, "stdin", NonTTY(""))
+    monkeypatch.setattr(sys, "argv", ["fix_question_cli.py",
+                                      "--fixes-dir", str(tmp_path)])
+    calls = []
+    monkeypatch.setattr(fix_question_cli, "review_pending",
+                        lambda **kw: calls.append(kw) or {})
+    assert fix_question_cli.main() == 0
+    assert calls == []
+
+
+def test_pick_sub_no_asks_when_same_number_has_two_sub_questions(tmp_path, monkeypatch):
+    md = str(tmp_path / "output/md" / REL / "卷A.md")
+    _env(tmp_path, monkeypatch,
+         questions=[
+             {"group_order": 26, "sub_no": 1, "content": "第一问"},
+             {"group_order": 26, "sub_no": 2, "content": "第二问"},
+         ],
+         issues=[])
+    monkeypatch.setattr("sys.stdin", io.StringIO("2\n"))
+    assert manual_fix._pick_sub_no(REL, SOURCE, 26) == 2
