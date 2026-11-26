@@ -24,24 +24,35 @@ const PAPER_QUESTION_NO_SQL = `COALESCE((
   LIMIT 1
 ), q.group_order)`;
 
-/** 该生「做过 + 最后作答时间」派生表，3 个 ? 依次是 student_id。
- *  与「从未做过」判定同源：专项/考试已判 + 主线非跳过未答。 */
-const ANSWERED_TIMES_SQL = `SELECT sar.question_id AS question_id, MAX(COALESCE(sar.judged_at, sar.created_at)) AS answered_at
-  FROM special_answer_records sar
-  JOIN special_practice_sessions sps ON sps.id = sar.session_id
-  WHERE sps.student_id = ? AND sar.is_correct IS NOT NULL
-  GROUP BY sar.question_id
-UNION ALL
-SELECT ea.question_id, MAX(COALESCE(ea.judged_at, ea.created_at))
-  FROM exam_answers ea
-  JOIN exam_sessions es ON es.id = ea.session_id
-  WHERE es.student_id = ? AND ea.is_correct IS NOT NULL
-  GROUP BY ea.question_id
-UNION ALL
-SELECT pr.question_id, MAX(COALESCE(pr.judged_at, pr.created_at))
-  FROM practice_results pr
-  WHERE pr.student_id = ? AND pr.method <> 'unanswered'
-  GROUP BY pr.question_id`;
+/** 该生「做过 + 最后作答时间」派生表，4 个 ? 依次是 student_id。
+ *  与「从未做过」判定同源：专项/考试已判 + 主线非跳过未答 + 主观题自评。
+ *  2026-11-26：加自评表——主观题提交时 sar.is_correct 停在 NULL，真正的对错
+ *  落在 question_self_assessments，只认 sar 会把这类题误判成「从未做过」。
+ *  外层按 question_id 聚合：自评回写后同一题可能同时命中 sar 与自评表，
+ *  不去重会让 findRandomByKpAndType 的 LEFT JOIN 抽出重复题。 */
+const ANSWERED_TIMES_SQL = `SELECT question_id, MAX(answered_at) AS answered_at FROM (
+  SELECT sar.question_id AS question_id, MAX(COALESCE(sar.judged_at, sar.created_at)) AS answered_at
+    FROM special_answer_records sar
+    JOIN special_practice_sessions sps ON sps.id = sar.session_id
+    WHERE sps.student_id = ? AND sar.is_correct IS NOT NULL
+    GROUP BY sar.question_id
+  UNION ALL
+  SELECT ea.question_id, MAX(COALESCE(ea.judged_at, ea.created_at))
+    FROM exam_answers ea
+    JOIN exam_sessions es ON es.id = ea.session_id
+    WHERE es.student_id = ? AND ea.is_correct IS NOT NULL
+    GROUP BY ea.question_id
+  UNION ALL
+  SELECT pr.question_id, MAX(COALESCE(pr.judged_at, pr.created_at))
+    FROM practice_results pr
+    WHERE pr.student_id = ? AND pr.method <> 'unanswered'
+    GROUP BY pr.question_id
+  UNION ALL
+  SELECT qsa.question_id, MAX(qsa.created_at)
+    FROM question_self_assessments qsa
+    WHERE qsa.student_id = ?
+    GROUP BY qsa.question_id
+) all_answered GROUP BY question_id`;
 
 export interface PaperPositionOptionRow extends RowDataPacket {
   grade: string;
@@ -255,8 +266,8 @@ export class QuestionsRepository {
       LIMIT ?`;
     // 2026-11-25：没做过的优先（池内仍随机），全做过后按最后作答时间从久到新补。
     const params = type != null
-      ? [studentId, studentId, studentId, studentId, subjectId, kpId, type, count]
-      : [studentId, studentId, studentId, studentId, subjectId, kpId, count];
+      ? [studentId, studentId, studentId, studentId, studentId, subjectId, kpId, type, count]
+      : [studentId, studentId, studentId, studentId, studentId, subjectId, kpId, count];
     // Use pool.query (client-side escaping) instead of pool.execute (server-side
     // prepared statements): MySQL rejects `LIMIT ?` as a prepared-statement
     // placeholder with "Incorrect arguments to mysqld_stmt_execute"（联调实测；
@@ -366,6 +377,9 @@ export class QuestionsRepository {
           SELECT 1 FROM practice_results pr
           WHERE pr.question_id = q.id AND pr.student_id = ?
             AND pr.method <> 'unanswered'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM question_self_assessments qsa
+          WHERE qsa.question_id = q.id AND qsa.student_id = ?
         ) THEN q.id END) AS untried_count
       FROM paper_questions pq
       JOIN exam_papers p ON p.id = pq.paper_id
@@ -379,7 +393,7 @@ export class QuestionsRepository {
       GROUP BY pq.question_no`;
     const [rows] = await this.pool.query<RowDataPacket[]>(
       sql,
-      [studentId, subjectId, studentId, subjectId, studentId, studentId, studentId,
+      [studentId, subjectId, studentId, subjectId, studentId, studentId, studentId, studentId,
         subjectId, grade, semester, studentId, subjectId],
     );
     return rows as PaperPositionCountRow[];
@@ -459,6 +473,10 @@ export class QuestionsRepository {
           WHERE pr.question_id = q.id AND pr.student_id = ?
             AND pr.method <> 'unanswered'
         )
+        AND NOT EXISTS (
+          SELECT 1 FROM question_self_assessments qsa
+          WHERE qsa.question_id = q.id AND qsa.student_id = ?
+        )
       GROUP BY q.id
       ORDER BY q.id ASC
       LIMIT ?`;
@@ -466,7 +484,7 @@ export class QuestionsRepository {
     const [rows] = await this.pool.query<RowDataPacket[]>(
       sql,
       [subjectId, grade, semester, questionNo, studentId, subjectId,
-        studentId, subjectId, studentId, studentId, studentId, limit],
+        studentId, subjectId, studentId, studentId, studentId, studentId, limit],
     );
     return rows as QuestionRow[];
   }
@@ -503,7 +521,7 @@ export class QuestionsRepository {
       LIMIT ?`;
     // pool.query：同上，LIMIT ? 不能走 execute 的 server-side prepare。
     const [rows] = await this.pool.query<RowDataPacket[]>(sql, [
-      studentId, studentId, studentId,
+      studentId, studentId, studentId, studentId,
       subjectId, grade, semester, questionNo,
       studentId, subjectId, studentId, subjectId,
       limit,

@@ -34,7 +34,7 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     // 老批量导入题没有 paper_questions 关联，退回 questions.group_order（卷面题号）
     expect(sql).toContain('COALESCE(');
     expect(sql).toContain('q.group_order');
-    expect(params).toEqual([7, 7, 7, 7, 1, 3, 'proof', 5]);
+    expect(params).toEqual([7, 7, 7, 7, 7, 1, 3, 'proof', 5]);
   });
 
   it('findRandomByKpAndType：没做过的优先随机抽，全做过后按最后作答时间从久到新', async () => {
@@ -43,14 +43,18 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     await repo.findRandomByKpAndType(7, 1, 3, null, 5);
 
     const [sql] = pool.query.mock.calls[0];
-    // 三处作答记录合并出「做过 + 最后作答时间」，与试卷题号口径同源
+    // 四处作答记录合并出「做过 + 最后作答时间」，与试卷题号口径同源；
+    // 2026-11-26 加自评表——主观题对错落在自评表，只认 sar 会误判成从未做过
     expect(sql).toContain('UNION ALL');
     expect(sql).toContain('FROM special_answer_records sar');
     expect(sql).toContain('FROM exam_answers ea');
     expect(sql).toContain('FROM practice_results pr');
+    expect(sql).toContain('FROM question_self_assessments qsa');
     expect(sql).toContain("pr.method <> 'unanswered'");
     expect(sql).toContain('sar.is_correct IS NOT NULL');
     expect(sql).toContain('ea.is_correct IS NOT NULL');
+    // 同一题同时命中 sar 与自评表时按 question_id 聚合，避免 LEFT JOIN 抽出重复题
+    expect(sql).toContain('all_answered GROUP BY question_id');
     expect(sql).toContain('LEFT JOIN (');
     expect(sql).toContain('ans.question_id = q.id');
     // 第一排序键：未做（ans 无行）在前；未做内部仍随机，做过的按时间升序（最久先）
@@ -74,7 +78,7 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     await repo.findRandomByKpAndType(7, 1, 3, null, 10);
     const [sql, params] = pool.query.mock.calls[0];
     expect(sql).not.toContain('q.type = ?');
-    expect(params).toEqual([7, 7, 7, 7, 1, 3, 10]);
+    expect(params).toEqual([7, 7, 7, 7, 7, 1, 3, 10]);
   });
 
   it('返回 QuestionRow 行', async () => {
@@ -323,7 +327,7 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(rows).toEqual([optionsRow]);
   });
 
-  it('countPaperPositionQuestions：三张作答表都参与「从未做过」判定', async () => {
+  it('countPaperPositionQuestions：三张作答表 + 自评表都参与「从未做过」判定', async () => {
     const pool = mockPool([{ question_no: 24, total: 6, wrong_count: 2, untried_count: 3 }]);
     const repo = new QuestionsRepository(pool as any);
     const rows = await repo.countPaperPositionQuestions(7, 1, '初三', 'first');
@@ -337,13 +341,14 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(sql).toContain('FROM exam_answers ea');
     expect(sql).toContain('JOIN exam_sessions es');
     expect(sql).toContain('FROM practice_results pr');
+    expect(sql).toContain('FROM question_self_assessments qsa');
     // 主线跳过未答（method='unanswered'）只是占位行，不算「做过」
     expect(sql).toContain("pr.method <> 'unanswered'");
     expect(sql).toContain('sar.is_correct IS NOT NULL');
     expect(sql).toContain('ea.is_correct IS NOT NULL');
     expect(sql).toContain('FROM student_hidden_questions shq');
     expect(sql).toContain('GROUP BY pq.question_no');
-    expect(params).toEqual([7, 1, 7, 1, 7, 7, 7, 1, '初三', 'first', 7, 1]);
+    expect(params).toEqual([7, 1, 7, 1, 7, 7, 7, 7, 1, '初三', 'first', 7, 1]);
     expect(rows[0].wrong_count).toBe(2);
   });
 
@@ -362,7 +367,7 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(params).toEqual([7, 1, 1, '初三', 'first', 24, 7, 1, 3]);
   });
 
-  it('findPaperPositionUntriedQuestions：排除三张作答表 + 错题本 + hidden', async () => {
+  it('findPaperPositionUntriedQuestions：排除三张作答表 + 自评表 + 错题本 + hidden', async () => {
     const pool = mockPool([]);
     const repo = new QuestionsRepository(pool as any);
     await repo.findPaperPositionUntriedQuestions(7, 1, '初三', 'first', 24, 2);
@@ -372,35 +377,38 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(sql).toContain('FROM special_answer_records sar');
     expect(sql).toContain('FROM exam_answers ea');
     expect(sql).toContain('FROM practice_results pr');
+    expect(sql).toContain('FROM question_self_assessments qsa');
     // 主线跳过未答（method='unanswered'）只是占位行，不算「做过」
     expect(sql).toContain("pr.method <> 'unanswered'");
     expect(sql).toContain('FROM main_error_books meb');
     expect(sql).toContain('FROM student_hidden_questions shq');
     expect(sql).toContain('ORDER BY q.id ASC');
     expect(sql).toContain('LIMIT ?');
-    expect(params).toEqual([1, '初三', 'first', 24, 7, 1, 7, 1, 7, 7, 7, 2]);
+    expect(params).toEqual([1, '初三', 'first', 24, 7, 1, 7, 1, 7, 7, 7, 7, 2]);
   });
 
-  it('findPaperPositionAnsweredQuestions：三张作答表合并出最后作答时间，升序取最久未做的题', async () => {
+  it('findPaperPositionAnsweredQuestions：三张作答表 + 自评表合并出最后作答时间，升序取最久未做的题', async () => {
     const pool = mockPool([]);
     const repo = new QuestionsRepository(pool as any);
     await repo.findPaperPositionAnsweredQuestions(7, 1, '初三', 'first', 24, 2);
 
     const [sql, params] = pool.query.mock.calls[0];
-    // 三处作答记录合并，方法与「从未做过」判定同源（跳过未答的占位行不算做过）。
+    // 四处作答记录合并，方法与「从未做过」判定同源（跳过未答的占位行不算做过）。
     expect(sql).toContain('UNION ALL');
     expect(sql).toContain('FROM special_answer_records sar');
     expect(sql).toContain('FROM exam_answers ea');
     expect(sql).toContain('FROM practice_results pr');
+    expect(sql).toContain('FROM question_self_assessments qsa');
     expect(sql).toContain("pr.method <> 'unanswered'");
     expect(sql).toContain('sar.is_correct IS NOT NULL');
     expect(sql).toContain('ea.is_correct IS NOT NULL');
     expect(sql).toContain('COALESCE(sar.judged_at, sar.created_at)');
+    expect(sql).toContain('all_answered GROUP BY question_id');
     // 错题池先取，这里必须排除未清错题，否则同一题会在两个池里重复出现。
     expect(sql).toContain('meb.is_cleared = 0');
     expect(sql).toContain('FROM student_hidden_questions shq');
     expect(sql).toContain('ORDER BY last_answered_at ASC, q.id ASC');
     expect(sql).toContain('LIMIT ?');
-    expect(params).toEqual([7, 7, 7, 1, '初三', 'first', 24, 7, 1, 7, 1, 2]);
+    expect(params).toEqual([7, 7, 7, 7, 1, '初三', 'first', 24, 7, 1, 7, 1, 2]);
   });
 });

@@ -17,7 +17,7 @@
 | 题号来源 | `paper_questions.question_no`（卷面题号；`questions.group_order` 是抽取兜底，不用于本功能筛选） |
 | 现有专项选题 | 知识点（`kpId`）/ 中考模型（`category+model`）；本功能是第三种 |
 | 错题本 | `main_error_books`，`is_cleared=0` = 还在错题本；`level` = 错题级别 L1–L5 |
-| 「做过」记录 | 专项/错题练习 → `special_answer_records`；真题考试 → `exam_answers`；主线练习 → `practice_results` |
+| 「做过」记录 | 专项/错题练习 → `special_answer_records`；真题考试 → `exam_answers`；主线练习 → `practice_results`；主观题自评 → `question_self_assessments`（2026-11-26 补：提交时 `is_correct=NULL`，对错真正落在自评表，只认前三处会把自评过的题误判为从未做过） |
 | 现有缺口 | 学生只能按知识点或模型选，无法表达「我要练第 24 题这种题」 |
 
 **关键限制（已告知用户并确认）**：`level` 不是真实错题次数——普通重复答错不累加，只有清零后重做再错才 +1。本期按级别排序，不新增真实计数。
@@ -67,7 +67,7 @@
 | 可判题 | `questions.is_active=1` 且 `answer <> ''`（空答案无法判题，与现有专项抽题池同口径） |
 | `total` | 该题号下、**已排除该生「不再展示」之后**的可判题数（接口直接给这个数，前端不二次过滤） |
 | 在错题本中 | 该生 + 该学科存在 `main_error_books.is_cleared=0 AND question_id=该题` |
-| 从未做过 | 该生对该题没有**已判**记录：`special_answer_records.is_correct IS NOT NULL`、`exam_answers.is_correct IS NOT NULL`、`practice_results` 三处均无（主线跳过未答 `practice_results.method='unanswered'` 的占位行不算做过） |
+| 从未做过 | 该生对该题没有**已判**记录，四处均无：`special_answer_records.is_correct IS NOT NULL`、`exam_answers.is_correct IS NOT NULL`、`practice_results`（主线跳过未答 `practice_results.method='unanswered'` 的占位行不算做过）、`question_self_assessments`（2026-11-26 补：主观题提交时 `is_correct=NULL`、对错只落在自评表，漏掉这处会把自评过的题误判为从未做过） |
 | 可练数 `availableCount` | 即接口的 `total`：不在该生「不再展示」清单的全部可判题，含做过最久的池；**这才是本次能被抽到的题数**（2026-11-25 起不再等于 `wrongCount + untriedCount`） |
 | 共 N 题 | 该「年级+学期」下 `exam_papers.question_count` 的众数（并列取较大值）；题号列表为 `1..N` |
 
@@ -355,7 +355,7 @@ ok(positions) → 选题号 → 选档位 → starting → 跳转 /student/train
 ### 10.1 后端（vitest）
 
 1. `paper-positions` 选项：数学返回 grade/semester 组合；众数计算（28 优先于 29）；非数学 400；无卷返回空。
-2. 题号清单：`total` 排除 inactive/空答案；`wrongCount` 只算未清错题；`untriedCount` 三张作答表均无已判记录；隐藏题不进任何计数；无题题号补 0。
+2. 题号清单：`total` 排除 inactive/空答案；`wrongCount` 只算未清错题；`untriedCount` 三张作答表 + 自评表均无已判记录；隐藏题不进任何计数；无题题号补 0。
 3. 开练校验：三选一互斥；缺字段；非数学；`type` 非 null；grade/semester 组合不存在；题号越界；`count` 非档位。
 4. 抽题顺序：未做 → 错题（level 降序、同级最近入本在前）→ 做过按最后作答时间升序；三池按剩余题数依次补足；已做过的题也参与第三池；多卷同题号去重。
 5. 题量不足：返回 400 且**不建** `training_sessions`。
