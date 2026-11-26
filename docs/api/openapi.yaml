@@ -6189,6 +6189,16 @@ paths:
         /training/questions/explanations）。训练题必来自题库（无「未命中
         AI + 结构化入库」分支）：题目不存在 400（code=4004）；AI 判定失败 503
         （code=5001，不写错题本）。
+        主观题默认错（2026-11-26）：source 为 targeted|error_practice 且带 sessionUid
+        时，主观题（self_assess 分支，含语文非客观题）提交即按错结算——响应
+        isCorrect=false（不带 uid 时为 null）/ method='self_assess' /
+        needsSelfAssessment=true / referenceAnswer，pointsAwarded=0；
+        SelfAssessmentSettlementService.submitDefaultIncorrect 在单连接事务内写会话 →
+        作答行 is_correct=0 + self_assess_state='default_incorrect' → 错题本 find-or-create →
+        逐 KP 掌握度 error+1，不写 question_self_assessments 留痕、不发订正分。
+        同题同答案重复提交幂等；不同答案或已确认状态 409/code=1001（回退改答案拦截）。
+        事务内 SQL 异常原样冒泡由 Nest 映射 5xx。不带 sessionUid 的老客户端行为不变
+        （isCorrect=null，不建会话、不进本状态机）；考试（exam）不经本端点。
       operationId: judgeTraining
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -6211,6 +6221,10 @@ paths:
                         $ref: '#/components/schemas/JudgeResult'
         '400':
           description: source 非法或题目不存在（code=4004）
+        '409':
+          description: >-
+            带 sessionUid 的主观题重复提交但答案不同，或作答行已确认
+            （self_assess_state 为 confirmed_correct / confirmed_incorrect），code=1001
         '503':
           description: AI 判定失败
           content:
@@ -6231,16 +6245,26 @@ paths:
       summary: 主观题学生自评（self_assess 模式）
       description: >-
         主观题学生对照参考答案自评对错（student JWT）。请求体：
-        {questionId, subjectId, assessment, source, sourceRefId?}；
-        assessment 枚举 correct|incorrect；source 枚举
+        {questionId, subjectId, assessment, source, sourceRefId?, sessionUid?,
+        suppressErrorFixPoints?}；assessment 枚举 correct|incorrect；source 枚举
         targeted|error_practice|exam（非法值 400）；sourceRefId 仅
-        source='exam' 时传 sessionId，其余来源不传。每次自评写入
-        question_self_assessments 留痕；incorrect 写入/复用
-        main_error_books（source 落库为训练/考试来源）并触发解析缓存兜底生成；
-        correct 清零该题所有未清记录。题目不存在 404。
-        可选 sessionUid（2026-11-26）：专项练习传本轮会话 uid 时，把作答历史
-        （special_answer_records）的 is_correct 从 NULL 补成自评结果；考试来源
-        （exam）不回写；回写失败只 warn 不影响自评。
+        source='exam' 时传 sessionId，其余来源不传。题目不存在 404。
+        带 sessionUid 且 source≠'exam'（2026-11-26 默认错结算）：交
+        SelfAssessmentSettlementService.confirmSelfAssessment 在同一连接事务内按
+        special_answer_records.self_assess_state 状态机结算——
+        default_incorrect + correct：写 question_self_assessments 留痕 correct、清本、
+        逐 KP 掌握度 error-1/correct+1、状态迁 confirmed_correct（is_correct=1），
+        不发 error_fix 订正分；default_incorrect + incorrect：只追加留痕 incorrect、
+        状态迁 confirmed_incorrect（is_correct=0），不再入本/不再改掌握度
+        （首次提交已按错结算）。同结论重复点幂等成功；相反结论已确认 409/code=1001；
+        作答行不存在/状态异常（含会话 uid 非本人）409/code=1002。
+        掌握度回退直接调仓储 revertOneError，异常冒泡回滚、0 行只 warn。
+        迁移前 self_assess_state=NULL 的旧行首次带 uid 自评按旧语义补做副作用并补写
+        confirmed_* 终态，不做批量历史回填。
+        无 sessionUid（老客户端）或 source='exam'：旧语义不变——委托
+        JudgeCore.recordSelfAssessment，每次写 question_self_assessments 留痕，
+        incorrect 写入/复用 main_error_books 并触发解析缓存兜底生成，correct 清零
+        该题所有未清记录；exam 来源不回写作答历史、不改 self_assess_state。
       operationId: selfAssessTraining
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -6265,11 +6289,19 @@ paths:
                           errorBookId:
                             type: integer
                             nullable: true
-                            description: incorrect 时返回写入/复用的错题本 id；correct 清零时省略该键（缺键按 null 理解）
+                            description: >-
+                              无 uid 路径 incorrect 时返回写入/复用的错题本 id、correct 省略该键（缺键按 null 理解）；
+                              带 uid 默认错路径错题本在判题时已建，correct/incorrect 均省略该键
+                          idempotent:
+                            type: boolean
+                            description: 带 uid 路径重复确认同一结论时为 true（幂等成功，不重复结算）
         '400':
           description: source/assessment 非法或 questionId/subjectId 非正整数
         '404':
           description: 题目不存在
+        '409':
+          description: >-
+            带 uid 路径状态冲突：相反结论已确认（code=1001）、作答行不存在/状态异常或会话非本人（code=1002）
 
   /training/bump-error-levels:
     post:
@@ -8247,6 +8279,43 @@ paths:
                         $ref: '#/components/schemas/CompleteSessionResult'
         '404':
           description: 训练会话不存在或非本人（code=1002）
+
+  /training/special-sessions/{sessionUid}/complete:
+    post:
+      tags: [Training]
+      summary: 专项作答会话完成标记（2026-11-26）
+      description: >-
+        **200**（状态迁移类 POST 显式 @HttpCode(200)）。按 sessionUid + JWT 学生 id
+        把 special_practice_sessions.completed_at 置为 NOW(3)（仅 completed_at IS NULL
+        的行更新）。会话不存在 / 非本人 / 已标记完成都回 404/code=1002——重复完成
+        **不幂等**（前端只在整轮结束调一次）。仅标记会话完成，不参与发分（乙类
+        整批发分仍走 /training/sessions/{id}/complete）。
+      operationId: completeSpecialSession
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: sessionUid
+          in: path
+          required: true
+          schema: { type: string }
+          description: 判题/自评时透传的本轮专项会话 uid
+      responses:
+        '200':
+          description: 完成标记结果
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          completed:
+                            type: boolean
+                            example: true
+        '404':
+          description: 会话不存在、非本人或已标记完成（code=1002）
 
   /student/practice-history:
     get:
@@ -11447,10 +11516,21 @@ components:
           description: 题库命中时的 questions.id；未命中且结构化失败时为 null（错题仅存题面）
         isCorrect:
           type: boolean
+          nullable: true
+          description: >-
+            true/false=已判定；null=主观题 self_assess 待自评。训练轨带 sessionUid 的主观题
+            （默认错，2026-11-26）提交即回 false，不带 uid 仍回 null
         method:
           type: string
-          enum: [exact, ai]
-          description: exact=客观题答案比对；ai=JudgmentCapability 判定
+          enum: [exact, ai, self_assess, unanswered]
+          description: exact=客观题答案比对；ai=JudgmentCapability 判定；self_assess=主观题学生对照参考答案自评；unanswered=空答案
+        needsSelfAssessment:
+          type: boolean
+          description: 主观题 self_assess 分支恒 true，前端据此展开自评入口（2026-11-26 补记）
+        referenceAnswer:
+          type: string
+          nullable: true
+          description: 主观题 self_assess 分支随判题下发的参考答案，供学生当场对照自评（2026-11-26 补记）
         errorType:
           type: string
           nullable: true
@@ -11682,8 +11762,10 @@ components:
           type: string
           description: >-
             可选（2026-11-01）：唯一标识本轮专项练习会话，同 uid 多次判题复用同一行。
-            缺失时下列作答记录旁路写入整体不生效（不建会话、不写记录、不报错）；
-            plannedQuestionIds 亦仅在传本字段时生效
+            缺失时下列作答记录旁路写入整体不生效（不建会话、不写记录、不报错），
+            主观题仍按旧语义回 isCorrect=null；plannedQuestionIds 亦仅在传本字段时生效。
+            传本字段的主观题（source=targeted|error_practice）提交即默认错并按事务结算
+            （2026-11-26，见端点 description）；同题同答案幂等、不同答案/已确认 409/code=1001
         title:
           type: string
           nullable: true
@@ -11736,9 +11818,11 @@ components:
         sessionUid:
           type: string
           description: >-
-            可选（2026-11-26）：专项练习本轮会话 uid（与判题 /judge 同一个）。传了则自评后把
-            special_answer_records 对应作答行的 is_correct 从 NULL 补成最终结果；
-            考试来源（exam）不回写。非字符串按不传处理，回写失败只 warn 不影响自评。
+            可选（2026-11-26）：专项练习本轮会话 uid（与判题 /judge 同一个）。带本字段且
+            source≠'exam' 时走 SelfAssessmentSettlementService 事务结算（默认错状态机：
+            default_incorrect → confirmed_correct / confirmed_incorrect，含掌握度回退与错题本
+            清本，不发订正分）；考试来源（exam）不回写、不走状态机。非字符串按不传处理，
+            传了即进入事务路径（SQL 异常冒泡 5xx，不再「失败只 warn」）。冲突 409/code=1001|1002。
         suppressErrorFixPoints:
           type: boolean
           description: >-

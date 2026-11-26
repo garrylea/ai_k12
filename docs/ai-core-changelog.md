@@ -8,7 +8,25 @@
 
 ---
 
-## 2026-11-26 专项抽题漏判自评过的题 + 作答历史对错停在 NULL（A+B 修复）
+## 2026-11-26 训练轨主观题「提交即默认错 + 事务结算」（最终态，取代 A+B 的 NULL 回写中间态）
+
+**问题与决策**：A+B 方案（本节下一条）只在自评后把 `special_answer_records.is_correct` 从 NULL 补成结果——提交那一刻作答历史仍是 NULL，抽题「做过」判定、错题本、掌握度三处仍不一致，学生不表态就一直悬空。用户裁决改为**训练轨带会话 uid 的主观题提交即按错结算**，学生点「我做对了」才事务化翻正，彻底取消「先 NULL 挂起、看答案后自评」语义。
+
+**实现**：
+1. **DB**：`special_answer_records` 加 `self_assess_state VARCHAR(24) DEFAULT NULL`（迁移 `2026-11-26_special_answer_self_assess_state.sql`，`information_schema` 守卫幂等，schema.sql 同步；DB 设计文档 v3.6 补录两表到 §3.23）。
+2. **判题**：`judge-core` 路由 1c 新增 `defaultIncorrect`——带 uid 的训练轨主观题回 `isCorrect=false` + `needsSelfAssessment=true` + 参考答案，`pointsAwarded=0`；不带 uid 仍为 `null`。`judgeTraining` 该分支跳过旧旁路 upsert，交结算服务。
+3. **首次提交**：`SelfAssessmentSettlementService.submitDefaultIncorrect` 单连接事务写会话 → 作答行 `is_correct=0`/`self_assess_state='default_incorrect'` → 错题本 find-or-create → 逐 KP 掌握度 `error+1`；**不写 `question_self_assessments` 留痕、不发订正分**。同题同答案幂等，不同答案 / 已确认 409/1001；事务内异常原样冒泡回滚。
+4. **点对**：`confirmSelfAssessment` 同事务留痕 correct + 清本 + 逐 KP 掌握度 `error-1/correct+1` + 迁 `confirmed_correct`（`is_correct=1`），**不发 `error_fix` 分**；`revertOneError` 0 行只 warn，其它掌握度异常冒泡回滚。**不可调吞异常的 `MasteryService.revertErrorToCorrect`**。
+5. **点错**：同事务只追加留痕 incorrect + 迁 `confirmed_incorrect`（`is_correct=0`），不再入本 / 不再改掌握度。同结论重复点幂等；相反结论 409/1001；无作答行 / 状态异常 409/1002。
+6. **迁移前 NULL 旧行**：首次带 uid 自评按旧语义补做副作用（留痕 + 错题本写入 / 清零 + 掌握度各记一次）并补写 `confirmed_*` 终态，不做批量历史回填。
+7. **接口与前端**：新增 `POST /api/training/special-sessions/{sessionUid}/complete`（显式 200，重复完成 404/1002 不幂等）；`error_practice` 补 `sessionUid`；回退到已作答自评题有拦截 + 409 兜底。
+8. **范围外**：考试（exam）、redo、无 uid 老客户端行为不变；客观题 / AI 判题 / 无参考答案守卫不变。
+
+**验证**：全量回归（server / web 的 `npm test` + `npx tsc --noEmit`）、schema 对账与 openapi YAML 校验结果见 Task 11 报告 `.superpowers/sdd/2026-11-26-self-assess-default-incorrect/task-11-report.md`。设计见 `docs/superpowers/specs/2026-11-26-self-assess-default-incorrect-design.md`。
+
+## 2026-11-26 专项抽题漏判自评过的题 + 作答历史对错停在 NULL（A+B 修复，已被上一条取代）
+
+> **⚠️ 已被同日「默认错 + 事务结算」最终态取代**：下文的「自评回写 `is_correct`」与「33 条存量未回填」仅为中间态记录，勿再按它改代码；最终行为以上一条为准。
 
 **问题**：学生昨晚做完数学试卷第 27 题（proof，主观题）并自评「正确」，今天选专项练习又抽到它。
 根因两条：① 主观题提交时 `judgeTraining` 写入 `special_answer_records.is_correct=NULL`（在途/未判），
