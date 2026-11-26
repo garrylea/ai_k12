@@ -23,10 +23,15 @@ def _write(path, rows):
                     encoding="utf-8")
 
 
-def _patch_content_roots(monkeypatch, root):
-    import review_content, review_editor
-    monkeypatch.setattr(review_editor, "ROOT", root)
-    monkeypatch.setattr(review_content, "ROOT", root)
+def _patch_all_roots(monkeypatch, root):
+    """editor / content / records 三层各有一份 ROOT 快照，临时目录必须一起改。
+
+    `review_records` 本身不读真实输出目录（路径都由调用方传入），没有 ROOT 属性，
+    所以第三个 setattr 用 `raising=False`。
+    """
+    import review_content, review_editor, review_records
+    for mod in (review_editor, review_content, review_records):
+        monkeypatch.setattr(mod, "ROOT", root, raising=False)
 
 
 def test_pending_issues_filters_by_exact_sources(tmp_path, monkeypatch):
@@ -953,7 +958,7 @@ def test_apply_image_placeholders_replaces_and_appends():
 
 
 def test_current_question_reads_extracted_jsonl(tmp_path, monkeypatch):
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     rel = Path("数学/初中/first/2026/卷A")
     d = tmp_path / "output" / "extracted" / rel
     d.mkdir(parents=True)
@@ -969,7 +974,7 @@ def test_current_question_reads_extracted_jsonl(tmp_path, monkeypatch):
 
 def test_copyable_question_text_full_content_and_options(tmp_path, monkeypatch):
     """补题展示用当前题的完整题干 + 全部选项，不截断、不省略，可整段拷贝。"""
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     rel = Path("数学/初中/first/2026/卷A")
     d = tmp_path / "output" / "extracted" / rel
     d.mkdir(parents=True)
@@ -992,7 +997,7 @@ def test_copyable_question_text_full_content_and_options(tmp_path, monkeypatch):
 
 def test_copyable_question_text_falls_back_to_excerpt(tmp_path, monkeypatch):
     """找不到 extracted 记录时退回 excerpt，不报错。"""
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     issue = {"source": "卷A", "rel_path": "数学/卷A", "group_order": 9,
              "excerpt": "某题的旧快照"}
     assert manual_fix._copyable_question_text(issue) == "某题的旧快照"
@@ -1000,7 +1005,7 @@ def test_copyable_question_text_falls_back_to_excerpt(tmp_path, monkeypatch):
 
 def test_discard_fixes_for_source_moves_only_matching(tmp_path, monkeypatch):
     """重转后只作废「已恢复」的旧补题，且只动目标卷。"""
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     fixes = tmp_path / "manual_fixes"
     fixes.mkdir()
     target = fixes / "海淀数学(9).jsonl"
@@ -1029,7 +1034,7 @@ def test_discard_fixes_for_source_no_dir(tmp_path):
 
 def test_discard_fixes_for_source_keyword(tmp_path, monkeypatch):
     """source_file 是关键词时也能匹配（兼容补题时的写法）。"""
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     fixes = tmp_path / "manual_fixes"
     fixes.mkdir()
     target = fixes / "海淀数学(9).jsonl"
@@ -1044,7 +1049,7 @@ def test_discard_fixes_for_source_keyword(tmp_path, monkeypatch):
 
 def test_discard_fixes_for_source_exact_does_not_match_keyword_superset(tmp_path, monkeypatch):
     """import_cli 已选短卷时必须精确匹配，不能把三帆卷的补题一起作废。"""
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     fixes = tmp_path / "manual_fixes"
     fixes.mkdir()
     short = "英语-初三(上)-202607-西城-期末-试卷"
@@ -1065,7 +1070,7 @@ def test_discard_fixes_for_source_exact_does_not_match_keyword_superset(tmp_path
 
 def test_discard_keeps_pending_when_still_missing_and_applied_always(tmp_path, monkeypatch):
     """仍缺题的 pending 补题与 applied=True 的重放信号都不能被 redo 清掉。"""
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     fixes = tmp_path / "manual_fixes"
     fixes.mkdir()
     target = fixes / "模拟二.jsonl"
@@ -1487,7 +1492,7 @@ def test_enter_at_material_scope_skips_url_prompt(tmp_path, monkeypatch):
 
 
 def test_copyable_text_includes_current_inline_material(tmp_path, monkeypatch):
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     rel = tmp_path / "output" / "extracted" / "语文" / "模拟二"
     rel.mkdir(parents=True)
     _write(rel / "模拟二.jsonl", [
@@ -1535,7 +1540,7 @@ def test_published_material_urls_dedup_and_sorted(tmp_path, monkeypatch):
         {"group_order": 24, "material_url": "materials/chinese/B/content.md"},
         {"group_order": 25, "material_url": None},
     ])
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     issue = {"rel_path": rel, "source": "语文-模拟二", "group_order": 20}
     assert manual_fix._published_material_urls(issue) == [
         (19, "materials/chinese/A/content.md"),
@@ -1544,7 +1549,7 @@ def test_published_material_urls_dedup_and_sorted(tmp_path, monkeypatch):
 
 
 def test_published_material_urls_missing_file_returns_empty(tmp_path, monkeypatch):
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     issue = {"rel_path": "语文/模拟二", "source": "不存在", "group_order": 20}
     assert manual_fix._published_material_urls(issue) == []
 
@@ -1554,7 +1559,7 @@ def test_published_material_urls_missing_file_returns_empty(tmp_path, monkeypatc
 def _prep_material_only(tmp_path, monkeypatch, *, with_url=True, post_material=None,
                         material_text="## 第三站中国(北京)航天科学中心\n该中心舟搔传统展馆局限。"):
     """题干完整的语文 incomplete_content：问题在共享文章缺画线标记。"""
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     monkeypatch.setattr(manual_fix, "ROOT", tmp_path)  # _edit_material_file 仍在 manual_fix
     rel = "语文/初中/second/2026/模拟二"
     ext = tmp_path / "output" / "extracted" / rel
@@ -2072,7 +2077,7 @@ def _prep_repair(tmp_path, monkeypatch, *, with_original=True, swap=False):
     md_dir = tmp_path / "md" / "物理" / "初中" / "first" / "2024" / "卷A"
     md_dir.mkdir(parents=True, exist_ok=True)
     (md_dir / "卷A.md").write_text("", encoding="utf-8")
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
 
     if with_original:
         lab = tmp_path / "output" / "labeling_issues.jsonl"
@@ -2152,7 +2157,7 @@ def test_repair_truncated_restore_records_content_only(tmp_path, monkeypatch):
 
 
 def test_repair_original_missing_returns_none(tmp_path, monkeypatch):
-    _patch_content_roots(monkeypatch, tmp_path)
+    _patch_all_roots(monkeypatch, tmp_path)
     issue = {"source": "物理-卷A-试卷", "group_order": 18}
     assert manual_fix._repair_original(issue) is None
 

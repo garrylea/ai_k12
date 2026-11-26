@@ -88,6 +88,13 @@ from review_queue import (  # noqa: F401
     mark_issue,
     pending_issues,
 )
+from review_records import (  # noqa: F401
+    _copy_new_images,
+    _keep_prior_images,
+    _save_records,
+    discard_fixes_for_source,
+)
+
 
 def _confirm_text(text: str, label: str = "题干") -> tuple[str, str]:
     """录入后必须显式选号确认；返回 (动作, 正文)，动作 ∈ ok / redo / clear / skip。
@@ -142,96 +149,6 @@ def _confirm_text(text: str, label: str = "题干") -> tuple[str, str]:
             continue
         c.warn("请按 1/2/3/4/5 选择（1 确认 / 2 逐行编辑 / 3 重新输入 / "
                "4 " + give_up + " / 5 文件编辑）")
-
-
-def _copy_new_images(paths: list[Path], paper_md_dir: Path) -> list[str]:
-    """把用户给的图片**原样**拷进该卷 images/，返回 md 相对引用（不走 MinerU）。"""
-    dst = paper_md_dir / "images"
-    dst.mkdir(parents=True, exist_ok=True)
-    refs: list[str] = []
-    for path in paths:
-        try:
-            data = path.read_bytes()
-        except OSError:
-            continue
-        name = f"manual_{hashlib.sha1(data).hexdigest()[:16]}{path.suffix.lower()}"
-        target = dst / name
-        if not target.exists():
-            target.write_bytes(data)
-        refs.append(f"images/{name}")
-    return refs
-
-
-def _keep_prior_images(old: dict | None, new: dict) -> None:
-    """同一批粘贴里同题号的后一条覆盖前一条时，别把前一条的配图吞掉。
-
-    截图 OCR 常把配图排在题号行之前，旧版会被切成两条同号记录；第二条没图，
-    覆盖后图就没了（2026-11-23 西城模拟一题19）。现在带图的那条被覆盖时，
-    把图补回新记录，宁可多一张图，也不要静默丢图。
-    """
-    if old is None:
-        return
-    old_imgs = _image_refs(old.get("content") or "", old.get("material_text") or "")
-    new_imgs = _image_refs(new.get("content") or "", new.get("material_text") or "")
-    if not old_imgs or new_imgs:
-        return
-    block = "\n\n" + "\n".join(f"![]({r})" for r in old_imgs)
-    if (new.get("material_text") or "").strip():
-        new["material_text"] = new["material_text"].rstrip() + block
-    else:
-        new["content"] = (new.get("content") or "").rstrip() + block
-    console().warn("同题号的后一条记录没有配图，已把前一条的图补回（避免图被覆盖丢失）")
-
-
-def discard_fixes_for_source(source_file: str, *, fixes_dir: Path | None = None,
-                             exact: bool = False) -> int:
-    """重转卷后只作废「已经被重新抽出来」的旧补题，保留仍需人工补的记录。
-
-    - `applied=True` 永远保留：这是 `needing_replay` 在重导清掉关联后恢复题号的唯一信号，
-      整文件丢弃会让补过的题永久消失（2026-11-21 语文模拟二 Q20 实测）。
-    - pending 记录：重抽后该题已出现在 extracted 里 → 旧补题过时，作废归档；
-      仍缺题 → 保留，等第 9 步写库，不必让用户再录一遍。
-    返回作废的记录条数。
-    """
-    out_dir = Path(fixes_dir) if fixes_dir else FIXES_DIR
-    if not out_dir.exists():
-        return 0
-    discarded = out_dir / "_discarded"
-    moved = 0
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    for f in sorted(out_dir.glob("*.jsonl")):
-        # 文件名就是卷名（manual_fix 落盘约定）。source_file 通常是精确卷名（import_cli
-        # 解析后的 chosen.name）；也兼容关键词——只要两边分词互相命中即可。
-        matched = (
-            f.stem.casefold() == source_file.casefold()
-            if exact
-            else match_keyword(f.stem, source_file) or match_keyword(source_file, f.stem)
-        )
-        if not matched:
-            continue
-        rows = _read_jsonl(f)
-        keep: list[dict] = []
-        drop: list[dict] = []
-        for rec in rows:
-            if rec.get("applied"):
-                keep.append(rec)
-                continue
-            current = _current_question(rec)
-            if current and (current.get("content") or "").strip():
-                drop.append(rec)       # 重抽已恢复：旧补题过时
-            else:
-                keep.append(rec)       # 仍缺题：保留用户补题
-        if not drop:
-            continue
-        discarded.mkdir(parents=True, exist_ok=True)
-        dest = discarded / f"{f.stem}.{stamp}{f.suffix}"
-        if keep:
-            _write_jsonl(dest, drop)
-            _write_jsonl(f, keep)
-        else:
-            shutil.move(str(f), str(dest))
-        moved += len(drop)
-    return moved
 
 
 def _ask_image_mode(count: int) -> str:
@@ -1623,19 +1540,6 @@ def papers_in_scope(subject: str | None, file: str | None,
         out.append({"source": source, "rel_path": rel_dir, "md": md,
                     "pdf": pdf if pdf.exists() else None})
     return out
-
-
-def _save_records(source: str, records: list[dict], out_dir: Path) -> None:
-    """把补题记录并入 manual_fixes/<source>.jsonl（同题号覆盖）。"""
-    out_file = out_dir / f"{source}.jsonl"
-    rows = _read_jsonl(out_file)
-    batch: dict[int, dict] = {}
-    for record in records:
-        _keep_prior_images(batch.get(record["group_order"]), record)
-        rows = [r for r in rows if r["group_order"] != record["group_order"]]
-        rows.append(record)
-        batch[record["group_order"]] = record
-    _write_jsonl(out_file, rows)
 
 
 def _pick_paper(papers: list[dict]) -> dict | None:

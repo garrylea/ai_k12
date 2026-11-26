@@ -17,6 +17,7 @@ from pathlib import Path
 
 from review_editor import ROOT
 from scope_filter import match_keyword
+from subject_codes import subject_code_for_path
 
 ISSUES_FILE = ROOT / "output" / "recognition_issues.jsonl"
 FIXES_DIR = ROOT / "output" / "manual_fixes"
@@ -132,6 +133,11 @@ class ReviewItem:
     @property
     def kinds(self) -> set[str]:
         return {str(f.get("kind") or "") for f in self.flags}
+
+    @property
+    def subject(self) -> str:
+        """学科 code（chinese / physics …）；路径认不出时回退 generic。"""
+        return subject_code_for_path(Path(self.rel_path), default="") or "generic"
 
     @property
     def is_repair(self) -> bool:
