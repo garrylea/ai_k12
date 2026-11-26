@@ -25,22 +25,30 @@ const PAPER_QUESTION_NO_SQL = `COALESCE((
 ), q.group_order)`;
 
 /** 该生「做过 + 最后作答时间」派生表，4 个 ? 依次是 student_id。
- *  与「从未做过」判定同源：专项/考试已判 + 主线非跳过未答 + 主观题自评。
+ *  与「从未做过」判定同源：专项/考试「已判**或已作答**」 + 主线非跳过未答 + 主观题自评。
  *  2026-11-26：加自评表——主观题提交时 sar.is_correct 停在 NULL，真正的对错
  *  落在 question_self_assessments，只认 sar 会把这类题误判成「从未做过」。
- *  外层按 question_id 聚合：自评回写后同一题可能同时命中 sar 与自评表，
- *  不去重会让 findRandomByKpAndType 的 LEFT JOIN 抽出重复题。 */
+ *  2026-11-26 二次修：判据从「有对错」放宽为「**有非空答案文本也算做过**」——
+ *  考试主观题 is_correct 恒为 NULL（考试只算客观题），学生答了但没在结果页自评时，
+ *  只认 is_correct 会把它当从未做过，专项抽题反复优先抽出。含旧专项行（is_correct=NULL
+ *  但 answer_text 有值）。占位行的 answer_text 为 NULL，天然排除。
+ *  外层按 question_id 聚合：同一题可能同时命中多表/多行，不去重会让
+ *  findRandomByKpAndType 的 LEFT JOIN 抽出重复题。 */
 const ANSWERED_TIMES_SQL = `SELECT question_id, MAX(answered_at) AS answered_at FROM (
   SELECT sar.question_id AS question_id, MAX(COALESCE(sar.judged_at, sar.created_at)) AS answered_at
     FROM special_answer_records sar
     JOIN special_practice_sessions sps ON sps.id = sar.session_id
-    WHERE sps.student_id = ? AND sar.is_correct IS NOT NULL
+    WHERE sps.student_id = ?
+      AND (sar.is_correct IS NOT NULL
+           OR (sar.answer_text IS NOT NULL AND TRIM(sar.answer_text) <> ''))
     GROUP BY sar.question_id
   UNION ALL
   SELECT ea.question_id, MAX(COALESCE(ea.judged_at, ea.created_at))
     FROM exam_answers ea
     JOIN exam_sessions es ON es.id = ea.session_id
-    WHERE es.student_id = ? AND ea.is_correct IS NOT NULL
+    WHERE es.student_id = ?
+      AND (ea.is_correct IS NOT NULL
+           OR (ea.answer_text IS NOT NULL AND TRIM(ea.answer_text) <> ''))
     GROUP BY ea.question_id
   UNION ALL
   SELECT pr.question_id, MAX(COALESCE(pr.judged_at, pr.created_at))
@@ -367,12 +375,14 @@ export class QuestionsRepository {
           SELECT 1 FROM special_answer_records sar
           JOIN special_practice_sessions sps ON sps.id = sar.session_id
           WHERE sar.question_id = q.id AND sps.student_id = ?
-            AND sar.is_correct IS NOT NULL
+            AND (sar.is_correct IS NOT NULL
+                 OR (sar.answer_text IS NOT NULL AND TRIM(sar.answer_text) <> ''))
         ) AND NOT EXISTS (
           SELECT 1 FROM exam_answers ea
           JOIN exam_sessions es ON es.id = ea.session_id
           WHERE ea.question_id = q.id AND es.student_id = ?
-            AND ea.is_correct IS NOT NULL
+            AND (ea.is_correct IS NOT NULL
+                 OR (ea.answer_text IS NOT NULL AND TRIM(ea.answer_text) <> ''))
         ) AND NOT EXISTS (
           SELECT 1 FROM practice_results pr
           WHERE pr.question_id = q.id AND pr.student_id = ?
@@ -460,13 +470,15 @@ export class QuestionsRepository {
           SELECT 1 FROM special_answer_records sar
           JOIN special_practice_sessions sps ON sps.id = sar.session_id
           WHERE sar.question_id = q.id AND sps.student_id = ?
-            AND sar.is_correct IS NOT NULL
+            AND (sar.is_correct IS NOT NULL
+                 OR (sar.answer_text IS NOT NULL AND TRIM(sar.answer_text) <> ''))
         )
         AND NOT EXISTS (
           SELECT 1 FROM exam_answers ea
           JOIN exam_sessions es ON es.id = ea.session_id
           WHERE ea.question_id = q.id AND es.student_id = ?
-            AND ea.is_correct IS NOT NULL
+            AND (ea.is_correct IS NOT NULL
+                 OR (ea.answer_text IS NOT NULL AND TRIM(ea.answer_text) <> ''))
         )
         AND NOT EXISTS (
           SELECT 1 FROM practice_results pr

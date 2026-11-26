@@ -53,6 +53,9 @@ describe('QuestionsRepository.findRandomByKpAndType', () => {
     expect(sql).toContain("pr.method <> 'unanswered'");
     expect(sql).toContain('sar.is_correct IS NOT NULL');
     expect(sql).toContain('ea.is_correct IS NOT NULL');
+    // 2026-11-26 二次修：考试主观题 is_correct 恒 NULL，「有非空答案也算做过」
+    expect(sql).toContain('TRIM(sar.answer_text)');
+    expect(sql).toContain('TRIM(ea.answer_text)');
     // 同一题同时命中 sar 与自评表时按 question_id 聚合，避免 LEFT JOIN 抽出重复题
     expect(sql).toContain('all_answered GROUP BY question_id');
     expect(sql).toContain('LEFT JOIN (');
@@ -346,6 +349,9 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(sql).toContain("pr.method <> 'unanswered'");
     expect(sql).toContain('sar.is_correct IS NOT NULL');
     expect(sql).toContain('ea.is_correct IS NOT NULL');
+    // 2026-11-26：有非空答案也算做过（考试主观题 is_correct 恒 NULL）
+    expect(sql).toContain('TRIM(sar.answer_text)');
+    expect(sql).toContain('TRIM(ea.answer_text)');
     expect(sql).toContain('FROM student_hidden_questions shq');
     expect(sql).toContain('GROUP BY pq.question_no');
     expect(params).toEqual([7, 1, 7, 1, 7, 7, 7, 7, 1, '初三', 'first', 7, 1]);
@@ -380,6 +386,9 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(sql).toContain('FROM question_self_assessments qsa');
     // 主线跳过未答（method='unanswered'）只是占位行，不算「做过」
     expect(sql).toContain("pr.method <> 'unanswered'");
+    // 2026-11-26：有非空答案也算做过（考试主观题 is_correct 恒 NULL）
+    expect(sql).toContain('TRIM(sar.answer_text)');
+    expect(sql).toContain('TRIM(ea.answer_text)');
     expect(sql).toContain('FROM main_error_books meb');
     expect(sql).toContain('FROM student_hidden_questions shq');
     expect(sql).toContain('ORDER BY q.id ASC');
