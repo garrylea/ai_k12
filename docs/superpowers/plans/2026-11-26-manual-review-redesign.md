@@ -896,7 +896,9 @@ def test_clear_images_strips_all_record_fields():
     rec = rr.build_record(ITEM, 19, 0, draft.patch, snap)
     assert "images/" not in rec["content"]
     assert "images/" not in rec["options"][0]["text"]
-    assert "images/" not in rec["material_inline_text"]
+    for key in ("material_text", "material_inline_text"):
+        if key in rec:
+            assert "images/" not in rec[key]
 
 
 def test_replace_images_uses_final_draft_sequence():
@@ -915,6 +917,36 @@ def test_clear_answer_uses_explicit_record_field():
     rec = rr.build_record(ITEM, 19, 0, draft.patch, snap)
     assert rec["answer"] == ""
     assert rec["clear_answer"] is True
+
+
+def test_untouched_material_chinese_omits_material_keys():
+    """语文只改题干：不要带 material_* 键，apply 自己会保留 existing_text。"""
+    item = ReviewItem(source="卷A", rel_path="语文/初中/2026/卷A", group_order=19)
+    snap = Snapshot(content="题干", article="文章", inline="素材")
+    rec = rr.build_record(item, 19, 0, rr.Patch(content="新题干"), snap)
+    assert "material_target" not in rec
+    assert "material_text" not in rec
+
+
+def test_untouched_material_physics_carries_inline():
+    """非语文必须带原 material_text，否则 apply 的 rec.get() 会把它写成 NULL。"""
+    snap = Snapshot(content="题干", inline="题前阅读")
+    rec = rr.build_record(ITEM, 19, 0, rr.Patch(content="新题干"), snap)
+    assert rec["material_target"] == "inline"
+    assert rec["material_text"] == "题前阅读"
+
+
+def test_clear_images_keeps_shared_article_body():
+    """清本题图不能删共享文章正文里的图。"""
+    item = ReviewItem(source="卷A", rel_path="语文/初中/2026/卷A", group_order=19)
+    snap = Snapshot(content="题干", article="旧文章", inline="素材")
+    draft = rr.ReviewDraft(snap)
+    draft.set_article("文章 ![](images/doc.jpg)")
+    draft.set_images([], "clear")
+    rec = rr.build_record(item, 19, 0, draft.patch, snap)
+    assert rec["material_target"] == "both"
+    assert "images/doc.jpg" in rec["material_text"]
+    assert "images/" not in rec["content"]
 
 
 def test_save_records_matches_sub_no(tmp_path):
@@ -1079,9 +1111,11 @@ def _apply_images_to_record(rec: dict, patch: Patch, snap: Snapshot) -> None:
             {**o, "text": strip_all_images(o.get("text") or "")}
             for o in (rec.get("options") or [])
         ]
-        for key in ("material_text", "material_inline_text"):
-            if key in rec:
-                rec[key] = strip_all_images(rec.get(key) or "")
+        # material_text 在 target=article/both 时承载共享文章正文，清它会删掉文章里的图。
+        if rec.get("material_target") not in ("article", "both") and "material_text" in rec:
+            rec["material_text"] = strip_all_images(rec.get("material_text") or "")
+        if "material_inline_text" in rec:
+            rec["material_inline_text"] = strip_all_images(rec.get("material_inline_text") or "")
     if mode in ("append", "replace") and patch.images:
         rec["content"] = _apply_image_placeholders(rec["content"], patch.images)
     elif mode == "keep":
@@ -1091,11 +1125,17 @@ def _apply_images_to_record(rec: dict, patch: Patch, snap: Snapshot) -> None:
 材料字段实现必须直接在同一个 `MaterialPatch` 上读取三态，不新增第二份状态：
 
 ```python
-def _material_record_values(patch: Patch, snap: Snapshot) -> dict:
+def _material_record_values(patch: Patch, snap: Snapshot, subject: str) -> dict:
     m = patch.material
     out: dict = {}
     if m.url_claim is not UNSET:
         out["material_url"] = m.url_claim
+    if m.article is UNSET and m.inline is UNSET:
+        # 材料一段都没改：语文不带键（apply 用 existing_text 保留原值）；
+        # 非语文必须带原 material_text，否则 apply 的 rec.get() 会把它写成 NULL。
+        if subject != "chinese" and (snap.inline or "").strip():
+            out.update(material_target="inline", material_text=snap.inline)
+        return out
     article = snap.article if m.article is UNSET else m.article
     inline = snap.inline if m.inline is UNSET else m.inline
     if article is None and inline is None:
@@ -1195,7 +1235,7 @@ def build_record(
         rec["clear_answer"] = True
     if patch.material.share_with is not None:
         rec["material_share_with"] = patch.material.share_with
-    rec.update(_material_record_values(patch, snap))
+    rec.update(_material_record_values(patch, snap, item.subject))
     _apply_images_to_record(rec, patch, snap)
     return rec
 ```
@@ -1286,11 +1326,19 @@ def test_clear_answer_updates_db_to_empty_string(tmp_path, monkeypatch):
     msg = apply_fixes.apply_record(
         cur, rec, True, assets_root=tmp_path / "assets", output_dir=tmp_path
     )
-    assert "已清空答案" in msg
-    assert any(
-        sql.startswith("UPDATE questions SET answer=%s")
-        for sql in cur.executed
+    assert "更新" in msg or "已清空" in msg
+    assert any("answer=''" in sql for sql in cur.executed)
+
+
+def test_clear_answer_with_content_edit_keeps_both(tmp_path):
+    """同一张卡改题干 + 清答案：两条都必须写，不能因为清答案早退把题干丢了。"""
+    rec = {**REC, "content": "新题干", "answer": "", "clear_answer": True}
+    cur = FakeCursor(paper=(17, 2), existing=5192)
+    apply_fixes.apply_record(
+        cur, rec, True, assets_root=tmp_path / "assets", output_dir=tmp_path
     )
+    assert any(sql.startswith("UPDATE questions SET content=") for sql in cur.executed)
+    assert any("answer=''" in sql for sql in cur.executed)
 
 
 def test_old_record_with_empty_answer_still_does_not_clear(tmp_path):
@@ -1355,21 +1403,26 @@ python3 -m pytest tests/test_apply_fixes.py -q
 
 Expected: `test_clear_answer_updates_db_to_empty_string` failed.
 
-- [ ] **Step 3: 实现最小分支**
+- [ ] **Step 3: 实现（不要顶层早退）**
 
-在 `answer_only` 分支前加入：
+`answer=COALESCE(NULLIF(%s,''), answer)` 在主 UPDATE 里（`apply_fixes.py:1018`），空串清不掉；
+但一张卡可以同时改题干和清答案，**顶层 `return` 会把题干/选项/材料一起吞掉**（记录仍会被
+标 applied、flag 仍会被关）。所以只改两条已有路径：
+
+1. 主 UPDATE 之后补一句：
 
 ```python
 if rec.get("clear_answer"):
-    if not apply:
-        return f"清空答案：paper={paper_id} 第{_no_label(go, sub_no)}题（question_id={qid or '—'}）"
-    if qid is None:
-        return "跳过：题库里找不到这道题，无法清空答案"
     cur.execute("UPDATE questions SET answer='' WHERE id=%s", (qid,))
-    _patch_extracted_answer(
-        rec, "", output_dir or RefineryConfig.from_env().output_dir,
-    )
-    return f"已清空答案：paper={paper_id} 第{_no_label(go, sub_no)}题"
+```
+
+2. `answer_only` 分支把空值拒绝改成：
+
+```python
+if not answer and not rec.get("clear_answer"):
+    return "跳过：答案为空"
+if rec.get("clear_answer"):
+    answer = ""          # 该分支的 UPDATE answer=%s 传空串即清空
 ```
 
 - [ ] **Step 4: 确认旧兼容**
@@ -1596,7 +1649,8 @@ def run_item(item: ReviewItem, index: int, total: int) -> RunResult:
                             load_repair=item.is_repair)
         result = run_card(item, target, snap, index, total)
         if result.action == "skip":
-            out.outcome = "skipped"
+            # 关联题卡已生成的记录不能丢：有记录就按 recorded 交给上层落盘
+            out.outcome = "recorded" if out.records else "skipped"
             return out
         if result.action == "ok":
             if (target.group_order, target.sub_no) == (item.group_order, item.sub_no):
@@ -2275,6 +2329,20 @@ git commit -m "docs(refinery): 同步人工校对一题一卡流程"
 - 材料三态：`UNSET / None / value`；
 - 卡片目标统一使用 `ReviewTarget(group_order, sub_no, note)`；多题粘贴使用
   `QuestionPart(group_order, sub_no, content, options, material)`，两者都携带题号与小问号。
+
+### 验收口径（可量化）
+
+| 场景 | 输入次数上限 | 断言方式 |
+|---|---|---|
+| 改题干（粘贴替换） | 4 | `test_review_flow.py` 里 `sys.stdin` 行数 |
+| 只改共享材料 / 题内材料 | 4 | 同上 |
+| 只补答案 | 2 | 同上 |
+| 砍短保留现状 | 1 | 同上 |
+| 同一张卡改题干 + 清答案 | 6 | 同条记录同时含 `content` 与 `clear_answer` |
+
+旧能力落点逐条见 spec §12。Task 6/7 的黄金会话至少要覆盖：改题干、改共享材料、
+改题内材料、只补答案、砍短用原文、缺题 + 关联题、换图/清图、清答案；其余输入原语
+（剪贴板、行编辑、回显、折行）由 Task 1 的单元测试覆盖。
 
 ### Placeholder Scan
 

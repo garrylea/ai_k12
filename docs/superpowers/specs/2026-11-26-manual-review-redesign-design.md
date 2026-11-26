@@ -8,9 +8,9 @@
 **写库边界**：
 
 - `recognition_scan.py`、publish/回灌规则、旧补题记录的读取兼容不动。
-- `apply_fixes.py` 只做三类最小改动：搬迁后 import 改指向新模块；新增向后兼容的
-  `clear_answer=True` 分支；状态回写时把 `sub_no` 传给 `mark_issue`。
-  旧 `manual_fixes/*.jsonl` 记录行为不变。
+- `apply_fixes.py` 只做三类最小改动：搬迁后 import 改指向新模块；支持向后兼容的
+  `clear_answer`（主 UPDATE 后补一条清空、`answer_only` 放宽空值拒绝，均不早退）；
+  状态回写时把 `sub_no` 传给 `mark_issue`。旧 `manual_fixes/*.jsonl` 记录行为不变。
 - 不新增数据库列，不新增 migration。
 
 ---
@@ -184,9 +184,11 @@
 - 路径按书写顺序编号，不再问“顺序对吗”。
 - 回车读剪贴板图片；连续回车可连续收图；无图等价于 `eof`。
 - 剪贴板图和显式路径都按文件内容 hash 去重。
-- `3 清空`：从本次记录将生成的 `content`、`options[].text`、`material_text`、
-  `material_inline_text` 中删除全部 Markdown 图片引用。
-- `2 替换全部`：先删除旧图片引用，再按最终图片序列应用 `[图N]`；未占用的新图追加到题干末尾。
+- `3 清空`：从本次记录将生成的 `content`、`options[].text`、`material_inline_text`
+  中删除全部 Markdown 图片引用；**不改 `material_text`**——`material_target=article/both`
+  时它承载共享文章正文，清它会把文章文档里的图一起删掉。
+- `2 替换全部`：先按上面的范围删除旧图片引用，再按最终图片序列应用 `[图N]`；
+  未占用的新图追加到题干末尾。
 - `1 追加`：最终图片序列 = 当前草稿图片 + 新图，不使用旧 Snapshot 覆盖已追加结果。
 - 外置共享文章文档内的图片不通过本题图槽清空；需要时进入共享材料槽 `:e` 修改文档副本。
 - `[图N]` 指向最终图片序列；仍有未匹配的 `[图N]` 时，保存前提示并进入图槽。
@@ -332,13 +334,16 @@ class Patch:
 
 | 草稿状态 | 记录字段 |
 |---|---|
-| article 新值 + inline 不改 | `material_target=article`、`material_text=article`、`material_scope=article` |
-| article 不改 + inline 新值 | `material_target=inline`、`material_text=inline`、`material_scope=inline` |
+| article 新值 + inline 不改，本题本来没有 inline | `material_target=article`、`material_text=article`、`material_scope=article` |
+| article 新值 + inline 不改，本题本来有 inline | `material_target=both`、`material_text=article`、`material_inline_text=原 inline`（写成 `article` 会让 apply 清掉题内素材） |
+| article 不改 + inline 新值 | `material_target=inline`、`material_text=inline`、`material_scope=inline`（`material_url` 不动，两段共存） |
 | article 新值 + inline 新值 | `material_target=both`、`material_text=article`、`material_inline_text=inline` |
 | article 存在 + inline 清空 | `material_target=both`、`material_text=article`、`material_inline_text=""` |
 | 无 article + inline 清空 | `material_target=inline`、`material_text=""`、`material_scope=inline` |
 | `n` 或 `R` 清空全部材料 | `material_url=None`，不携带材料正文 |
 | 只认领 URL + inline 新值 | `material_url=<url>`、`material_target=inline`、`material_text=inline` |
+| 材料全部未改（语文） | 不带 `material_*` 键；apply 的 `material_text = existing_text` 会保留原值 |
+| 材料全部未改（非语文且有 `material_text`） | `material_target=inline`、`material_text=原值`；不带会被 apply 写成 NULL（`material_text = rec.get("material_text")`） |
 
 ### 5.4 图片落记录规则
 
@@ -346,8 +351,8 @@ class Patch:
 |---|---|
 | `keep` | 原题有、记录里没有的旧图补回题干末尾 |
 | `append` | 使用草稿最终图片序列；替换 `[图N]`，未占用图追加 |
-| `replace` | 删除旧图引用，再应用最终图片序列 |
-| `clear` | 删除 content/options/材料中的全部 Markdown 图片引用 |
+| `replace` | 按 `clear` 的范围删除旧图引用，再应用最终图片序列 |
+| `clear` | 删除 content/options/`material_inline_text` 中的图片引用；不动 `material_text`（可能是文章正文） |
 | `explicit` | `E` 编辑器路径；以用户读回内容为准，不自动补旧图 |
 
 ### 5.5 记录字段
@@ -430,20 +435,32 @@ manual_fix
 
 ### 8.2 清空答案
 
-在 `answer_only` 分支之前增加：
+**不要在 `apply_record` 顶层早退**：一张卡可以同时改题干和清答案，顶层 `return` 会把
+题干/选项/材料的改动一起吞掉（记录仍会被标 applied、flag 仍会被关）。清空只做进两条
+已有路径：
+
+1. 普通路径的主 UPDATE 用 `answer=COALESCE(NULLIF(%s,''), answer)`
+   （`apply_fixes.py:1018`），空串清不掉。在主 UPDATE 之后补：
 
 ```python
 if rec.get("clear_answer"):
-    if not apply:
-        return f"清空答案：paper={paper_id} 第{_no_label(go, sub_no)}题（question_id={qid or '—'}）"
-    if qid is None:
-        return "跳过：题库里找不到这道题，无法清空答案"
     cur.execute("UPDATE questions SET answer='' WHERE id=%s", (qid,))
-    _patch_extracted_answer(rec, "", output_dir or RefineryConfig.from_env().output_dir)
-    return f"已清空答案：paper={paper_id} 第{_no_label(go, sub_no)}题"
 ```
 
-`questions.answer` 是 `TEXT NOT NULL`，清空值是空串，不写 NULL。旧记录没有该字段时完全走原路径。
+   extracted 回写沿用主 UPDATE 已传入的 `answer=""`（`_patch_extracted` 按空串写）。
+
+2. `answer_only` 分支当前是 `if not answer: return "跳过：答案为空"`，改成：
+
+```python
+if not answer and not rec.get("clear_answer"):
+    return "跳过：答案为空"
+if rec.get("clear_answer"):
+    answer = ""                     # 显式清空：绕过上面的空值拒绝
+cur.execute("UPDATE questions SET answer=%s WHERE id=%s", (answer, qid))
+```
+
+`questions.answer` 是 `TEXT NOT NULL`，清空值是空串，不写 NULL。旧记录没有该字段时
+完全走原路径（空答案仍被 `COALESCE(NULLIF(...))` 保留为原值）。
 
 ### 8.3 小问状态回写
 
@@ -491,7 +508,7 @@ if rec.get("clear_answer"):
 3. **清空有效**
    - 答案 `:c` 写库后数据库中该题 answer 为空串；
    - 题内材料 `:c` 清空数据库和 extracted；
-   - 图片清空移除 content/options/当前材料中的全部图片引用；
+   - 图片清空移除 content/options/`material_inline_text` 中的图片引用，且不动共享文章正文；
    - `R` 清空材料与 URL，答案保留。
 4. **多题粘贴**
    - 一次粘贴 27、28 两题生成两条记录；
@@ -515,3 +532,36 @@ if rec.get("clear_answer"):
 9. **人工冒烟**
    - 真实卷处理缺题、内容不完整、砍短、缺答案各一题；
    - 每类记录实际写入后复扫状态正确。
+10. **输入次数**（黄金会话按 stdin 行数断言）
+    - 改题干（粘贴替换）：≤ 4 次输入；
+    - 只改共享材料或题内材料：≤ 4 次；
+    - 只补答案：≤ 2 次；
+    - 砍短保留现状：1 次；
+    - 改题干 + 清答案同一张卡：≤ 6 次，且两条修改都落进同一条记录。
+
+---
+
+## 12. 旧能力落点（抽查表）
+
+| 旧入口 | 新入口 |
+|---|---|
+| `_ask_edit_mode` 编辑器改 | `E` |
+| `_ask_edit_mode` 重新录入 | 槽位 1 粘贴 |
+| `_ask_image_mode` 保留原图 | 默认 `keep` |
+| `_ask_image_mode` 换图 | `5 图 → 1 追加 / 2 替换` |
+| `_ask_image_mode` 重新识别 | `R → 2 图片识别` |
+| `_ask_image_mode` 只改文本 | `R → 1 粘贴`（答案保留，清答案用 `4 → :c`） |
+| 输入方式菜单 1/2/3/4/5 | 粘贴 / `:f` / 图槽（裸 `@路径` 取消） |
+| 「多图+题干」逐张裁剪 | `5 图 → 1 追加`（回车连续读剪贴板） |
+| `[图N]` 占位符 | 同，指向最终图片序列 |
+| 答案富输入 + `e/r/s` | 槽位 4 + `:e/:f/:c`（改题干回菜单按 1） |
+| `_confirm_text` 逐行/文件编辑 | `:l` / `:e` |
+| 三段式：题干/共享材料/题内材料 | 主菜单 1/2/3 |
+| 材料「1 文件改 / 2 粘贴」 | `:e` / 粘贴 |
+| 新建共享材料 + 共用题号 | 槽位 2 粘贴 + 一次共用题号追问 |
+| `_ask_material_url` 认领同卷文章 | 槽位 2 的「序号 / n」 |
+| 砍短两版裁决 | 卡片并列 + `k`（保留）/`u`（用原文） |
+| 只补答案 | `answer_missing` 直达槽位 4 |
+| 缺题先修关联题 | `ReviewItem.targets()` 先出关联卡 |
+| 跳号误报只能一直跳过 | `k` = 卷面本来没这题 |
+| 主动重录 | 同一卡片流程（`manual_override`） |
