@@ -34,32 +34,6 @@ describe('SpecialAnswerRecordsRepository', () => {
     expect(exec.execute).toHaveBeenCalled();
   });
 
-  it('markSelfAssessCorrectness 按 session_uid + student_id 定位回写对错，只改 is_correct/judged_at', async () => {
-    const pool = mockPool();
-    pool.execute.mockResolvedValueOnce([{ affectedRows: 1 } as any]);
-    const repo = new SpecialAnswerRecordsRepository(pool as any);
-    await repo.markSelfAssessCorrectness({
-      sessionUid: 'uid-abc', studentId: 2, questionId: 5034, isCorrect: true,
-    });
-    const [sql, params] = pool.execute.mock.calls[0];
-    expect(sql).toContain('UPDATE special_answer_records sar');
-    expect(sql).toContain('JOIN special_practice_sessions sps');
-    expect(sql).toContain('SET sar.is_correct = ?, sar.judged_at = CURRENT_TIMESTAMP(3)');
-    expect(sql).toContain('sps.session_uid = ? AND sps.student_id = ? AND sar.question_id = ?');
-    // 归属校验 studentId 必须在 WHERE；true -> 1
-    expect(params).toEqual([1, 'uid-abc', 2, 5034]);
-  });
-
-  it('markSelfAssessCorrectness isCorrect=false 写 0', async () => {
-    const pool = mockPool();
-    pool.execute.mockResolvedValueOnce([{ affectedRows: 1 } as any]);
-    const repo = new SpecialAnswerRecordsRepository(pool as any);
-    await repo.markSelfAssessCorrectness({
-      sessionUid: 'uid-abc', studentId: 2, questionId: 5034, isCorrect: false,
-    });
-    expect(pool.execute.mock.calls[0][1][0]).toBe(0);
-  });
-
   it('upsertSpecialAnswer question_id 为空先 DELETE 后 INSERT', async () => {
     const pool = mockPool();
     const repo = new SpecialAnswerRecordsRepository(pool as any);

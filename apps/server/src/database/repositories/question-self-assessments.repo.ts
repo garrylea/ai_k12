@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 /**
  * 学生主观题自评留痕 repo（判题体系重构 2026-09-09）。
@@ -18,8 +18,9 @@ export class QuestionSelfAssessmentsRepository {
     questionId: number;
     assessment: 'correct' | 'incorrect';
     source: string;
-  }): Promise<number> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+  }, executor?: PoolConnection): Promise<number> {
+    const db = executor ?? this.pool;
+    const [result] = await db.execute<ResultSetHeader>(
       `INSERT INTO question_self_assessments (student_id, question_id, assessment, source)
        VALUES (?, ?, ?, ?)`,
       [row.studentId, row.questionId, row.assessment, row.source],

@@ -1,5 +1,7 @@
-import { HttpException, Inject, Injectable } from '@nestjs/common';
+import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
 import type { Pool } from 'mysql2/promise';
+import { EventsService } from '../analytics/events.service.js';
+import { PointsService } from '../points/points.service.js';
 import {
   MainErrorBooksRepository,
   QuestionSelfAssessmentsRepository,
@@ -37,6 +39,8 @@ export interface SubmitDefaultIncorrectInput {
  */
 @Injectable()
 export class SelfAssessmentSettlementService {
+  private readonly logger = new Logger(SelfAssessmentSettlementService.name);
+
   constructor(
     @Inject('DATABASE_POOL') private pool: Pool,
     private sessions: SpecialPracticeSessionsRepository,
@@ -45,6 +49,9 @@ export class SelfAssessmentSettlementService {
     private questions: QuestionsRepository,
     private mastery: StudentKnowledgeMasteryRepository,
     private selfAssess: QuestionSelfAssessmentsRepository,
+    private readonly events?: EventsService,
+    // 本服务刻意不发 error_fix 积分；保留注入供测试守卫“任何分支都不会误调 award”。
+    private readonly points?: PointsService,
   ) {}
 
   async submitDefaultIncorrect(input: SubmitDefaultIncorrectInput): Promise<{ sessionId: number; errorBookId: number }> {
@@ -97,6 +104,72 @@ export class SelfAssessmentSettlementService {
 
       await conn.commit();
       return { sessionId, errorBookId };
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
+    }
+  }
+
+  /**
+   * 自评结算：点「我做对了」（correct）时在同一连接事务内留痕 → 清错题 →
+   * 逐 KP 回退掌握度 → 作答行迁移到 confirmed_correct；不发 error_fix 积分。
+   *
+   * 幂等/冲突：confirmed_correct 直接提交返回幂等成功；confirmed_incorrect 409。
+   * ⚠️ 掌握度回退必须直接调 masteryRepo.revertOneError(..., conn) 并让异常冒泡 rollback，
+   * 0 行只 warn；绝不能调吞异常的 MasteryService.revertErrorToCorrect。
+   */
+  async confirmSelfAssessment(input: {
+    studentId: number; questionId: number; assessment: 'correct' | 'incorrect';
+    source: string; sessionUid: string;
+  }): Promise<{ errorBookId?: number; idempotent?: boolean }> {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const sessionId = await this.sessions.findIdByUid(input.sessionUid, input.studentId, conn);
+      const row = await this.answers.findForUpdate(sessionId, input.questionId, conn);
+      if (!row) throw new HttpException({ code: 1002, message: '作答记录不存在或已失效，请重新提交' }, 409);
+      const state = row.self_assess_state;
+      if (input.assessment === 'correct') {
+        if (state === 'confirmed_correct') {
+          await conn.commit();
+          return { idempotent: true };
+        }
+        if (state === 'confirmed_incorrect') {
+          throw new HttpException({ code: 1001, message: '该题自评结果已确认' }, 409);
+        }
+        if (state === 'default_incorrect') {
+          await this.selfAssess.create({
+            studentId: input.studentId, questionId: input.questionId,
+            assessment: 'correct', source: input.source,
+          }, conn);
+          const cleared = await this.errorBooks.clearUnclearedByStudentQuestionId(
+            input.studentId, input.questionId, conn,
+          );
+          const kpIds = await this.questions.findKnowledgePointIdsByQuestion(input.questionId);
+          for (const kpId of kpIds) {
+            const n = await this.mastery.revertOneError(input.studentId, kpId, conn);
+            if (n === 0) this.logger.warn(`revertOneError 0 行（student=${input.studentId}, kp=${kpId}）`);
+          }
+          await this.answers.transitionState({
+            sessionId, questionId: input.questionId, state: 'confirmed_correct',
+            isCorrect: 1, judgedAt: new Date(),
+          }, conn);
+          await conn.commit();
+          if (cleared > 0) {
+            this.events?.track({
+              event: 'error_book_cleared', source: 'server', studentId: input.studentId,
+              refType: 'question', refId: input.questionId,
+            });
+          }
+          return { errorBookId: undefined };
+        }
+        // state === NULL（迁移前旧行）：旧语义补偿见 Task 9，此处按状态缺失拒绝。
+        throw new HttpException({ code: 1002, message: '作答记录状态缺失，请重新提交' }, 409);
+      }
+      // incorrect 分支见 Task 7。
+      throw new HttpException({ code: 1002, message: '暂不支持的自评结果' }, 409);
     } catch (e) {
       await conn.rollback();
       throw e;

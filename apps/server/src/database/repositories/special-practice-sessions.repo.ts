@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { HttpException, Injectable, Inject } from '@nestjs/common';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 /** 专项会话 module 值：语文三专项 + 英语背单词 + 各学科 targeted（英语/道法已补齐）。 */
@@ -108,6 +108,21 @@ export class SpecialPracticeSessionsRepository {
       params,
     );
     return Number((rows[0] as { cnt: number | string }).cnt ?? 0);
+  }
+
+  /**
+   * 结算入口按 session_uid + student_id 定位会话 id（归属校验防 IDOR）。
+   * 事务内传 executor；无行（含非本人）抛 409/1002，避免把别人的作答当自己的结算。
+   */
+  async findIdByUid(sessionUid: string, studentId: number, executor?: PoolConnection): Promise<number> {
+    const db = executor ?? this.pool;
+    const [rows] = await db.execute<RowDataPacket[]>(
+      `SELECT id FROM special_practice_sessions WHERE session_uid = ? AND student_id = ?`,
+      [sessionUid, studentId],
+    );
+    const id = (rows[0] as { id?: number })?.id;
+    if (!id) throw new HttpException({ code: 1002, message: '作答记录不存在或已失效，请重新提交' }, 409);
+    return id;
   }
 
   /** 单个 session 归属校验（防 IDOR）。 */

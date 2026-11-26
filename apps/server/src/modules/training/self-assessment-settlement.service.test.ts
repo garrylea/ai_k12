@@ -22,18 +22,29 @@ function mkSettlement() {
   };
   const pool = { getConnection: vi.fn().mockResolvedValue(conn) };
   const mocks = {
-    sessions: { upsertSession: vi.fn().mockResolvedValue(101) },
+    sessions: {
+      upsertSession: vi.fn().mockResolvedValue(101),
+      findIdByUid: vi.fn().mockResolvedValue(101),
+    },
     answers: {
       findForUpdate: vi.fn().mockResolvedValue(null),
       insertDefaultIncorrect: vi.fn().mockResolvedValue(undefined),
+      transitionState: vi.fn().mockResolvedValue(undefined),
     },
     errorBooks: {
       findOrCreateUncleared: vi.fn().mockResolvedValue(202),
       findUnclearedByStudentQuestionId: vi.fn().mockResolvedValue({ id: 202 }),
+      clearUnclearedByStudentQuestionId: vi.fn().mockResolvedValue(1),
     },
     questions: { findKnowledgePointIdsByQuestion: vi.fn().mockResolvedValue([7, 8]) },
-    mastery: { upsertOnJudge: vi.fn().mockResolvedValue(undefined) },
+    mastery: {
+      upsertOnJudge: vi.fn().mockResolvedValue(undefined),
+      revertOneError: vi.fn().mockResolvedValue(1),
+    },
     selfAssess: { create: vi.fn().mockResolvedValue(1) },
+    // 结算刻意不发 error_fix 积分；注入守卫确保任何分支都不会误调用 award。
+    points: { award: vi.fn().mockResolvedValue({ pointsAwarded: 0 }) },
+    events: { track: vi.fn() },
   };
   const svc = new SelfAssessmentSettlementService(
     pool as any,
@@ -43,6 +54,8 @@ function mkSettlement() {
     mocks.questions as any,
     mocks.mastery as any,
     mocks.selfAssess as any,
+    mocks.events as any,
+    mocks.points as any,
   );
   const input = {
     studentId: 2,
@@ -151,5 +164,115 @@ describe('self-assessment settlement: SelfAssessmentSettlementService.submitDefa
     expect(conn.commit).not.toHaveBeenCalled();
     expect(conn.release).toHaveBeenCalled();
     expect(mocks.mastery.upsertOnJudge).not.toHaveBeenCalled();
+  });
+});
+
+describe('self-assessment settlement: confirmSelfAssessment correct', () => {
+  const confirmInput = {
+    studentId: 2, questionId: 5034, assessment: 'correct' as const,
+    source: 'targeted', sessionUid: 'u-1',
+  };
+  const defaultRow = {
+    is_correct: 0, self_assess_state: 'default_incorrect', answer_text: '解',
+  };
+
+  it('default_incorrect + correct：留痕correct+清本+revert+state=confirmed_correct+is_correct=1；不发分', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue(defaultRow);
+
+    const r = await svc.confirmSelfAssessment(confirmInput);
+
+    expect(mocks.sessions.findIdByUid).toHaveBeenCalledWith('u-1', 2, conn);
+    expect(mocks.answers.findForUpdate).toHaveBeenCalledWith(101, 5034, conn);
+    expect(mocks.selfAssess.create).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 2, questionId: 5034, assessment: 'correct', source: 'targeted',
+    }), conn);
+    expect(mocks.errorBooks.clearUnclearedByStudentQuestionId).toHaveBeenCalledWith(2, 5034, conn);
+    // 逐 KP 直接调仓储（绝不走吞异常的 MasteryService.revertErrorToCorrect），且全部走同连接
+    expect(mocks.mastery.revertOneError).toHaveBeenCalledTimes(2);
+    expect(mocks.mastery.revertOneError).toHaveBeenCalledWith(2, 7, conn);
+    expect(mocks.mastery.revertOneError).toHaveBeenCalledWith(2, 8, conn);
+    expect(mocks.answers.transitionState).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 101, questionId: 5034, state: 'confirmed_correct', isCorrect: 1, judgedAt: expect.any(Date),
+    }), conn);
+    expect(mocks.points.award).not.toHaveBeenCalled();
+    expect(conn.beginTransaction).toHaveBeenCalled();
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.rollback).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalled();
+    expect(r).toEqual({ errorBookId: undefined });
+  });
+
+  it('confirmed_correct + correct：幂等，不重复', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue({
+      is_correct: 1, self_assess_state: 'confirmed_correct', answer_text: '解',
+    });
+
+    const r = await svc.confirmSelfAssessment(confirmInput);
+
+    expect(r.idempotent).toBe(true);
+    expect(mocks.selfAssess.create).not.toHaveBeenCalled();
+    expect(mocks.errorBooks.clearUnclearedByStudentQuestionId).not.toHaveBeenCalled();
+    expect(mocks.mastery.revertOneError).not.toHaveBeenCalled();
+    expect(mocks.answers.transitionState).not.toHaveBeenCalled();
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.rollback).not.toHaveBeenCalled();
+  });
+
+  it('confirmed_incorrect + correct：409，不改任何东西', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue({
+      is_correct: 0, self_assess_state: 'confirmed_incorrect', answer_text: '解',
+    });
+
+    await expect(svc.confirmSelfAssessment(confirmInput)).rejects.toMatchObject({ status: 409 });
+    expect(conn.rollback).toHaveBeenCalled();
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(mocks.selfAssess.create).not.toHaveBeenCalled();
+    expect(mocks.mastery.revertOneError).not.toHaveBeenCalled();
+  });
+
+  it('revertOneError 0 行：仍提交成功，不回滚', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue(defaultRow);
+    mocks.mastery.revertOneError.mockResolvedValue(0);
+
+    await expect(svc.confirmSelfAssessment(confirmInput)).resolves.toBeTruthy();
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.rollback).not.toHaveBeenCalled();
+  });
+
+  it('revertOneError 抛错：原样冒泡 + rollback（不吞异常）', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue(defaultRow);
+    mocks.mastery.revertOneError.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(svc.confirmSelfAssessment(confirmInput)).rejects.toThrow('db down');
+    expect(conn.rollback).toHaveBeenCalled();
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(mocks.answers.transitionState).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalled();
+  });
+
+  it('cleared>0：提交后才发 error_book_cleared；cleared=0 不发', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue(defaultRow);
+
+    await svc.confirmSelfAssessment(confirmInput);
+    expect(mocks.events.track).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'error_book_cleared', source: 'server', studentId: 2,
+      refType: 'question', refId: 5034,
+    }));
+    expect(conn.commit.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.events.track.mock.invocationCallOrder[0]);
+
+    const second = mkSettlement();
+    second.mocks.answers.findForUpdate.mockResolvedValue(defaultRow);
+    second.mocks.errorBooks.clearUnclearedByStudentQuestionId.mockResolvedValue(0);
+    await second.svc.confirmSelfAssessment(confirmInput);
+    expect(second.mocks.events.track).not.toHaveBeenCalledWith(expect.objectContaining({
+      event: 'error_book_cleared',
+    }));
   });
 });

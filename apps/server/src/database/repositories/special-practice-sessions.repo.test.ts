@@ -68,4 +68,25 @@ describe('SpecialPracticeSessionsRepository', () => {
     expect(pool.execute).not.toHaveBeenCalled();
     expect(exec.execute).toHaveBeenCalled();
   });
+
+  it('findIdByUid 按 session_uid + student_id 取 id，传 executor 时用该连接', async () => {
+    const pool = { execute: vi.fn(), query: vi.fn() };
+    const exec = { execute: vi.fn().mockResolvedValue([[{ id: 101 }]]), query: vi.fn() };
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    expect(await repo.findIdByUid('u-1', 7, exec as any)).toBe(101);
+    expect(pool.execute).not.toHaveBeenCalled();
+    const [sql, params] = exec.execute.mock.calls[0];
+    expect(sql).toContain('SELECT id FROM special_practice_sessions WHERE session_uid = ? AND student_id = ?');
+    expect(params).toEqual(['u-1', 7]);
+  });
+
+  it('findIdByUid 查无会话（含非本人）抛 409/1002', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[]] as any);
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    await expect(repo.findIdByUid('u-1', 7)).rejects.toMatchObject({
+      status: 409,
+      response: { code: 1002, message: '作答记录不存在或已失效，请重新提交' },
+    });
+  });
 });

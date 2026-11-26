@@ -22,6 +22,19 @@ describe('QuestionSelfAssessmentsRepository.create', () => {
     expect(sql).toContain('(student_id, question_id, assessment, source)');
     expect(params).toEqual([7, 10, 'incorrect', 'targeted']);
   });
+
+  it('传 executor 时用该连接而非 pool（结算事务内留痕）', async () => {
+    const pool = mockPool();
+    const exec = { execute: vi.fn().mockResolvedValue([{ insertId: 5 }, []]) };
+    const repo = new QuestionSelfAssessmentsRepository(pool as any);
+    const id = await repo.create({ studentId: 2, questionId: 5034, assessment: 'correct', source: 'targeted' }, exec as any);
+    expect(id).toBe(5);
+    expect(pool.execute).not.toHaveBeenCalled();
+    expect(exec.execute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO question_self_assessments'),
+      [2, 5034, 'correct', 'targeted'],
+    );
+  });
 });
 
 describe('QuestionSelfAssessmentsRepository.findLatestByStudentAndQuestionIds', () => {

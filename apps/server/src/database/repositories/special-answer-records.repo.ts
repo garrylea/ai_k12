@@ -100,26 +100,6 @@ export class SpecialAnswerRecordsRepository {
   }
 
   /**
-   * 自评回写对错（2026-11-26）：主观题提交时 is_correct=NULL（在途/未判），
-   * 自评端点据此把行补成最终结果，避免作答历史永远停在 NULL。
-   * 按 session_uid + student_id 定位（归属校验防 IDOR），只改 is_correct/judged_at。
-   */
-  async markSelfAssessCorrectness(input: {
-    sessionUid: string;
-    studentId: number;
-    questionId: number;
-    isCorrect: boolean;
-  }): Promise<void> {
-    await this.pool.execute(
-      `UPDATE special_answer_records sar
-       JOIN special_practice_sessions sps ON sps.id = sar.session_id
-       SET sar.is_correct = ?, sar.judged_at = CURRENT_TIMESTAMP(3)
-       WHERE sps.session_uid = ? AND sps.student_id = ? AND sar.question_id = ?`,
-      [input.isCorrect ? 1 : 0, input.sessionUid, input.studentId, input.questionId],
-    );
-  }
-
-  /**
    * question_id 为空：uniq_sar_session_q 唯键不生效（MySQL NULL 不去重）。
    * 先 DELETE 同 session+ref_type+ref_id+sentence_index 的旧行，再 INSERT。
    */
