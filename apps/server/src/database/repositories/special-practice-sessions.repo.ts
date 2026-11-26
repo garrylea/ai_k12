@@ -45,12 +45,22 @@ export class SpecialPracticeSessionsRepository {
       [input.sessionUid, input.studentId, input.subjectId, input.module, input.title, input.questionCount],
     );
     if (result.insertId > 0) return result.insertId;
-    // 命中已存在行：按 uid 取 id
+    // 命中已存在行：session_uid 是客户端提供的全局唯一键，必须核对归属与场景，
+    // 否则学生 A 带学生 B 的 uid 会把答案写进 B 的会话（IDOR，spec §3 硬约束 6）。
     const [rows] = await db.execute<RowDataPacket[]>(
-      `SELECT id FROM special_practice_sessions WHERE session_uid = ?`,
+      `SELECT id, student_id, subject_id, module FROM special_practice_sessions WHERE session_uid = ?`,
       [input.sessionUid],
     );
-    return (rows[0] as { id: number }).id;
+    const row = rows[0] as {
+      id: number; student_id: number; subject_id: number; module: string;
+    } | undefined;
+    if (
+      !row || Number(row.student_id) !== input.studentId ||
+      Number(row.subject_id) !== input.subjectId || row.module !== input.module
+    ) {
+      throw new HttpException({ code: 1002, message: '会话标识冲突' }, 409);
+    }
+    return row.id;
   }
 
   /** 标记完成（前端离开时调用，可选）。 */

@@ -88,6 +88,23 @@ export class SpecialAnswerRecordsRepository {
     );
   }
 
+  /**
+   * 事务内认领 ensurePlannedQuestions 写下的全 NULL 占位行：改成默认错。
+   * 不写 question_order（保留题单里的原始位次），必传 executor，不回退 pool。
+   * 调用方须先用 findForUpdate 锁定并确认是占位行；本方法只按 session+question 定位。
+   */
+  async claimPlaceholderAsDefaultIncorrect(
+    sessionId: number, questionId: number, answerText: string, executor: PoolConnection,
+  ): Promise<void> {
+    await executor.execute(
+      `UPDATE special_answer_records
+       SET answer_text = ?, is_correct = 0, method = 'self_assess',
+           self_assess_state = 'default_incorrect', judged_at = NOW(3)
+       WHERE session_id = ? AND question_id = ?`,
+      [answerText, sessionId, questionId],
+    );
+  }
+
   /** 事务内结算自评状态机到终态：必传 executor，不回退 pool。 */
   async transitionState(input: {
     sessionId: number; questionId: number; state: 'confirmed_correct' | 'confirmed_incorrect'; isCorrect: 0 | 1; judgedAt: Date;

@@ -29,15 +29,44 @@ describe('SpecialPracticeSessionsRepository', () => {
     );
   });
 
-  it('upsertSession 命中已存在行时通过 SELECT 取 id（affectedRows=0 分支）', async () => {
+  it('upsertSession 命中已存在行时校验归属后返回 id（affectedRows=0 分支）', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([{ insertId: 0, affectedRows: 0 } as any]);
-    pool.execute.mockResolvedValueOnce([[{ id: 99 }] as any]);
+    pool.execute.mockResolvedValueOnce([[{ id: 99, student_id: 7, subject_id: 1, module: 'math_targeted' }] as any]);
     const repo = new SpecialPracticeSessionsRepository(pool as any);
     const id = await repo.upsertSession({
       sessionUid: 'abc-123', studentId: 7, subjectId: 1, module: 'math_targeted', title: null, questionCount: 0,
     });
     expect(id).toBe(99);
+    const [sql, params] = pool.execute.mock.calls[1];
+    expect(sql).toContain('SELECT id, student_id, subject_id, module FROM special_practice_sessions');
+    expect(params).toEqual(['abc-123']);
+  });
+
+  it('upsertSession 命中但 student_id 不同：409/1002 会话标识冲突（防 IDOR）', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([{ insertId: 0, affectedRows: 0 } as any]);
+    pool.execute.mockResolvedValueOnce([[{ id: 99, student_id: 8, subject_id: 1, module: 'math_targeted' }] as any]);
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    await expect(repo.upsertSession({
+      sessionUid: 'abc-123', studentId: 7, subjectId: 1, module: 'math_targeted', title: null, questionCount: 0,
+    })).rejects.toMatchObject({
+      status: 409,
+      response: { code: 1002, message: '会话标识冲突' },
+    });
+  });
+
+  it.each([
+    ['subject_id', { student_id: 7, subject_id: 2, module: 'math_targeted' }],
+    ['module', { student_id: 7, subject_id: 1, module: 'physics_targeted' }],
+  ])('upsertSession 命中但 %s 不同：409/1002', async (_field, row) => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([{ insertId: 0, affectedRows: 0 } as any]);
+    pool.execute.mockResolvedValueOnce([[{ id: 99, ...row }] as any]);
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    await expect(repo.upsertSession({
+      sessionUid: 'abc-123', studentId: 7, subjectId: 1, module: 'math_targeted', title: null, questionCount: 0,
+    })).rejects.toMatchObject({ status: 409, response: { code: 1002 } });
   });
 
   it('upsertSession 传 executor 时用该连接而非 pool', async () => {

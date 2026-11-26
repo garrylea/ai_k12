@@ -29,6 +29,7 @@ function mkSettlement() {
     answers: {
       findForUpdate: vi.fn().mockResolvedValue(null),
       insertDefaultIncorrect: vi.fn().mockResolvedValue(undefined),
+      claimPlaceholderAsDefaultIncorrect: vi.fn().mockResolvedValue(undefined),
       transitionState: vi.fn().mockResolvedValue(undefined),
     },
     errorBooks: {
@@ -153,6 +154,30 @@ describe('self-assessment settlement: SelfAssessmentSettlementService.submitDefa
     await expect(svc.submitDefaultIncorrect(input)).rejects.toMatchObject({ status: 409 });
     expect(conn.rollback).toHaveBeenCalled();
     expect(conn.commit).not.toHaveBeenCalled();
+  });
+
+  it('同会话先客观题写占位行、再主观题提交：认领占位行为 default_incorrect，不 409', async () => {
+    const { svc, conn, mocks, input } = mkSettlement();
+    // ensurePlannedQuestions 写下的占位行：answer_text/is_correct/method/self_assess_state 全 NULL
+    mocks.answers.findForUpdate.mockResolvedValue({
+      self_assess_state: null, answer_text: null, is_correct: null, method: null,
+    });
+
+    const r = await svc.submitDefaultIncorrect(input);
+
+    expect(mocks.answers.claimPlaceholderAsDefaultIncorrect).toHaveBeenCalledWith(
+      101, 5034, '解', conn,
+    );
+    expect(mocks.answers.insertDefaultIncorrect).not.toHaveBeenCalled();
+    // 认领后照常落错题本 + 掌握度 error+1（不是只改状态就返回）
+    expect(mocks.errorBooks.findOrCreateUncleared).toHaveBeenCalledWith({
+      studentId: 2, subjectId: 1, questionId: 5034, source: 'targeted', sourceRefId: null,
+    }, conn);
+    expect(mocks.mastery.upsertOnJudge).toHaveBeenCalledTimes(2);
+    expect(mocks.selfAssess.create).not.toHaveBeenCalled();
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.rollback).not.toHaveBeenCalled();
+    expect(r).toEqual({ sessionId: 101, errorBookId: 202 });
   });
 
   it('错题本写失败 -> rollback 并抛原错误，release 仍执行', async () => {
@@ -330,6 +355,37 @@ describe('self-assessment settlement: confirmSelfAssessment incorrect', () => {
     expect(conn.rollback).toHaveBeenCalled();
     expect(conn.commit).not.toHaveBeenCalled();
   });
+});
+
+describe('self-assessment settlement: 占位行不得伪造自评', () => {
+  const placeholder = {
+    self_assess_state: null, answer_text: null, is_correct: null, method: null,
+  };
+
+  it.each(['correct', 'incorrect'] as const)(
+    '占位行（从未作答）+ %s：抛 409/1002，不写留痕/错题本/掌握度',
+    async (assessment) => {
+      const { svc, conn, mocks } = mkSettlement();
+      mocks.answers.findForUpdate.mockResolvedValue(placeholder);
+
+      await expect(svc.confirmSelfAssessment({
+        studentId: 2, subjectId: 1, questionId: 5034, assessment,
+        source: 'targeted', sessionUid: 'u-1',
+      })).rejects.toMatchObject({
+        status: 409,
+        response: { code: 1002, message: '作答记录不存在或已失效，请重新提交' },
+      });
+
+      expect(conn.rollback).toHaveBeenCalled();
+      expect(conn.commit).not.toHaveBeenCalled();
+      expect(mocks.selfAssess.create).not.toHaveBeenCalled();
+      expect(mocks.errorBooks.findOrCreateUncleared).not.toHaveBeenCalled();
+      expect(mocks.errorBooks.clearUnclearedByStudentQuestionId).not.toHaveBeenCalled();
+      expect(mocks.mastery.upsertOnJudge).not.toHaveBeenCalled();
+      expect(mocks.answers.transitionState).not.toHaveBeenCalled();
+      expect(conn.release).toHaveBeenCalled();
+    },
+  );
 });
 
 describe('self-assessment settlement: 迁移前旧行（self_assess_state=NULL）兼容', () => {

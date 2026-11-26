@@ -12,6 +12,20 @@ import {
 } from '../../database/repositories/index.js';
 import type { SpecialSessionModule } from '../../database/repositories/special-practice-sessions.repo.js';
 
+/**
+ * 未作答占位行判据（spec §4.1）：ensurePlannedQuestions 为整轮题单写的空行，
+ * answer_text/is_correct/method/self_assess_state 四列全 NULL，绝不能当作「已提交」。
+ */
+function isPlaceholderRow(row: {
+  self_assess_state: string | null;
+  answer_text: string | null;
+  is_correct: number | null;
+  method: string | null;
+}): boolean {
+  return row.self_assess_state == null && row.answer_text == null
+    && row.is_correct == null && row.method == null;
+}
+
 /** 主观题首次提交：判题路由先按「默认错」回包，由本服务在一个事务里落库。 */
 export interface SubmitDefaultIncorrectInput {
   studentId: number;
@@ -69,24 +83,31 @@ export class SelfAssessmentSettlementService {
 
       const existing = await this.answers.findForUpdate(sessionId, input.questionId, conn);
       if (existing) {
-        if (existing.self_assess_state === 'default_incorrect' && existing.answer_text === input.answerText) {
+        if (isPlaceholderRow(existing)) {
+          // 同会话先客观题（plannedQuestionIds）写过占位行：占位=未作答，不是已提交。
+          // 在锁住的行上认领为默认错，再照常走错题本 + 掌握度 error+1，不抛 409。
+          await this.answers.claimPlaceholderAsDefaultIncorrect(
+            sessionId, input.questionId, input.answerText, conn,
+          );
+        } else if (existing.self_assess_state === 'default_incorrect' && existing.answer_text === input.answerText) {
           // 幂等重复提交：不重复 error+1 / 错题本；errorBookId 取既有未清行（无则 0）
           const old = await this.errorBooks.findUnclearedByStudentQuestionId(
             input.studentId, input.questionId, conn,
           );
           await conn.commit();
           return { sessionId, errorBookId: old?.id ?? 0 };
+        } else {
+          throw new HttpException({ code: 1001, message: '该题已有不同作答或已确认' }, 409);
         }
-        throw new HttpException({ code: 1001, message: '该题已有不同作答或已确认' }, 409);
+      } else {
+        await this.answers.insertDefaultIncorrect({
+          sessionId,
+          questionId: input.questionId,
+          questionOrder: input.questionOrder,
+          answerText: input.answerText,
+          method: 'self_assess',
+        }, conn);
       }
-
-      await this.answers.insertDefaultIncorrect({
-        sessionId,
-        questionId: input.questionId,
-        questionOrder: input.questionOrder,
-        answerText: input.answerText,
-        method: 'self_assess',
-      }, conn);
 
       const errorBookId = await this.errorBooks.findOrCreateUncleared({
         studentId: input.studentId,
@@ -135,7 +156,7 @@ export class SelfAssessmentSettlementService {
       // 迁移前旧行（spec §4.5）：没有 self_assess_state 的专项作答行，首次收到带 uid 的
       // 自评时按旧语义补做副作用，成功后补写终态；不做批量历史回填。
       if (state === null || state === undefined) {
-        return await this.confirmLegacyRow(input, sessionId, conn);
+        return await this.confirmLegacyRow(input, sessionId, conn, row);
       }
       if (input.assessment === 'correct') {
         if (state === 'confirmed_correct') {
@@ -214,6 +235,9 @@ export class SelfAssessmentSettlementService {
    * ⚠️ 掌握度必须直接逐 KP 调 `masteryRepo.upsertOnJudge(..., conn)`，异常冒泡由外层 rollback；
    * 绝不能调吞异常的 `MasteryService.recordFromSelfAssessment` / `revertErrorToCorrect`。
    * 仅首次自评走此路径（作答行已 FOR UPDATE 锁定），不做批量历史回填。
+   *
+   * ⚠️ state=NULL 也涵盖「从未作答」的占位行（四列全 NULL）：它不能按旧语义伪造自评，
+   * 入口直接抛 409/1002，不写留痕/错题本/掌握度。
    */
   private async confirmLegacyRow(
     input: {
@@ -222,7 +246,11 @@ export class SelfAssessmentSettlementService {
     },
     sessionId: number,
     conn: PoolConnection,
+    row: Parameters<typeof isPlaceholderRow>[0],
   ): Promise<{ errorBookId?: number }> {
+    if (isPlaceholderRow(row)) {
+      throw new HttpException({ code: 1002, message: '作答记录不存在或已失效，请重新提交' }, 409);
+    }
     await this.selfAssess.create({
       studentId: input.studentId, questionId: input.questionId,
       assessment: input.assessment, source: input.source,

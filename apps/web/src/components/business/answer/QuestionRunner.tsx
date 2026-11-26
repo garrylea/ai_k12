@@ -298,14 +298,20 @@ export function QuestionRunner({
     // P1：回退到已作答的自评题再次提交，会让后端结算撞「已有不同作答/已确认」409。
     // 前端在入口拦住：不发请求、不写失败结果、不 advance，停留本题并提示重做入口。
     // **仅自评题生效**：客观题回退改答案的既有行为不变（继续走下方重交流程）。
-    if (inlineSelfAssess && resultsRef.current[question.n] != null) {
+    // failed:true 是网络/5xx 失败、题从未落库，不能当「已作答」拦住回退重试（spec §1 硬约束 6）。
+    const prior = resultsRef.current[question.n];
+    if (inlineSelfAssess && prior && !prior.failed) {
       setSubmitBlocked('本题已作答，如需重做请重新进入练习');
       return;
     }
     setSubmitBlocked(null);
 
-    clearDraft(`${draftKeyPrefix}-${question.n}`);
-    setAnswer('');
+    // 客观题 / 考试 fire-and-forget 分支的既有语义不变（提交即清本地草稿与输入）。
+    // 内联自评题不在这里清：请求成功前保留答案与草稿，失败（含 409/5xx）可重试（spec §7）。
+    if (!inlineSelfAssess) {
+      clearDraft(`${draftKeyPrefix}-${question.n}`);
+      setAnswer('');
+    }
 
     const seq = (seqRef.current[question.n] ?? 0) + 1;
     seqRef.current[question.n] = seq;
@@ -318,6 +324,10 @@ export function QuestionRunner({
       try {
         const res = await Promise.resolve(onSubmit(question, submittedAnswer));
         if (seqRef.current[question.n] !== seq) return; // 过期结果，丢弃
+        // 请求成功后才清本地草稿与输入框：失败分支（409/5xx/网络）保留作答供重试。
+        // 只清可见输入，answerByNRef 不动——回退仍能从缓存恢复本题答案（既有语义）。
+        clearDraft(`${draftKeyPrefix}-${question.n}`);
+        setAnswer('');
         if (res.needsSelfAssessment) {
           setSelfAssess({
             question,

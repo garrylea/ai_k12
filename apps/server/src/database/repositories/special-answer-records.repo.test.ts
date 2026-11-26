@@ -93,6 +93,21 @@ describe('SpecialAnswerRecordsRepository', () => {
     expect(sql).toContain(", 0, ?, 'default_incorrect', NOW(3))");
     expect(params).toEqual([1, 5034, 1, 'x', 'self_assess']);
   });
+  it('claimPlaceholderAsDefaultIncorrect 认领占位行时不改 question_order', async () => {
+    const exec = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]) };
+    const repo = new SpecialAnswerRecordsRepository({} as any);
+    await repo.claimPlaceholderAsDefaultIncorrect(1, 5034, '我的解答', exec as any);
+    const [sql, params] = exec.execute.mock.calls[0];
+    // 事务内按 session+question 定位、单连接执行；SET 里没有 question_order
+    expect(sql).toContain('UPDATE special_answer_records');
+    expect(sql).toContain("is_correct = 0, method = 'self_assess'");
+    expect(sql).toContain("self_assess_state = 'default_incorrect'");
+    expect(sql).toContain('judged_at = NOW(3)');
+    expect(sql).not.toContain('question_order =');
+    expect(sql).toContain('WHERE session_id = ? AND question_id = ?');
+    expect(params).toEqual(['我的解答', 1, 5034]);
+  });
+
   it('transitionState 更新 is_correct/state/judged_at', async () => {
     const exec = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]) };
     const repo = new SpecialAnswerRecordsRepository({} as any);

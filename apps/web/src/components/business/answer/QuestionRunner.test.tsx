@@ -43,6 +43,8 @@ vi.mock('@/utils/image-compress', async (importOriginal) => {
 });
 import { QuestionRunner } from './QuestionRunner';
 import { uploadFile } from '@/services/api';
+import { clearDraft, getDraft, setDraft } from '../draft-store';
+import type { Stroke } from '../draft-store';
 import type { RunnerJudgeOutcome, RunnerQuestion } from './types';
 
 function makeQuestions(): RunnerQuestion[] {
@@ -1021,5 +1023,136 @@ describe('P1：回退已作答自评题拦截与 409 兜底', () => {
     expect(screen.getByText('第一道自评题')).toBeTruthy();
     expect(screen.queryByText('第二道自评题')).toBeNull();
     expect(onFinish).not.toHaveBeenCalled();
+  });
+});
+
+// I1/I2（2026-11-26）：失败题必须可重试；请求成功前不得清空本地答案与草稿。
+describe('失败保留作答与成功后清空', () => {
+  const TWO: RunnerQuestion[] = [
+    { n: '1', text: '第一道自评题', type: 'proof' },
+    { n: '2', text: '第二道自评题', type: 'proof' },
+  ];
+  const BLOCK_MSG = '本题已作答，如需重做请重新进入练习';
+  const strokes: Stroke[] = [{ points: [{ x: 1, y: 2, pressure: 0.5 }], size: 2 }];
+
+  function renderTwo(prefix: string, onSubmit: (_q: RunnerQuestion, _a: string) => Promise<RunnerJudgeOutcome>) {
+    const user = userEvent.setup();
+    render(
+      <QuestionRunner
+        questions={TWO}
+        subjectId={1}
+        draftKeyPrefix={prefix}
+        variant="embedded"
+        draftDisabled
+        answerInput="plain"
+        onSubmit={onSubmit}
+        onFinish={() => {}}
+      />,
+    );
+    return { user };
+  }
+
+  afterEach(() => {
+    for (const key of ['retry-5xx', 'no-clear-409', 'pending', 'no-clear-5xx']) clearDraft(`${key}-1`);
+  });
+
+  it('judge 5xx 写 failed:true 后回退再提交：onSubmit 被调用，不被已作答拦截', async () => {
+    let calls = 0;
+    const onSubmit = vi.fn(async (): Promise<RunnerJudgeOutcome> => {
+      calls += 1;
+      if (calls === 1) {
+        const err = new Error('服务暂不可用') as Error & { status: number };
+        err.status = 503;
+        throw err;
+      }
+      return {
+        isCorrect: null, method: 'self_assess', needsSelfAssessment: true, referenceAnswer: '参考答案',
+      };
+    });
+    const { user } = renderTwo('retry-5xx', onSubmit);
+
+    await user.type(screen.getByRole('textbox'), '我的解答');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    // 5xx：写 failed:true 并前进到第二题
+    expect(await screen.findByText('第二道自评题')).toBeTruthy();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    // 回退到失败题：答案应保留，再次提交必须真的发请求（不再被 resultsRef 非空拦住）
+    await user.click(screen.getByRole('button', { name: '上一题' }));
+    expect(screen.getByText('第一道自评题')).toBeTruthy();
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('我的解答');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('button', { name: '我做对了' })).toBeTruthy();
+    expect(screen.queryByTestId('submit-blocked')).toBeNull();
+  });
+
+  it('judge 409：停留本题、保留答案与草稿（失败分支不清空）', async () => {
+    setDraft('no-clear-409-1', strokes);
+    const onSubmit = async (): Promise<RunnerJudgeOutcome> => {
+      const err = new Error('该题已有不同作答或已确认') as Error & { status: number };
+      err.status = 409;
+      throw err;
+    };
+    const { user } = renderTwo('no-clear-409', onSubmit);
+
+    await user.type(screen.getByRole('textbox'), '我的解答');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+
+    expect(await screen.findByTestId('submit-blocked')).toHaveTextContent(BLOCK_MSG);
+    // 409 兜底：留在本题，输入框里的答案还在（旧代码在请求前就 setAnswer('') 了）
+    expect(screen.getByText('第一道自评题')).toBeTruthy();
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('我的解答');
+    expect(getDraft('no-clear-409-1')).toEqual(strokes);
+  });
+
+  it('judge 5xx：草稿不被提前删除，回退后答案仍在', async () => {
+    setDraft('no-clear-5xx-1', strokes);
+    const onSubmit = async (): Promise<RunnerJudgeOutcome> => {
+      const err = new Error('服务暂不可用') as Error & { status: number };
+      err.status = 503;
+      throw err;
+    };
+    const { user } = renderTwo('no-clear-5xx', onSubmit);
+
+    await user.type(screen.getByRole('textbox'), '我的解答');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    expect(await screen.findByText('第二道自评题')).toBeTruthy();
+    expect(getDraft('no-clear-5xx-1')).toEqual(strokes);
+
+    await user.click(screen.getByRole('button', { name: '上一题' }));
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('我的解答');
+  });
+
+  it('请求未返回前不清草稿；只有成功后才清空，且 answerByNRef 回退语义不变', async () => {
+    setDraft('pending-1', strokes);
+    let resolveJudge: undefined | ((v: RunnerJudgeOutcome) => void);
+    const onSubmit = vi.fn(() => new Promise<RunnerJudgeOutcome>((resolve) => {
+      resolveJudge = resolve;
+    }));
+    const { user } = renderTwo('pending', onSubmit);
+
+    await user.type(screen.getByRole('textbox'), '我的解答');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+
+    // 请求还悬着：草稿绝不能已经被删掉（旧代码在 await 之前就 clearDraft 了）
+    expect(getDraft('pending-1')).toEqual(strokes);
+
+    await act(async () => {
+      resolveJudge!({
+        isCorrect: null, method: 'self_assess', needsSelfAssessment: true, referenceAnswer: '参考答案',
+      });
+    });
+    expect(await screen.findByRole('button', { name: '我做对了' })).toBeTruthy();
+    // 成功响应返回后才清空草稿
+    expect(getDraft('pending-1')).toHaveLength(0);
+
+    // 自评放行 → 第二题 → 回退：answerByNRef 未被破坏，仍能恢复本题作答
+    await user.click(screen.getByRole('button', { name: '我做对了' }));
+    expect(await screen.findByText('第二道自评题')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '上一题' }));
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('我的解答');
   });
 });
