@@ -1,5 +1,6 @@
 import io
 import json
+from pathlib import Path
 
 import manual_fix
 
@@ -266,3 +267,30 @@ def test_enter_after_edit_then_k_not_needed(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO("1\n新题干\nEOF\n\n"))
     manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
     assert _records(tmp_path)[0]["content"].startswith("新题干")
+
+
+def test_editor_on_content_slot_includes_options_and_reads_them_back(tmp_path, monkeypatch):
+    """:e 必须把选项一起带进编辑器，改完能读回（以前只给题干，选项看不见也改不了）。"""
+    import review_editor
+
+    md = str(tmp_path / "output/md" / REL / "卷A.md")
+    opts = [{"label": ch, "text": t} for ch, t in
+            zip("ABCD", ("甲", "乙", "丙", "丁"))]
+    _env(tmp_path, monkeypatch,
+         questions=[_q(19, content="19. 旧题干", options=opts)],
+         issues=[_i(19, md=md)])
+    seen = {}
+
+    def fake_edit(text, label="题干", *, path=None):
+        seen["text"] = text
+        return ("新题干\nA. 甲改\nB. 乙\nC. 丙\nD. 丁", Path("/tmp/x.md"))
+
+    monkeypatch.setattr(review_editor, "_file_edit", fake_edit)
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n:e\n\n"))
+
+    manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+
+    assert "A. 甲" in seen["text"] and "D. 丁" in seen["text"], "编辑器正文里要有全部选项"
+    rec = _records(tmp_path)[0]
+    assert rec["content"].startswith("新题干")
+    assert [o["text"] for o in rec["options"]] == ["甲改", "乙", "丙", "丁"]

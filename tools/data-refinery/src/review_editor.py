@@ -619,6 +619,7 @@ def read_slot(
     allow_peek: bool = True,
     reject_wrapped: bool = False,
     first_line: str | None = None,
+    editor_text: str | None = None,
 ) -> tuple[str, str]:
     """读一个文字槽，返回 (动作, 正文)，动作 ∈ unchanged / value / clear。
 
@@ -641,7 +642,9 @@ def read_slot(
             return "unchanged", ""
         low = s.lower()
         if low in (":e", ":edit"):
-            edited, _path = _file_edit(current or "", label)
+            # 有的槽（题干/选项）打开编辑器时要带上本槽的多个字段，而不只是 current
+            edited, _path = _file_edit(
+                (editor_text if editor_text is not None else current or ""), label)
             if edited is None:
                 c.warn("没有改内容")
                 continue

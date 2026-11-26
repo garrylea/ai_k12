@@ -321,13 +321,25 @@ def close_as_ok(item: ReviewItem, target: ReviewTarget) -> None:
     c.ok(f"第 {_label(target.group_order, target.sub_no)} 题已标记「确认无问题」，题库未改动")
 
 
+def _content_options_body(view: View) -> str:
+    """题干 + 选项拼成编辑器正文（选项一行一个，读回时按同样格式拆）。"""
+    lines = [(view.content or "").strip()]
+    for opt in view.options or []:
+        label = str((opt or {}).get("label") or "").strip()
+        text = str((opt or {}).get("text") or "").strip()
+        if label:
+            lines.append(f"{label}. {text}".rstrip())
+    return "\n".join(lines).strip()
+
+
 def edit_content_slot(state: CardState) -> CardResult | None:
     kind, text = read_slot(
         console(),
         label="题干/选项",
-        hint="回车=不改；粘贴=整段替换，EOF 结束；:e 编辑器 · :l 逐行 · :f 文件/剪贴板 · :c 清空",
+        hint="回车=不改；粘贴=整段替换，EOF 结束；:e 编辑器（含选项） · :l 逐行 · :f 文件/剪贴板 · :c 清空",
         current=state.view.content,
         paper_md_dir=state.paper_dir,
+        editor_text=_content_options_body(state.view),
     )
     if kind == "unchanged":
         return None
@@ -530,7 +542,10 @@ def replace_all(state: CardState) -> None:
 
 
 def edit_whole_in_editor(state: CardState) -> None:
-    body = editable_body(state.snap)
+    # 用当前草稿而不是 Snapshot：同一张卡里先改过别的段时，编辑器要看到最新内容
+    body = _content_options_body(state.view)
+    if (state.view.inline or "").strip():
+        body = body.rstrip() + "\n\n" + state.view.inline.strip()
     edited, _path = _file_edit(body, f"第{state.target.group_order}题题干")
     if edited is None or not edited.strip():
         console().warn("没有收到修改")
