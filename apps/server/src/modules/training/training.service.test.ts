@@ -54,7 +54,11 @@ const mk = (overrides: any = {}) => ({
   // 错题升级变式（2026-10-11）：bump 后 fire-and-forget 触发生成。
   variationGenerator: { generateForErrorItem: vi.fn().mockResolvedValue(undefined) },
   // 作答记录旁路写入（Task 3，2026-11-01）：judgeTraining 带 sessionUid 时调。
-  specialSessionsRepo: { upsertSession: vi.fn().mockResolvedValue(101) },
+  // markCompletedByUid：专项会话完成端点（Task 9）用。
+  specialSessionsRepo: {
+    upsertSession: vi.fn().mockResolvedValue(101),
+    markCompletedByUid: vi.fn().mockResolvedValue(1),
+  },
   specialAnswersRepo: {
     upsertAnswer: vi.fn().mockResolvedValue(undefined),
     upsertSpecialAnswer: vi.fn().mockResolvedValue(undefined),
@@ -1551,5 +1555,37 @@ describe('TrainingService.judgeTraining — special_answer_records 旁路写入'
         sessionId: 101, questionId: 11, answerText: 'B',
       }));
     });
+  });
+});
+
+// 专项会话完成端点（Task 9）：按 uid + student 置 completed_at，0 行一律 404/1002。
+describe('TrainingService.completeSpecialSession', () => {
+  it('按 uid+student 置 completed_at，成功回 {completed:true}', async () => {
+    const deps = mk();
+    deps.specialSessionsRepo.markCompletedByUid.mockResolvedValue(1);
+    const r = await mkSvc(deps).completeSpecialSession('u-1', 2);
+    expect(deps.specialSessionsRepo.markCompletedByUid).toHaveBeenCalledWith('u-1', 2);
+    expect(r).toEqual({ completed: true });
+  });
+
+  it('未命中（0 行）抛 404/1002', async () => {
+    const deps = mk();
+    deps.specialSessionsRepo.markCompletedByUid.mockResolvedValue(0);
+    await expect(mkSvc(deps).completeSpecialSession('nope', 2)).rejects.toMatchObject({
+      status: 404,
+      response: { code: 1002 },
+    });
+  });
+});
+
+describe('TrainingController.completeSpecialSession — 专项会话完成端点', () => {
+  const user = { sub: 7, role: 'student' } as any;
+
+  it('透传 sessionUid + JWT 学生 id 给 service，返回 service 结果', async () => {
+    const svc: any = { completeSpecialSession: vi.fn().mockResolvedValue({ completed: true }) };
+    const c = new TrainingController(svc, {} as never, {} as never, {} as never);
+    const res = await c.completeSpecialSession('uid-abc', user);
+    expect(svc.completeSpecialSession).toHaveBeenCalledWith('uid-abc', 7);
+    expect(res).toEqual({ completed: true });
   });
 });

@@ -296,6 +296,16 @@ export class TrainingService {
     return result;
   }
 
+  /**
+   * 专项会话完成端点（Task 9）：按 session_uid + student_id 置 completed_at。
+   *  affectedRows=0（不存在 / 非本人 / 已完成）一律 404/1002，不区分原因防探测。
+   */
+  async completeSpecialSession(sessionUid: string, studentId: number): Promise<{ completed: true }> {
+    const n = await this.specialSessionsRepo!.markCompletedByUid(sessionUid, studentId);
+    if (n === 0) throw new NotFoundException({ code: 1002, message: '会话不存在或非本人' });
+    return { completed: true };
+  }
+
   /** 语文默写：配置页篇目清单（抽题池 = verified=1 且 memorize_required=1 且 is_active=1）。
    *  只出篇名 + 册次——作者/朝代/正文都是判题答案字段，一律不下发。 */
   async listDictationPassages(): Promise<{ passages: DictationPassageListItem[] }> {

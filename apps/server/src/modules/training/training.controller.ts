@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Logger, NotFoundException, Optional, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Logger, NotFoundException, Optional, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { TrainingService } from './training.service.js';
 import { TrainingSessionsRepository } from '../../database/repositories/training-sessions.repo.js';
 import { PointsService } from '../points/points.service.js';
@@ -372,6 +372,14 @@ export class TrainingController {
           ? { reason: points.reason }
           : {}),
     };
+  }
+
+  /** 专项会话完成端点（Task 9）：按 sessionUid + JWT 学生 id 置 completed_at。
+   *  状态迁移类 POST 显式 200（CLAUDE.md 约定）；非本人 / 不存在回 404/1002。 */
+  @Post('special-sessions/:sessionUid/complete')
+  @HttpCode(200)
+  async completeSpecialSession(@Param('sessionUid') uid: string, @CurrentUser() user: JwtUser) {
+    return this.trainingService.completeSpecialSession(uid, user.sub);
   }
 
   // ==================== 语文古诗文专项：默写（2026-09-13） ====================
