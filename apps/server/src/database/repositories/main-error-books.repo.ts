@@ -86,8 +86,10 @@ export class MainErrorBooksRepository {
   async findUnclearedByStudentQuestionId(
     studentId: number,
     questionId: number,
+    executor?: PoolConnection,
   ): Promise<MainErrorBookRow | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const db = executor ?? this.pool;
+    const [rows] = await db.execute<RowDataPacket[]>(
       `SELECT * FROM main_error_books
        WHERE student_id = ? AND is_cleared = 0 AND question_id = ?
        LIMIT 1`,

@@ -128,6 +128,20 @@ describe('MainErrorBooksRepository', () => {
     expect(params).toEqual([1, null, null, 5, '未入库题面']);
   });
 
+  it('findUnclearedByStudentQuestionId 传 executor 时走同一连接（不回退 pool）', async () => {
+    const row = { id: 12, student_id: 1, question_id: 2, is_cleared: 0 };
+    const pool = mockPool();
+    const executor = mockPool([row]);
+    const repo = new MainErrorBooksRepository(pool as any);
+    const found = await repo.findUnclearedByStudentQuestionId(1, 2, executor as any);
+    expect(found).toEqual(row);
+    expect(executor.execute).toHaveBeenCalledTimes(1);
+    expect(pool.execute).not.toHaveBeenCalled();
+    const [sql, params] = executor.execute.mock.calls[0];
+    expect(sql).toContain('is_cleared = 0');
+    expect(params).toEqual([1, 2]);
+  });
+
   it('findUnclearedPracticeByStudentSubject 返回未清 practice 错题并 JOIN questions 题面 + cards 卡片所属课', async () => {
     const rows = [{ id: 9, source_ref_id: 441, question_id: null, question_n: '0-1', questionText: '题A', lesson_id: 181 }];
     const pool = mockPool(rows);

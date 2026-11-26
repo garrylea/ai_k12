@@ -39,6 +39,8 @@ export interface AnswerRow {
   is_correct: number | null;
   score: string | number | null;
   method: string | null;
+  /** 自评结算状态：default_incorrect|confirmed_correct|confirmed_incorrect；NULL=旧数据/非本设计。 */
+  self_assess_state: string | null;
   analysis: string | null;
   judged_at: Date | null;
 }
