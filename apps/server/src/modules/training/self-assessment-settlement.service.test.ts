@@ -169,7 +169,7 @@ describe('self-assessment settlement: SelfAssessmentSettlementService.submitDefa
 
 describe('self-assessment settlement: confirmSelfAssessment correct', () => {
   const confirmInput = {
-    studentId: 2, questionId: 5034, assessment: 'correct' as const,
+    studentId: 2, subjectId: 1, questionId: 5034, assessment: 'correct' as const,
     source: 'targeted', sessionUid: 'u-1',
   };
   const defaultRow = {
@@ -279,7 +279,7 @@ describe('self-assessment settlement: confirmSelfAssessment correct', () => {
 
 describe('self-assessment settlement: confirmSelfAssessment incorrect', () => {
   const confirmInput = {
-    studentId: 2, questionId: 5034, assessment: 'incorrect' as const,
+    studentId: 2, subjectId: 1, questionId: 5034, assessment: 'incorrect' as const,
     source: 'targeted', sessionUid: 'u-1',
   };
   const defaultRow = {
@@ -329,5 +329,63 @@ describe('self-assessment settlement: confirmSelfAssessment incorrect', () => {
     expect(mocks.selfAssess.create).not.toHaveBeenCalled();
     expect(conn.rollback).toHaveBeenCalled();
     expect(conn.commit).not.toHaveBeenCalled();
+  });
+});
+
+describe('self-assessment settlement: 迁移前旧行（self_assess_state=NULL）兼容', () => {
+  const legacyRow = { is_correct: null, self_assess_state: null, answer_text: '旧作答' };
+
+  it('NULL + correct：按旧语义留痕+清本+掌握度按 assessment 记一次，再补写 confirmed_correct', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue(legacyRow);
+
+    const r = await svc.confirmSelfAssessment({
+      studentId: 2, subjectId: 1, questionId: 5034, assessment: 'correct',
+      source: 'targeted', sessionUid: 'u-1',
+    });
+
+    expect(mocks.selfAssess.create).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 2, questionId: 5034, assessment: 'correct', source: 'targeted',
+    }), conn);
+    expect(mocks.errorBooks.clearUnclearedByStudentQuestionId).toHaveBeenCalledWith(2, 5034, conn);
+    // 掌握度按 assessment 记一次（correct=true），逐 KP 直接走仓储同连接，异常冒泡 rollback
+    expect(mocks.mastery.upsertOnJudge).toHaveBeenCalledTimes(2);
+    expect(mocks.mastery.upsertOnJudge).toHaveBeenCalledWith(2, 7, true, conn);
+    expect(mocks.mastery.upsertOnJudge).toHaveBeenCalledWith(2, 8, true, conn);
+    expect(mocks.mastery.revertOneError).not.toHaveBeenCalled();
+    expect(mocks.answers.transitionState).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 101, questionId: 5034, state: 'confirmed_correct', isCorrect: 1, judgedAt: expect.any(Date),
+    }), conn);
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.rollback).not.toHaveBeenCalled();
+    expect(r.errorBookId).toBeUndefined();
+  });
+
+  it('NULL + incorrect：按旧语义留痕+错题本写入+掌握度按 assessment 记一次，再补写 confirmed_incorrect', async () => {
+    const { svc, conn, mocks } = mkSettlement();
+    mocks.answers.findForUpdate.mockResolvedValue(legacyRow);
+
+    const r = await svc.confirmSelfAssessment({
+      studentId: 2, subjectId: 1, questionId: 5034, assessment: 'incorrect',
+      source: 'targeted', sessionUid: 'u-1',
+    });
+
+    expect(mocks.selfAssess.create).toHaveBeenCalledWith(expect.objectContaining({
+      studentId: 2, questionId: 5034, assessment: 'incorrect', source: 'targeted',
+    }), conn);
+    expect(mocks.errorBooks.findOrCreateUncleared).toHaveBeenCalledWith({
+      studentId: 2, subjectId: 1, questionId: 5034, source: 'targeted', sourceRefId: null,
+    }, conn);
+    expect(mocks.errorBooks.clearUnclearedByStudentQuestionId).not.toHaveBeenCalled();
+    expect(mocks.mastery.upsertOnJudge).toHaveBeenCalledTimes(2);
+    expect(mocks.mastery.upsertOnJudge).toHaveBeenCalledWith(2, 7, false, conn);
+    expect(mocks.mastery.upsertOnJudge).toHaveBeenCalledWith(2, 8, false, conn);
+    expect(mocks.mastery.revertOneError).not.toHaveBeenCalled();
+    expect(mocks.answers.transitionState).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 101, questionId: 5034, state: 'confirmed_incorrect', isCorrect: 0, judgedAt: expect.any(Date),
+    }), conn);
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.rollback).not.toHaveBeenCalled();
+    expect(r.errorBookId).toBe(202);
   });
 });

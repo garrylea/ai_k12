@@ -60,6 +60,11 @@ const mk = (overrides: any = {}) => ({
     upsertSpecialAnswer: vi.fn().mockResolvedValue(undefined),
     ensurePlannedQuestions: vi.fn().mockResolvedValue(undefined),
   },
+  // 自评事务结算（Task 8）：带 uid 的首次提交/自评确认都走这里。
+  settlement: {
+    submitDefaultIncorrect: vi.fn().mockResolvedValue({ sessionId: 101, errorBookId: 202 }),
+    confirmSelfAssessment: vi.fn().mockResolvedValue({}),
+  },
   ...overrides,
   // 用例常只覆盖 questionsRepo 的部分方法，补齐默认桩，别让新增抽题池把老用例打崩。
   questionsRepo: { ...defaultQuestionsRepo, ...(overrides.questionsRepo ?? {}) },
@@ -77,6 +82,7 @@ const mkSvc = (deps: ReturnType<typeof mk>) =>
     undefined,  // events
     deps.specialSessionsRepo as never,
     deps.specialAnswersRepo as never,
+    deps.settlement as never,
   );
 
 /**
@@ -175,7 +181,7 @@ describe('TrainingService.judgeTraining', () => {
     const deps = mk({ judgeCore: { judgeQuestion: vi.fn().mockResolvedValue({ questionId: 10, isCorrect: true, method: 'exact', errorType: null, errorBookId: undefined }) } });
     const svc = mkSvc(deps);
     await svc.judgeTraining({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice' });
-    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice', sourceRefId: null });
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice', sourceRefId: null, defaultIncorrect: false });
   });
 });
 
@@ -209,6 +215,38 @@ describe('TrainingService.selfAssess', () => {
     await mkSvc(deps).selfAssess({ studentId: 1, questionId: 10, subjectId: 1, assessment: 'correct', source: 'exam', sourceRefId: 5 });
     expect(deps.judgeCore.recordSelfAssessment).toHaveBeenCalledWith({ studentId: 1, questionId: 10, subjectId: 1, assessment: 'correct', source: 'exam', sourceRefId: 5 });
     expect(deps.explanationCache.ensureExplanation).not.toHaveBeenCalled();
+  });
+
+  it('带 sessionUid 且非 exam -> 改调 settlement.confirmSelfAssessment，不再调 recordSelfAssessment', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(userQ) },
+      judgeCore: { recordSelfAssessment: vi.fn() },
+    });
+    await mkSvc(deps).selfAssess({
+      studentId: 1, questionId: 10, subjectId: 1,
+      assessment: 'correct', source: 'targeted', sessionUid: 'uid-1',
+    });
+    expect(deps.settlement.confirmSelfAssessment).toHaveBeenCalledWith({
+      studentId: 1, subjectId: 1, questionId: 10,
+      assessment: 'correct', source: 'targeted', sessionUid: 'uid-1',
+    });
+    expect(deps.judgeCore.recordSelfAssessment).not.toHaveBeenCalled();
+  });
+
+  it('带 sessionUid 但 source=exam -> 保持 recordSelfAssessment 旧语义', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(userQ) },
+      judgeCore: { recordSelfAssessment: vi.fn().mockResolvedValue({ errorBookId: undefined }) },
+    });
+    await mkSvc(deps).selfAssess({
+      studentId: 1, questionId: 10, subjectId: 1,
+      assessment: 'correct', source: 'exam', sourceRefId: 5, sessionUid: 'uid-exam',
+    });
+    expect(deps.judgeCore.recordSelfAssessment).toHaveBeenCalledWith({
+      studentId: 1, questionId: 10, subjectId: 1, assessment: 'correct',
+      source: 'exam', sourceRefId: 5, sessionUid: 'uid-exam',
+    });
+    expect(deps.settlement.confirmSelfAssessment).not.toHaveBeenCalled();
   });
 
 });
@@ -1275,6 +1313,62 @@ describe('TrainingService.waitForExplanation', () => {
     });
     const r = await mkSvc(deps).waitForExplanation(10);
     expect(r).toEqual({ explanation: null });
+  });
+});
+
+// 默认错事务结算（Task 8）：带 uid 的主观题首次提交走 settlement，跳过旧旁路。
+describe('TrainingService.judgeTraining — 默认错事务结算', () => {
+  const selfAssessResult = {
+    isCorrect: false, method: 'self_assess', explanation: '解析文本', needsSelfAssessment: true,
+  };
+
+  it('带 sessionUid + 自评题：defaultIncorrect=true 透传，调 submitDefaultIncorrect，跳过 upsertAnswer，响应合并 errorBookId', async () => {
+    const deps = mk({
+      judgeCore: { judgeQuestion: vi.fn().mockResolvedValue(selfAssessResult) },
+    });
+    const result = await mkSvc(deps).judgeTraining({
+      studentId: 7, questionId: 100, subjectId: 1, studentAnswer: 'B', source: 'targeted',
+      sessionUid: 'abc-123', title: '数学专项', questionCount: 3, questionOrder: 2,
+    });
+
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith(expect.objectContaining({
+      questionId: 100, source: 'targeted', sourceRefId: null, defaultIncorrect: true,
+    }));
+    expect(deps.settlement.submitDefaultIncorrect).toHaveBeenCalledWith({
+      studentId: 7, subjectId: 1, questionId: 100, answerText: 'B',
+      source: 'targeted', sessionUid: 'abc-123',
+      session: { module: 'math_targeted', title: '数学专项', questionCount: 3 },
+      questionOrder: 2,
+    });
+    expect(deps.specialAnswersRepo.upsertAnswer).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ...selfAssessResult, errorBookId: 202 });
+  });
+
+  it('不带 sessionUid：defaultIncorrect=false，不调 settlement（旧语义）', async () => {
+    const deps = mk({
+      judgeCore: { judgeQuestion: vi.fn().mockResolvedValue(selfAssessResult) },
+    });
+    const result = await mkSvc(deps).judgeTraining({
+      studentId: 7, questionId: 100, subjectId: 1, studentAnswer: 'B', source: 'error_practice',
+    });
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith(expect.objectContaining({ defaultIncorrect: false }));
+    expect(deps.settlement.submitDefaultIncorrect).not.toHaveBeenCalled();
+    expect(result).toBe(selfAssessResult);
+  });
+
+  it('带 sessionUid 但客观题（needsSelfAssessment 缺省）：不调 settlement，维持旧旁路', async () => {
+    const objective = { isCorrect: true, method: 'exact', explanation: null };
+    const deps = mk({
+      judgeCore: { judgeQuestion: vi.fn().mockResolvedValue(objective) },
+    });
+    await mkSvc(deps).judgeTraining({
+      studentId: 7, questionId: 100, subjectId: 1, studentAnswer: 'A', source: 'targeted',
+      sessionUid: 'abc-obj', questionOrder: 1,
+    });
+    expect(deps.settlement.submitDefaultIncorrect).not.toHaveBeenCalled();
+    expect(deps.specialAnswersRepo.upsertAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 101, questionId: 100, answerText: 'A', isCorrect: true,
+    }));
   });
 });
 

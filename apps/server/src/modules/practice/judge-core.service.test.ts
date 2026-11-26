@@ -348,6 +348,38 @@ describe('judgeQuestion 四路由（self_assess 模式）', () => {
   });
 });
 
+describe('judgeQuestion 路由 1c defaultIncorrect（默认错交事务结算）', () => {
+  const subjQ = { id: 5034, subject_id: 1, type: 'short_answer', answer: '参考答案', explanation: '解析文本', options: null, content: '题面' };
+  const input = (defaultIncorrect?: boolean) => ({
+    studentId: 2, subjectId: 1, questionId: 5034, studentAnswer: 'x',
+    source: 'targeted', defaultIncorrect,
+  });
+
+  it('defaultIncorrect=true：isCorrect=false / needsSelfAssessment=true，不调 finishJudge（不写掌握度）、不 trackAnswer（不计连错）', async () => {
+    const { svc, masteryService, events } = makeService({
+      questions: { findById: vi.fn(async () => subjQ) },
+    });
+    const out = await svc.judgeQuestion(input(true));
+    expect(out).toMatchObject({
+      questionId: 5034, isCorrect: false, method: 'self_assess', needsSelfAssessment: true,
+      referenceAnswer: '参考答案', explanation: '解析文本', pointsAwarded: 0,
+    });
+    expect(masteryService.recordFromJudge).not.toHaveBeenCalled();
+    expect(events.track).toHaveBeenCalledWith(expect.objectContaining({ event: 'self_assess_answered' }));
+    expect(events.track).not.toHaveBeenCalledWith(expect.objectContaining({ event: 'answer_submitted' }));
+  });
+
+  it('defaultIncorrect 缺省：保持 isCorrect=null，仍走 finishJudge 原语义', async () => {
+    const { svc, masteryService } = makeService({
+      questions: { findById: vi.fn(async () => subjQ) },
+    });
+    const out = await svc.judgeQuestion(input(undefined));
+    expect(out.isCorrect).toBeNull();
+    expect(out.needsSelfAssessment).toBe(true);
+    expect(masteryService.recordFromJudge).toHaveBeenCalledWith({ studentId: 2, questionId: 5034, isCorrect: null });
+  });
+});
+
 describe('judgeQuestion 语文（subject_id=2）非客观题自评（2026-10-28 裁决）', () => {
   const cn = (type: string, answer = '示例：写出一个即可') => ({ ...q(type, answer), subject_id: 2 });
 

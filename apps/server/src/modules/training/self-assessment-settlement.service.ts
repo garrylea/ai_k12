@@ -1,5 +1,5 @@
 import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
-import type { Pool } from 'mysql2/promise';
+import type { Pool, PoolConnection } from 'mysql2/promise';
 import { EventsService } from '../analytics/events.service.js';
 import { PointsService } from '../points/points.service.js';
 import {
@@ -121,7 +121,8 @@ export class SelfAssessmentSettlementService {
    * 0 行只 warn；绝不能调吞异常的 MasteryService.revertErrorToCorrect。
    */
   async confirmSelfAssessment(input: {
-    studentId: number; questionId: number; assessment: 'correct' | 'incorrect';
+    studentId: number; subjectId: number; questionId: number;
+    assessment: 'correct' | 'incorrect';
     source: string; sessionUid: string;
   }): Promise<{ errorBookId?: number; idempotent?: boolean }> {
     const conn = await this.pool.getConnection();
@@ -131,6 +132,11 @@ export class SelfAssessmentSettlementService {
       const row = await this.answers.findForUpdate(sessionId, input.questionId, conn);
       if (!row) throw new HttpException({ code: 1002, message: '作答记录不存在或已失效，请重新提交' }, 409);
       const state = row.self_assess_state;
+      // 迁移前旧行（spec §4.5）：没有 self_assess_state 的专项作答行，首次收到带 uid 的
+      // 自评时按旧语义补做副作用，成功后补写终态；不做批量历史回填。
+      if (state === null || state === undefined) {
+        return await this.confirmLegacyRow(input, sessionId, conn);
+      }
       if (input.assessment === 'correct') {
         if (state === 'confirmed_correct') {
           await conn.commit();
@@ -165,8 +171,8 @@ export class SelfAssessmentSettlementService {
           }
           return { errorBookId: undefined };
         }
-        // state === NULL（迁移前旧行）：旧语义补偿见 Task 9，此处按状态缺失拒绝。
-        throw new HttpException({ code: 1002, message: '作答记录状态缺失，请重新提交' }, 409);
+        // NULL 旧行已在上方兼容；此处只兜未知脏状态。
+        throw new HttpException({ code: 1002, message: '作答记录状态异常，请重新提交' }, 409);
       }
       if (input.assessment === 'incorrect') {
         if (state === 'confirmed_incorrect') {
@@ -188,8 +194,8 @@ export class SelfAssessmentSettlementService {
           await conn.commit();
           return {};
         }
-        // state === NULL（迁移前旧行）：旧语义补偿见 Task 9，此处按状态缺失拒绝。
-        throw new HttpException({ code: 1002, message: '作答记录状态缺失，请重新提交' }, 409);
+        // NULL 旧行已在上方兼容；此处只兜未知脏状态。
+        throw new HttpException({ code: 1002, message: '作答记录状态异常，请重新提交' }, 409);
       }
       throw new HttpException({ code: 1002, message: '暂不支持的自评结果' }, 409);
     } catch (e) {
@@ -198,5 +204,65 @@ export class SelfAssessmentSettlementService {
     } finally {
       conn.release();
     }
+  }
+
+  /**
+   * 迁移前旧作答行（self_assess_state=NULL）的兼容路径（spec §4.5）：
+   * 按旧 `judgeCore.recordSelfAssessment` 语义补做副作用——留痕 + 错题本写入/清零 +
+   * 掌握度按 assessment 记一次，再由调用方 transitionState 补写 confirmed_*。
+   *
+   * ⚠️ 掌握度必须直接逐 KP 调 `masteryRepo.upsertOnJudge(..., conn)`，异常冒泡由外层 rollback；
+   * 绝不能调吞异常的 `MasteryService.recordFromSelfAssessment` / `revertErrorToCorrect`。
+   * 仅首次自评走此路径（作答行已 FOR UPDATE 锁定），不做批量历史回填。
+   */
+  private async confirmLegacyRow(
+    input: {
+      studentId: number; subjectId: number; questionId: number;
+      assessment: 'correct' | 'incorrect'; source: string;
+    },
+    sessionId: number,
+    conn: PoolConnection,
+  ): Promise<{ errorBookId?: number }> {
+    await this.selfAssess.create({
+      studentId: input.studentId, questionId: input.questionId,
+      assessment: input.assessment, source: input.source,
+    }, conn);
+
+    let cleared = 0;
+    let errorBookId: number | undefined;
+    if (input.assessment === 'correct') {
+      cleared = await this.errorBooks.clearUnclearedByStudentQuestionId(
+        input.studentId, input.questionId, conn,
+      );
+    } else {
+      errorBookId = await this.errorBooks.findOrCreateUncleared({
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+        questionId: input.questionId,
+        source: input.source,
+        sourceRefId: null,
+      }, conn);
+    }
+
+    const kpIds = await this.questions.findKnowledgePointIdsByQuestion(input.questionId);
+    for (const kpId of kpIds) {
+      await this.mastery.upsertOnJudge(input.studentId, kpId, input.assessment === 'correct', conn);
+    }
+
+    await this.answers.transitionState({
+      sessionId, questionId: input.questionId,
+      state: input.assessment === 'correct' ? 'confirmed_correct' : 'confirmed_incorrect',
+      isCorrect: input.assessment === 'correct' ? 1 : 0,
+      judgedAt: new Date(),
+    }, conn);
+    await conn.commit();
+
+    if (cleared > 0) {
+      this.events?.track({
+        event: 'error_book_cleared', source: 'server', studentId: input.studentId,
+        refType: 'question', refId: input.questionId,
+      });
+    }
+    return { errorBookId };
   }
 }

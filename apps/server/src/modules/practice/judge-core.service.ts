@@ -139,6 +139,11 @@ export interface JudgeCoreQuestionInput {
    *  客户端传入的布尔值，**不是安全边界**——置 true 只会压制调用者自己的订正分，
    *  没有越权面（题/错题归属仍全由 JWT + SQL 谓词守）。缺省/false 保持既有发分行为。 */
   suppressErrorFixPoints?: boolean;
+  /** 默认错（2026-11-26 自评事务结算）：主观题路由 1c 先回 isCorrect=false，
+   *  由调用方（训练轨，带 sessionUid）在事务里落作答行/错题本/掌握度。
+   *  仅 targeted/error_practice 由调用方传 true；exam 永不传。
+   *  置 true 时本服务不写掌握度（finishJudge）、不记连错（trackAnswer），避免重复记账。 */
+  defaultIncorrect?: boolean;
 }
 
 export interface JudgeDictationInput {
@@ -335,7 +340,9 @@ export class JudgeCoreService {
       // 此时还没有 assessment），不发 answer_submitted。
       const out: JudgeOutput = {
         questionId: q.id,
-        isCorrect: null,
+        // 默认错：前端据此先按错展示，结算由 SelfAssessmentSettlementService 在事务内完成。
+        // 不带标志时保持原语义 isCorrect=null（自评未判）。
+        isCorrect: input.defaultIncorrect ? false : null,
         method: 'self_assess',
         errorType: null,
         errorBookId: undefined,
@@ -349,6 +356,11 @@ export class JudgeCoreService {
         module: moduleName, refType: 'question', refId: input.questionId,
         props: { assessment: null },
       });
+      if (input.defaultIncorrect) {
+        // 不 trackAnswer（避免把未自评的默认错计进连错）、不 finishJudge
+        // （掌握度交给 settlement 事务按每题 KP 记一次，避免重复写）。
+        return out;
+      }
       return this.finishJudge(input.studentId, out);
     } else if ((q.type === 'fill_blank' || q.type === 'calculation')
                && compareAnswer(input.studentAnswer, q.answer, q.options)) {

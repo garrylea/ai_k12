@@ -36,6 +36,7 @@ import type { SpecialPracticeVerdict } from '../../database/repositories/special
 import { SpecialPracticeSessionsRepository } from '../../database/repositories/special-practice-sessions.repo.js';
 import { SpecialAnswerRecordsRepository } from '../../database/repositories/special-answer-records.repo.js';
 import type { SpecialSessionModule } from '../../database/repositories/special-practice-sessions.repo.js';
+import { SelfAssessmentSettlementService } from './self-assessment-settlement.service.js';
 import { EventsService } from '../analytics/events.service.js';
 import {
   evaluateDictation,
@@ -112,6 +113,9 @@ export class TrainingService {
      *  让既有测试 mock 构造（少传这两个参数）也能跑。 */
     @Optional() private readonly specialSessionsRepo?: SpecialPracticeSessionsRepository,
     @Optional() private readonly specialAnswersRepo?: SpecialAnswerRecordsRepository,
+    /** 自评事务结算（Task 8，2026-11-26）：生产由 TrainingModule providers 注入；
+     *  @Optional 仅为兼容既有测试直接 new 的构造调用（它们不触及 self-assess 路径）。 */
+    @Optional() private readonly settlement?: SelfAssessmentSettlementService,
   ) {}
 
   /**
@@ -217,7 +221,29 @@ export class TrainingService {
   }) {
     // plannedQuestionIds 只是作答记录的入参，不能顺带喂给 JudgeCore（它不认这个字段）。
     const { plannedQuestionIds, ...judgeInput } = input;
-    const result = await this.judgeCore.judgeQuestion({ ...judgeInput, sourceRefId: null });
+    // 默认错（Task 8）：带 uid 的主观题先按错回包，由 settlement 在单连接事务里落
+    // 作答行/错题本/掌握度；judge-core 该分支不写掌握度、不记连错，避免重复记账。
+    // judgeTraining 的 source 类型只有 targeted/error_practice（exam 走 exams 模块，不经此处），
+    // 故「非 exam」由类型保证，这里只需判 uid。
+    const useDefaultIncorrect = !!input.sessionUid;
+    const result = await this.judgeCore.judgeQuestion({
+      ...judgeInput, sourceRefId: null, defaultIncorrect: useDefaultIncorrect,
+    });
+    if (result.needsSelfAssessment && useDefaultIncorrect) {
+      const module = targetedSessionModule(input.subjectId) as SpecialSessionModule;
+      const settled = await this.settlement!.submitDefaultIncorrect({
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+        questionId: input.questionId,
+        answerText: input.studentAnswer,
+        source: input.source,
+        sessionUid: input.sessionUid!,
+        session: { module, title: input.title ?? null, questionCount: input.questionCount ?? 0 },
+        questionOrder: input.questionOrder ?? 1,
+      });
+      // settlement 已写作答行（self_assess_state=default_incorrect），跳过旧 upsertAnswer 旁路。
+      return { ...result, errorBookId: settled.errorBookId };
+    }
     // 旁路写作答记录：判题结果算出后、返回前。sessionUid 缺失 = 旧客户端，不写、不报错。
     if (input.sessionUid && this.specialSessionsRepo && this.specialAnswersRepo) {
       const module = targetedSessionModule(input.subjectId) as SpecialSessionModule;
@@ -732,7 +758,21 @@ export class TrainingService {
     if (!q) {
       throw new NotFoundException(`题目不存在：${input.questionId}`);
     }
-    const result = await this.judgeCore.recordSelfAssessment({ ...input, sourceRefId: input.sourceRefId ?? null });
+    let result: { errorBookId?: number };
+    if (input.sessionUid && input.source !== 'exam') {
+      // 带 uid 的训练轨自评：交 settlement 事务结算（状态机 + 幂等 + 掌握度回退同连接）。
+      result = await this.settlement!.confirmSelfAssessment({
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+        questionId: input.questionId,
+        assessment: input.assessment,
+        source: input.source,
+        sessionUid: input.sessionUid,
+      });
+    } else {
+      // 无 uid（旧客户端）/ exam：保持 recordSelfAssessment 旧语义。
+      result = await this.judgeCore.recordSelfAssessment({ ...input, sourceRefId: input.sourceRefId ?? null });
+    }
     if (input.assessment === 'incorrect') {
       this.explanationCache.ensureExplanation(q);
     }
