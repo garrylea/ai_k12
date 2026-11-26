@@ -149,6 +149,51 @@ def test_single_letter_is_not_compact_choice_key():
     assert issues[0].code == "compact_choice_count_mismatch"
 
 
+def test_group_header_with_inline_compact_choices_keeps_answers():
+    """大题标题后直接跟裸字母串时，仍按顺序写入本节各题。"""
+    result = parse_answer_region(
+        [
+            AnswerLine(
+                1,
+                "## 一、选择题(共8道小题，每小题2分，共16分) BDAD CACB",
+            ),
+        ],
+        [AnswerQuestion(no=number, group_id="一") for number in range(1, 9)],
+        first_line_no=1,
+    )
+    got = {fragment.question_no: fragment.text for fragment in result.fragments}
+
+    assert got == {
+        1: "B",
+        2: "D",
+        3: "A",
+        4: "D",
+        5: "C",
+        6: "A",
+        7: "C",
+        8: "B",
+    }
+
+
+def test_inline_dotted_numeric_answers_split_consecutive_question_numbers():
+    """连续题号后的 ``14.2`` 是第 14 题答案 2，不是第 13 题里的小数。"""
+    result = parse_answer_region(
+        [
+            AnswerLine(1, "二、填空题（共8道小题，每空2分，共16分）"),
+            AnswerLine(2, "9. 0.8    10. 答案不唯一    11. 8    12. y1<y2"),
+            AnswerLine(3, "13. 5    14.2    15.8    16. $\\sqrt{13}$"),
+        ],
+        [AnswerQuestion(no=number, group_id="二") for number in range(9, 17)],
+        first_line_no=1,
+    )
+    got = {fragment.question_no: fragment.text for fragment in result.fragments}
+
+    assert got[13] == "5"
+    assert got[14] == "2"
+    assert got[15] == "8"
+    assert got[16] == "$\\sqrt{13}$"
+
+
 def test_region_reports_missing_without_writing_neighbor():
     lines = [
         AnswerLine(10, "9. (-1,-2) 10. 4"),

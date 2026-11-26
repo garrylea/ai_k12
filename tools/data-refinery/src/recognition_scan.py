@@ -738,7 +738,7 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
         if pruned:
             print(f"[redo] 清除 {pruned} 条旧 issue 记录（本次重扫的卷，旧快照已失效）", flush=True)
     current = {(i["source"], i["group_order"], i["kind"]) for i in all_issues}
-    scanned = {i["source"] for i in all_issues}
+    scanned = {source for _jsonl, _rel_dir, source in jobs}
     closed = _auto_close_stale(
         records, current, scanned,
         answers_checked=answers_by_source is not None,

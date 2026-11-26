@@ -62,6 +62,9 @@ _GROUP_HEADER_RE = re.compile(
     r"^#{0,6}\s*([一二三四五六七八九十]+)、\s*(.*)$"
 )
 _INLINE_NUMBER_RE = re.compile(r"(?<!\d)\d{1,2}\s*[.．]")
+_COMPACT_CHOICE_TAIL_RE = re.compile(
+    r"(?<![A-Za-z])(?P<answers>[A-Da-d]{2,}(?:[ \t]+[A-Da-d]{1,4})*)[ \t]*$"
+)
 _SECTION_HEADER_RE = re.compile(
     r"^#{0,6}\s*[（(]\s*[一二三四五六七八九十]+\s*[）)]"
 )
@@ -79,7 +82,11 @@ def _split_group_header_with_tail(line: str) -> tuple[str | None, str]:
         return None, line.strip()
     body = match.group(2).strip()
     inline = _INLINE_NUMBER_RE.search(body)
-    tail = body[inline.start():].strip() if inline else ""
+    if inline:
+        tail = body[inline.start():].strip()
+    else:
+        compact = _COMPACT_CHOICE_TAIL_RE.search(body)
+        tail = compact.group("answers").strip() if compact else ""
     return match.group(1), tail
 
 
@@ -230,6 +237,7 @@ def _marker_allowed(
     text: str,
     match: re.Match[str],
     line_starts: set[int],
+    previous_answer: str | None = None,
 ) -> bool:
     before = text[:match.start()].rstrip()
     previous = before[-1:] if before else ""
@@ -245,7 +253,16 @@ def _marker_allowed(
     ):
         return False
     if has_dot and followed_by_digit and not at_line_start:
-        return previous in _STRONG_PREFIXES or previous == "分"
+        compact_previous = bool(
+            previous_answer
+            and len(previous_answer) <= 40
+            and not re.search(r"[\u3400-\u9fff。；;]", previous_answer)
+        )
+        return (
+            previous in _STRONG_PREFIXES
+            or previous == "分"
+            or compact_previous
+        )
     return (
         at_line_start
         or raw_previous.isspace()
@@ -260,6 +277,7 @@ def _find_marker(
     start: int,
     expected_no: int,
     line_starts: set[int],
+    previous_marker_end: int | None = None,
 ) -> re.Match[str] | None:
     digits = r"\s*".join(str(expected_no))
     pattern = re.compile(
@@ -267,7 +285,12 @@ def _find_marker(
         rf"(?:\s*(?=\S)|(?=\n|$))"
     )
     for match in pattern.finditer(text, start):
-        if _marker_allowed(text, match, line_starts):
+        previous_answer = (
+            text[previous_marker_end:match.start()].strip()
+            if previous_marker_end is not None
+            else None
+        )
+        if _marker_allowed(text, match, line_starts, previous_answer):
             return match
     return None
 
@@ -281,12 +304,16 @@ def parse_numbered_block(
     starts = _line_start_offsets(text)
     markers: list[tuple[int, re.Match[str]]] = []
     cursor = 0
+    previous_marker_end: int | None = None
     for number in expected_numbers:
-        marker = _find_marker(text, cursor, number, starts)
+        marker = _find_marker(
+            text, cursor, number, starts, previous_marker_end,
+        )
         if marker is None:
             continue
         markers.append((number, marker))
         cursor = marker.end()
+        previous_marker_end = marker.end()
 
     fragments: list[AnswerFragment] = []
     issues: list[AnswerIssue] = []

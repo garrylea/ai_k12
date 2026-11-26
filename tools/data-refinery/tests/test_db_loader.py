@@ -824,6 +824,23 @@ class TestLoadQuestionsPaperGrouping:
         upd = [a for sql, a in queries if "UPDATE exam_papers SET question_count" in sql]
         assert upd == [(2, 9)]
 
+    def test_shared_question_renumber_uses_paper_link_group_order(self):
+        """跨卷复用题的本卷题号以 paper_questions.group_order 为准。
+
+        同一题干可在两卷处于不同题号；questions.group_order 只代表原卷，
+        重排时拿它覆盖会制造卷内两个同号题。
+        """
+        loader, queries = _make_loader_seq({
+            "FROM subjects WHERE code": [[(1,)]],
+            "FROM questions WHERE content_hash": [[(123,)]],
+        })
+        loader.load_questions([self.QS[0]], paper=(_paper_meta(), 9))
+
+        renumber = next(
+            sql for sql, _ in queries if "SET pq.question_no = COALESCE(" in sql
+        )
+        assert "COALESCE(pq.group_order, q.group_order, t.rn)" in renumber
+
     def test_material_only_change_updates_existing_row(self):
         """只改 material_text 时 content_hash 不变，也必须原址更新材料。
 

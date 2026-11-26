@@ -559,6 +559,48 @@ def test_answer_missing_uses_db_and_only_when_md_has_answers(tmp_path):
     assert not [i for i in issues if i["kind"] == "answer_missing"]
 
 
+def test_answer_missing_closes_when_rescan_has_no_issues(tmp_path, monkeypatch):
+    """答案补齐后本次检出 0 条，也仍要收口该卷旧的 answer_missing。"""
+    extracted = tmp_path / "output" / "extracted" / "数学" / "x" / "卷A.jsonl"
+    extracted.parent.mkdir(parents=True)
+    extracted.write_text(
+        json.dumps({
+            "group_order": 1,
+            "content": "甲",
+            "type": "fill_blank",
+            "options": None,
+        }, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    md = tmp_path / "output" / "md" / "数学" / "x" / "卷A.md"
+    md.parent.mkdir(parents=True)
+    md.write_text("1. 甲\n\n# 数学答案\n\n1. D\n", encoding="utf-8")
+    issues_file = tmp_path / "output" / "recognition_issues.jsonl"
+    issues_file.write_text(
+        json.dumps({
+            "source": "卷A",
+            "group_order": 1,
+            "kind": "answer_missing",
+            "status": "pending",
+            "reasons": ["answer_empty"],
+        }, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(R, "ROOT", tmp_path)
+    monkeypatch.setattr(R, "ISSUES_FILE", issues_file)
+    monkeypatch.setattr(
+        R, "_load_db_answers",
+        lambda _keys: {"数学/x/卷A": {1: "D"}},
+    )
+
+    assert R.run("数学", "卷A") == []
+
+    records = R._read_jsonl(issues_file)
+    assert records[0]["status"] == "resolved"
+    assert records[0]["auto_closed"] is True
+
+
 class TestRedoPrune:
     """--redo 重做卷时，先清掉旧 issue 快照，避免栅格化后已修好的题还挂着旧误报。"""
 

@@ -1580,7 +1580,7 @@ class DbLoader:
                     "  FROM paper_questions pq2 JOIN questions q2 ON q2.id = pq2.question_id"
                     "  WHERE pq2.paper_id=%s) t"
                     " ON t.question_id = pq.question_id "
-                    "SET pq.question_no = COALESCE(q.group_order, t.rn) "
+                    "SET pq.question_no = COALESCE(pq.group_order, q.group_order, t.rn) "
                     "WHERE pq.paper_id=%s",
                     (paper[1], paper[1]))
             self._exec(
