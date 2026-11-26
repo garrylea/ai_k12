@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 /** 专项会话 module 值：语文三专项 + 英语背单词 + 各学科 targeted（英语/道法已补齐）。 */
 export type SpecialSessionModule =
@@ -36,8 +36,9 @@ export class SpecialPracticeSessionsRepository {
    * 惰性建会话：INSERT IGNORE，首次返回 insertId；命中已存在行（affectedRows=0）时
    * 再 SELECT 取 id。返回 session id 供后续 upsertAnswer 用。
    */
-  async upsertSession(input: UpsertSessionInput): Promise<number> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+  async upsertSession(input: UpsertSessionInput, executor?: PoolConnection): Promise<number> {
+    const db = executor ?? this.pool;
+    const [result] = await db.execute<ResultSetHeader>(
       `INSERT IGNORE INTO special_practice_sessions
        (session_uid, student_id, subject_id, module, title, question_count)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -45,7 +46,7 @@ export class SpecialPracticeSessionsRepository {
     );
     if (result.insertId > 0) return result.insertId;
     // 命中已存在行：按 uid 取 id
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await db.execute<RowDataPacket[]>(
       `SELECT id FROM special_practice_sessions WHERE session_uid = ?`,
       [input.sessionUid],
     );
@@ -53,27 +54,44 @@ export class SpecialPracticeSessionsRepository {
   }
 
   /** 标记完成（前端离开时调用，可选）。 */
-  async markCompleted(sessionId: number, studentId: number): Promise<void> {
-    await this.pool.execute(
+  async markCompleted(sessionId: number, studentId: number, executor?: PoolConnection): Promise<void> {
+    const db = executor ?? this.pool;
+    await db.execute(
       `UPDATE special_practice_sessions SET completed_at = CURRENT_TIMESTAMP(3)
        WHERE id = ? AND student_id = ? AND completed_at IS NULL`,
       [sessionId, studentId],
     );
   }
 
+  /**
+   * 按 session_uid + student_id 标记完成（结算/完成端点用）。
+   * 返回 affectedRows：0 表示会话不存在、非本人或已完成。
+   */
+  async markCompletedByUid(sessionUid: string, studentId: number, executor?: PoolConnection): Promise<number> {
+    const db = executor ?? this.pool;
+    const [r] = await db.execute<ResultSetHeader>(
+      `UPDATE special_practice_sessions SET completed_at = NOW(3)
+       WHERE session_uid = ? AND student_id = ? AND completed_at IS NULL`,
+      [sessionUid, studentId],
+    );
+    return r.affectedRows;
+  }
+
   /** 列表查询（按学生，可选学科筛选）。 */
   async listByStudent(
     studentId: number,
     opts: { subjectId?: number; limit?: number; offset?: number },
+    executor?: PoolConnection,
   ): Promise<SessionListRow[]> {
+    const db = executor ?? this.pool;
     const limit = opts.limit ?? 20;
     const offset = opts.offset ?? 0;
     const where = opts.subjectId
       ? `WHERE student_id = ? AND subject_id = ?`
       : `WHERE student_id = ?`;
     const params = opts.subjectId ? [studentId, opts.subjectId, limit, offset] : [studentId, limit, offset];
-    // 走 pool.query（客户端转义）：mysql2 对 execute 的 LIMIT ? 占位符会直接报 ER_WRONG_ARGUMENTS。
-    const [rows] = await this.pool.query<RowDataPacket[]>(
+    // 走 db.query（客户端转义）：mysql2 对 execute 的 LIMIT ? 占位符会直接报 ER_WRONG_ARGUMENTS。
+    const [rows] = await db.query<RowDataPacket[]>(
       `SELECT * FROM special_practice_sessions ${where} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
       params,
     );
@@ -81,10 +99,11 @@ export class SpecialPracticeSessionsRepository {
   }
 
   /** 总数（分页用）。 */
-  async countByStudent(studentId: number, subjectId?: number): Promise<number> {
+  async countByStudent(studentId: number, subjectId?: number, executor?: PoolConnection): Promise<number> {
+    const db = executor ?? this.pool;
     const where = subjectId ? `WHERE student_id = ? AND subject_id = ?` : `WHERE student_id = ?`;
     const params = subjectId ? [studentId, subjectId] : [studentId];
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await db.execute<RowDataPacket[]>(
       `SELECT COUNT(*) AS cnt FROM special_practice_sessions ${where}`,
       params,
     );
@@ -92,8 +111,9 @@ export class SpecialPracticeSessionsRepository {
   }
 
   /** 单个 session 归属校验（防 IDOR）。 */
-  async findByIdOwned(sessionId: number, studentId: number): Promise<SessionListRow | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+  async findByIdOwned(sessionId: number, studentId: number, executor?: PoolConnection): Promise<SessionListRow | null> {
+    const db = executor ?? this.pool;
+    const [rows] = await db.execute<RowDataPacket[]>(
       `SELECT * FROM special_practice_sessions WHERE id = ? AND student_id = ?`,
       [sessionId, studentId],
     );

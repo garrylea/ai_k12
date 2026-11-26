@@ -203,6 +203,15 @@ describe('MainErrorBooksRepository', () => {
     expect(await repo.clearUnclearedByStudentQuestionId(1, 2)).toBe(0);
   });
 
+  it('clearUnclearedByStudentQuestionId 传 executor 时用该连接而非 pool', async () => {
+    const pool = { execute: vi.fn(), query: vi.fn() };
+    const exec = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]), query: vi.fn() };
+    const repo = new MainErrorBooksRepository(pool as any);
+    expect(await repo.clearUnclearedByStudentQuestionId(1, 2, exec as any)).toBe(1);
+    expect(pool.execute).not.toHaveBeenCalled();
+    expect(exec.execute).toHaveBeenCalled();
+  });
+
   it('clearUnclearedByStudentQuestion questionId=null 走题面匹配分支，同样返回 affectedRows', async () => {
     const pool = mockPool();
     const repo = new MainErrorBooksRepository(pool as any);
@@ -285,5 +294,53 @@ describe('MainErrorBooksRepository.countUncoveredUncleared', () => {
     expect(rows[0].answerable).toBe(1);
     const [sql] = pool.execute.mock.calls[0];
     expect(sql).toContain("q.answer <> ''");
+  });
+});
+
+describe('MainErrorBooksRepository.findOrCreateUncleared', () => {
+  const input = {
+    studentId: 2, subjectId: 1, questionId: 5034, source: 'targeted', sourceRefId: 99,
+  };
+
+  it('已有未清行：SELECT ... FOR UPDATE 命中即返回其 id，不 INSERT', async () => {
+    const pool = mockPool([{ id: 55 }]);
+    const repo = new MainErrorBooksRepository(pool as any);
+    expect(await repo.findOrCreateUncleared(input)).toBe(55);
+    expect(pool.execute).toHaveBeenCalledTimes(1);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('SELECT id FROM main_error_books');
+    expect(sql).toContain('FOR UPDATE');
+    expect(sql).toContain('is_cleared = 0');
+    expect(params).toEqual([2, 5034]);
+  });
+
+  it('无未清行：INSERT 并返回新 id', async () => {
+    const pool = mockPool([]);
+    const repo = new MainErrorBooksRepository(pool as any);
+    expect(await repo.findOrCreateUncleared(input)).toBe(7);
+    expect(pool.execute).toHaveBeenCalledTimes(2);
+    const [insertSql, insertParams] = pool.execute.mock.calls[1];
+    expect(insertSql).toContain('INSERT INTO main_error_books');
+    expect(insertSql).not.toContain('FOR UPDATE');
+    expect(insertParams).toEqual([2, 1, 5034, 'targeted', 99]);
+  });
+
+  it('sourceRefId 缺省时写 NULL', async () => {
+    const pool = mockPool([]);
+    const repo = new MainErrorBooksRepository(pool as any);
+    await repo.findOrCreateUncleared({ ...input, sourceRefId: undefined });
+    expect(pool.execute.mock.calls[1][1]).toEqual([2, 1, 5034, 'targeted', null]);
+  });
+
+  it('传 executor 时用该连接而非 pool', async () => {
+    const pool = { execute: vi.fn(), query: vi.fn() };
+    const exec = {
+      execute: vi.fn().mockResolvedValueOnce([[], []]).mockResolvedValueOnce([{ insertId: 9 }, []]),
+      query: vi.fn(),
+    };
+    const repo = new MainErrorBooksRepository(pool as any);
+    expect(await repo.findOrCreateUncleared(input, exec as any)).toBe(9);
+    expect(pool.execute).not.toHaveBeenCalled();
+    expect(exec.execute).toHaveBeenCalledTimes(2);
   });
 });

@@ -23,6 +23,17 @@ describe('SpecialAnswerRecordsRepository', () => {
     );
   });
 
+  it('upsertAnswer 传 executor 时用该连接而非 pool', async () => {
+    const pool = { execute: vi.fn(), query: vi.fn() };
+    const exec = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]), query: vi.fn() };
+    const repo = new SpecialAnswerRecordsRepository(pool as any);
+    await repo.upsertAnswer({
+      sessionId: 1, questionId: 100, questionOrder: 1, answerText: 'B',
+    }, exec as any);
+    expect(pool.execute).not.toHaveBeenCalled();
+    expect(exec.execute).toHaveBeenCalled();
+  });
+
   it('markSelfAssessCorrectness 按 session_uid + student_id 定位回写对错，只改 is_correct/judged_at', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([{ affectedRows: 1 } as any]);

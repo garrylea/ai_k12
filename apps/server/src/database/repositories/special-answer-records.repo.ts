@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 
 export interface UpsertAnswerInput {
   sessionId: number;
@@ -48,8 +48,9 @@ export class SpecialAnswerRecordsRepository {
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
 
   /** question_id 非空：走 uniq_sar_session_q 的 ON DUPLICATE KEY UPDATE（与 exam_answers 一致）。 */
-  async upsertAnswer(input: UpsertAnswerInput): Promise<void> {
-    await this.pool.execute(
+  async upsertAnswer(input: UpsertAnswerInput, executor?: PoolConnection): Promise<void> {
+    const db = executor ?? this.pool;
+    await db.execute(
       `INSERT INTO special_answer_records
        (session_id, question_id, question_order, answer_text, is_correct, score, method, analysis, judged_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

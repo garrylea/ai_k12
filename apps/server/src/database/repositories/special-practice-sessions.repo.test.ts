@@ -39,4 +39,33 @@ describe('SpecialPracticeSessionsRepository', () => {
     });
     expect(id).toBe(99);
   });
+
+  it('upsertSession 传 executor 时用该连接而非 pool', async () => {
+    const pool = { execute: vi.fn(), query: vi.fn() };
+    const exec = { execute: vi.fn().mockResolvedValue([{ insertId: 9, affectedRows: 1 }]), query: vi.fn() };
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    await repo.upsertSession({ sessionUid: 'u', studentId: 1, subjectId: 1, module: 'math_targeted', title: null, questionCount: 0 }, exec as any);
+    expect(pool.execute).not.toHaveBeenCalled();
+    expect(exec.execute).toHaveBeenCalled();
+  });
+
+  it('markCompletedByUid 按 uid+student 置 completed_at 并返回 affectedRows', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 1 } as any]);
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    expect(await repo.markCompletedByUid('u-1', 7)).toBe(1);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('UPDATE special_practice_sessions SET completed_at = NOW(3)');
+    expect(sql).toContain('session_uid = ? AND student_id = ? AND completed_at IS NULL');
+    expect(params).toEqual(['u-1', 7]);
+  });
+
+  it('markCompletedByUid 传 executor 时用该连接而非 pool', async () => {
+    const pool = { execute: vi.fn(), query: vi.fn() };
+    const exec = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }]), query: vi.fn() };
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    expect(await repo.markCompletedByUid('u-1', 7, exec as any)).toBe(1);
+    expect(pool.execute).not.toHaveBeenCalled();
+    expect(exec.execute).toHaveBeenCalled();
+  });
 });

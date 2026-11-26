@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import type { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import type { MainErrorBookRow } from './types.js';
 import { UNCOVERED_ERROR_PREDICATE } from '../sql-fragments.js';
 
@@ -96,6 +96,35 @@ export class MainErrorBooksRepository {
     return (rows[0] as MainErrorBookRow) ?? null;
   }
 
+  /**
+   * find-or-create：事务内先锁定该学生此题的未清错题行，没有则新建并返回 id。
+   * `SELECT ... FOR UPDATE` 放在同一 executor 上，避免并发结算插入重复未清行。
+   * 匹配口径与题中心变体 `findUnclearedByStudentQuestionId` 一致（student + question，不限 source）。
+   */
+  async findOrCreateUncleared(input: {
+    studentId: number;
+    subjectId: number;
+    questionId: number;
+    source: string;
+    sourceRefId?: number | null;
+  }, executor?: PoolConnection): Promise<number> {
+    const db = executor ?? this.pool;
+    const [rows] = await db.execute<RowDataPacket[]>(
+      `SELECT id FROM main_error_books
+       WHERE student_id = ? AND question_id = ? AND is_cleared = 0
+       FOR UPDATE`,
+      [input.studentId, input.questionId],
+    );
+    const existingId = (rows[0] as { id?: number } | undefined)?.id;
+    if (existingId) return existingId;
+    const [result] = await db.execute<ResultSetHeader>(
+      `INSERT INTO main_error_books (student_id, subject_id, question_id, source, source_ref_id)
+       VALUES (?, ?, ?, ?, ?)`,
+      [input.studentId, input.subjectId, input.questionId, input.source, input.sourceRefId ?? null],
+    );
+    return result.insertId;
+  }
+
   /** 该学生此题是否已有错题本行（不限 source、含已清零）。用于幂等补写。 */
   async existsByStudentAndQuestionId(studentId: number, questionId: number): Promise<boolean> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
@@ -112,8 +141,9 @@ export class MainErrorBooksRepository {
    * `> 0` 才发 `error_fix` 分，首次就答对（本无未清行）为 `0`、不发分（spec §6.5）。
    * 返回值从 `void` 改为 `number` 对既有 `await` 调用方兼容（它们忽略返回值）。
    */
-  async clearUnclearedByStudentQuestionId(studentId: number, questionId: number): Promise<number> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+  async clearUnclearedByStudentQuestionId(studentId: number, questionId: number, executor?: PoolConnection): Promise<number> {
+    const db = executor ?? this.pool;
+    const [result] = await db.execute<ResultSetHeader>(
       `UPDATE main_error_books SET is_cleared = 1, cleared_at = NOW(3)
        WHERE student_id = ? AND is_cleared = 0 AND question_id = ?`,
       [studentId, questionId],
