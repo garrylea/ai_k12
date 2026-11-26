@@ -97,3 +97,42 @@ def test_read_images_stops_when_clipboard_keeps_same_image(tmp_path, monkeypatch
 
     assert mode == "append"
     assert [p.name for p in paths] == ["one.png"]
+
+
+class _TTY(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def test_file_edit_offers_install_hints_then_retries(tmp_path, monkeypatch, capsys):
+    """没装编辑器时要给安装命令，装好后回车能重新检测并继续。"""
+    monkeypatch.setattr(ed, "ROOT", tmp_path)
+    seq = iter([None, (["true"], False)])
+    monkeypatch.setattr(ed, "_find_editor", lambda: next(seq))
+    launched = []
+    monkeypatch.setattr(ed.subprocess, "call", lambda argv: launched.append(argv))
+    monkeypatch.setattr("sys.stdin", _TTY("\n\n"))
+
+    got, _path = ed._file_edit("原始题干")
+
+    out = capsys.readouterr().out
+    assert ("brew install" in out) or ("apt install" in out) or ("winget" in out)
+    assert "装好后按回车重新检测" in out
+    assert launched and got == "原始题干"
+
+
+def test_file_edit_no_editor_q_cancels(tmp_path, monkeypatch):
+    monkeypatch.setattr(ed, "ROOT", tmp_path)
+    monkeypatch.setattr(ed, "_find_editor", lambda: None)
+    monkeypatch.setattr("sys.stdin", _TTY("q\n"))
+
+    got, path = ed._file_edit("原始题干")
+
+    assert got is None and path.exists()
+
+
+def test_read_slot_prints_hint_on_its_own_line(monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
+    ed.read_slot(_c(), label="题干/选项", hint=":e 编辑器 · :c 清空",
+                 current="", paper_md_dir=Path("."))
+    assert ":e 编辑器" in capsys.readouterr().out

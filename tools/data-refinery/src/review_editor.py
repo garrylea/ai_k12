@@ -434,6 +434,26 @@ def _line_edit(text: str) -> str | None:
         c.warn("指令不认识；" + _EDIT_HINT)
 
 
+def _editor_install_hints() -> list[str]:
+    """按平台给出装编辑器的命令（找不到编辑器时提示一次，不自动装）。"""
+    if sys.platform == "darwin":
+        return [
+            "macOS：brew install --cask visual-studio-code"
+            "（装完在 VS Code 里执行 Shell Command: Install 'code' command in PATH）",
+            "或：brew install vim（macOS 自带 /usr/bin/vi，找不到请检查 PATH）",
+        ]
+    if sys.platform.startswith("win"):
+        return [
+            "Windows：winget install Microsoft.VisualStudioCode",
+            "或：winget install vim.vim",
+        ]
+    return [
+        "Linux：sudo apt install vim（Debian/Ubuntu）",
+        "或：sudo dnf install vim（Fedora）/ sudo pacman -S vim（Arch）",
+        "VS Code：https://code.visualstudio.com/",
+    ]
+
+
 def _find_editor() -> tuple[list[str], bool] | None:
     """返回 (命令, 是否 VS Code)；VS Code 用 --reuse-window 打开、不阻塞。
 
@@ -474,6 +494,20 @@ def _file_edit(text: str | None, label: str = "题干",
 
     # 非交互环境（管道/测试）不拉起图形编辑器，避免 code --wait 之类把管道挂住
     editor = _find_editor() if sys.stdin.isatty() else None
+    if editor is None and sys.stdin.isatty():
+        c.warn("没找到 VS Code / vim / vi，无法自动打开编辑器")
+        for line in _editor_install_hints():
+            c.write(f"  {line}")
+        c.info(f"文件已写好，也可以手动打开：{path}")
+        while True:
+            c.prompt("装好后按回车重新检测 / q 取消 › ")
+            raw = _read_line()
+            if raw is None or raw.strip().lower() in ("q", "quit"):
+                return None, path
+            editor = _find_editor()
+            if editor:
+                break
+            c.warn("还是没找到；确认已安装并在 PATH 里，再回车重试，或 q 取消")
     if editor:
         argv, is_code = editor
         try:
@@ -487,7 +521,7 @@ def _file_edit(text: str | None, label: str = "题干",
         except OSError as exc:
             c.warn(f"编辑器启动失败：{exc}")
             c.info(f"请手动打开这个文件改：{path}")
-    else:
+    elif not sys.stdin.isatty():
         c.warn("没找到 VS Code / vim / vi，请手动打开这个文件改：")
         c.write(f"  {path}")
 
@@ -588,8 +622,9 @@ def read_slot(
     pre = first_line
     while True:
         if pre is None:
-            tail = f"（{hint}）" if hint else ""
-            c.prompt(f"{label} › {tail}")
+            if hint:
+                c.write("  " + c.paint(hint, "dim"))
+            c.prompt(f"{label} › ")
             raw = _read_line()
         else:
             raw, pre = pre, None
