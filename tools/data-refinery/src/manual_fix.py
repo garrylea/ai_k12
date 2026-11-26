@@ -266,11 +266,12 @@ def ask_menu(c, *, is_repair: bool, has_original: bool,
     tail = []
     if has_content:
         tail.append("E 编辑器改整题")
-    tail += ["R 全换（清空材料/图）", "k 确认无问题"]
+    tail.append("R 全换（清空材料/图）")
     if is_repair and has_original:
         tail.append("u 用修复前原文")
     c.write("           " + c.paint(" · ".join(tail), "dim"))
-    c.write("           " + c.paint("回车=结束本题 · s 稍后再说 · q 退出", "dim"))
+    c.write("           " + c.paint("回车 保存并结束 · s 稍后（不保存） · "
+                                    "k 该题无问题（不写库） · q 退出", "dim"))
     while True:
         c.prompt("› ")
         raw = _read_line()
@@ -294,7 +295,7 @@ def ask_menu(c, *, is_repair: bool, has_original: bool,
             return "quit", None
         if low == "u" and is_repair and has_original:
             return "restore", None
-        c.warn("请按 1–5 / E / R / k / u / 回车 / s / q")
+        c.warn("请按 1–5 / E / R / u / 回车（保存）/ s / k / q")
 
 
 def close_as_ok(item: ReviewItem, target: ReviewTarget) -> None:
@@ -595,14 +596,14 @@ def run_card(item: ReviewItem, target: ReviewTarget, snap: Snapshot,
         elif action == "ok":
             if has_changes(state.draft.patch) and state.armed != "ok":
                 state.armed = "ok"
-                c.warn("本题有未保存的修改：回车=保存修改；再按一次 k = 丢弃修改并标「确认无问题」")
+                c.warn("本题有未保存的修改：回车=保存并结束；再按一次 k = 丢弃修改并标该题无问题")
                 continue
             close_as_ok(item, target)
             return CardResult("ok")
         elif action == "skip":
             if has_changes(state.draft.patch) and state.armed != "skip":
                 state.armed = "skip"
-                c.warn("本题有未保存的修改：回车=保存修改；再按一次 s = 丢弃修改、稍后再处理")
+                c.warn("本题有未保存的修改：回车=保存并结束；再按一次 s = 丢弃修改、稍后处理")
                 continue
             return CardResult("skip")
         elif action == "enter":
