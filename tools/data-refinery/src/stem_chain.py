@@ -373,3 +373,235 @@ def collect_interval_candidates(text: str, strategy, anchors: list[StemCandidate
         candidates=tuple(candidates),
         consumed_lines=frozenset(consumed),
     )
+
+
+def _options_by_number(collection: StemCollectionResult) -> dict[int, list[tuple[int, StemOption]]]:
+    out: dict[int, list[tuple[int, StemOption]]] = {}
+    for candidate in collection.candidates:
+        for option in candidate.options:
+            if not has_hard_veto(option):
+                out.setdefault(option.number, []).append((candidate.line_no, option))
+    return out
+
+
+def _top_two(paths: list[StemPath]) -> list[StemPath]:
+    ranked = sorted(paths, key=lambda p: p.rank_key)
+    unique: list[StemPath] = []
+    seen: set[tuple] = set()
+    for path in ranked:
+        key = tuple((line, number, cid) for line, number, cid in path.assignments)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+        if len(unique) == 2:
+            break
+    return unique
+
+
+def _complete_paths(
+    collection: StemCollectionResult,
+) -> list[tuple[int, int, list[StemPath], dict[int, list[StemPath]]]]:
+    options = _options_by_number(collection)
+    completed = []
+    for left, right in zip(collection.anchors, collection.anchors[1:]):
+        left_no = left.options[0].number
+        right_no = right.options[0].number
+        expected = tuple(range(left_no + 1, right_no))
+        paths_by_no: dict[int, list[StemPath]] = {
+            left_no: [StemPath(
+                assignments=((left.line_no, left_no, left.options[0].candidate_id),),
+                rank_key=(0, 0, 0, 0),
+                selected_options=(),
+            )]
+        }
+        for number in expected:
+            expanded: list[StemPath] = []
+            for prev in paths_by_no.get(number - 1, []):
+                prev_line = prev.assignments[-1][0]
+                for line_no, option in options.get(number, []):
+                    if line_no <= prev_line or line_no >= right.line_no:
+                        continue
+                    selected = prev.selected_options + (option,)
+                    assignments = prev.assignments + ((line_no, number, option.candidate_id),)
+                    draft = StemPath(
+                        assignments=assignments,
+                        rank_key=(),
+                        selected_options=selected,
+                    )
+                    expanded.append(StemPath(
+                        assignments=assignments,
+                        rank_key=path_rank_key(draft),
+                        selected_options=selected,
+                    ))
+            paths_by_no[number] = _top_two(expanded)
+        completed.append((left_no, right_no, paths_by_no.get(right_no - 1, []), paths_by_no))
+    return completed
+
+
+def select_stem_chains(
+    collection: StemCollectionResult,
+    *,
+    source_lines: list[str] | None = None,
+    margin: int = 2,
+) -> StemChainResult:
+    accepted: dict[int, tuple[int, str, str]] = {}
+    safe_prefix: dict[int, tuple[int, str, str]] = {}
+    gaps: list[tuple[int, int, int]] = []
+    gap_segments: list[StemGapSegment] = []
+    ambiguities: list[StemAmbiguity] = []
+    issues: list[StemIssue] = []
+
+    for left, right in zip(collection.anchors, collection.anchors[1:]):
+        left_no = left.options[0].number
+        right_no = right.options[0].number
+        matching = next(
+            (entry for entry in _complete_paths(collection)
+             if entry[0] == left_no and entry[1] == right_no),
+            None,
+        )
+        paths = matching[2] if matching else []
+        if paths:
+            first = paths[0]
+            needs_confirmation = any(
+                option.recovery == "dropped_tens" for option in first.selected_options
+            )
+            clear_winner = (
+                len(paths) == 1
+                or first.rank_key[0] < paths[1].rank_key[0]
+                or sum(first.rank_key[1:]) + margin <= sum(paths[1].rank_key[1:])
+            )
+            if clear_winner and not needs_confirmation:
+                for line_no, number, cid in first.assignments[1:]:
+                    option = next(o for o in first.selected_options if o.candidate_id == cid)
+                    accepted[line_no] = (number, option.form, option.recovery)
+                continue
+            ambiguities.append(StemAmbiguity(
+                reason="high_risk_recovery" if needs_confirmation else "ambiguous",
+                left_anchor=left_no,
+                right_anchor=right_no,
+                expected_numbers=tuple(range(left_no + 1, right_no)),
+                candidates=tuple(
+                    candidate for candidate in collection.candidates
+                    if left.line_no < candidate.line_no < right.line_no
+                ),
+                top_paths=tuple(paths),
+            ))
+            issues.append(StemIssue(
+                code="stem_chain_high_risk_recovery" if needs_confirmation else "stem_chain_ambiguous",
+                severity="warning",
+                message=f"题 {left_no}→{right_no} 需要本地 LLM 仲裁",
+                line_no=left.line_no + 1,
+                excerpt=left.text,
+                question_no=left_no + 1,
+                interval_id=f"C{left_no}-{right_no}",
+            ))
+            continue
+
+        # No complete path: accept only the left-connected safe prefix.
+        expected = tuple(range(left_no + 1, right_no))
+        options = _options_by_number(collection)
+        last_line = left.line_no
+        stopped_at = None
+        for number in expected:
+            choices = [
+                (line_no, option)
+                for line_no, option in options.get(number, [])
+                if line_no > last_line
+            ]
+            if len(choices) != 1:
+                stopped_at = number
+                break
+            line_no, option = choices[0]
+            tags = {e.tag for e in option.evidence if e.polarity == "positive"}
+            paragraph_ok = bool(tags & {
+                "blank_before", "paragraph_break", "prev_sentence_end",
+            })
+            stem_ok = bool(tags & {
+                "chinese_after", "long_stem", "stem_keyword", "math_after",
+            })
+            if option.recovery == "dropped_tens" or not paragraph_ok or not stem_ok:
+                stopped_at = number
+                break
+            safe_prefix[line_no] = (number, option.form, option.recovery)
+            accepted[line_no] = (number, option.form, option.recovery)
+            last_line = line_no
+        if stopped_at is not None:
+            gaps.append((stopped_at - 1, stopped_at, left.line_no + 1))
+            weak = [
+                candidate.line_no
+                for candidate in collection.candidates
+                if any(option.number == stopped_at for option in candidate.options)
+            ]
+            start = min(weak) if weak else None
+            end = right.line_no - 1
+            if source_lines is not None and start is not None:
+                text = "\n".join(source_lines[start:end + 1])
+            else:
+                text = "\n".join(
+                    candidate.text for candidate in collection.candidates
+                    if start is not None and start <= candidate.line_no <= end
+                )
+            gap_segments.append(StemGapSegment(
+                left_question_no=stopped_at - 1,
+                right_question_no=right_no,
+                missing_numbers=tuple(range(stopped_at, right_no)),
+                line_start=start,
+                line_end=end,
+                excerpt=text[:600],
+                boundary_known=start is not None,
+            ))
+            issues.append(StemIssue(
+                code="stem_chain_gap",
+                severity="error",
+                message=f"题号链在 {stopped_at - 1}→{stopped_at} 断开",
+                line_no=left.line_no + 1,
+                excerpt=text[:600],
+                question_no=stopped_at,
+                interval_id=f"C{left_no}-{right_no}",
+            ))
+            if start is None:
+                issues.append(StemIssue(
+                    code="stem_chain_boundary_uncertain",
+                    severity="warning",
+                    message="gap 起始行不确定，尾部内容需人工复核",
+                    line_no=left.line_no + 1,
+                    excerpt=text[:600],
+                    question_no=stopped_at,
+                    interval_id=f"C{left_no}-{right_no}",
+                ))
+
+    result = StemChainResult(
+        accepted=accepted,
+        gaps=gaps,
+        gap_segments=gap_segments,
+        ambiguities=ambiguities,
+        safe_prefix=safe_prefix,
+        issues=issues,
+    )
+    return StemChainResult(
+        accepted=result.accepted,
+        gaps=result.gaps,
+        gap_segments=result.gap_segments,
+        ambiguities=result.ambiguities,
+        safe_prefix=result.safe_prefix,
+        issues=result.issues + validate_forced_assignments(result),
+    )
+
+
+def validate_forced_assignments(result: StemChainResult) -> list[StemIssue]:
+    seen: dict[int, int] = {}
+    issues: list[StemIssue] = []
+    for line_no, (number, _form, _recovery) in sorted(result.accepted.items()):
+        if number in seen:
+            issues.append(StemIssue(
+                code="stem_chain_forced_duplicate",
+                severity="error",
+                message=f"题 {number} 同时命中行 {seen[number] + 1} 和 {line_no + 1}",
+                line_no=line_no + 1,
+                excerpt="",
+                question_no=number,
+            ))
+        else:
+            seen[number] = line_no
+    return issues

@@ -159,3 +159,100 @@ def test_interval_candidates_generate_dropped_tens_only_inside_gap():
         if option.recovery == "dropped_tens"
     }
     assert recovered == {12, 13, 14}
+
+
+from stem_chain import (
+    StemCollectionResult, StemChainResult,
+    select_stem_chains, validate_forced_assignments,
+)
+
+
+def candidate(line_no: int, options: tuple[StemOption, ...]) -> StemCandidate:
+    return StemCandidate(
+        line_no=line_no,
+        text=f"line {line_no}",
+        options=options,
+        context_before="",
+        context_after="",
+    )
+
+
+def anchor(line_no: int, number: int) -> StemCandidate:
+    return StemCandidate(
+        line_no=line_no,
+        text=f"{number}. anchor",
+        options=(opt(number=number, candidate_id=f"L{line_no}-Main"),),
+        context_before="",
+        context_after="",
+        anchor=True,
+    )
+
+
+def test_top_two_keeps_lower_scored_option_when_high_option_breaks_order():
+    anchors = (anchor(0, 11), anchor(6, 14))
+    high_late = opt(
+        number=12, candidate_id="late",
+        evidence=(ev("blank_before"), ev("blank_before"), ev("blank_before")),
+    )
+    low_early = opt(
+        number=12, candidate_id="early",
+        evidence=(ev("blank_before"),),
+    )
+    no_13 = opt(number=13, candidate_id="q13")
+    collection = StemCollectionResult(
+        anchors=anchors,
+        candidates=(
+            candidate(1, (low_early,)),
+            candidate(3, (no_13,)),
+            candidate(4, (high_late,)),
+        ),
+        consumed_lines=frozenset(),
+    )
+    result = select_stem_chains(collection)
+    assert result.accepted[1] == (12, "main", "exact")
+    assert result.accepted[3] == (13, "main", "exact")
+    assert 4 not in result.accepted
+
+
+def test_equal_paths_are_ambiguous_not_line_order_wins():
+    anchors = (anchor(0, 11), anchor(4, 13))
+    left = opt(number=12, candidate_id="left")
+    right = opt(number=12, candidate_id="right")
+    collection = StemCollectionResult(
+        anchors=anchors,
+        candidates=(candidate(1, (left,)), candidate(2, (right,))),
+        consumed_lines=frozenset(),
+    )
+    result = select_stem_chains(collection)
+    assert result.accepted == {}
+    assert result.ambiguities[0].reason == "ambiguous"
+    assert [p.selected_options[0].candidate_id for p in result.ambiguities[0].top_paths] == [
+        "left", "right",
+    ]
+
+
+def test_missing_26_keeps_25_prefix_and_creates_gap_segment():
+    anchors = (anchor(0, 24), anchor(5, 27))
+    q25 = opt(number=25, candidate_id="q25", evidence=(ev("blank_before"), ev("stem_keyword")))
+    weak26 = opt(
+        number=26, candidate_id="q26",
+        evidence=(ev("inside_math", "veto"),),
+    )
+    collection = StemCollectionResult(
+        anchors=anchors,
+        candidates=(candidate(1, (q25,)), candidate(2, (weak26,))),
+        consumed_lines=frozenset(),
+    )
+    result = select_stem_chains(collection)
+    assert 1 in result.accepted
+    assert any(g.missing_numbers == (26,) for g in result.gap_segments)
+    assert any(i.code == "stem_chain_gap" for i in result.issues)
+
+
+def test_forced_assignment_duplicate_is_an_error():
+    result = StemChainResult(
+        accepted={1: (12, "main", "exact"), 2: (12, "main", "exact")},
+        gaps=[], gap_segments=[], ambiguities=[], safe_prefix={}, issues=[],
+    )
+    issues = validate_forced_assignments(result)
+    assert [issue.code for issue in issues] == ["stem_chain_forced_duplicate"]
