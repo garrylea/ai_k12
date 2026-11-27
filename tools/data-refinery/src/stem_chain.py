@@ -277,13 +277,27 @@ def _hard_veto_evidence(lines: list[str], line_no: int) -> tuple[StemEvidence, .
     return tuple(veto)
 
 
+def _ordered_anchor_pairs(anchors):
+    """只产出按行号递增的相邻锚点对。
+
+    select_stem_anchors 按题号排序，卷首小号（如 `2.` `3.` `4.` 出现在第 11 题之后）
+    会让相邻锚点的 line_no 回指，zip 出反向区间并造出虚假的 gap。这类锚点对不构成
+    题号链区间，三个消费锚点对的地方统一跳过。
+    """
+    return (
+        (left, right)
+        for left, right in zip(anchors, anchors[1:])
+        if left.line_no < right.line_no
+    )
+
+
 def collect_interval_candidates(text: str, strategy, anchors: list[StemCandidate]):
     if not supports_global_stem_chain(strategy):
         return StemCollectionResult(tuple(anchors), (), frozenset())
     lines = text.split("\n")
     candidates: list[StemCandidate] = []
     consumed: set[int] = set()
-    for left, right in zip(anchors, anchors[1:]):
+    for left, right in _ordered_anchor_pairs(anchors):
         left_no = left.options[0].number
         right_no = right.options[0].number
         expected = set(_expected_between(left_no, right_no))
@@ -404,7 +418,7 @@ def _complete_paths(
 ) -> list[tuple[int, int, list[StemPath], dict[int, list[StemPath]]]]:
     options = _options_by_number(collection)
     completed = []
-    for left, right in zip(collection.anchors, collection.anchors[1:]):
+    for left, right in _ordered_anchor_pairs(collection.anchors):
         left_no = left.options[0].number
         right_no = right.options[0].number
         expected = tuple(range(left_no + 1, right_no))
@@ -452,7 +466,7 @@ def select_stem_chains(
     ambiguities: list[StemAmbiguity] = []
     issues: list[StemIssue] = []
 
-    for left, right in zip(collection.anchors, collection.anchors[1:]):
+    for left, right in _ordered_anchor_pairs(collection.anchors):
         left_no = left.options[0].number
         right_no = right.options[0].number
         matching = next(
@@ -476,15 +490,16 @@ def select_stem_chains(
                     option = next(o for o in first.selected_options if o.candidate_id == cid)
                     accepted[line_no] = (number, option.form, option.recovery)
                 continue
+            interval_candidates = tuple(
+                candidate for candidate in collection.candidates
+                if left.line_no < candidate.line_no < right.line_no
+            )
             ambiguities.append(StemAmbiguity(
                 reason="high_risk_recovery" if needs_confirmation else "ambiguous",
                 left_anchor=left_no,
                 right_anchor=right_no,
                 expected_numbers=tuple(range(left_no + 1, right_no)),
-                candidates=tuple(
-                    candidate for candidate in collection.candidates
-                    if left.line_no < candidate.line_no < right.line_no
-                ),
+                candidates=interval_candidates,
                 top_paths=tuple(paths),
             ))
             issues.append(StemIssue(
@@ -493,6 +508,42 @@ def select_stem_chains(
                 message=f"题 {left_no}→{right_no} 需要本地 LLM 仲裁",
                 line_no=left.line_no + 1,
                 excerpt=left.text,
+                question_no=left_no + 1,
+                interval_id=f"C{left_no}-{right_no}",
+            ))
+            # 未仲裁 = 当前区间保留 gap：候选行整体压住，不让裸题号兜底把
+            # `2./3./4.` 原样吐成第 2/3/4 题；仲裁成功后 question_extract 会按
+            # interval_id 丢掉这里的 stem_chain_gap 并解除 suppression。
+            missing = tuple(range(left_no + 1, right_no))
+            weak = [candidate.line_no for candidate in interval_candidates]
+            start = min(weak) if weak else None
+            end = right.line_no - 1
+            boundary_known = start is not None and end >= start
+            if not boundary_known:
+                start = None
+                end = max(end, 0)
+            if source_lines is not None and start is not None:
+                gap_text = "\n".join(source_lines[start:end + 1])
+            else:
+                gap_text = "\n".join(
+                    candidate.text for candidate in interval_candidates
+                )
+            gaps.append((left_no, left_no + 1, left.line_no + 1))
+            gap_segments.append(StemGapSegment(
+                left_question_no=left_no,
+                right_question_no=right_no,
+                missing_numbers=missing,
+                line_start=start,
+                line_end=end,
+                excerpt=gap_text[:600],
+                boundary_known=boundary_known,
+            ))
+            issues.append(StemIssue(
+                code="stem_chain_gap",
+                severity="error",
+                message=f"题号链在 {left_no}→{left_no + 1} 待仲裁确认",
+                line_no=left.line_no + 1,
+                excerpt=gap_text[:600],
                 question_no=left_no + 1,
                 interval_id=f"C{left_no}-{right_no}",
             ))
@@ -535,6 +586,10 @@ def select_stem_chains(
             ]
             start = min(weak) if weak else None
             end = right.line_no - 1
+            boundary_known = start is not None and end >= start
+            if not boundary_known:
+                start = None
+                end = max(end, 0)
             if source_lines is not None and start is not None:
                 text = "\n".join(source_lines[start:end + 1])
             else:
@@ -549,7 +604,7 @@ def select_stem_chains(
                 line_start=start,
                 line_end=end,
                 excerpt=text[:600],
-                boundary_known=start is not None,
+                boundary_known=boundary_known,
             ))
             issues.append(StemIssue(
                 code="stem_chain_gap",

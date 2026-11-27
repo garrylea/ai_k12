@@ -256,3 +256,28 @@ def test_forced_assignment_duplicate_is_an_error():
     )
     issues = validate_forced_assignments(result)
     assert [issue.code for issue in issues] == ["stem_chain_forced_duplicate"]
+
+
+def test_out_of_line_order_anchors_do_not_create_reversed_gap():
+    """锚点按题号排序但 line_no 回指（2/3/4 出现在第 11 题之后）时，
+    反向区间 C4-11 不能造出虚假 stem_chain_gap / 越界 line_start > line_end。"""
+    anchors = (
+        anchor(2, 2), anchor(4, 3), anchor(6, 4), anchor(0, 11), anchor(8, 15),
+    )
+    collection = StemCollectionResult(
+        anchors=anchors, candidates=(), consumed_lines=frozenset(),
+    )
+    result = select_stem_chains(
+        collection, source_lines=[f"line {i}" for i in range(10)],
+    )
+    assert not any(i.interval_id == "C4-11" for i in result.issues)
+    assert not any(
+        (seg.left_question_no, seg.right_question_no) == (4, 11)
+        for seg in result.gap_segments
+    )
+    # 正常行序区间不受影响；所有 gap 段的边界始终自洽。
+    assert any(i.interval_id == "C11-15" for i in result.issues)
+    for seg in result.gap_segments:
+        assert seg.line_start is None or seg.line_start <= seg.line_end
+        if seg.boundary_known:
+            assert seg.line_start is not None and seg.line_end >= seg.line_start

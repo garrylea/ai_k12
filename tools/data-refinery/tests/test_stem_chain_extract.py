@@ -129,3 +129,69 @@ def test_local_llm_arbitration_merges_drops_stale_issues_and_lifts_suppression(m
         gap.missing_numbers == (14, 15)
         for gap in result.stem_chain_result.gap_segments
     )
+
+
+def test_dropped_tens_paper_suppresses_ambiguity_until_arbitrated():
+    """卷首 `2./3./4.` + 第 11/15 题锚点：未仲裁时不能吐出 2/3/4；
+    仲裁成功后闭集恢复 11-15，且反向锚点 C4-11 的假 gap 全程不出现。"""
+    import question_extract as qe
+    from subject_strategies import get_strategy
+
+    text = """11. 第十一题题干内容很长很长需要满足行长判定。
+
+2. 第十二十一题备选内容也很长很长。
+
+3. 第十二十三题备选内容也很长很长。
+
+4. 第十二十四题备选内容也很长很长。
+
+15. 第十五题题干内容很长很长。
+"""
+    strategy = get_strategy("math")
+
+    unresolved, issues = qe._split_paper_questions(
+        text, Path("dropped-tens.md"), strategy, None, False,
+    )
+    assert [q.group_order for q in unresolved.questions] == [11, 15]
+    assert not {2, 3, 4} & {q.group_order for q in unresolved.questions}
+    # 未仲裁区间必须留下 gap segment + gap issue；该 gap 覆盖候选行与缺号。
+    assert any(
+        seg.missing_numbers == (12, 13, 14)
+        and seg.line_start == 2 and seg.line_end == 7 and seg.boundary_known
+        for seg in unresolved.stem_chain_result.gap_segments
+    )
+    assert any(
+        i.code == "stem_chain_gap" and i.interval_id == "C11-15" for i in issues
+    )
+    assert not any(i.interval_id == "C4-11" for i in issues)
+
+    class FakeLLM:
+        def complete(self, system, user):
+            intervals = json.loads(user)["intervals"]
+            return SimpleNamespace(content=json.dumps({
+                "intervals": [
+                    {
+                        "interval_id": iv["interval_id"],
+                        "result": "resolved",
+                        "assignments": [
+                            {"number": c["number"], "candidate_id": c["candidate_id"]}
+                            for c in iv["candidates"]
+                        ],
+                    }
+                    for iv in intervals
+                ]
+            }, ensure_ascii=False))
+
+    resolved, resolved_issues = qe._split_paper_questions(
+        text, Path("dropped-tens.md"), strategy, FakeLLM(), True,
+    )
+    assert [q.group_order for q in resolved.questions] == [11, 12, 13, 14, 15]
+    # 仲裁成功后该区间不再有 gap issue / gap segment；C4-11 假 gap 也不存在。
+    assert not any(
+        seg.missing_numbers == (12, 13, 14)
+        for seg in resolved.stem_chain_result.gap_segments
+    )
+    assert [
+        i.code for i in resolved_issues if i.interval_id == "C11-15"
+    ] == ["stem_chain_llm_resolved"]
+    assert not any(i.interval_id == "C4-11" for i in resolved_issues)
