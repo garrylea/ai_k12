@@ -38,11 +38,40 @@ export class ApiError extends Error {
 }
 
 /**
- * 响应信封判定：fetchApi 与 multipart 裸 fetch 共用（uploadResearchImage 必须走裸 fetch
- * 保 boundary，但不能因此漏掉 2001/1013 的全局跳转与 res.ok 检查）。
+ * 1003 的两种来源只靠业务码分不开：
+ * - 会话失效（AuthMiddleware / JwtAuthGuard / RolesGuard）：文案固定为下面两条 → 必须回登录页；
+ * - 业务失败（密码错、验证码错、无权访问他人数据、账号停用等）：也用 1003 → 留给页面展示。
  */
-async function handleApiResponse<T>(res: Response, json: ApiResponse<T>): Promise<T> {
+const SESSION_INVALID_MESSAGES = new Set(['未登录或 token 已过期', '账号已停用']);
+
+/** 登录/注册/改密端点：这些端点的 1003 一律是业务失败，不当会话失效跳转。 */
+function isAuthFlowPath(path: string): boolean {
+  return path.startsWith('/auth/');
+}
+
+/**
+ * 响应信封判定：fetchApi 与 multipart 裸 fetch 共用（uploadResearchImage 必须走裸 fetch
+ * 保 boundary，但不能因此漏掉 2001/1013/1003 的全局跳转与 res.ok 检查）。
+ *
+ * `path` 仅用来区分「鉴权端点自己的 1003」与「业务接口的会话失效 1003」。
+ */
+async function handleApiResponse<T>(res: Response, json: ApiResponse<T>, path?: string): Promise<T> {
   if (json.code !== 0) {
+    if (
+      json.code === 1003 &&
+      SESSION_INVALID_MESSAGES.has(json.message) &&
+      path &&
+      !isAuthFlowPath(path) &&
+      window.location.pathname !== '/login'
+    ) {
+      // 会话已在服务端失效（token 过期 / 后端重启后签名或 seq 失配）。本地 JWT 的 exp 还没到、
+      // RequireRole 只解码本地 token 仍放行，若不在这里拦，用户退出浅停留页会落到星图并在
+      // 那里拿到一堆「加载失败」——正确落点是登录页。清本地登录态并整页跳 /login?reason=expired，
+      // 让登录页显示「登录已过期」。与 1013/2001 同惯例：返回永不 resolve 的 Promise，页面即将整体跳走。
+      clearAuthSession();
+      window.location.assign('/login?reason=expired');
+      return new Promise<T>(() => {});
+    }
     if (json.code === 1013) {
       // 单点登录互踢（2026-10-10）：该账号已在别处重新登录。清本地登录态并回登录页，
       // kicked=1 供登录页展示提示。与 2001 同惯例：返回永不 resolve 的 Promise，页面即将整体跳走。
@@ -94,7 +123,7 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   const json: ApiResponse<T> = await res.json();
-  return handleApiResponse(res, json);
+  return handleApiResponse(res, json, path);
 }
 
 // --- Auth ---
@@ -1267,7 +1296,7 @@ export async function uploadResearchImage(file: File, signal?: AbortSignal): Pro
     signal,
   });
   const json: ApiResponse<{ fileId: number; url: string }> = await res.json();
-  return handleApiResponse(res, json);
+  return handleApiResponse(res, json, '/research/images');
 }
 
 /** 取消编辑时按 URL 清理未被引用的教研图片。 */

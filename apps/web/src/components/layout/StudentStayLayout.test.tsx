@@ -23,12 +23,26 @@ import { LearningLockContext } from '@/kiosk/learningLockContext';
 
 afterEach(() => cleanup());
 
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+});
+
+/** 有效 JWT：浅停留页只有登录态能进，「退出本页」会查 isSessionValid，测试须按真实口径给未过期 token。 */
+function validToken(): string {
+  const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }));
+  return `header.${payload}.signature`;
+}
+
 function renderStay(
   initialEntry: { pathname: string; state?: unknown },
   lock: { locked: boolean; remainingMs: number } | null = null,
 ) {
+  localStorage.setItem('token', validToken());
+  localStorage.setItem('userRole', 'student');
   const router = createMemoryRouter(
     [
+      { path: '/login', element: <div>登录页</div> },
       { path: '/student/star-map', element: <div>知识星图</div> },
       { path: '/student/course-detail', element: <div>课程详情</div> },
       { path: '/student/entry', element: <div>入口选择页</div> },
@@ -75,7 +89,8 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
 
   it('来源页自己的 location.state 一起带回去（课程详情缺 state 打不开），且不是登出', async () => {
     const user = userEvent.setup();
-    localStorage.setItem('token', 'still-logged-in');
+    const tokenBefore = validToken();
+    localStorage.setItem('token', tokenBefore);
     const router = renderStay({
       pathname: '/student/profile',
       state: buildStayReturnState('/student/course-detail', { subjectId: 7, lessonId: 42 }),
@@ -92,8 +107,8 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
 
     expect(router.state.location.pathname).toBe('/student/course-detail');
     expect(router.state.location.state).toEqual({ subjectId: 7, lessonId: 42 });
-    expect(localStorage.getItem('token')).toBe('still-logged-in');
-    localStorage.removeItem('token');
+    // 「退出本页」不是登出：token 原样保留（会话仍有效时）
+    expect(localStorage.getItem('token')).toBe(tokenBefore);
   });
 
   it('直接输地址进来（没有来源）→ 兜底回星图，不是回入口选择页', async () => {
@@ -123,6 +138,22 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
     expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '退出本页' })).toBeInTheDocument();
   });
+
+  it('会话已失效（停留期间 token 过期/被清）→ 退出本页直接回登录页带原因，不落到来源页', async () => {
+    const user = userEvent.setup();
+    const router = renderStay({
+      pathname: '/student/profile',
+      state: buildStayReturnState('/student/star-map', undefined),
+    });
+    // 模拟停留期间会话失效：来源页（星图）同样要登录，退过去会卡死
+    localStorage.removeItem('token');
+
+    await user.click(screen.getByRole('button', { name: '退出本页' }));
+
+    expect(router.state.location.pathname).toBe('/login');
+    expect(router.state.location.search).toBe('?reason=expired');
+    expect(screen.getByText('登录页')).toBeInTheDocument();
+  });
 });
 
 /**
@@ -135,8 +166,11 @@ function renderPracticeHistory(
   state?: unknown,
   lock: { locked: boolean; remainingMs: number } | null = null,
 ) {
+  localStorage.setItem('token', validToken());
+  localStorage.setItem('userRole', 'student');
   const router = createMemoryRouter(
     [
+      { path: '/login', element: <div>登录页</div> },
       { path: '/student/star-map', element: <div>知识星图</div> },
       { path: '/student/training/chinese/special', element: <div>语文专项页</div> },
       {

@@ -1,6 +1,7 @@
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ExitIcon } from '@/components/base';
 import { LockedPillReveal } from '@/kiosk/LockedPillReveal';
+import { clearAuth, isSessionValid } from '@/utils/auth';
 import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 
 /**
@@ -101,10 +102,19 @@ export default function StudentStayLayout() {
           ))}
         </nav>
 
-        {/* 退出本页：回到进入本页之前的那一页（唯一的离开入口），不是登出 */}
+        {/* 退出本页：回到进入本页之前的那一页（唯一的离开入口），不是登出。
+            但会话已失效时（如停留期间后端重启/token 过期）不能回来源页——来源页同样要登录，
+            没 session 会卡死；统一回登录页并说明原因。 */}
         <button
           type="button"
-          onClick={() => navigate(back.to, { state: back.state })}
+          onClick={() => {
+            if (!isSessionValid()) {
+              clearAuth();
+              navigate('/login?reason=expired', { replace: true });
+              return;
+            }
+            navigate(back.to, { state: back.state });
+          }}
           title="退出本页"
           aria-label="退出本页"
           className="justify-self-end p-2.5 rounded-full bg-[var(--bg-card)] border border-[var(--bg-subtle)] shadow-sm hover:bg-[var(--bg-base)] transition-colors text-[var(--text-secondary)]"

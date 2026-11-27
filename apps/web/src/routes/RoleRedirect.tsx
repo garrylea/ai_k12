@@ -5,10 +5,10 @@ import { MOBILE_VIEWPORT_BREAKPOINT } from '@/constants';
 
 /** 根路径按登录角色分流：researcher -> /research，admin -> /admin，parent -> 按视口（窄屏移动版/宽屏桌面台），student -> 入口选择页。 */
 export default function RoleRedirect() {
-  // token 缺失或已过期：清掉残留角色，一律回登录页
+  // token 缺失或已过期：清掉残留角色，一律回登录页并说明原因
   if (!isSessionValid()) {
     clearAuth();
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login?reason=expired" replace />;
   }
   const role = getAuthItem('userRole');
   if (role === 'researcher') return <Navigate to="/research" replace />;

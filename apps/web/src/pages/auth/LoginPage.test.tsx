@@ -117,6 +117,20 @@ describe('LoginPage 被踢下线提示（单点登录互踢）', () => {
   });
 });
 
+describe('LoginPage 会话失效提示（token 过期 / 后端重启）', () => {
+  it('URL 带 reason=expired → 页面展示「登录已过期，请重新登录」', () => {
+    window.history.replaceState(null, '', '/login?reason=expired');
+    renderLoginPage();
+    expect(screen.getByText('登录已过期，请重新登录')).toBeInTheDocument();
+  });
+
+  it('无 reason 参数 → 不显示过期提示', () => {
+    window.history.replaceState(null, '', '/login');
+    renderLoginPage();
+    expect(screen.queryByText('登录已过期，请重新登录')).toBeNull();
+  });
+});
+
 describe('LoginPage 家长落点按视口分流', () => {
   it('窄屏（<768px）家长登录落 /m/parent', async () => {
     const user = userEvent.setup();

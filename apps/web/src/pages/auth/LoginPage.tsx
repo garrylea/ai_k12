@@ -10,13 +10,14 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  // 单点登录互踢（2026-10-10）：fetchApi 收到 1013 会清登录态并跳 /login?kicked=1，
-  // 借既有 error 红字块展示被踢提示；用户开始输入后照常被 setError('') 清掉。
-  const [error, setError] = useState(
-    new URLSearchParams(window.location.search).get('kicked') === '1'
-      ? '账号已在其他设备登录，请重新登录'
-      : '',
-  );
+  // 会话失效提示：被踢（1013）跳 /login?kicked=1，其他失效（token 过期/后端重启）跳
+  // /login?reason=expired。两者都借既有 error 红字块展示，用户提交登录时 setError('') 清掉。
+  const [error, setError] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('kicked') === '1') return '账号已在其他设备登录，请重新登录';
+    if (params.get('reason') === 'expired') return '登录已过期，请重新登录';
+    return '';
+  });
   const [loading, setLoading] = useState(false);
   // Web 端默认不勾（会话级登录）；PC App（Electron）默认勾选，保持关 App 重开仍登录的旧行为
   const [remember, setRemember] = useState(() => isDesktopShell());

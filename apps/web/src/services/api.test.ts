@@ -19,6 +19,7 @@ import {
   getSubscriptionPlans,
   getSubscriptionStatus,
   heartbeatStudySession,
+  login,
   deleteResearchImages,
   deleteResearchPaper,
   gcResearchImages,
@@ -84,11 +85,12 @@ describe('专项会话完成端点（Task 10）', () => {
 });
 
 describe('fetchApi 错误形状', () => {
-  it('业务码非 0 时抛 ApiError，且带上 HTTP status（401 → 1003）', async () => {
-    stubFetch(401, { code: 1003, message: '未登录', data: null });
+  it('业务码非 0 时抛 ApiError，且带上 HTTP status（401 → 1002）', async () => {
+    // 用 1002 而非 1003：1003 已被全局会话失效拦截接管（见下方 1013 组），这里只测错误形状
+    stubFetch(401, { code: 1002, message: '资源不存在', data: null });
 
     await expect(getMyPoints()).rejects.toBeInstanceOf(ApiError);
-    await expect(getMyPoints()).rejects.toMatchObject({ code: 1003, status: 401 });
+    await expect(getMyPoints()).rejects.toMatchObject({ code: 1002, status: 401 });
   });
 
   it('404（会话不存在）同样带回 status，供调用方判定不可重试', async () => {
@@ -591,11 +593,38 @@ describe('1013 全局拦截（单点登录互踢）', () => {
     expect(sessionStorage.getItem('userRole')).toBeNull();
   });
 
-  it('code=1003（token 过期）→ 行为不变，仍抛 ApiError，也不置「已被踢」标记', async () => {
+  it('code=1003（token 在服务端已失效）→ 清登录态并整页跳 /login?reason=expired，Promise 永不 resolve', async () => {
     const assign = stubLocationAssign();
+    localStorage.setItem('token', 't');
+    sessionStorage.setItem('userRole', 'student');
     stubFetch(401, { code: 1003, message: '未登录或 token 已过期', data: null });
+
+    let outcome: 'resolved' | 'rejected' | 'pending' = 'pending';
+    void getMyPoints().then(
+      () => { outcome = 'resolved'; },
+      () => { outcome = 'rejected'; },
+    );
+
+    await vi.waitFor(() => expect(assign).toHaveBeenCalledWith('/login?reason=expired'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(outcome).toBe('pending');
+    // 1003 是「token 失效」而非「被别处踢」，不带 kicked 提示
+    expect(isSessionRevoked()).toBe(false);
+    expect(localStorage.getItem('token')).toBeNull();
+    expect(sessionStorage.getItem('userRole')).toBeNull();
+  });
+
+  it('登录/注册/改密端点的 code=1003（密码错、账号停用等）→ 不跳转，仍抛 ApiError 给页面展示', async () => {
+    const assign = stubLocationAssign();
+    stubFetch(401, { code: 1003, message: '用户名或密码错误', data: null });
+    await expect(login('u', 'bad')).rejects.toMatchObject({ code: 1003 });
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('非鉴权端点的业务 1003（旧密码错、无权访问等，同码不同文案）→ 不跳转，仍抛 ApiError', async () => {
+    const assign = stubLocationAssign();
+    stubFetch(401, { code: 1003, message: '旧密码错误', data: null });
     await expect(getMyPoints()).rejects.toMatchObject({ code: 1003 });
     expect(assign).not.toHaveBeenCalled();
-    expect(isSessionRevoked()).toBe(false);
   });
 });

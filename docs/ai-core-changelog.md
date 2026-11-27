@@ -4491,3 +4491,21 @@ MDM 描述文件（`com.apple.applicationaccess` 的 `allowAssistant=false`，ma
 
 
 **2026-11-24（续）：题20「题干不完整」是误判——引言本就在 material_text，材料切分保留**：物理西城模拟一题20 重录后 `content` 是 `(1)(2)`、引言在 `material_text`，这是 `split_material` 的正常结果（`material_position=NULL` 时前端按固定规则把题中素材渲染在题干下方）。曾误改为「人工录入不搬材料」，用户裁决**材料切分是对的**，已恢复 `_ask_one` 原逻辑与 `test_ask_one_splits_material_then_options`。教训：用户说「题干不完整」时，先确认内容是否在 `material_text`，再谈改代码。
+
+---
+
+## 2026-11-27 · 会话失效统一回登录页并显示原因
+
+**现象**：从个人中心点「退出本页」，正常回来源页；但停留期间后端重启/token 失效后退出，会落到兜底的 `/student/star-map`——星图同样要登录，没 session 就卡在那儿。
+
+**根因**：`RequireRole` 只用 `isSessionValid()` 解码**本地 JWT 的 exp**，不校验服务端会话；后端重启导致签名/seq 失配时本地 token 仍"有效"，守卫放行落到星图。而 API 层此前只对 `1013`/`2001` 做全局跳转，服务端返回的 `1003`「未登录或 token 已过期」被页面 `.catch()` 吞成"加载失败"，人卡在星图。
+
+**改动**：
+- `services/api.ts` — `handleApiResponse` 增 `path` 参数，新增 `1003` 全局拦截：会话失效文案（`未登录或 token 已过期`/`账号已停用`）且非 `/auth/*` 端点且不在登录页 → 清登录态 + 整页跳 `/login?reason=expired`。依据**文案**区分 1003 的业务来源（密码错/验证码错/无权访问也是 1003），避免把改密失败误判成会话失效。沿用 1013/2001 惯例返回永不 resolve 的 Promise。
+- `routes/RequireRole.tsx` / `RoleRedirect.tsx` — 本地 token 失效 → `/login?reason=expired`（原来裸 `/login`）。
+- `components/layout/StudentStayLayout.tsx` — 「退出本页」先查 `isSessionValid()`，失效则直接跳登录页带原因，不走来源页兜底（来源页同样要登录）。
+- `pages/auth/LoginPage.tsx` — `reason=expired` 展示"登录已过期，请重新登录"，与既有 `kicked=1` 的"账号已在其他设备登录"同用红字块。
+
+**测试**：`api.test.ts`（1003 拦截 + 业务 1003 不误伤）、`LoginPage.test.tsx`（两种原因文案）、`StudentStayLayout.test.tsx`（会话失效退出回登录 + 既有落点用例补有效 token）、`routeTable.test.tsx`。web 全量 195 文件 / 2011 用例绿。
+
+**未覆盖**：SSE 与 `uploadFile` 等裸 fetch 路径绕过 `fetchApi`，`1003` 跳转对它们不生效——与 1013/2001 同类既有缺口，非本批引入。

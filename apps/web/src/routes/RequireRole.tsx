@@ -16,7 +16,7 @@ export default function RequireRole({
 }) {
   if (!isSessionValid()) {
     clearAuth();
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login?reason=expired" replace />;
   }
   const userRole = getAuthItem('userRole');
   if (userRole !== role) {
