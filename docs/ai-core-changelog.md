@@ -4,6 +4,34 @@
 
 **人工校对改为一题一卡（2026-11-26）**：题目身份升级为 `(source, group_order, sub_no)`；卡片一次给全现状（题干/选项/共享材料/题内材料/答案/图/依据），主菜单 `1–5` 选段 + `E` 编辑器改整题 / `R` 全换 / `k` 确认无问题 / `u` 用修复前原文；槽位统一「回车=不改、其余都是内容、命令一律 `:` 前缀」。材料用三态草稿（`UNSET` / `None` / 值）字段级合并，图片支持追加/替换/清空且不动共享文章正文；答案清空新增向后兼容的 `clear_answer=True` 记录字段（主 UPDATE 的 `COALESCE(NULLIF(...))` 清不掉空串）；多题号粘贴按题拆分生成记录但不批量改答案。`k`/回车/`s` 三个不写库出口分开；非 TTY 在 `fix_question_cli` 入口直接打印唯一入口命令。旧补题记录继续兼容；旧菜单（verdict / edit-mode / image-mode / confirm / 答案富输入）删除，`manual_fix.py` 从 2695 行降到约 1000 行，原语/快照/队列/记录拆到 `review_editor` / `review_content` / `review_queue` / `review_records`。
 
+## 2026-11-27 数学切题：全局题号链与本地 LLM 歧义仲裁
+
+**问题**：`25.16` 类粘题号依赖单行补丁；`12.8/12.16` 同题号候选没有全局比较；
+答案区 `11.4` 误判与题干槽位缺失被混为一类。
+
+**修复**：新增 main 探针、锚点、区间候选、top-2 链、gap segment 和本地闭集仲裁；
+forced 结果不被局部规则覆盖；答案区既有守卫保留。首批只给数学策略开启。
+旧题干侧 `25.16` 局部补丁已删除，由全局链接管；`answer_blocks.py` 答案区守卫未动。
+
+**验证**：85434、85487、合成 `11→13` 与 `11→15` 场景、top-2 并列、gap、
+refinery 全量离线测试、全局链快照 `--write/--check` 与旧路径补丁删除零差异证明。
+
+**未完成（需人工，勿当已验证）**：30 卷人工复核 holdout 没有 golden 数据集，本次未做，不报 30 卷指标；
+逐份快照差异的人工过目（尤其缺号是否有 `stem_chain_gap` 或显式人工决定、85487 答案对齐）也未做。
+用户裁决「先做可自动化部分」。后续补齐用下面两条命令：
+
+```bash
+cd tools/data-refinery
+python3 src/stem_chain_benchmark.py --golden output/stem_chain_golden_30.jsonl --json-out output/stem_chain_benchmark.json
+python3 src/split_snapshot.py --stem-chain --check
+```
+
+逐份差异清单（基线 vs 链快照，每份一行）在
+`.superpowers/sdd/2026-11-27-global-stem-chain/task-10-snapshot-diff.txt`。
+注意旧基线 `split_snapshot.json` 抽样 28 份，当前语料抽样 31 份，且其中 2 份卷内容已漂移，
+故 `python3 src/split_snapshot.py --check` 目前并非零差异（11 份基线独有 / 14 份抽样新增 / 2 份内容漂移），
+这是既存语料漂移；已单独证明删除旧 `25.16` 补丁本身对旧路径零影响。
+
 - 各条目引用的任务级实现计划见 `docs/superpowers/plans/`
 - 仍生效的行为约束已提炼回 CLAUDE.md 的「关键约定」节，本文件仅作历史溯源
 - 阅读当前约定请以根 `CLAUDE.md` 为准；本文件内容可能包含已被后续条目修正的过时描述

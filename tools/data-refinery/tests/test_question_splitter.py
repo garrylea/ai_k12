@@ -2185,31 +2185,6 @@ def test_split_page_wrapper_keeps_list_contract():
     assert questions[0].group_order == 9
 
 
-def test_dot_glued_number_is_next_stem_not_decimal():
-    """`25.16 世纪…` 是第 25 题（`25.` 与正文 `16 世纪` 粘在一起），不是小数。
-
-    2026-11-27 北京各 85434：旧规则把 `25.16` 当小数，第 25 题整段并进
-    第 24 题；答案也因为没有 25 号槽位而跟着错位。
-    """
-    from question_splitter import split_page
-
-    text = (
-        "24. 第 24 题题干，圆的综合题。\n\n"
-        "25.16 世纪中叶，我国发明了一种新式火箭。\n\n"
-        "(1) 若火箭第二级的引发点高度为 3.6km，求 a, b 的值。\n\n"
-        "26. 第 26 题题干，二次函数题。\n\n"
-        "# 参考答案\n\n"
-        "24. 第 24 题答案\n\n"
-        "25. 第 25 题答案\n\n"
-        "26. 第 26 题答案\n"
-    )
-    got = {q.group_order: q for q in split_page(text, Path("x.md"))}
-    assert [no for no in (24, 25, 26) if no not in got] == []
-    assert "16 世纪" not in got[24].content
-    assert got[25].content.startswith("16 世纪中叶")
-    assert got[25].answer == "第 25 题答案"
-
-
 # ---- Task 6: 第二遍切题 forced 优先级 / gap suppression ----
 
 def test_forced_map_bypasses_end_of_paper_small_number_merge():
@@ -2277,3 +2252,43 @@ def test_inline_glued_is_controlled_by_forced_map_when_map_is_supplied():
     )
     assert [q.group_order for q in qs] == [1, 3]
     assert "2. 第二题正文" in qs[0].content
+
+
+def test_85434_25_16_requires_chain_while_11_4_answer_guard_remains():
+    stem_md = """24. 第二十四题题干
+
+25.16 世纪中叶，我国发明了一种新式火箭。
+
+(1) 若火箭第二级的引发点高度为 3.6km，求 a, b 的值。
+
+26. 第二十六题题干
+
+# 参考答案
+
+24. 第二十四题答案
+
+25.【答案】(1) ① a = -1/15 ; ② 8.4 km
+
+【解答】解得 $x = 11.4$
+
+11.4 - 3 = 8.4 (km)
+
+∴这两个位置之间的距离 8.4km.
+
+26. 第二十六题答案
+"""
+    from question_extract import _split_paper_questions
+
+    split_result, _issues = _split_paper_questions(
+        stem_md,
+        Path("85434.md"),
+        _math_strategy(),
+        None,
+        False,
+    )
+    qs = {q.group_order: q for q in split_result.questions}
+    assert sorted(qs) == [24, 25, 26]
+    assert "16 世纪中叶" not in qs[24].content
+    assert qs[25].content.startswith("16 世纪中叶")
+    assert "11.4 - 3 = 8.4" in qs[25].answer
+    assert "11.4 - 3 = 8.4" not in qs[24].answer

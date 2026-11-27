@@ -1,8 +1,10 @@
 """切题行为黄金快照：重构前拍基线，重构后逐份比对题数与题干哈希。
 
 用法（在 tools/data-refinery/ 下）：
-    python3 src/split_snapshot.py --write     # 写 tests/fixtures/split_snapshot.json
-    python3 src/split_snapshot.py --check     # 比对当前代码与基线，有差异退出码 1
+    python3 src/split_snapshot.py --write                  # 写旧切题基线 split_snapshot.json
+    python3 src/split_snapshot.py --check                  # 比对旧切题与基线，有差异退出码 1
+    python3 src/split_snapshot.py --stem-chain --write     # 写全局题号链基线 split_snapshot_stem_chain.json
+    python3 src/split_snapshot.py --stem-chain --check     # 比对全局题号链与链基线
 """
 
 import argparse
@@ -12,12 +14,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+from question_extract import _split_paper_questions  # noqa: E402
 from question_splitter import split_page  # noqa: E402
 from subject_codes import subject_code_for_path  # noqa: E402
 from subject_strategies import get_strategy  # noqa: E402
 
 SAMPLE_PER_SUBJECT = 8
 BASELINE = ROOT / "tests" / "fixtures" / "split_snapshot.json"
+STEM_CHAIN_BASELINE = ROOT / "tests" / "fixtures" / "split_snapshot_stem_chain.json"
 
 
 def sample_files(md_root: Path) -> list[Path]:
@@ -40,15 +44,22 @@ def sample_files(md_root: Path) -> list[Path]:
     return picked
 
 
-def snapshot(md_root: Path) -> dict:
+def snapshot(md_root: Path, use_stem_chain: bool = False) -> dict:
     snap: dict = {}
     for path in sample_files(md_root):
+        strategy = get_strategy(subject_code_for_path(
+            path.relative_to(md_root), default="math",
+        ))
+        if use_stem_chain:
+            split_result, _issues = _split_paper_questions(
+                path.read_text(encoding="utf-8"), path, strategy, None, False,
+            )
+            questions = split_result.questions
+        else:
+            questions = split_page(
+                path.read_text(encoding="utf-8"), path, strategy=strategy,
+            )
         rel = str(path.relative_to(md_root))
-        code = subject_code_for_path(path.relative_to(md_root), default="math")
-        questions = split_page(
-            path.read_text(encoding="utf-8"), path,
-            strategy=get_strategy(code),
-        )
         snap[rel] = {
             "count": len(questions),
             "items": [
@@ -107,18 +118,21 @@ def main() -> int:
     parser.add_argument("--md-root", default=str(ROOT / "output" / "md"))
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--stem-chain", action="store_true",
+                        help="用全局题号链切题，并比对 split_snapshot_stem_chain.json")
     args = parser.parse_args()
 
+    baseline_path = STEM_CHAIN_BASELINE if args.stem_chain else BASELINE
     md_root = Path(args.md_root)
-    current = snapshot(md_root)
+    current = snapshot(md_root, use_stem_chain=args.stem_chain)
     if args.write:
-        BASELINE.parent.mkdir(parents=True, exist_ok=True)
-        BASELINE.write_text(json.dumps(current, ensure_ascii=False, indent=1, sort_keys=True),
-                            encoding="utf-8")
-        print(f"[ok] 基线已写入 {BASELINE}（{len(current)} 份）")
+        baseline_path.parent.mkdir(parents=True, exist_ok=True)
+        baseline_path.write_text(json.dumps(current, ensure_ascii=False, indent=1, sort_keys=True),
+                                 encoding="utf-8")
+        print(f"[ok] 基线已写入 {baseline_path}（{len(current)} 份）")
         return 0
 
-    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     diffs = compare(current, baseline)
     if diffs:
         print(f"[FAIL] {len(diffs)} 处差异：")

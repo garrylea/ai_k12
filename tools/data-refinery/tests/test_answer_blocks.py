@@ -378,3 +378,21 @@ def test_decimal_line_does_not_truncate_previous_answer():
     assert "8.4 (km)" in got[25]
     assert "小问 2 详解" in got[25]
     assert "(1) 1" in got[26]
+
+
+def test_answer_guard_stays_after_stem_chain_landing():
+    """题干链修好 Q25 槽位后，答案正文 11.4 仍不能开题 11。"""
+    lines = [
+        AnswerLine(1, "25.【答案】(1) ① a = -1/15 ; ② 8.4 km"),
+        AnswerLine(2, "【解答】解得 $x = 11.4$"),
+        AnswerLine(3, "11.4 - 3 = 8.4 (km)"),
+        AnswerLine(4, "26.【答案】1"),
+    ]
+    result = parse_answer_region(
+        lines,
+        [AnswerQuestion(no=25, group_id=None), AnswerQuestion(no=26, group_id=None)],
+        first_line_no=1,
+    )
+    got = {fragment.question_no: fragment.text for fragment in result.fragments}
+    assert "11.4 - 3 = 8.4" in got[25]
+    assert 11 not in got

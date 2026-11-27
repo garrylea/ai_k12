@@ -700,11 +700,11 @@ def collect_interval_candidates(text: str, strategy, anchors: list[StemCandidate
     lines = text.split("\n")
     candidates: list[StemCandidate] = []
     consumed: set[int] = set()
-    anchor_by_line = {anchor.line_no for anchor in anchors}
 
     for left, right in zip(anchors, anchors[1:]):
         left_no = left.options[0].number
         right_no = right.options[0].number
+        boundary_lines = {left.line_no, right.line_no}
         expected = set(_expected_between(left_no, right_no))
         if not expected:
             continue
@@ -715,7 +715,7 @@ def collect_interval_candidates(text: str, strategy, anchors: list[StemCandidate
             options: list[StemOption] = []
 
             ok, number = strategy.is_stem(line)
-            if ok and i not in anchor_by_line:
+            if ok and i not in boundary_lines:
                 rest = line.lstrip().split(".", 1)[-1].strip()
                 if number in expected:
                     options.append(_option(
@@ -1259,7 +1259,9 @@ def test_arbiter_payload_accepts_one_closed_candidate_per_number():
     }]}
     result = validate_arbiter_payload(payload, [_ambiguity()])
     assert result.accepted[2] == (12, "glued_number", "glued_suffix")
-    assert result.issues == []
+    assert [(i.code, i.severity) for i in result.issues] == [
+        ("stem_chain_llm_resolved", "info"),
+    ]
 
 
 def test_arbiter_rejects_candidate_outside_interval():
