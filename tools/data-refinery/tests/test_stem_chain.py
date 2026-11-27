@@ -71,3 +71,37 @@ def test_path_rank_sums_recovery_before_positive_structure():
         ),),
     )
     assert path_rank_key(cheap) < path_rank_key(repaired)
+
+
+from question_splitter import (
+    ambiguous_stem_candidate, bare_stem_candidate, split_glued_next_stem,
+)
+from stem_chain import collect_main_stem_probes, select_stem_anchors
+from subject_strategies import get_strategy
+
+
+def test_public_splitter_predicates_reuse_existing_runtime_rules():
+    assert ambiguous_stem_candidate("25.16 世纪中叶，我国发明火箭") == (
+        25, "16 世纪中叶，我国发明火箭",
+    )
+    assert bare_stem_candidate("11 在平面直角坐标系中求点坐标") == (
+        11, "在平面直角坐标系中求点坐标",
+    )
+    assert split_glued_next_stem("前文。16.根据材料三回答", 16) == (
+        "前文。", 16, "根据材料三回答",
+    )
+
+
+def test_main_probes_then_anchors_are_two_phase_and_ordered():
+    md = """# 卷
+
+1. 第一题求一次函数解析式
+
+1. 第一题重复且正文更长一些
+
+3. 第三题证明三角形全等
+"""
+    probes = collect_main_stem_probes(md, get_strategy("math"))
+    anchors = select_stem_anchors(probes)
+    assert [candidate.options[0].number for candidate in anchors] == [1, 3]
+    assert [candidate.line_no for candidate in anchors] == [2, 6]

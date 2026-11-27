@@ -227,6 +227,38 @@ def _bare_stem_candidate(line: str) -> tuple[int, str] | None:
     return n, rest
 
 
+def ambiguous_stem_candidate(line: str) -> tuple[int, str] | None:
+    m = _AMBIGUOUS_NUM_RE.match(line)
+    if not m:
+        return None
+    number = int(m.group(1))
+    return number, _strip_main_stem_prefix(line)
+
+
+def bare_stem_candidate(line: str) -> tuple[int, str] | None:
+    return _bare_stem_candidate(line)
+
+
+def orphan_stem_candidate(line: str) -> tuple[int, str] | None:
+    m = _ORPHAN_STEM_DOT_RE.match(line)
+    if not m:
+        return None
+    rest = line[m.end():].strip()
+    return (rest,) if rest else None
+
+
+def split_glued_next_stem(line: str, expected_no: int):
+    return _split_glued_next_stem(line, expected_no)
+
+
+def is_junk_stem_line(line: str) -> bool:
+    return len(line.strip()) <= 40 and bool(_JUNK_QUESTION_RE.search(line))
+
+
+def is_notice_stem_line(line: str) -> bool:
+    return bool(_NOTICE_RE.search(line))
+
+
 def _strip_bare_prefix(line: str) -> str:
     """剥掉行首裸题号前缀（`11 在平面…` -> `在平面…`），保留 markdown 标题符号已 lstrip。"""
     m = _BARE_STEM_RE.match(line)

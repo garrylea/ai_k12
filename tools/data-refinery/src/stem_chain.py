@@ -133,3 +133,95 @@ def path_rank_key(path: StemPath) -> tuple:
         for o in path.selected_options
     )
     return total_recovery, -paragraph, -stem, -context
+
+
+from question_splitter import (
+    is_answer_keyword, is_junk_stem_line, is_main_stem, is_notice_stem_line,
+)
+
+
+def _body_evidence(rest: str, blank_before: bool) -> tuple[StemEvidence, ...]:
+    evidence = [StemEvidence("line_start", "positive")]
+    if blank_before:
+        evidence.append(StemEvidence("blank_before", "positive"))
+    if len(rest) >= 6 and any("\u4e00" <= ch <= "\u9fff" for ch in rest):
+        evidence.append(StemEvidence("chinese_after", "positive"))
+    if len(rest) >= 30:
+        evidence.append(StemEvidence("long_stem", "positive"))
+    if any(word in rest for word in ("求", "证明", "如图", "已知", "解方程")):
+        evidence.append(StemEvidence("stem_keyword", "positive"))
+    return tuple(evidence)
+
+
+def collect_main_stem_probes(text: str, strategy) -> list[StemCandidate]:
+    lines = text.split("\n")
+    probes: list[StemCandidate] = []
+    blank_before = False
+    for i, line in enumerate(lines):
+        if not line.strip():
+            blank_before = True
+            continue
+        if is_answer_keyword(line):
+            break
+        ok, number = strategy.is_stem(line)
+        if not ok or number is None:
+            blank_before = False
+            continue
+        rest = line.lstrip()
+        rest = rest.split(".", 1)[1].strip() if "." in rest else rest
+        evidence = _body_evidence(rest, blank_before)
+        if is_junk_stem_line(line):
+            evidence += (StemEvidence("notice_junk", "veto"),)
+        elif is_notice_stem_line(line) and not probes:
+            evidence += (StemEvidence("notice_junk", "veto"),)
+        option = StemOption(
+            candidate_id=f"L{i}-Main",
+            raw_number=number,
+            number=number,
+            form="main",
+            recovery="exact",
+            evidence=evidence,
+            content_rest=rest,
+        )
+        probes.append(StemCandidate(
+            line_no=i,
+            text=line.strip()[:160],
+            options=(option,),
+            context_before="\n".join(lines[max(0, i - 2):i]),
+            context_after="\n".join(lines[i + 1:i + 3]),
+        ))
+        blank_before = False
+    return probes
+
+
+def select_stem_anchors(probes: list[StemCandidate]) -> list[StemCandidate]:
+    best_by_number: dict[int, StemCandidate] = {}
+    for candidate in probes:
+        option = candidate.options[0]
+        if has_hard_veto(option):
+            continue
+        current = best_by_number.get(option.number)
+        if current is None:
+            best_by_number[option.number] = candidate
+            continue
+        current_option = current.options[0]
+        if option_rank_key(option) < option_rank_key(current_option):
+            best_by_number[option.number] = candidate
+
+    anchors: list[StemCandidate] = []
+    last_no = 0
+    for number in sorted(best_by_number):
+        candidate = best_by_number[number]
+        option = candidate.options[0]
+        if option.number <= last_no:
+            continue
+        anchors.append(StemCandidate(
+            line_no=candidate.line_no,
+            text=candidate.text,
+            options=candidate.options,
+            context_before=candidate.context_before,
+            context_after=candidate.context_after,
+            anchor=True,
+        ))
+        last_no = option.number
+    return anchors
