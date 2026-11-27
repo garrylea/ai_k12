@@ -127,6 +127,7 @@ def _split_by_marks(content: str, marks: list[tuple[int, int, str]]) -> tuple[st
 
 class ChineseStrategy:
     code = "chinese"
+    supports_global_stem_chain = False
 
     def is_stem(self, line: str) -> tuple[bool, int | None]:
         return is_main_stem(line)

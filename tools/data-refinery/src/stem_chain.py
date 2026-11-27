@@ -225,3 +225,151 @@ def select_stem_anchors(probes: list[StemCandidate]) -> list[StemCandidate]:
         ))
         last_no = option.number
     return anchors
+
+
+from question_splitter import (
+    ambiguous_stem_candidate, bare_stem_candidate, orphan_stem_candidate,
+    split_glued_next_stem,
+)
+
+
+def supports_global_stem_chain(strategy) -> bool:
+    return bool(getattr(strategy, "supports_global_stem_chain", False))
+
+
+def _expected_between(left: int, right: int) -> tuple[int, ...]:
+    return tuple(range(left + 1, right))
+
+
+def _option(
+    line_no: int,
+    number: int,
+    form: str,
+    recovery: str,
+    rest: str,
+    raw_number: int,
+    context: tuple[StemEvidence, ...],
+) -> StemOption:
+    return StemOption(
+        candidate_id=f"L{line_no}-{form}-{number}",
+        raw_number=raw_number,
+        number=number,
+        form=form,
+        recovery=recovery,
+        evidence=context,
+        content_rest=rest,
+    )
+
+
+def _display_math_open(lines: list[str], line_no: int) -> bool:
+    opens = sum(line.count("$$") for line in lines[:line_no]) % 2
+    return bool(opens)
+
+
+def _hard_veto_evidence(lines: list[str], line_no: int) -> tuple[StemEvidence, ...]:
+    line = lines[line_no]
+    veto: list[StemEvidence] = []
+    if _display_math_open(lines, line_no):
+        veto.append(StemEvidence("inside_math", "veto"))
+    stripped = line.lstrip()
+    if stripped.startswith(("=", "+", "-", "×", "÷")):
+        veto.append(StemEvidence("after_operator", "veto"))
+    return tuple(veto)
+
+
+def collect_interval_candidates(text: str, strategy, anchors: list[StemCandidate]):
+    if not supports_global_stem_chain(strategy):
+        return StemCollectionResult(tuple(anchors), (), frozenset())
+    lines = text.split("\n")
+    candidates: list[StemCandidate] = []
+    consumed: set[int] = set()
+    for left, right in zip(anchors, anchors[1:]):
+        left_no = left.options[0].number
+        right_no = right.options[0].number
+        expected = set(_expected_between(left_no, right_no))
+        if not expected:
+            continue
+        # 锚点的题号锁定只对「以它为边界的区间」生效；同一行在另一个区间里
+        # 仍可产生别的题号解释（如 11→15 区间内的 `2.` → 12）。
+        boundary_lines = {left.line_no, right.line_no}
+        for i in range(left.line_no + 1, right.line_no):
+            line = lines[i]
+            blank_before = i > 0 and not lines[i - 1].strip()
+            context = _body_evidence(line.strip(), blank_before) + _hard_veto_evidence(lines, i)
+            options: list[StemOption] = []
+
+            ok, number = strategy.is_stem(line)
+            if ok and i not in boundary_lines:
+                rest = line.lstrip().split(".", 1)[-1].strip()
+                if number in expected:
+                    options.append(_option(
+                        i, number, "main", "exact", rest, number, context,
+                    ))
+                for wanted in expected:
+                    if wanted >= 10 and wanted % 10 == number:
+                        options.append(_option(
+                            i, wanted, "main", "dropped_tens",
+                            rest, number, context,
+                        ))
+
+            ambiguous = ambiguous_stem_candidate(line)
+            if ambiguous:
+                number, rest = ambiguous
+                glued_number = next(
+                    (n for n in expected if n == number), None
+                )
+                if glued_number is not None:
+                    options.append(_option(
+                        i, glued_number, "glued_number", "glued_suffix",
+                        rest, number, context,
+                    ))
+
+            bare = bare_stem_candidate(line)
+            if bare:
+                number, rest = bare
+                if number in expected:
+                    options.append(_option(
+                        i, number, "bare", "missing_dot", rest, number, context,
+                    ))
+                for wanted in expected:
+                    if wanted >= 10 and wanted % 10 == number:
+                        options.append(_option(
+                            i, wanted, "bare", "dropped_tens",
+                            rest, number, context,
+                        ))
+
+            orphan = orphan_stem_candidate(line)
+            if orphan:
+                rest = orphan[0]
+                number = left_no + 1
+                if number in expected and blank_before:
+                    options.append(_option(
+                        i, number, "orphan_dot", "missing_dot",
+                        rest, number, context,
+                    ))
+
+            glued = split_glued_next_stem(line, left_no + 1)
+            if glued:
+                _head, number, rest = glued
+                if number in expected:
+                    options.append(_option(
+                        i, number, "inline_glued", "exact", rest, number,
+                        context + (StemEvidence("continuous_context", "positive"),),
+                    ))
+                    consumed.add(i)
+
+            kept = tuple(o for o in options if not has_hard_veto(o))
+            if kept:
+                candidates.append(StemCandidate(
+                    line_no=i,
+                    text=line.strip()[:160],
+                    options=kept,
+                    context_before="\n".join(lines[max(0, i - 2):i]),
+                    context_after="\n".join(lines[i + 1:i + 3]),
+                ))
+
+    return StemCollectionResult(
+        anchors=tuple(anchors),
+        candidates=tuple(candidates),
+        consumed_lines=frozenset(consumed),
+    )

@@ -90,6 +90,7 @@ class BlockAnswerMixin:
 
 class GenericStrategy(BlockAnswerMixin):
     code = "generic"
+    supports_global_stem_chain = False
 
     def is_stem(self, line: str) -> tuple[bool, int | None]:
         return is_main_stem(line)
@@ -122,6 +123,7 @@ class NaturalScienceStrategy(BlockAnswerMixin):
     """
 
     code: str = ""
+    supports_global_stem_chain = False
     answers = staticmethod(extract_generic_answers)
 
     def is_stem(self, line: str) -> tuple[bool, int | None]:

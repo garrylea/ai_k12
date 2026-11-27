@@ -5,3 +5,4 @@ from subject_strategies.generic import NaturalScienceStrategy
 
 class MathStrategy(NaturalScienceStrategy):
     code = "math"
+    supports_global_stem_chain = True

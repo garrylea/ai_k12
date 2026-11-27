@@ -198,6 +198,7 @@ class EnglishMaterialPolicy(MaterialPolicy):
 
 class EnglishStrategy(BlockAnswerMixin):
     code = "english"
+    supports_global_stem_chain = False
 
     def is_stem(self, line: str) -> tuple[bool, int | None]:
         return is_main_stem(line)

@@ -105,3 +105,57 @@ def test_main_probes_then_anchors_are_two_phase_and_ordered():
     anchors = select_stem_anchors(probes)
     assert [candidate.options[0].number for candidate in anchors] == [1, 3]
     assert [candidate.line_no for candidate in anchors] == [2, 6]
+
+
+from stem_chain import collect_interval_candidates, supports_global_stem_chain
+
+
+def test_only_math_enables_global_chain_initially():
+    assert supports_global_stem_chain(get_strategy("math"))
+    assert not supports_global_stem_chain(get_strategy("chinese"))
+    assert not supports_global_stem_chain(get_strategy("english"))
+
+
+def test_interval_candidates_keep_12_8_and_12_16_as_same_number_options():
+    md = """11. 第十一题已知函数
+
+10.5 米处的测量数据
+
+12.8 米处是正文数字
+
+12.16 世纪中叶的新式火箭
+
+13. 第十三题求坐标
+"""
+    probes = collect_main_stem_probes(md, get_strategy("math"))
+    anchors = select_stem_anchors(probes)
+    result = collect_interval_candidates(md, get_strategy("math"), anchors)
+    by_line = {
+        candidate.line_no: [option.number for option in candidate.options]
+        for candidate in result.candidates
+    }
+    assert 12 in by_line[4] and 12 in by_line[6]
+    assert 10 not in by_line.get(2, [])
+
+
+def test_interval_candidates_generate_dropped_tens_only_inside_gap():
+    md = """11. 第十一题
+
+2. 第二组数据的第一段题目正文
+
+3. 第二组数据的第二段题目正文
+
+4. 第二组数据的第三段题目正文
+
+15. 第十五题
+"""
+    probes = collect_main_stem_probes(md, get_strategy("math"))
+    anchors = select_stem_anchors(probes)
+    result = collect_interval_candidates(md, get_strategy("math"), anchors)
+    recovered = {
+        option.number
+        for candidate in result.candidates
+        for option in candidate.options
+        if option.recovery == "dropped_tens"
+    }
+    assert recovered == {12, 13, 14}
