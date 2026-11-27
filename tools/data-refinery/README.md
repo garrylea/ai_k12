@@ -263,6 +263,22 @@ python src/refinery_cli.py --purge-business-data   # 库里有业务数据时显
 
 把人工或 AI 产出的题目内容回写 `questions` 表：`answer`（答案）、`approach`（解题思路）、`explanation`（详细解析）、`type`（题型）。**默认 dry-run 只出 diff 报告，`--apply` 才写库**；幂等可重跑。与题目的切题/入库无关，是对已入库题的内容做人工/AI 补全。
 
+**题解内嵌分段（2026-11-27）**：答案区与答案文档里的
+`答案/正确答案/参考答案` 归 `answer`，`解析/分析/思路/解题思路` 归
+`approach`，`详解/解答/点睛` 归 `explanation`。共享解析器在
+`src/answer_sections.py`，答案块先按题号归属再拆字段；裸 `解：/证明：`
+不单独迁移。extract → publish → db_loader 全链路透传 `approach`，其图片
+按 `approach_NN` 物化。
+
+存量混合题解用一条命令整理，先预览、确认、备份、事务写入并复查：
+
+```bash
+python3 src/normalize_embedded_answers_cli.py --apply
+```
+
+已有 `approach` / `explanation` 不会被覆盖：旧内容在前，新拆出的内容以空行
+追加在后；`answer_verified` 保持原值。多题答案混入或缺少答案正文的行会跳过并报告。
+
 ```bash
 python src/answer_importer_cli.py --records edits.jsonl                 # dry-run：diff 报告，不写库
 python src/answer_importer_cli.py --records edits.jsonl --apply         # 确认后写入（需输 yes）

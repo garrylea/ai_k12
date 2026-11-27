@@ -1,6 +1,6 @@
 # 题解内嵌分段拆分与存量整理 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 从题解的明确分段标题中拆出答案、思路和详解，并同时修复未来数据管线与存量 `questions` 数据。
 
@@ -62,7 +62,7 @@
 - Produces: `split_answer_sections(text: str) -> AnswerSections`
 - Produces: `merge_old_then_new(old: str | None, new: str | None) -> str | None`
 
-- [ ] **Step 1: Write the failing parser tests**
+- [x] **Step 1: Write the failing parser tests**
 
 Create `tests/test_answer_sections.py`:
 
@@ -153,7 +153,7 @@ def test_merges_old_first_and_new_after():
     assert merge_old_then_new("旧思路", "旧思路") == "旧思路"
 ```
 
-- [ ] **Step 2: Run the tests and verify failure**
+- [x] **Step 2: Run the tests and verify failure**
 
 Run:
 
@@ -164,7 +164,7 @@ pytest tests/test_answer_sections.py -q
 
 Expected: FAIL because `answer_sections` does not exist.
 
-- [ ] **Step 3: Implement the shared parser**
+- [x] **Step 3: Implement the shared parser**
 
 Create `src/answer_sections.py`:
 
@@ -287,7 +287,7 @@ def merge_old_then_new(old: str | None, new: str | None) -> str | None:
     return f"{left}\n\n{right}"
 ```
 
-- [ ] **Step 4: Run parser tests**
+- [x] **Step 4: Run parser tests**
 
 Run:
 
@@ -298,7 +298,7 @@ pytest tests/test_answer_sections.py -q
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/answer_sections.py tools/data-refinery/tests/test_answer_sections.py
@@ -319,7 +319,7 @@ git commit -m "feat(refinery): parse embedded answer sections"
 - Produces: `AnswerFragment.approach: str`、`AnswerFragment.explanation: str`
 - Produces: `parse_answer_region(...).fragments[*]` 中 `text/approach/explanation` 已拆分
 
-- [ ] **Step 1: Add failing answer-region tests**
+- [x] **Step 1: Add failing answer-region tests**
 
 Append to `tests/test_answer_blocks.py`:
 
@@ -358,7 +358,7 @@ Add imports if absent:
 from answer_blocks import AnswerLine, AnswerQuestion
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -369,7 +369,7 @@ pytest tests/test_answer_blocks.py -q
 
 Expected: FAIL because `AnswerFragment` has no `approach`.
 
-- [ ] **Step 3: Extend fragment and normalize parsed fragments**
+- [x] **Step 3: Extend fragment and normalize parsed fragments**
 
 In `src/answer_blocks.py`, extend `AnswerFragment`:
 
@@ -436,7 +436,7 @@ for fragment in block_fragments:
     fragments.append(fragment)
 ```
 
-- [ ] **Step 4: Run answer block tests**
+- [x] **Step 4: Run answer block tests**
 
 Run:
 
@@ -447,7 +447,7 @@ pytest tests/test_answer_blocks.py tests/test_answer_sections.py -q
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/answer_blocks.py tools/data-refinery/src/answer_region.py tools/data-refinery/tests/test_answer_blocks.py
@@ -471,7 +471,7 @@ git commit -m "feat(refinery): carry approach and explanation in answer fragment
 - Produces: `ExtractedAnswer.answer/approach/explanation`
 - Produces: extract JSONL key `approach`
 
-- [ ] **Step 1: Write failing splitter and generic tests**
+- [x] **Step 1: Write failing splitter and generic tests**
 
 Append to `tests/test_question_splitter.py`:
 
@@ -526,7 +526,7 @@ def test_generic_extract_answers_carries_approach_and_explanation():
     assert q1.explanation == "所以选 C。"
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -537,7 +537,7 @@ pytest tests/test_question_splitter.py::test_split_page_result_distributes_answe
 
 Expected: FAIL because `RawQuestion` has no `approach` and generic extraction discards it.
 
-- [ ] **Step 3: Add approach to RawQuestion and extraction**
+- [x] **Step 3: Add approach to RawQuestion and extraction**
 
 In `RawQuestion`:
 
@@ -590,7 +590,7 @@ answers.append(ExtractedAnswer(
 ))
 ```
 
-- [ ] **Step 4: Run the focused tests**
+- [x] **Step 4: Run the focused tests**
 
 Run:
 
@@ -601,7 +601,7 @@ pytest tests/test_question_splitter.py::test_split_page_result_distributes_answe
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/question_splitter.py tools/data-refinery/src/question_extract.py tools/data-refinery/src/subject_strategies/generic.py tools/data-refinery/tests/test_question_splitter.py tools/data-refinery/tests/test_answer_extract_cli.py
@@ -623,7 +623,7 @@ git commit -m "feat(refinery): propagate split approach through extraction"
 - Produces: 语文 `ExtractedAnswer.approach/explanation`
 - Produces: answer doc 的 `思路：` 与 `解析：`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Append to `tests/subject_strategies/test_chinese_answers.py`:
 
@@ -666,7 +666,7 @@ def test_render_doc_includes_approach_and_explanation_fields():
     assert item.explanation == "所以选 C。"
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -677,7 +677,7 @@ pytest tests/subject_strategies/test_chinese_answers.py::test_chinese_answer_hea
 
 Expected: FAIL because Chinese extraction and document rendering do not populate `approach`.
 
-- [ ] **Step 3: Integrate the shared parser**
+- [x] **Step 3: Integrate the shared parser**
 
 In `chinese.py`, import:
 
@@ -723,7 +723,7 @@ if (item.approach or "").strip():
 
 Keep the existing `解析：` block sourced from `item.explanation`.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -734,7 +734,7 @@ pytest tests/subject_strategies/test_chinese_answers.py tests/test_answer_extrac
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/subject_strategies/chinese.py tools/data-refinery/src/answer_extract_cli.py tools/data-refinery/tests/subject_strategies/test_chinese_answers.py tools/data-refinery/tests/test_answer_extract_cli.py
@@ -759,7 +759,7 @@ git commit -m "feat(refinery): split Chinese embedded answer sections"
 - Produces: `rewrite_fields(...)` 返回 `(content, answer, approach, explanation, material_text, options, materialized)`
 - Produces: db_loader 拒绝未物化 `approach` 图片
 
-- [ ] **Step 1: Write failing propagation tests**
+- [x] **Step 1: Write failing propagation tests**
 
 Append to `tests/test_models.py`:
 
@@ -823,7 +823,7 @@ def test_materialized_image_guard_checks_approach():
         assert_materialized_images(approach="![](images/approach.jpg)")
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -834,7 +834,7 @@ pytest tests/test_models.py::test_exam_question_keeps_approach_through_model_dum
 
 Expected: FAIL because the model and rewrite chain drop or ignore `approach`.
 
-- [ ] **Step 3: Implement model and rewrite propagation**
+- [x] **Step 3: Implement model and rewrite propagation**
 
 In `models.ExamQuestion`:
 
@@ -925,7 +925,7 @@ At the `load_questions` call site pass:
 approach=q.get("approach"),
 ```
 
-- [ ] **Step 4: Run the focused tests**
+- [x] **Step 4: Run the focused tests**
 
 Run:
 
@@ -936,7 +936,7 @@ pytest tests/test_models.py tests/test_publish_cli.py tests/test_db_loader.py -q
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/models.py tools/data-refinery/src/image_rewrite.py tools/data-refinery/src/publish_cli.py tools/data-refinery/src/db_loader.py tools/data-refinery/tests/test_models.py tools/data-refinery/tests/test_publish_cli.py tools/data-refinery/tests/test_db_loader.py
@@ -958,7 +958,7 @@ git commit -m "feat(refinery): preserve approach through publish and load"
 - Produces: `build_cleanup_changes(rows: list[CleanupRow]) -> tuple[list[CleanupChange], list[tuple[CleanupRow, list[str]]]]`
 - CLI: `python3 src/normalize_embedded_answers_cli.py --apply`
 
-- [ ] **Step 1: Write failing pure-function and fake-DB tests**
+- [x] **Step 1: Write failing pure-function and fake-DB tests**
 
 Create `tests/test_normalize_embedded_answers_cli.py`:
 
@@ -1074,7 +1074,7 @@ def test_apply_rolls_back_on_concurrent_change(tmp_path):
     assert conn.rolled_back is True
 ```
 
-- [ ] **Step 2: Run tests and verify failure**
+- [x] **Step 2: Run tests and verify failure**
 
 Run:
 
@@ -1085,7 +1085,7 @@ pytest tests/test_normalize_embedded_answers_cli.py -q
 
 Expected: FAIL because the CLI module does not exist.
 
-- [ ] **Step 3: Implement pure planning and DB write functions**
+- [x] **Step 3: Implement pure planning and DB write functions**
 
 Create `src/normalize_embedded_answers_cli.py` with these public definitions and behavior:
 
@@ -1230,7 +1230,7 @@ The main path:
 7. Apply and verify.
 8. Return 0 on success, 1 on user cancel/concurrency, 2 on invalid input.
 
-- [ ] **Step 4: Add CLI argument and report tests**
+- [x] **Step 4: Add CLI argument and report tests**
 
 Append to `tests/test_normalize_embedded_answers_cli.py`:
 
@@ -1269,7 +1269,7 @@ pytest tests/test_normalize_embedded_answers_cli.py -q
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/data-refinery/src/normalize_embedded_answers_cli.py tools/data-refinery/tests/test_normalize_embedded_answers_cli.py
@@ -1290,7 +1290,7 @@ git commit -m "feat(refinery): add embedded answer cleanup CLI"
 - Consumes: completed parser, pipeline propagation, cleanup CLI
 - Produces: documented one-command workflow and real database cleanup evidence
 
-- [ ] **Step 1: Run all data-refinery tests**
+- [x] **Step 1: Run all data-refinery tests**
 
 Run:
 
@@ -1301,7 +1301,7 @@ pytest -q
 
 Expected: all tests PASS.
 
-- [ ] **Step 2: Run the cleanup preview against the real database**
+- [x] **Step 2: Run the cleanup preview against the real database**
 
 Run:
 
@@ -1316,7 +1316,7 @@ Expected:
 - ambiguous multi-question rows are listed and skipped;
 - no DB writes occur.
 
-- [ ] **Step 3: Inspect representative diffs before applying**
+- [x] **Step 3: Inspect representative diffs before applying**
 
 Inspect at least:
 
@@ -1326,7 +1326,7 @@ Inspect at least:
 
 If any sampled split is wrong, add the exact fixture and regression test under `tests/test_answer_sections.py` or `tests/test_normalize_embedded_answers_cli.py` before proceeding.
 
-- [ ] **Step 4: Apply the cleanup**
+- [x] **Step 4: Apply the cleanup**
 
 Run the single user-facing command:
 
@@ -1344,7 +1344,7 @@ Expected:
 - post-write verification passes;
 - rerunning preview returns zero changes for already cleaned rows.
 
-- [ ] **Step 5: Verify database invariants**
+- [x] **Step 5: Verify database invariants**
 
 Run read-only SQL:
 
@@ -1361,7 +1361,7 @@ Expected:
 - every returned `answer_verified` is unchanged for rows that were intentionally skipped;
 - the CLI’s own post-write verification confirms old `approach` / `explanation` content appears before appended new content.
 
-- [ ] **Step 6: Update docs**
+- [x] **Step 6: Update docs**
 
 Add to `tools/data-refinery/README.md`:
 
@@ -1393,7 +1393,7 @@ Add to `docs/ai-core-changelog.md`:
 - verification results;
 - any ambiguous rows intentionally skipped.
 
-- [ ] **Step 7: Run docs diff check and commit**
+- [x] **Step 7: Run docs diff check and commit**
 
 Run:
 

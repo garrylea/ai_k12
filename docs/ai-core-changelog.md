@@ -4,6 +4,23 @@
 
 **人工校对改为一题一卡（2026-11-26）**：题目身份升级为 `(source, group_order, sub_no)`；卡片一次给全现状（题干/选项/共享材料/题内材料/答案/图/依据），主菜单 `1–5` 选段 + `E` 编辑器改整题 / `R` 全换 / `k` 确认无问题 / `u` 用修复前原文；槽位统一「回车=不改、其余都是内容、命令一律 `:` 前缀」。材料用三态草稿（`UNSET` / `None` / 值）字段级合并，图片支持追加/替换/清空且不动共享文章正文；答案清空新增向后兼容的 `clear_answer=True` 记录字段（主 UPDATE 的 `COALESCE(NULLIF(...))` 清不掉空串）；多题号粘贴按题拆分生成记录但不批量改答案。`k`/回车/`s` 三个不写库出口分开；非 TTY 在 `fix_question_cli` 入口直接打印唯一入口命令。旧补题记录继续兼容；旧菜单（verdict / edit-mode / image-mode / confirm / 答案富输入）删除，`manual_fix.py` 从 2695 行降到约 1000 行，原语/快照/队列/记录拆到 `review_editor` / `review_content` / `review_queue` / `review_records`。
 
+**题解内嵌分段统一拆分（2026-11-27）**：新增 `answer_sections.py`，在答案块完成题号归属后统一把
+`答案/正确答案/参考答案` → `answer`、`解析/分析/思路/解题思路` → `approach`、
+`详解/解答/点睛` → `explanation`；裸 `解：/证明：` 不拆。`AnswerFragment`、
+`RawQuestion`、`LabeledQuestion`、extract JSONL、答案文档、`ExamQuestion`、
+publish 图片物化与 db_loader 图片护栏全部补齐 `approach`，避免字段在任一阶段被静默丢弃。
+
+**存量整理**：`normalize_embedded_answers_cli.py` 预览命中 254 题（语文 47、数学 196、
+物理 11），新增思路 201 题、新增详解 166 题；5 题已有目标字段，按“旧内容在前、新内容
+追加在后”合并。4 题因 `answer_body_missing` 或 `numbered_answer_heading` 跳过：
+questions#5406、#5416、#9126、#10852。事务写入后脚本复查通过，复跑预览为 0 变更；
+`answer_verified` / `content_hash` 未改。备份：
+`tools/data-refinery/output/backups/embedded_answers_20261127T141951427757Z.jsonl`。
+
+**验证**：data-refinery 全量 `2379 passed, 11 skipped`；真实库抽查
+questions#10788（数学 C/分析/详解+点睛）、#5409（语文分小问答案/参考译文/解答）、
+#6754（物理答案 2000/详解）和 #5234（`answer_verified=1` 保持）通过。
+
 ## 2026-11-27 草稿白板：选中图形复制粘贴
 
 选中一个或多个笔迹/图形后，`Ctrl/Cmd+C` 深拷贝到组件内剪贴板，`Ctrl/Cmd+V` 追加副本；首次相对原图右下各偏移 10px，连续粘贴按 10/20/30px 递增。粘贴后自动选中新副本，一次粘贴只记一步历史；复制不占历史。选中图形时快捷键优先作用于草稿，不受答题输入框残留焦点或系统剪贴板旧图片影响；没有草稿复制内容时保持输入框与图片粘贴原行为。切题清空内部剪贴板。

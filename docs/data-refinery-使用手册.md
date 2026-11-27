@@ -737,6 +737,29 @@ python src/answer_importer_cli.py --records output/answers_to_fill_chinese.fille
 
 **安全须知**：默认 dry-run；`--apply` 默认需交互输 `yes`（编排场景显式加 `--yes` 跳过）；`--limit` 默认 500——**导入**时超过即拒绝，**导出**时取前 N 条（达到上限会打印截断警告，需调大后重导）；**全量导入前先做快照**——`mysqldump -u ai_k12 -pai_k12 ai_k12 questions > questions_snapshot.sql`；首次请先小批（2-3 题）验证匹配无误再放量。另注：`db_loader` 的 full-reload 会把 `answer_verified=1` 计入守卫，未被 purge 时中止，不会静默覆盖已核验内容。
 
+#### 4.8.1 题解内嵌分段整理
+
+答案区里常带 `【答案】【分析】【详解】`、`答案：/解析：/详解：` 等完整题解。
+管线会先按题号归属答案，再用 `src/answer_sections.py` 拆分：
+
+| 源标题 | 目标字段 |
+|---|---|
+| `答案 / 正确答案 / 参考答案` | `answer` |
+| `解析 / 分析 / 思路 / 解题思路` | `approach` |
+| `详解 / 解答 / 点睛` | `explanation` |
+
+裸 `解：/证明：` 不单独迁移。存量数据整理只跑一条命令：
+
+```bash
+cd tools/data-refinery
+python3 src/normalize_embedded_answers_cli.py --apply
+```
+
+命令先打印候选、学科分布、旧字段追加数和异常跳过项，输入 `yes` 后把原值
+备份到 `output/backups/embedded_answers_<timestamp>.jsonl`。已有目标字段不覆盖：
+旧内容在前，新拆出的内容追加在后；`answer_verified` 和 `content_hash` 不变。
+疑似混入多题答案、只有解析/详解而没有答案正文、或代码围栏未闭合的题会跳过并列出。
+
 ### 4.9 dictation_cli — 语文古诗文默写采集入库（旁路管线）
 
 > **这条旁路只服务「训练 → 语文 → 专项 → 古诗文默写」**，产物进 `chinese_passages`
