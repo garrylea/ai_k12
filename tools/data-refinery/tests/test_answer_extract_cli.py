@@ -77,6 +77,25 @@ def test_generic_answer_result_carries_missing_issue_details():
     )
 
 
+def test_generic_extract_answers_carries_approach_and_explanation():
+    text = """1. 已知函数
+
+# 参考答案
+
+1. 【答案】C
+【分析】先观察图象。
+【详解】所以选 C。
+"""
+    answers = get_strategy("math").extract_answers(
+        text,
+        Path("数学/初中/first/2025/test.md"),
+    )
+    q1 = next(item for item in answers if item.no == 1)
+    assert q1.answer == "C"
+    assert q1.approach == "先观察图象。"
+    assert q1.explanation == "所以选 C。"
+
+
 def test_zero_assignment_sentinel_is_detectable():
     from subject_strategies.types import ExtractedAnswer
 

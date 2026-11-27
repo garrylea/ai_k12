@@ -2290,5 +2290,34 @@ def test_85434_25_16_requires_chain_while_11_4_answer_guard_remains():
     assert sorted(qs) == [24, 25, 26]
     assert "16 世纪中叶" not in qs[24].content
     assert qs[25].content.startswith("16 世纪中叶")
-    assert "11.4 - 3 = 8.4" in qs[25].answer
+    assert qs[25].answer == "(1) ① a = -1/15 ; ② 8.4 km"
+    assert "11.4 - 3 = 8.4" in qs[25].explanation
     assert "11.4 - 3 = 8.4" not in qs[24].answer
+
+
+def test_split_page_result_distributes_answer_sections():
+    from pathlib import Path
+    from question_splitter import split_page_result
+    from subject_strategies import get_strategy
+
+    text = """1. 已知函数
+
+2. 求值
+
+# 参考答案
+
+1. 【答案】C
+【分析】先观察图象。
+【详解】所以选 C。
+
+2. B
+"""
+    result = split_page_result(
+        text,
+        Path("数学/初中/first/2025/test.md"),
+        strategy=get_strategy("math"),
+    )
+    q1 = next(q for q in result.questions if q.group_order == 1)
+    assert q1.answer == "C"
+    assert q1.approach == "先观察图象。"
+    assert q1.explanation == "所以选 C。"

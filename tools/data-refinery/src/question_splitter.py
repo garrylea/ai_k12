@@ -844,6 +844,7 @@ class RawQuestion:
     group_id: str | None            # 大题分组（"一"/"二"/"三"...），无分组为 None
     content: str                    # 题干原文（主题号"N."已剥离，小问号"(N)"保留）
     answer: str = ""                # 答案（答案对齐阶段填入）
+    approach: str = ""              # 解题思路（题解中的解析/分析）
     explanation: str | None = None  # 解析（答案对齐阶段填入）
     score: int | None = None        # 每题满分（分组标题解析），无则为 None
     sub_no: int = 0
@@ -1456,11 +1457,25 @@ def split_page_result(
             answer_questions,
             first_line_no=first_line_no,
         )
-        by_number: dict[int, list[str]] = {}
+        by_number: dict[int, list] = {}
         for fragment in answer_result.fragments:
-            by_number.setdefault(fragment.question_no, []).append(fragment.text)
+            by_number.setdefault(fragment.question_no, []).append(fragment)
         for question in questions:
-            question.answer = "\n".join(by_number.get(question.group_order, []))
+            parts = by_number.get(question.group_order, [])
+            question.answer = "\n".join(
+                fragment.text for fragment in parts if fragment.text
+            )
+            question.approach = "\n\n".join(
+                fragment.approach for fragment in parts if fragment.approach
+            )
+            question.explanation = (
+                "\n\n".join(
+                    fragment.explanation
+                    for fragment in parts
+                    if fragment.explanation
+                )
+                or None
+            )
 
     questions = _apply_strategy_finalizers(questions, lines, md_path, strategy)
     return SplitPageResult(

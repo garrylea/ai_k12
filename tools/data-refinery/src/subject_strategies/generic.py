@@ -42,6 +42,8 @@ def extract_generic_answers(text: str, md_path: Path,
         answers.append(ExtractedAnswer(
             no=question.group_order,
             answer=(question.answer or "").strip(),
+            approach=(question.approach or "").strip(),
+            explanation=(question.explanation or "").strip(),
             issues=[detail["message"] for detail in details],
             issue_details=details,
         ))
