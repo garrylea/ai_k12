@@ -2183,3 +2183,112 @@ def test_split_page_wrapper_keeps_list_contract():
     )
     assert isinstance(questions, list)
     assert questions[0].group_order == 9
+
+
+# ---- Task 6: 第二遍切题 forced 优先级 / gap suppression ----
+
+def test_forced_map_bypasses_end_of_paper_small_number_merge():
+    md = """20. 第二十题
+
+2. 该行最终题号是第二十一题
+
+22. 第二十二题
+"""
+    lines = md.split("\n")
+    forced_line = lines.index("2. 该行最终题号是第二十一题")
+    qs = split_page(
+        md,
+        Path("x.md"),
+        strategy=_math_strategy(),
+        forced_stem_map={forced_line: (21, "main", "dropped_tens")},
+    )
+    assert [q.group_order for q in qs] == [20, 21, 22]
+    assert qs[1].content.startswith("该行最终题号")
+
+
+def test_suppressed_gap_range_is_not_appended_to_previous_question():
+    md = """1. 第一题正文
+
+26. 属于未确认 gap 的正文
+
+27. 第二十七题
+"""
+    lines = md.split("\n")
+    gap_line = lines.index("26. 属于未确认 gap 的正文")
+    qs = split_page(
+        md,
+        Path("x.md"),
+        strategy=_math_strategy(),
+        suppressed_ranges=[(gap_line, gap_line)],
+    )
+    assert [q.group_order for q in qs] == [1, 27]
+    assert "属于未确认 gap" not in qs[0].content
+
+
+def test_split_page_result_carries_stem_chain_result():
+    from question_splitter import split_page_result
+
+    marker = object()
+    result = split_page_result(
+        "1. 第一题正文",
+        Path("x.md"),
+        strategy=_math_strategy(),
+        stem_chain_result=marker,
+    )
+    assert result.stem_chain_result is marker
+
+
+def test_inline_glued_is_controlled_by_forced_map_when_map_is_supplied():
+    md = """1. 第一题正文。2. 第二题正文
+
+3. 第三题正文
+"""
+    line_no = 0
+    qs = split_page(
+        md,
+        Path("x.md"),
+        strategy=_math_strategy(),
+        forced_stem_map={line_no: (1, "main", "exact")},
+    )
+    assert [q.group_order for q in qs] == [1, 3]
+    assert "2. 第二题正文" in qs[0].content
+
+
+def test_85434_25_16_requires_chain_while_11_4_answer_guard_remains():
+    stem_md = """24. 第二十四题题干
+
+25.16 世纪中叶，我国发明了一种新式火箭。
+
+(1) 若火箭第二级的引发点高度为 3.6km，求 a, b 的值。
+
+26. 第二十六题题干
+
+# 参考答案
+
+24. 第二十四题答案
+
+25.【答案】(1) ① a = -1/15 ; ② 8.4 km
+
+【解答】解得 $x = 11.4$
+
+11.4 - 3 = 8.4 (km)
+
+∴这两个位置之间的距离 8.4km.
+
+26. 第二十六题答案
+"""
+    from question_extract import _split_paper_questions
+
+    split_result, _issues = _split_paper_questions(
+        stem_md,
+        Path("85434.md"),
+        _math_strategy(),
+        None,
+        False,
+    )
+    qs = {q.group_order: q for q in split_result.questions}
+    assert sorted(qs) == [24, 25, 26]
+    assert "16 世纪中叶" not in qs[24].content
+    assert qs[25].content.startswith("16 世纪中叶")
+    assert "11.4 - 3 = 8.4" in qs[25].answer
+    assert "11.4 - 3 = 8.4" not in qs[24].answer

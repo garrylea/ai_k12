@@ -83,6 +83,11 @@ class FakeCursor:
     def fetchall(self):
         return self._rows
 
+    @property
+    def executed(self) -> list[str]:
+        """执行过的 SQL 文本（断言用；原有测试仍可直接读 self.sql）。"""
+        return [sql for sql, _args in self.sql]
+
 
 REC = {
     "source": "物理-卷A-试卷",
@@ -1168,3 +1173,80 @@ def test_content_only_rejects_empty_stem():
     rec = dict(REC, content="  ", content_only=True)
     cur = FakeCursor(paper=(54, 4), existing=42)
     assert _impl.apply_record(cur, rec, apply=True).startswith("跳过")
+
+
+def test_clear_answer_updates_db_to_empty_string(tmp_path):
+    rec = {**REC, "answer": "", "clear_answer": True}
+    cur = FakeCursor(paper=(17, 2), existing=5190)
+    msg = _impl.apply_record(cur, rec, True, assets_root=tmp_path / "assets", output_dir=tmp_path)
+    assert "更新" in msg or "已清空" in msg
+    assert any("answer=''" in sql for sql in cur.executed)
+
+
+def test_clear_answer_with_content_edit_keeps_both(tmp_path):
+    """同一张卡改题干 + 清答案：两条都必须写，不能因为清答案早退把题干丢了。"""
+    rec = {**REC, "content": "新题干", "answer": "", "clear_answer": True}
+    cur = FakeCursor(paper=(17, 2), existing=5192)
+    _impl.apply_record(cur, rec, True, assets_root=tmp_path / "assets", output_dir=tmp_path)
+    assert any(sql.startswith("UPDATE questions SET content=") for sql in cur.executed)
+    assert any("answer=''" in sql for sql in cur.executed)
+
+
+def test_old_record_with_empty_answer_still_does_not_clear(tmp_path):
+    rec = {**REC, "answer": ""}
+    cur = FakeCursor(paper=(17, 2), existing=5191)
+    _impl.apply_record(cur, rec, True, assets_root=tmp_path / "assets", output_dir=tmp_path)
+    assert not any("answer=''" in sql for sql in cur.executed)
+
+
+def test_answer_only_clear_is_not_rejected_as_empty(tmp_path):
+    rec = {**REC, "answer": "", "clear_answer": True, "answer_only": True}
+    cur = FakeCursor(paper=(17, 2), existing=5193)
+    msg = _impl.apply_record(cur, rec, True, assets_root=tmp_path / "assets", output_dir=tmp_path)
+    assert not msg.startswith("跳过"), msg
+    answers = [a for sql, a in cur.sql if sql.startswith("UPDATE questions SET answer=%s")]
+    assert answers and answers[0][0] == ""
+
+
+def test_apply_status_echo_carries_sub_no(tmp_path, monkeypatch):
+    import types
+
+    import apply_fixes as impl
+
+    (tmp_path / "A.jsonl").write_text(json.dumps({
+        "source": "A",
+        "rel_path": "道法/A",
+        "group_order": 26,
+        "sub_no": 2,
+        "content": "第二问",
+        "applied": False,
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    notes: list[tuple] = []
+
+    class Cur:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def execute(self, *args, **kwargs): return None
+
+    class Conn:
+        def cursor(self): return Cur()
+        def commit(self): pass
+        def rollback(self): pass
+        def close(self): pass
+
+    monkeypatch.setattr(impl.pymysql, "connect", lambda *a, **kw: Conn())
+    monkeypatch.setattr(impl.RefineryConfig, "from_env",
+                        lambda: types.SimpleNamespace(output_dir=tmp_path, db_host="",
+                                                      db_port=0, db_user="",
+                                                      db_pass="", db_name=""))
+    monkeypatch.setattr(impl, "mark_issue",
+                        lambda src, go, status, **kw: notes.append((src, go, status, kw)))
+    monkeypatch.setattr(impl, "apply_record",
+                        lambda cur, rec, apply, **kw: (rec.update(applied=True) or "更新：ok"))
+    monkeypatch.setattr(impl, "_rescan", lambda applied: None)
+    monkeypatch.setattr(impl, "_publish_sources", lambda sources: None)
+
+    assert impl.run(["--fixes-dir", str(tmp_path), "--apply"]) == 0
+    assert notes[0][3]["sub_no"] == 2
+    assert notes[0][3]["statuses"] == {"pending", "recorded"}

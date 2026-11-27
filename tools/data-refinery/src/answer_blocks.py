@@ -120,6 +120,32 @@ def prepare_answer_lines(
     return out
 
 
+def _line_start_question_no(text: str, numbers) -> int | None:
+    """该行以哪个题号开头（没有则 None）。允许 OCR 把题号拆成 `1 3 .`。
+
+    块边界只看行首：答案正文行里的 `7.5cm`、`15cm` 不是新题号，
+    若用 ``re.search`` 全行匹配，会把一行答案拆成多个块、后半截整段丢
+    （2026-11-27 北京各 85487 第 12 题）。行首裸题号（`9 $x\neq5$ ...`，
+    顺义 2025 期末）也认，但后面紧跟数字或「分」的不算——那是空格拆开的
+    公式数字（`2 2 x`）或分值说明（`1 分`）。
+    """
+    stripped = text.lstrip()
+    for number in numbers:
+        digits = r"\s*".join(str(number))
+        if re.match(rf"{digits}\s*[.．]", stripped):
+            return number
+        # 裸题号必须连写（`9 $x$`），不能是「2 2」这种空格拆开的公式数字；
+        # 后面紧跟数字或「分」的也不算（`1 分` 是分值）。
+        bare = re.match(rf"{number}\s+(\S)", stripped)
+        if bare and not bare.group(1).isdigit() and bare.group(1) != "分":
+            return number
+    return None
+
+
+def _line_starts_question(text: str, numbers) -> bool:
+    return _line_start_question_no(text, numbers) is not None
+
+
 def split_answer_blocks(
     lines: list[AnswerLine],
     questions: list[AnswerQuestion],
@@ -129,7 +155,20 @@ def split_answer_blocks(
     working_lines = list(lines)
     blocks: list[AnswerBlock] = []
     group_id: str | None = None
+    last_no = 0          # 已切出的最后一个题号：答案按题号递增，小数字不另起块
     index = 0
+
+    def _next_question_no(text: str) -> int | None:
+        num = _line_start_question_no(text, expected)
+        if num is None:
+            return None
+        # `11.4 - 3 = 8.4` 行首是 `11.` 但紧跟数字，可能是小数/算式；只有
+        # 题号比已切出的更大时才另起块。`1. 答案：B`（点后是空格）这类明确
+        # 分隔符不受限，仍允许重开一套答案块（第二套会被当重复忽略）。
+        ambiguous = re.match(r"^\d{1,2}[.．]\d", text.lstrip())
+        if ambiguous and num <= last_no:
+            return None
+        return num
 
     while index < len(working_lines):
         line = working_lines[index]
@@ -165,7 +204,9 @@ def split_answer_blocks(
             index += 1
             continue
 
-        if any(re.search(rf"(?<!\d){number}\s*[.．]", text) for number in expected):
+        number = _next_question_no(text)
+        if number is not None:
+            last_no = number
             end = index + 1
             while end < len(working_lines):
                 next_text = working_lines[end].text.strip()
@@ -175,10 +216,10 @@ def split_answer_blocks(
                     r"[A-Da-d](?:\s*[A-Da-d])+", next_text
                 ):
                     break
-                if any(
-                    re.search(rf"(?<!\d){number}\s*[.．]", next_text)
-                    for number in expected
-                ):
+                # 只认题号比当前块更大的行。答案正文里的 `11.4 - 3 = 8.4`
+                # 行首是 `11.`，若也当新题会把第 25 题的答案从中间截断
+                # （2026-11-27 北京各 85434 第 25 题）。
+                if _next_question_no(next_text) is not None:
                     break
                 end += 1
             blocks.append(AnswerBlock(
@@ -196,7 +237,7 @@ def split_answer_blocks(
                 r"[A-Da-d](?:\s*[A-Da-d])+", next_text
             ):
                 break
-            if any(re.search(rf"(?<!\d){number}\s*[.．]", next_text) for number in expected):
+            if _next_question_no(next_text) is not None:
                 break
             end += 1
         blocks.append(AnswerBlock(
@@ -233,6 +274,37 @@ def _line_start_offsets(text: str) -> set[int]:
     return starts
 
 
+def _is_inside_math(text: str, pos: int) -> bool:
+    """pos 是否落在 `$...$` / `$$...$$` 公式内（按出现顺序成对切换）。
+
+    区分两种「看起来像题号」的裸数字：
+    - `9 $x \\neq 5$ 10 ...`：9/10 在公式外，仍是题号（顺义 2025 期末）；
+    - `$15cm$`、`$$... + 2 4 0 x ...$$`：数字在公式内，不是题号。
+    """
+    inside = False
+    index = 0
+    while index < pos:
+        if text[index] != "$":
+            index += 1
+            continue
+        if text.startswith("$$", index):
+            inside = not inside
+            index += 2
+            continue
+        inside = not inside
+        index += 1
+    return inside
+
+
+def _is_compact_previous(previous_answer: str | None) -> bool:
+    """上一段答案是否短且无中文——用来确认「连续内联答案」里的下一个题号。"""
+    return bool(
+        previous_answer
+        and len(previous_answer) <= 40
+        and not re.search(r"[\u3400-\u9fff。；;]", previous_answer)
+    )
+
+
 def _marker_allowed(
     text: str,
     match: re.Match[str],
@@ -253,15 +325,35 @@ def _marker_allowed(
     ):
         return False
     if has_dot and followed_by_digit and not at_line_start:
-        compact_previous = bool(
-            previous_answer
-            and len(previous_answer) <= 40
-            and not re.search(r"[\u3400-\u9fff。；;]", previous_answer)
-        )
         return (
             previous in _STRONG_PREFIXES
             or previous == "分"
-            or compact_previous
+            or _is_compact_previous(previous_answer)
+        )
+    if not has_dot:
+        # 不带点的题号必须是连写数字；「2 4」这种数字拆开的形式只在带点
+        # （`1 3 .`）时成立，否则和公式里的空格数字分不开。
+        if re.search(r"\s", match.group("number")):
+            return False
+        after = text[match.end():]
+        next_char = after.lstrip()[:1]
+        # 「1 分」是分值说明、`2 2 x` 是空格拆开的公式数字，都不是题号。
+        if next_char.isdigit() or next_char == "分":
+            return False
+        if at_line_start:
+            return True
+        # 行中间的裸题号只有落在公式外才可能成立；公式里的
+        # `\therefore x^{2} - 4 x = 4`（4）、`+ 2 4 0 x`（24）、`$15cm$`（15）
+        # 一律不是题号（2026-11-27 北京各 85487）。
+        if _is_inside_math(text, match.start()):
+            return False
+        # 公式外的裸题号也得能确认是「新答案的起点」，否则教学答案里的
+        # `(2) 28;`、`（2 分）` 会被当成第 28/2 题，把上一题拦腰截断。
+        followed_by_math = after.lstrip().startswith("$")
+        return (
+            followed_by_math
+            or previous in _STRONG_PREFIXES
+            or previous == "分"
         )
     return (
         at_line_start
@@ -281,7 +373,9 @@ def _find_marker(
 ) -> re.Match[str] | None:
     digits = r"\s*".join(str(expected_no))
     pattern = re.compile(
-        rf"(?<!\d)(?P<number>{digits})\s*(?P<dot>[.．])?"
+        # `(?!\d)` 不能省：否则「…+ 240x …」里的 24 会被当成第 24 题的题号，
+        # 把第 23 题答案从数字中间切开（2026-11-27 北京各 85487 实测）。
+        rf"(?<!\d)(?P<number>{digits})(?!\d)\s*(?P<dot>[.．])?"
         rf"(?:\s*(?=\S)|(?=\n|$))"
     )
     for match in pattern.finditer(text, start):

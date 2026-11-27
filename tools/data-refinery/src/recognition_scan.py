@@ -38,6 +38,8 @@ from scope_filter import match_keyword  # noqa: E402
 from subject_codes import subject_code_for_path  # noqa: E402
 
 ISSUES_FILE = ROOT / "output" / "recognition_issues.jsonl"
+# 全局题号链扫描产物：消费它的 error/warning 条目进人工队列（info 已解决的不进）
+STEM_ISSUES_FILE = ROOT / "output" / "stem_chain_issues.jsonl"
 # 人工补题的落盘目录；只认顶层 *.jsonl（`_discarded/` 里的作废记录不参与判定）
 FIXES_DIR = ROOT / "output" / "manual_fixes"
 
@@ -160,6 +162,49 @@ def _read_jsonl(path: Path) -> list[dict]:
 def _excerpt(text: str, limit: int = _EXCERPT_LIMIT) -> str:
     text = (text or "").strip()
     return text if len(text) <= limit else text[:limit] + "…"
+
+
+def stem_issue_to_recognition(
+    row: dict, md_path: Path, pdf_path: Path | None,
+) -> dict | None:
+    """题号链 issue → 人工复核条目；info（如 llm 已解决）不进队列。"""
+    if row.get("severity") == "info":
+        return None
+    question_no = row.get("question_no")
+    if not isinstance(question_no, int):
+        return None
+    code = str(row.get("code") or "")
+    return {
+        "source": row.get("source"),
+        "group_order": question_no,
+        "kind": code,
+        "reasons": [code, "stem_chain"],
+        "excerpt": _excerpt(row.get("excerpt") or ""),
+        "line_no": row.get("line_no"),
+        "candidate_ids": row.get("candidate_ids") or [],
+        "pdf": str(pdf_path) if pdf_path else None,
+        "md": str(md_path),
+        "status": "pending",
+    }
+
+
+def load_stem_issues_for_source(
+    source: str, md_path: Path, pdf_path: Path | None,
+) -> list[dict]:
+    return [
+        converted
+        for row in _read_jsonl(STEM_ISSUES_FILE)
+        if row.get("source") == source
+        for converted in [stem_issue_to_recognition(row, md_path, pdf_path)]
+        if converted is not None
+    ]
+
+
+def _issue_key(i: dict) -> tuple:
+    """issue 身份：默认 (source, group_order, kind)，带 line_no 时再带上行号，
+    防止同一题不同行的两条题号链问题被去重成一条。"""
+    base = (i["source"], i["group_order"], i["kind"])
+    return base if i.get("line_no") is None else base + (i["line_no"],)
 
 
 def _option_block_count(text: str) -> int:
@@ -552,11 +597,11 @@ def reopen_unbacked(records: list[dict], all_issues: list[dict],
     事故经过：补题时连终端界面一起粘进去，补题文件被作废，但清单仍标 resolved，
     于是这张卷的缺题再也不会提示（一零一题28、人大附题7 因此消失）。
     """
-    existing = {(r["source"], r["group_order"], r["kind"]): r for r in records}
+    existing = {_issue_key(r): r for r in records}
     fix_cache: dict[str, dict[int, bool]] = {}
     reopened = 0
     for it in all_issues:
-        rec = existing.get((it["source"], it["group_order"], it["kind"]))
+        rec = existing.get(_issue_key(it))
         if rec is None or rec.get("status") == "pending":
             continue
         # 自动收口的（LLM 标记消失/噪声题被过滤）不按「补题未落库」重新打开——
@@ -605,12 +650,12 @@ def reopen_changed(records: list[dict], all_issues: list[dict]) -> int:
     只认内容指纹：同一段正文 → 同一个结论可以一直沿用；重新切题/补题后正文变了，
     旧结论不一定还成立，必须让人再看一眼（否则一次「没问题」会永久闭麦）。
     """
-    fresh = {(i["source"], i["group_order"], i["kind"]): i for i in all_issues}
+    fresh = {_issue_key(i): i for i in all_issues}
     reopened = 0
     for rec in records:
         if rec.get("verdict") != "no_change":
             continue
-        it = fresh.get((rec["source"], rec.get("group_order"), rec.get("kind")))
+        it = fresh.get(_issue_key(rec))
         old_sig, new_sig = rec.get("content_sig"), (it or {}).get("content_sig")
         if not old_sig or not new_sig or old_sig == new_sig:
             continue
@@ -723,6 +768,11 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
             pdf_path if pdf_path.exists() else None, labeling_issues,
             db_answers=None if answers_by_source is None else answers_by_source.get(key, {}),
         )
+        found.extend(load_stem_issues_for_source(
+            source,
+            md_path,
+            pdf_path if pdf_path.exists() else None,
+        ))
         all_issues.extend(found)
         flag = f"，{len(found)} 处待确认" if found else ""
         print(f"[scan] {source}: {len(rows)} 题{flag}", flush=True)
@@ -737,7 +787,7 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
         records, pruned = _prune_records_for_redo(records, jobs)
         if pruned:
             print(f"[redo] 清除 {pruned} 条旧 issue 记录（本次重扫的卷，旧快照已失效）", flush=True)
-    current = {(i["source"], i["group_order"], i["kind"]) for i in all_issues}
+    current = {_issue_key(i) for i in all_issues}
     scanned = {source for _jsonl, _rel_dir, source in jobs}
     closed = _auto_close_stale(
         records, current, scanned,
@@ -745,10 +795,10 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
         present=present_by_source,
     )
     # 老记录里 pdf 为空（早期版本路径算错）时，用这次算出来的补上
-    by_key = {(i["source"], i["group_order"], i["kind"]): i for i in all_issues}
+    by_key = {_issue_key(i): i for i in all_issues}
     filled = 0
     for rec in records:
-        key = (rec.get("source"), rec.get("group_order"), rec.get("kind"))
+        key = _issue_key(rec)
         fresh = by_key.get(key)
         if fresh and fresh.get("pdf") and not rec.get("pdf"):
             rec["pdf"] = fresh["pdf"]
@@ -768,11 +818,11 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
         if changed:
             print(f"[ok] 重新打开 {changed} 条（题目内容已变化，旧的「确认无问题」作废）",
                   flush=True)
-    known = {(i["source"], i["group_order"], i["kind"]) for i in records}
+    known = {_issue_key(i) for i in records}
     added = 0
     with ISSUES_FILE.open("a", encoding="utf-8") as f:
         for it in all_issues:
-            key = (it["source"], it["group_order"], it["kind"])
+            key = _issue_key(it)
             if key in known:
                 continue
             f.write(json.dumps(it, ensure_ascii=False) + "\n")
@@ -782,9 +832,10 @@ def run(subject: str, file: str | None = None, *, write: bool = True,
     # 只看「新增 0」会误以为全部解析正常。
     pending_by_source: dict[str, list] = {}
     for rec in records + [{"source": i["source"], "group_order": i["group_order"],
-                           "kind": i["kind"], "status": "pending"} for i in all_issues
-                          if (i["source"], i["group_order"], i["kind"]) not in
-                          {(r["source"], r["group_order"], r["kind"]) for r in records}]:
+                           "kind": i["kind"], "line_no": i.get("line_no"),
+                           "status": "pending"} for i in all_issues
+                          if _issue_key(i) not in
+                          {_issue_key(r) for r in records}]:
         if rec.get("status") == "pending" and rec.get("source") in scanned:
             pending_by_source.setdefault(rec["source"], []).append(
                 f"{rec['group_order']}({rec['kind']})")

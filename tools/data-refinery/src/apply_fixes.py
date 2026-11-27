@@ -29,7 +29,7 @@ from checkpoint import RefineryCheckpoint  # noqa: E402
 from config import RefineryConfig  # noqa: E402
 from db_loader import content_hash  # noqa: E402
 from image_rewrite import MissingImageError, rewrite_fields  # noqa: E402
-from manual_fix import mark_issue  # noqa: E402
+from review_queue import mark_issue  # noqa: E402
 from scope_filter import match_keyword  # noqa: E402
 from subject_codes import subject_code_for_parts  # noqa: E402
 
@@ -443,7 +443,7 @@ def _sync_applied_hashes(hash_map: dict, output_dir: Path,
 
     按 source 过滤：卷内 key 后不同卷的同一段内容各有 URL，不能串着改。
     """
-    from manual_fix import _read_jsonl, _write_jsonl
+    from review_queue import _read_jsonl, _write_jsonl
 
     for f in (output_dir / "manual_fixes").glob("*.jsonl"):
         rows = _read_jsonl(f)
@@ -468,7 +468,7 @@ def _sync_extracted_article(rec: dict, new_body: str, old_body: str | None,
     新正文后，publish 只会有一组、一个 URL（2026-11-22 Q21 实测）。
     """
     from chinese_material_doc import same_article
-    from manual_fix import _read_jsonl, _write_jsonl
+    from review_queue import _read_jsonl, _write_jsonl
 
     rel, src = rec.get("rel_path"), rec.get("source")
     if not rel or not src:
@@ -501,7 +501,7 @@ def _sync_extracted_article_groups(rec: dict, new_body: str,
     挪到 ``_post_material_text``（题后素材通道），publish 会再注回 material_text。
     """
     from chinese_material_doc import same_article
-    from manual_fix import _read_jsonl, _write_jsonl
+    from review_queue import _read_jsonl, _write_jsonl
 
     rel, src = rec.get("rel_path"), rec.get("source")
     if not rel or not src:
@@ -612,7 +612,7 @@ def _correct_article_doc(cur, rec, material_text: str, old_url: str,
     """
     from chinese_material_doc import write_material_doc
     from image_rewrite import _resolve_src
-    from manual_fix import _read_jsonl, _write_jsonl
+    from review_queue import _read_jsonl, _write_jsonl
 
     assets_dir = output_dir / "assets"
     md_images_dir = output_dir / "md" / Path(rec.get("rel_path", ""))
@@ -704,7 +704,7 @@ def _correct_article_doc(cur, rec, material_text: str, old_url: str,
 
 def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None,
                  output_dir: Path | None = None) -> str:
-    from manual_fix import looks_like_ui_echo, looks_like_wrapped_copy
+    from review_editor import looks_like_ui_echo, looks_like_wrapped_copy
 
     if looks_like_ui_echo(rec.get("content") or ""):
         return "跳过：内容疑似终端界面文字（不是真题），请重新补录"
@@ -742,8 +742,10 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
                     f"（question_id={qid or '—'}）· 题面不动")
         if qid is None:
             return "跳过：题库里找不到这道题，无法只补答案"
-        if not answer:
+        if not answer and not rec.get("clear_answer"):
             return "跳过：答案为空"
+        if rec.get("clear_answer"):
+            answer = ""              # 显式清空：绕过上面的空值拒绝
         cur.execute("UPDATE questions SET answer=%s WHERE id=%s", (answer, qid))
         _patch_extracted_answer(
             rec, answer, output_dir or RefineryConfig.from_env().output_dir,
@@ -1068,6 +1070,11 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
                 "INSERT IGNORE INTO paper_questions (paper_id, question_id, question_no, group_order) "
                 "VALUES (%s,%s,%s,%s)", (paper_id, qid, go, go))
 
+    if rec.get("clear_answer") and qid:
+        # answer 列是 TEXT NOT NULL：显式清空写空串。主 UPDATE 用
+        # COALESCE(NULLIF(%s,''), answer) 保旧值，不额外写一条就清不掉。
+        cur.execute("UPDATE questions SET answer='' WHERE id=%s", (qid,))
+
     _renumber(cur, paper_id)
     cur.execute("UPDATE exam_papers SET question_count=(SELECT COUNT(*) FROM paper_questions "
                 "WHERE paper_id=%s) WHERE id=%s", (paper_id, paper_id))
@@ -1224,8 +1231,8 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                            autocommit=False)
     total = 0
     previewed = 0
-    applied_keys: list[tuple[str, int, str]] = []
-    rejected_keys: list[tuple[str, int, str, str]] = []
+    applied_keys: list[tuple[str, int, int, str]] = []
+    rejected_keys: list[tuple[str, int | None, str, str]] = []
     applied_sources: dict[str, dict[str, set[int]]] = {}   # 学科目录 -> 卷名 -> 题号
     material_sources: dict[str, str] = {}                  # 卷名 → rel_path，需精确重发
     # 补题文件的 applied 标记必须在事务提交**之后**落盘。否则同一批里后面的记录
@@ -1262,7 +1269,8 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                         msg = f"跳过：题号非法（{rec.get('group_order')!r}），请重新补录"
                         print(f"[{str(rec.get('source'))[:26]}] 题?: {msg}", flush=True)
                         rejected_keys.append((str(rec.get("source", "?")),
-                                              str(rec.get("group_order", "?")),
+                                              rec.get("group_order"),
+                                              _go_int(rec.get("sub_no")) or 0,
                                               str(f), msg))
                         continue
                     # 每条记录一个 savepoint：单条异常/拒绝只回滚它自己，其它题照常入库。
@@ -1285,13 +1293,15 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
                         cur.execute("ROLLBACK TO SAVEPOINT apply_fix_record")
                         cur.execute("RELEASE SAVEPOINT apply_fix_record")
                         rejected_keys.append((rec["source"], rec["group_order"],
+                                              _go_int(rec.get("sub_no")) or 0,
                                               str(f), msg))
                         continue
                     cur.execute("RELEASE SAVEPOINT apply_fix_record")
                     rec["applied"] = True
                     rec["applied_at"] = datetime.now().isoformat(timespec="seconds")
                     total += 1
-                    applied_keys.append((rec["source"], go, str(f)))
+                    applied_keys.append((rec["source"], go,
+                                         _go_int(rec.get("sub_no")) or 0, str(f)))
                     if (rec.get("material_target") or rec.get("material_scope")
                             or "material_url" in rec
                             or (rec.get("material_text") or "").strip()):
@@ -1307,11 +1317,13 @@ def run(argv=None, *, via_pipeline: bool = False) -> int:
             for f, rows in written_files:
                 _write_jsonl(f, rows)
             # 状态回写在事务提交之后：写库失败时清单不能被误标成已解决
-            for source, go, f in applied_keys:
-                mark_issue(source, go, "resolved", note="已写入题库", fix_file=f)
-            for source, go, f, reason in rejected_keys:
+            for source, go, sub_no, f in applied_keys:
+                mark_issue(source, go, "resolved", note="已写入题库", fix_file=f,
+                           sub_no=sub_no, statuses={"pending", "recorded"})
+            for source, go, sub_no, f, reason in rejected_keys:
                 mark_issue(source, go, "pending", note=f"补录内容被拒：{reason}",
-                           fix_file=f)
+                           fix_file=f, sub_no=sub_no,
+                           statuses={"pending", "recorded"})
             print(f"\n[ok] 已写入 {total} 题", flush=True)
             _rescan(applied_sources)
             _publish_sources(material_sources)

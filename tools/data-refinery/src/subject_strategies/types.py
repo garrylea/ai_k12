@@ -49,6 +49,7 @@ class QuestionStrategy(Protocol):
     """一个学科的切题策略：四件事各科自己实现。"""
 
     code: str
+    supports_global_stem_chain: bool
 
     def is_stem(self, line: str) -> tuple[bool, int | None]:
         """该行是否是主题号，返回 (是, 题号)。"""

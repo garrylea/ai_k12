@@ -11,13 +11,16 @@ docs/superpowers/specs/2026-09-05-exam-question-splitter-design.md。
 
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pymysql
 
 from answer_merger import maybe_merge_answer_md
 from extract import _parse_json_object
-from question_splitter import is_junk_question, split_page, split_options
+from question_splitter import (
+    SplitPageResult, is_junk_question, split_page, split_page_result, split_options,
+)
 from question_labeler import (
     QuestionLabeler, LabeledQuestion, apply_lost_mark_choice_exemption,
     apply_material_sections_exemption, apply_material_subq_exemption,
@@ -26,6 +29,11 @@ from question_labeler import (
 from section_analyzer import analyze_sections
 from page_markers import strip_page_markers
 from qr_detect import strip_qr_images
+from stem_chain import (
+    StemIssue, collect_interval_candidates, collect_main_stem_probes,
+    select_stem_anchors, select_stem_chains, supports_global_stem_chain,
+)
+from stem_chain_arbiter import arbitrate_stem_ambiguities
 from subject_codes import subject_code_for_parts
 from subject_strategies import get_strategy
 
@@ -131,6 +139,140 @@ def _purge_labeling_issues_for_source(log_path: Path, source_name: str) -> None:
         log_path.write_text("\n".join(keep) + ("\n" if keep else ""), encoding="utf-8")
     except OSError as e:
         print(f"[WARN] 清理 labeling_issues 失败（{e}），旧记录可能残留", flush=True)
+
+
+def _purge_stem_chain_issues_for_source(log_path: Path, source_name: str) -> None:
+    """清掉该卷上一轮的题干链问题记录（保留其它卷、坏行原样保留）。"""
+    if not log_path.exists():
+        return
+    keep: list[str] = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            keep.append(line)
+            continue
+        if rec.get("source") != source_name:
+            keep.append(line)
+    log_path.write_text("\n".join(keep) + ("\n" if keep else ""), encoding="utf-8")
+
+
+def _write_stem_chain_issues(
+    log_path: Path, source_name: str, issues: list[StemIssue],
+) -> int:
+    """把本轮题干链问题快照追加到 jsonl，返回写入条数。"""
+    if not issues:
+        return 0
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as handle:
+        for issue in issues:
+            handle.write(json.dumps({
+                "source": source_name,
+                "code": issue.code,
+                "severity": issue.severity,
+                "message": issue.message,
+                "line_no": issue.line_no,
+                "excerpt": issue.excerpt,
+                "question_no": issue.question_no,
+                "interval_id": issue.interval_id,
+                "candidate_ids": list(issue.candidate_ids),
+            }, ensure_ascii=False) + "\n")
+    return len(issues)
+
+
+def _split_paper_questions(text, md_path, strategy, llm, allow_local_llm):
+    """切题前串起全局题干链：能力关闭走旧裸题号兜底，能力开启走链选择。"""
+    if not supports_global_stem_chain(strategy):
+        suspects: list[dict] = []
+        questions = split_page(text, md_path, strategy=strategy, suspects_out=suspects)
+        if suspects and llm is not None:
+            accepted = _judge_suspects(llm, suspects, md_path.stem)
+            if accepted:
+                questions = split_page(
+                    text, md_path, strategy=strategy, forced_stem_lines=accepted,
+                )
+        return SplitPageResult(questions=questions, answer_result=None), []
+
+    probes = collect_main_stem_probes(text, strategy)
+    anchors = select_stem_anchors(probes)
+    collection = collect_interval_candidates(text, strategy, anchors)
+    chain = select_stem_chains(collection, source_lines=text.split("\n"))
+    issues = list(chain.issues)
+    accepted = dict(chain.accepted)
+    resolved_intervals: set[str] = set()
+    if chain.ambiguities:
+        if allow_local_llm and llm is not None:
+            arbitration = arbitrate_stem_ambiguities(
+                llm, chain.ambiguities, md_path.stem,
+            )
+            accepted.update(arbitration.accepted)
+            issues.extend(arbitration.issues)
+            resolved_intervals = {
+                issue.interval_id
+                for issue in arbitration.issues
+                if issue.code == "stem_chain_llm_resolved" and issue.interval_id
+            }
+        else:
+            issues.extend(
+                StemIssue(
+                    code="stem_chain_llm_unresolved",
+                    severity="warning",
+                    message="存在歧义区间，但本地 LLM 未启用或不可用",
+                    line_no=min(
+                        (candidate.line_no for candidate in ambiguity.candidates),
+                        default=0,
+                    ) + 1,
+                    excerpt="",
+                    question_no=ambiguity.expected_numbers[0],
+                    interval_id=f"C{ambiguity.left_anchor}-{ambiguity.right_anchor}",
+                )
+                for ambiguity in chain.ambiguities
+            )
+
+    accepted_numbers = {number for number, _form, _recovery in accepted.values()}
+    issues = [
+        issue for issue in issues
+        if not (
+            issue.interval_id in resolved_intervals
+            and issue.code in (
+                "stem_chain_ambiguous",
+                "stem_chain_high_risk_recovery",
+                "stem_chain_gap",
+            )
+        )
+    ]
+    remaining_gaps = [
+        gap for gap in chain.gaps
+        if gap[1] not in accepted_numbers
+    ]
+    remaining_segments = [
+        segment for segment in chain.gap_segments
+        if any(number not in accepted_numbers for number in segment.missing_numbers)
+    ]
+    suppressed = [
+        (segment.line_start, segment.line_end)
+        for segment in remaining_segments
+        if segment.line_start is not None
+    ]
+    final_chain = replace(
+        chain,
+        accepted=accepted,
+        gaps=remaining_gaps,
+        gap_segments=remaining_segments,
+        issues=issues,
+    )
+    result = split_page_result(
+        text,
+        md_path,
+        strategy=strategy,
+        forced_stem_map=accepted,
+        consumed_lines=set(collection.consumed_lines),
+        suppressed_ranges=suppressed,
+        stem_chain_result=final_chain,
+    )
+    return result, issues
 
 
 # LLM 修复时出现过的占位/缺失说明（不是题目内容，绝不能入库）
@@ -743,15 +885,18 @@ def extract_questions_file(source, config, llm, fb_llm,
     # 4. 题号切分 + 答案对齐（一次扫描）
     # 材料归属（语文阅读材料写在题号之前、按小节归属到每道题）由学科策略决定，
     # 其它学科的策略 attach=False，行为不变。
-    suspects: list[dict] = []
-    questions = split_page(text, md_path, strategy=strategy, suspects_out=suspects)
-    # 裸题号兜底：规则没认、又没满足 4 条采纳条件的候选行，整卷一次交 LLM 复核；
-    # 模型说"是题"且题号 == 期望值的才采纳，重跑一遍切分把这几行强制当题号。
-    if suspects and llm is not None:
-        accepted = _judge_suspects(llm, suspects, md_path.stem)
-        if accepted:
-            questions = split_page(text, md_path, strategy=strategy,
-                                   forced_stem_lines=accepted)
+    stem_issues_log = extracted_dir.parent / "stem_chain_issues.jsonl"
+    _purge_stem_chain_issues_for_source(stem_issues_log, md_path.stem)
+
+    split_result, stem_issues = _split_paper_questions(
+        text,
+        md_path,
+        strategy,
+        llm,
+        allow_local_llm=(getattr(config, "llm_provider", None) == "local"),
+    )
+    questions = split_result.questions
+    _write_stem_chain_issues(stem_issues_log, md_path.stem, stem_issues)
     # 卷首页脚/署名会被切题器当成一道题，占掉真实题号（北师大实验 2024：题4）
     kept = [q for q in questions if not is_junk_question(q)]
     if len(kept) != len(questions):

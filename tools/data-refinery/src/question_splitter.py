@@ -227,6 +227,38 @@ def _bare_stem_candidate(line: str) -> tuple[int, str] | None:
     return n, rest
 
 
+def ambiguous_stem_candidate(line: str) -> tuple[int, str] | None:
+    m = _AMBIGUOUS_NUM_RE.match(line)
+    if not m:
+        return None
+    number = int(m.group(1))
+    return number, _strip_main_stem_prefix(line)
+
+
+def bare_stem_candidate(line: str) -> tuple[int, str] | None:
+    return _bare_stem_candidate(line)
+
+
+def orphan_stem_candidate(line: str) -> tuple[int, str] | None:
+    m = _ORPHAN_STEM_DOT_RE.match(line)
+    if not m:
+        return None
+    rest = line[m.end():].strip()
+    return (rest,) if rest else None
+
+
+def split_glued_next_stem(line: str, expected_no: int):
+    return _split_glued_next_stem(line, expected_no)
+
+
+def is_junk_stem_line(line: str) -> bool:
+    return len(line.strip()) <= 40 and bool(_JUNK_QUESTION_RE.search(line))
+
+
+def is_notice_stem_line(line: str) -> bool:
+    return bool(_NOTICE_RE.search(line))
+
+
 def _strip_bare_prefix(line: str) -> str:
     """剥掉行首裸题号前缀（`11 在平面…` -> `在平面…`），保留 markdown 标题符号已 lstrip。"""
     m = _BARE_STEM_RE.match(line)
@@ -904,6 +936,9 @@ def is_junk_question(q: RawQuestion) -> bool:
 def _split_questions_only(text: str, md_path: Path,
                           strategy=None, *,
                           forced_stem_lines: set[int] | None = None,
+                          forced_stem_map: dict[int, tuple[int, str, str]] | None = None,
+                          consumed_lines: set[int] | None = None,
+                          suppressed_ranges: list[tuple[int, int]] | None = None,
                           suspects_out: list | None = None) -> list[RawQuestion]:
     """按题号切分试卷 MD 并对齐答案，返回 RawQuestion 列表。
 
@@ -916,6 +951,14 @@ def _split_questions_only(text: str, md_path: Path,
         forced_stem_lines: 行索引集合（0 基，按 split('\n')）。这些行是 LLM 复核后
             认定的裸题号（`11 xxx` 这种 OCR 丢了点），切题时强制当题号处理。
             仅供 extract 第二遍调用；通常调用方不传。
+        forced_stem_map: 第二遍切题的强制题号表 `{行索引: (题号, form, recovery)}`。
+            提供的行强制当题号并绕过所有局部纠正（卷末小号合并、十位错认、
+            卷首署名/重复题号护栏），优先级最高。form 为 'inline_glued' 时
+            走行内粘连拆分分支，其余 form 在 is_stem 位置直接采纳。
+        consumed_lines: chain 已消费的行内粘连行索引；仅在 forced_stem_map 缺省时
+            用于防止重复拆分。有 map 时行内粘连完全由 map 控制。
+        suppressed_ranges: 未确认 gap 的行区间 [(start, end)]，这些行整体跳过，
+            绝不并进上一题。
         suspects_out: 若提供，规则没认、又没满足裸题号采纳条件的候选行会追加进去，
             供调用方批量交 LLM 复核。第一遍切分时传；第二遍（带 forced）不传。
 
@@ -926,6 +969,14 @@ def _split_questions_only(text: str, md_path: Path,
         from subject_strategies import get_strategy
         strategy = get_strategy("generic")
     policy = strategy.material_policy()
+    # 第二遍切题：未确认 gap 的行整体跳过；chain 已消费的行内粘连行仅在没有
+    # forced map 时用于防止重复拆分（有 map 时完全由 map 控制）。
+    suppressed = {
+        i
+        for start, end in (suppressed_ranges or [])
+        for i in range(start, end + 1)
+    }
+    consumed = set(consumed_lines or ())
     questions: list[RawQuestion] = []
     current: RawQuestion | None = None
     current_group_id: str | None = None
@@ -980,6 +1031,15 @@ def _split_questions_only(text: str, md_path: Path,
         if is_date_trap(line):
             continue
 
+        # 未确认 gap 的行整行跳过：既不建题，也绝不并进上一题。
+        if i in suppressed:
+            continue
+
+        # 强制题号表：在行首算一次，供下面的行内粘连分支和 is_stem 决策共用。
+        # 注意真正的「强制采纳」（ok, n = True, forced[0]）仍放在 is_answer_keyword
+        # 与各标题/边界之后，保证这些结构行优先于 forced。
+        forced = (forced_stem_map or {}).get(i)
+
         part_ok, part_kind = is_part_header(line)
         if part_ok:
             # 卷内部分标题（'## 第二部分 非选择题'）：关闭当前题、丢弃该行，
@@ -1019,8 +1079,12 @@ def _split_questions_only(text: str, md_path: Path,
         # 题干区行内粘连（MinerU 把选项行与下一题合并成一行）：
         # '…6层以下楼房。16.根据材料三…'。不拆的话整段被吞进上一题的选项 D，
         # 题16 直接消失（大兴 2024 实测）。只在题号 == 上一题+1 时生效。
-        if not ok and current is not None:
-            glued = _split_glued_next_stem(line, current.group_order + 1)
+        if not ok and current is not None and (
+            (forced is not None and forced[1] == "inline_glued")
+            or (forced_stem_map is None and i not in consumed)
+        ):
+            expected = forced[0] if forced is not None else current.group_order + 1
+            glued = _split_glued_next_stem(line, expected)
             if glued is not None:
                 head, tail_no, tail = glued
                 body, inline_gid = split_inline_group_header(head)
@@ -1081,7 +1145,13 @@ def _split_questions_only(text: str, md_path: Path,
             break
         # 题号判定走学科策略（`is_stem`），内核不再自己判——
         # 各科的 is_stem 目前都委托 is_main_stem，行为等价。
-        ok, n = strategy.is_stem(line)
+        # 第二遍带 forced map 时，非 inline_glued 行直接采纳强制题号，绕过规则判定。
+        form = None
+        if forced is not None and forced[1] != "inline_glued":
+            ok, n = True, forced[0]
+            form = forced[1]
+        else:
+            ok, n = strategy.is_stem(line)
         accepted_bare = False
         if not ok and current_part_kind == 'choice':
             # 状态机：选择题区行首 '数字.数字'（题号+年份 '6.2025年' 或疑似小数
@@ -1161,47 +1231,52 @@ def _split_questions_only(text: str, md_path: Path,
                 continue
 
         if ok:
-            # 卷首页脚/署名可能带题号（「4. 命题人: 李岩」「第 3 页 共 8 页」）。
-            # 这类行会先占掉题号，随后该条被 is_junk_question 删掉 → 留下缺号；
-            # 真正的第 4 题又被「重复题号」跳过（2026-11-01 北师大实验实测）。
-            if len(line.strip()) <= 40 and _JUNK_QUESTION_RE.search(line):
-                continue
-            # 作文题后的「要求：1. 文体不限 2. 字数…」会被 is_main_stem 认成
-            # 1/2/3/4，拆出来就是 4 道没有题干的空题（北京五中 2024 实测）。
-            # 只在「卷末大题（≥20）之后回到个位数」时合并——MinerU 输出顺序错乱
-            # 时也会有 18→14 这类回退（汇文 2024 题18 排在题14 前面），那是真题，
-            # 不能并进上一题。
-            if last_stem_no >= 20 and n <= 5:
-                if current is not None:
-                    current.content += "\n" + line
-                continue
-            # 卷首考试说明（题1 之前）：直接丢弃，不占题号
-            if last_stem_no == 0 and _NOTICE_RE.search(line):
-                continue
-            # 重复题号：答案区残留或 OCR 重复（同一题号出现两次）。直接跳过，
-            # 保留第一次出现的真题。**不能顺延**：OCR 把大段内容识别成重复题号时，
-            # 顺延会连锁撞上后面的真实题号，题号一路膨胀（一零一 2024 从 4 溢到 29）。
-            if n in seen_stems:
-                repair = getattr(strategy, "repair_duplicate_stem", None)
-                repaired = (
-                    repair(n, last_stem_no, current_group_id, current, line)
-                    if callable(repair) else None
-                )
-                if repaired is not None and repaired not in seen_stems:
-                    print(f"[WARN] 题号重复（{n}），按完形空格标记恢复为 {repaired}",
-                          flush=True)
-                    n = repaired
-                else:
-                    if not warned_dup:
-                        print(f"[WARN] 题号重复（{n} 起），重复段已跳过；缺的题请看缺号告警",
-                              flush=True)
-                        warned_dup = True
+            if not forced:
+                # 卷首页脚/署名可能带题号（「4. 命题人: 李岩」「第 3 页 共 8 页」）。
+                # 这类行会先占掉题号，随后该条被 is_junk_question 删掉 → 留下缺号；
+                # 真正的第 4 题又被「重复题号」跳过（2026-11-01 北师大实验实测）。
+                if len(line.strip()) <= 40 and _JUNK_QUESTION_RE.search(line):
                     continue
+                # 作文题后的「要求：1. 文体不限 2. 字数…」会被 is_main_stem 认成
+                # 1/2/3/4，拆出来就是 4 道没有题干的空题（北京五中 2024 实测）。
+                # 只在「卷末大题（≥20）之后回到个位数」时合并——MinerU 输出顺序错乱
+                # 时也会有 18→14 这类回退（汇文 2024 题18 排在题14 前面），那是真题，
+                # 不能并进上一题。
+                if last_stem_no >= 20 and n <= 5:
+                    if current is not None:
+                        current.content += "\n" + line
+                    continue
+                # 卷首考试说明（题1 之前）：直接丢弃，不占题号
+                if last_stem_no == 0 and _NOTICE_RE.search(line):
+                    continue
+                # 重复题号：答案区残留或 OCR 重复（同一题号出现两次）。直接跳过，
+                # 保留第一次出现的真题。**不能顺延**：OCR 把大段内容识别成重复题号时，
+                # 顺延会连锁撞上后面的真实题号，题号一路膨胀（一零一 2024 从 4 溢到 29）。
+                if n in seen_stems:
+                    repair = getattr(strategy, "repair_duplicate_stem", None)
+                    repaired = (
+                        repair(n, last_stem_no, current_group_id, current, line)
+                        if callable(repair) else None
+                    )
+                    if repaired is not None and repaired not in seen_stems:
+                        print(f"[WARN] 题号重复（{n}），按完形空格标记恢复为 {repaired}",
+                              flush=True)
+                        n = repaired
+                    else:
+                        if not warned_dup:
+                            print(f"[WARN] 题号重复（{n} 起），重复段已跳过；缺的题请看缺号告警",
+                                  flush=True)
+                            warned_dup = True
+                        continue
+            else:
+                # 强制题号优先于所有局部护栏；冲突必须显式报错，不能静默跳过。
+                if n in seen_stems:
+                    raise ValueError(f"forced stem duplicate at line {i + 1}: {n}")
             seen_stems.add(n)
             # OCR 十位错认：22 之后写成 33、再往后又是 24 → 33 实际是 23
             # （清华附中 2024 题23 实测）。只在前跳一位且个位吻合时纠正，
-            # 真跳号（试卷本身缺题）不动，留给缺号告警。
-            if last_stem_no and n > last_stem_no + 1:
+            # 真跳号（试卷本身缺题）不动，留给缺号告警。forced 行跳过此纠正。
+            if not forced and last_stem_no and n > last_stem_no + 1:
                 if n % 10 == (last_stem_no + 1) % 10:
                     print(f"[WARN] 题号疑似 OCR 错认：{last_stem_no} 之后出现 {n}，"
                           f"按 {last_stem_no + 1} 处理", flush=True)
@@ -1218,8 +1293,14 @@ def _split_questions_only(text: str, md_path: Path,
                 q_score = current_unified_score
             else:
                 q_score = None
-            content = _strip_bare_prefix(line) if accepted_bare \
-                else _strip_main_stem_prefix(line)
+            if forced is not None and form == "bare":
+                content = _strip_bare_prefix(line)
+            elif forced is not None:
+                content = _strip_main_stem_prefix(line)
+            elif accepted_bare:
+                content = _strip_bare_prefix(line)
+            else:
+                content = _strip_main_stem_prefix(line)
             material = _material_for_new_stem() if policy.attach else None
             if policy.attach and between_material:
                 extra = "\n".join(between_material).strip()
@@ -1295,6 +1376,7 @@ def _split_questions_only(text: str, md_path: Path,
 class SplitPageResult:
     questions: list[RawQuestion]
     answer_result: AnswerParseResult | None
+    stem_chain_result: object | None = None
 
 
 def _find_answer_boundary(lines: list[str]) -> int | None:
@@ -1328,7 +1410,11 @@ def split_page_result(
     strategy=None,
     *,
     forced_stem_lines: set[int] | None = None,
+    forced_stem_map: dict[int, tuple[int, str, str]] | None = None,
+    consumed_lines: set[int] | None = None,
+    suppressed_ranges: list[tuple[int, int]] | None = None,
     suspects_out: list | None = None,
+    stem_chain_result: object | None = None,
 ) -> SplitPageResult:
     """切分题干后，把答案区整体交给策略的块级解析器。"""
     if strategy is None:
@@ -1354,6 +1440,9 @@ def split_page_result(
         md_path,
         strategy,
         forced_stem_lines=forced_stem_lines,
+        forced_stem_map=forced_stem_map,
+        consumed_lines=consumed_lines,
+        suppressed_ranges=suppressed_ranges,
         suspects_out=suspects_out,
     )
     answer_result = None
@@ -1374,7 +1463,11 @@ def split_page_result(
             question.answer = "\n".join(by_number.get(question.group_order, []))
 
     questions = _apply_strategy_finalizers(questions, lines, md_path, strategy)
-    return SplitPageResult(questions=questions, answer_result=answer_result)
+    return SplitPageResult(
+        questions=questions,
+        answer_result=answer_result,
+        stem_chain_result=stem_chain_result,
+    )
 
 
 def split_page(
@@ -1383,6 +1476,9 @@ def split_page(
     strategy=None,
     *,
     forced_stem_lines: set[int] | None = None,
+    forced_stem_map: dict[int, tuple[int, str, str]] | None = None,
+    consumed_lines: set[int] | None = None,
+    suppressed_ranges: list[tuple[int, int]] | None = None,
     suspects_out: list | None = None,
 ) -> list[RawQuestion]:
     return split_page_result(
@@ -1390,5 +1486,8 @@ def split_page(
         md_path,
         strategy,
         forced_stem_lines=forced_stem_lines,
+        forced_stem_map=forced_stem_map,
+        consumed_lines=consumed_lines,
+        suppressed_ranges=suppressed_ranges,
         suspects_out=suspects_out,
     ).questions
