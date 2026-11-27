@@ -983,3 +983,16 @@ def test_english_cloze_exemption_requires_options_and_stem_claim():
 
     no_material = _cloze_labeled(_OPTIONS_4, material=None)
     assert apply_english_cloze_exemption([no_material], "english") == 0
+
+
+def test_labeled_question_from_raw_keeps_approach():
+    raw = RawQuestion(
+        group_order=1,
+        group_id=None,
+        content="题干",
+        answer="C",
+        approach="先判断函数类型。",
+        explanation="完整过程。",
+    )
+    labeled = LabeledQuestion.from_raw(raw)
+    assert labeled.approach == "先判断函数类型。"

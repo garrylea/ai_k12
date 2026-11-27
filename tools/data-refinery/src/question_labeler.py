@@ -424,7 +424,7 @@ def _validate_item(item: dict, q: RawQuestion, subject: str = "") -> list[str]:
 class LabeledQuestion:
     """标注后的题（RawQuestion 字段 + LLM 标注 + 完整性检测/修复）。
 
-    Python 切的（保留）：group_order/group_id/score/answer/explanation
+    Python 切的（保留）：group_order/group_id/score/answer/approach/explanation
     LLM 标注：type/difficulty/knowledge_points/suggested_new_kps
     完整性兜底：is_complete/completeness_issues/regenerated（有缺陷时 LLM 修复原题）
     content/options/material_text：由 question_extract 组装时 split_options 或 regenerated 填
@@ -434,6 +434,7 @@ class LabeledQuestion:
     content: str                        # RawQuestion 原文（完整，含选项/材料）
     answer: str                         # Python 对齐的答案
     explanation: str | None             # Python 对齐的解析
+    approach: str = ""                  # Python 对齐的解题思路
     score: int | None = None            # 每题满分
     sub_no: int = 0
     type: str = ""
@@ -459,6 +460,7 @@ class LabeledQuestion:
             group_id=q.group_id,
             content=q.content,
             answer=q.answer,
+            approach=q.approach,
             explanation=q.explanation,
             score=q.score,
             sub_no=q.sub_no,
