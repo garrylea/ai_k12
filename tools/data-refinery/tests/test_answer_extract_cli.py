@@ -39,6 +39,23 @@ def test_render_doc_strips_markdown_heading_prefix_from_answer():
     assert parsed.items[0].answer == "评分参考\n正文"
 
 
+def test_render_doc_includes_approach_and_explanation_fields():
+    doc = render_answer_doc(
+        "卷",
+        [ExtractedAnswer(
+            no=1,
+            answer="C",
+            approach="先观察图象。",
+            explanation="所以选 C。",
+        )],
+    )
+    parsed = parse_answer_doc(doc)
+    item = parsed.items[0]
+    assert item.answer == "C"
+    assert item.approach == "先观察图象。"
+    assert item.explanation == "所以选 C。"
+
+
 def test_find_paper_md_unique_hit(tmp_path: Path):
     md = tmp_path / "语文/初中/second/2025/语文-初三(下)-202507-海淀-模拟二-试卷"
     md.mkdir(parents=True)

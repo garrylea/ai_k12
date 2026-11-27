@@ -278,3 +278,17 @@ def test_markdown_section_heading_not_appended_to_previous_answer():
     assert answers[15].answer == "①甲\n②乙"
     assert "名著阅读" not in answers[15].answer
     assert answers[16].answer.startswith("简·爱")
+
+
+def test_chinese_answer_headings_are_split_before_scoring_notes():
+    text = """# 语文试卷答案及评分参考
+
+1.【答案】C（2 分）
+【分析】先看上下文。
+【详解】结合语境可知 C。
+"""
+    got = _case(text)
+    q1 = next(item for item in got if item.no == 1)
+    assert q1.answer == "C"
+    assert q1.approach == "先看上下文。"
+    assert "结合语境可知 C。" in q1.explanation

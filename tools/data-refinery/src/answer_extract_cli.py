@@ -85,6 +85,11 @@ def render_answer_doc(title: str, answers) -> str:
         parts.append(f"## {item.no}")
         parts.append("答案：" + lines[0])
         parts.extend(lines[1:])
+        if (item.approach or "").strip():
+            parts.append("思路：" + item.approach.strip().split("\n")[0])
+            for ln in item.approach.strip().split("\n")[1:]:
+                if ln.strip():
+                    parts.append(ln.rstrip())
         if (item.explanation or "").strip():
             parts.append("解析：" + item.explanation.strip().split("\n")[0])
             for ln in item.explanation.strip().split("\n")[1:]:

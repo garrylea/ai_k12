@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 from answer_blocks import AnswerLine, AnswerParseResult, AnswerQuestion
+from answer_sections import merge_old_then_new, split_answer_sections
 from page_markers import is_page_marker_line
 from question_splitter import (
     is_answer_keyword,
@@ -424,13 +425,29 @@ def extract_chinese_answers(text: str, md_path: Path) -> list[ExtractedAnswer]:
         if not raw_answer:
             results.append(ExtractedAnswer(no=no, issues=[f"第 {no} 题答案段为空"]))
             continue
-        answer, explanation = _extract_scoring_notes(raw_answer)
+        sections = split_answer_sections(raw_answer)
+        if sections.issues:
+            results.append(ExtractedAnswer(
+                no=no,
+                answer=raw_answer,
+                issues=[
+                    f"第 {no} 题题解分段无法安全拆分："
+                    f"{', '.join(sections.issues)}"
+                ],
+            ))
+            continue
+
+        answer, scoring_explanation = _extract_scoring_notes(sections.answer)
+        explanation = merge_old_then_new(
+            scoring_explanation, sections.explanation,
+        ) or ""
         issues: list[str] = []
         if not answer:
             issues.append(f"第 {no} 题剥离评分说明后答案为空，已保留原文")
         results.append(ExtractedAnswer(
             no=no,
             answer=answer,
+            approach=sections.approach,
             explanation=explanation,
             issues=issues,
         ))
