@@ -97,8 +97,9 @@ _CANONICAL_IMG_PREFIXES = (
 )
 
 
-def assert_materialized_images(*, content=None, answer=None, explanation=None,
-                               material_text=None, options=None, context: str = "") -> None:
+def assert_materialized_images(*, content=None, answer=None, approach=None,
+                               explanation=None, material_text=None, options=None,
+                               context: str = "") -> None:
     """入库前护栏：题干/答案/解析/材料/选项里的图片引用必须是物化后的规范路径。
 
     出现 ``images/xxx.jpg`` 这类 md 相对路径，说明这条数据绕过了 publish（例如人工
@@ -106,7 +107,10 @@ def assert_materialized_images(*, content=None, answer=None, explanation=None,
     学生完全看不到图（2026-10-31 北师大实验第 3/4 题事故）。宁可整条拒收，也不要
     静默入库。
     """
-    texts = [content or "", answer or "", explanation or "", material_text or ""]
+    texts = [
+        content or "", answer or "", approach or "",
+        explanation or "", material_text or "",
+    ]
     for opt in options or []:
         texts.append(opt.get("text") or "")
     for text in texts:
@@ -1369,6 +1373,7 @@ class DbLoader:
             assert_materialized_images(
                 content=content,
                 answer=q.get("answer"),
+                approach=q.get("approach"),
                 explanation=q.get("explanation"),
                 material_text=q.get("material_text"),
                 options=opts,

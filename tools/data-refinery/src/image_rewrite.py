@@ -154,6 +154,7 @@ def rewrite_fields(
     *,
     content: str | None,
     answer: str | None,
+    approach: str | None,
     explanation: str | None,
     material_text: str | None,
     options: list[dict] | None,
@@ -161,13 +162,13 @@ def rewrite_fields(
     asset_store: AssetStore,
     asset_prefix: str,
     strict: bool = False,
-) -> tuple[str, str, str | None, str | None, list[dict] | None, list[str]]:
-    """改写题干(stem_NN)/答案(answer_NN)/解析(explain_NN)/材料(fig_NN)/选项(opt_{label})。
+) -> tuple[str, str, str | None, str | None, str | None, list[dict] | None, list[str]]:
+    """改写题干/答案/思路/解析/材料/选项中的图片。
 
     **answer 必须一起改写**：答案里的图（实验读数截图等）在自评视图与结果页会展示，
     漏改就是前端 404（2026-10-31 实测全库 16 题受影响）。
 
-    返回 ``(content, answer, explanation, material_text, options, materialized)``。
+    返回 ``(content, answer, approach, explanation, material_text, options, materialized)``。
     不依赖 ``ExamQuestion``，供 publish 与人工补题落库共用。
     """
     materialized: list[str] = []
@@ -183,6 +184,14 @@ def rewrite_fields(
         new_answer, m, _ = _rewrite_text(
             new_answer, md_images_dir, asset_store, asset_prefix,
             lambda i, ext: f"answer_{i:02d}{ext}", strict=strict,
+        )
+        materialized += m
+
+    new_approach = approach
+    if new_approach:
+        new_approach, m, _ = _rewrite_text(
+            new_approach, md_images_dir, asset_store, asset_prefix,
+            lambda i, ext: f"approach_{i:02d}{ext}", strict=strict,
         )
         materialized += m
 
@@ -220,7 +229,10 @@ def rewrite_fields(
                     opt["image_url"] = m[0]
                 materialized += m
 
-    return new_content, new_answer, new_exp, new_material, options, materialized
+    return (
+        new_content, new_answer, new_approach, new_exp,
+        new_material, options, materialized,
+    )
 
 
 def rewrite_question(
@@ -232,9 +244,18 @@ def rewrite_question(
     strict: bool = False,
 ) -> tuple[ExamQuestion, list[str]]:
     """按 ExamQuestion 字段改写（薄封装，保持既有调用点签名）。"""
-    q.content, q.answer, q.explanation, q.material_text, q.options, materialized = rewrite_fields(
+    (
+        q.content,
+        q.answer,
+        q.approach,
+        q.explanation,
+        q.material_text,
+        q.options,
+        materialized,
+    ) = rewrite_fields(
         content=q.content,
         answer=q.answer,
+        approach=q.approach,
         explanation=q.explanation,
         material_text=q.material_text,
         options=q.options,

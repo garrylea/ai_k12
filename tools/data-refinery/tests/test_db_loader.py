@@ -1078,6 +1078,13 @@ def test_guard_rejects_images_in_answer_and_options():
         assert_materialized_images(options=[{"label": "A", "text": "![](images/o.jpg)"}])
 
 
+def test_guard_rejects_images_in_approach():
+    from db_loader import assert_materialized_images
+
+    with pytest.raises(ValueError, match="图片引用未物化"):
+        assert_materialized_images(approach="![](images/approach.jpg)")
+
+
 def test_guard_accepts_materialized_paths():
     from db_loader import assert_materialized_images
 

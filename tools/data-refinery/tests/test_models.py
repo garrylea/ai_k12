@@ -96,3 +96,17 @@ def test_exam_question_keeps_knowledge_points_through_model_dump():
 def test_exam_question_knowledge_points_optional():
     q = ExamQuestion(subject_id="math", type="choice", difficulty=2, content="x", answer="1")
     assert q.knowledge_points is None
+
+
+def test_exam_question_keeps_approach_through_model_dump():
+    q = ExamQuestion(
+        subject_id="math",
+        type="choice",
+        difficulty=2,
+        content="题干",
+        answer="C",
+        approach="先判断函数类型。",
+        explanation="完整过程。",
+    )
+    dumped = q.model_dump(mode="json")
+    assert dumped["approach"] == "先判断函数类型。"

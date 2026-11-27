@@ -69,6 +69,42 @@ class TestPublishCli:
 
         assert "Published: 1" in capsys.readouterr().out
 
+    def test_publish_keeps_approach_and_materializes_image(self, tmp_path):
+        out = tmp_path / "out"
+        ext = out / "extracted" / "数学" / "试卷"
+        ext.mkdir(parents=True)
+        image = out / "md" / "数学" / "试卷" / "images" / "a.jpg"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"\xff\xd8\xff" + b"approach")
+        row = {
+            "subject_id": "math",
+            "type": "choice",
+            "difficulty": 2,
+            "content": "题干",
+            "answer": "C",
+            "approach": "先看图 ![](images/a.jpg)",
+            "explanation": "详细过程",
+        }
+        (ext / "试卷.jsonl").write_text(
+            json.dumps(row, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+        with patch("publish_cli.RefineryConfig") as mock_config:
+            mock_config.from_env.return_value = MagicMock(output_dir=out)
+            main([
+                "--input-dir", str(out / "extracted"),
+                "--output-dir", str(out / "published"),
+            ])
+
+        got = json.loads(
+            (out / "published" / "数学" / "试卷" / "试卷.jsonl")
+            .read_text(encoding="utf-8")
+            .strip()
+        )
+        assert got["approach"].startswith("先看图 ![](questions/math/")
+        assert got["explanation"] == "详细过程"
+
     def test_changed_extracted_is_republished(self, tmp_path, capsys):
         """版本没变但 extracted 改了（重抽/补题回写）也必须重发，否则题目/题型停在旧状态。"""
         out = _setup(tmp_path)

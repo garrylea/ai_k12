@@ -36,7 +36,9 @@ from subject_codes import subject_code_for_path as _subject_code_for
 PUBLISH_VERSION = 3
 
 # 试卷题干/材料/答案/解析里可能残留的页码标记（extract 已洗，这里兜底）
-_QUESTION_TEXT_FIELDS = ("content", "material_text", "answer", "explanation")
+_QUESTION_TEXT_FIELDS = (
+    "content", "material_text", "answer", "approach", "explanation",
+)
 
 
 def _strip_page_markers_from_question(item: ExamQuestion, rel: Path) -> None:

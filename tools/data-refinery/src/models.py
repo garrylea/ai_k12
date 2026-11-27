@@ -16,6 +16,7 @@ class ExamQuestion(BaseModel):
     content: str
     options: list[dict] | None = None
     answer: str
+    approach: str | None = None
     explanation: str | None = None
     material_text: str | None = None
     material_url: str | None = None

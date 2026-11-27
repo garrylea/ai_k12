@@ -987,9 +987,18 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
         code = subject_code_for_parts(Path(rec["rel_path"]).parts, default="")
         prefix = f"questions/{code}/{_source_key(rec)}/{go}"
         try:
-            content, answer, _exp, material_text, options, _mat = rewrite_fields(
+            (
+                content,
+                answer,
+                _approach,
+                _exp,
+                material_text,
+                options,
+                _mat,
+            ) = rewrite_fields(
                 content=content,
                 answer=answer,
+                approach=None,
                 explanation=None,
                 material_text=material_text,
                 options=options,

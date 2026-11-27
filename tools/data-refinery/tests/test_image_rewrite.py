@@ -61,6 +61,19 @@ class TestRewriteQuestion:
 
         assert "questions/math/1024/explain_01.jpg" in q.explanation
 
+    def test_approach_image(self, tmp_path):
+        md_dir = tmp_path / "md" / "book"
+        _make_image(md_dir, "ap.jpg")
+        store = LocalAssetStore(tmp_path / "assets")
+        q = ExamQuestion(
+            subject_id="math", type="short_answer", difficulty=1,
+            content="题干", answer="1", approach="先看 ![](images/ap.jpg)",
+        )
+
+        rewrite_question(q, md_dir, store, "questions/math/1024")
+
+        assert "questions/math/1024/approach_01.jpg" in q.approach
+
     def test_no_images_unchanged(self, tmp_path):
         store = LocalAssetStore(tmp_path / "assets")
         q = ExamQuestion(
