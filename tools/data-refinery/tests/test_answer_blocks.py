@@ -374,10 +374,11 @@ def test_decimal_line_does_not_truncate_previous_answer():
         ],
         first_line_no=1,
     )
-    got = {fragment.question_no: fragment.text for fragment in result.fragments}
-    assert "8.4 (km)" in got[25]
-    assert "小问 2 详解" in got[25]
-    assert "(1) 1" in got[26]
+    got = {fragment.question_no: fragment for fragment in result.fragments}
+    assert got[25].text == "(1) ① a = -1/15 ; ② 8.4 km"
+    assert "8.4 (km)" in got[25].explanation
+    assert "小问 2 详解" in got[25].explanation
+    assert "(1) 1" in got[26].text
 
 
 def test_answer_guard_stays_after_stem_chain_landing():
@@ -393,6 +394,35 @@ def test_answer_guard_stays_after_stem_chain_landing():
         [AnswerQuestion(no=25, group_id=None), AnswerQuestion(no=26, group_id=None)],
         first_line_no=1,
     )
-    got = {fragment.question_no: fragment.text for fragment in result.fragments}
-    assert "11.4 - 3 = 8.4" in got[25]
+    got = {fragment.question_no: fragment for fragment in result.fragments}
+    assert got[25].text == "(1) ① a = -1/15 ; ② 8.4 km"
+    assert "11.4 - 3 = 8.4" in got[25].explanation
     assert 11 not in got
+
+
+def test_answer_region_splits_embedded_sections_after_number_assignment():
+    result = parse_answer_region(
+        [
+            AnswerLine(1, "1. 【答案】C"),
+            AnswerLine(2, "【分析】先配方。"),
+            AnswerLine(3, "【详解】因此顶点为 (1, 2)。"),
+            AnswerLine(4, "2. B"),
+        ],
+        [AnswerQuestion(no=1, group_id=None), AnswerQuestion(no=2, group_id=None)],
+        first_line_no=1,
+    )
+    q1 = next(fragment for fragment in result.fragments if fragment.question_no == 1)
+    assert q1.text == "C"
+    assert q1.approach == "先配方。"
+    assert q1.explanation == "因此顶点为 (1, 2)。"
+    assert not any(issue.question_no == 1 for issue in result.issues)
+
+
+def test_answer_region_skips_multiquestion_contamination():
+    result = parse_answer_region(
+        [AnswerLine(1, "1. 答案：A\n解析：第一题\n2. 答案：B")],
+        [AnswerQuestion(no=1, group_id=None)],
+        first_line_no=1,
+    )
+    assert not any(fragment.question_no == 1 for fragment in result.fragments)
+    assert any(issue.code == "answer_sections_ambiguous" for issue in result.issues)

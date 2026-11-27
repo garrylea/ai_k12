@@ -38,6 +38,8 @@ class AnswerFragment:
     block_kind: str
     line_start: int
     line_end: int
+    approach: str = ""
+    explanation: str = ""
 
 
 @dataclass(frozen=True)

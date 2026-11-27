@@ -1,6 +1,7 @@
 """答案区编排：块解析、首套答案优先与完整覆盖校验。"""
 
 import re
+from dataclasses import replace
 
 from answer_blocks import (
     AnswerBlock,
@@ -16,6 +17,7 @@ from answer_blocks import (
     prepare_answer_lines,
     split_answer_blocks,
 )
+from answer_sections import split_answer_sections
 
 
 def _group_numbers(
@@ -134,6 +136,31 @@ def _duplicate_issue(
     )
 
 
+def _split_fragment(
+    fragment: AnswerFragment,
+) -> tuple[AnswerFragment | None, list[AnswerIssue]]:
+    sections = split_answer_sections(fragment.text)
+    if sections.issues:
+        return None, [AnswerIssue(
+            code="answer_sections_ambiguous",
+            severity="error",
+            message=(
+                f"第 {fragment.question_no} 题题解分段无法安全拆分："
+                f"{', '.join(sections.issues)}"
+            ),
+            question_no=fragment.question_no,
+            line_start=fragment.line_start,
+            line_end=fragment.line_end,
+            excerpt=fragment.text[:200],
+        )]
+    return replace(
+        fragment,
+        text=sections.answer,
+        approach=sections.approach,
+        explanation=sections.explanation,
+    ), []
+
+
 def parse_answer_region(
     lines: list[AnswerLine],
     questions: list[AnswerQuestion],
@@ -156,6 +183,11 @@ def parse_answer_region(
         )
         issues.extend(block_issues)
         for fragment in block_fragments:
+            normalized, split_issues = _split_fragment(fragment)
+            issues.extend(split_issues)
+            if normalized is None:
+                continue
+            fragment = normalized
             if fragment.question_no in assigned:
                 issues.append(_duplicate_issue(fragment))
                 continue
