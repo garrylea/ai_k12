@@ -651,3 +651,37 @@ def test_subquestion_row_does_not_report_starts_at_2(tmp_path):
              "type": "short_answer"}]
     issues = R.scan_paper("卷A", Path("道法/x/卷A"), md, rows, None, [])
     assert not [i for i in issues if "subq_starts_at_2" in (i.get("reasons") or [])]
+
+
+def test_stem_chain_issue_becomes_traceable_recognition_issue(tmp_path):
+    md = _md(tmp_path, "26. 弱候选\n")
+    row = {
+        "source": "卷A",
+        "code": "stem_chain_gap",
+        "severity": "error",
+        "message": "题号链在 25→26 断开",
+        "line_no": 1,
+        "excerpt": "26. 弱候选",
+        "question_no": 26,
+        "candidate_ids": ["L0-Main-26"],
+    }
+    issue = R.stem_issue_to_recognition(row, md, None)
+    assert issue["source"] == "卷A"
+    assert issue["group_order"] == 26
+    assert issue["kind"] == "stem_chain_gap"
+    assert issue["line_no"] == 1
+    assert issue["candidate_ids"] == ["L0-Main-26"]
+    assert issue["md"] == str(md)
+    assert issue["status"] == "pending"
+
+
+def test_stem_chain_info_resolved_is_not_sent_to_manual_queue(tmp_path):
+    md = _md(tmp_path, "1. 甲\n")
+    row = {
+        "source": "卷A",
+        "code": "stem_chain_llm_resolved",
+        "severity": "info",
+        "line_no": 1,
+        "question_no": 1,
+    }
+    assert R.stem_issue_to_recognition(row, md, None) is None
