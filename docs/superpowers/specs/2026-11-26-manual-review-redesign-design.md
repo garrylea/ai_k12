@@ -1,7 +1,9 @@
 # 人工校对（补题）交互重构设计
 
 **日期**：2026-11-26
-**状态**：v2 已修订（2026-11-26，按设计 review 修正清空语义、Patch 合并、多题粘贴、`sub_no` 身份与写库边界）
+**状态**：v2 已修订（2026-11-26，按设计 review 修正清空语义、Patch 合并、多题粘贴、`sub_no` 身份与写库边界）。
+其中“关联题多 target 卡”和“槽位返回后整卡重绘”两项行为已由
+`2026-11-27-manual-review-identity-and-input-design.md` v2 取代。
 **范围**：`tools/data-refinery` 人工校对链路 —— `manual_fix.py`、`import_cli` 第 7 步、`fix_question_cli`、`review_by_numbers`
 **实施计划**：`docs/superpowers/plans/2026-11-26-manual-review-redesign.md`
 
@@ -125,7 +127,7 @@
 
 | 输入 | 行为 |
 |---|---|
-| `1`–`5` | 进入对应槽位；返回后重新渲染当前草稿 |
+| `1`–`5` | 进入对应槽位；成功后只显示“修改已加入本次记录”和菜单，不整卡重绘 |
 | `E` | 编辑“题干 + 选项 + 题内材料”的副本；外置共享文章不进编辑器 |
 | `R` | 清空题干、选项、题内材料、共享材料和图片，答案保留，再收新题面 |
 | `u` | 仅 `repair_truncated`；把修复前原文放入当前草稿并返回卡片，可继续改 |
@@ -523,7 +525,7 @@ cur.execute("UPDATE questions SET answer=%s WHERE id=%s", (answer, qid))
 7. **卡片可拷贝**
    - 长行不截断；
    - 图片引用显示真实 Markdown；
-   - 修改后重新渲染显示当前草稿，不显示旧 Snapshot。
+   - 修改后不整卡重绘；当前草稿状态由后续菜单动作和最终记录生成保持。
 8. **回归**
    - `apply_fixes` 旧记录测试全绿；
    - `recognition_scan` 测试全绿；
