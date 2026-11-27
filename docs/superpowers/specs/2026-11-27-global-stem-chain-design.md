@@ -1,7 +1,7 @@
 # 题号识别的全局最优链设计
 
 日期：2026-11-27
-状态：草案 v2，待评审
+状态：草案 v3，待评审
 修订：2026-11-27
 关联模块：`tools/data-refinery` 的题干切分（`question_splitter.py`）、题号复核（`question_extract.py`）、答案对齐（`answer_blocks.py`）
 
@@ -40,13 +40,16 @@ Q24 content 尾部出现火箭题的两张图
 Q24 answer 尾部出现「解得 x = 11.4」（第 25 题答案）
 ```
 
-答案之所以跟着错，不是答案解析器单独出错，而是答案对齐拿题干切出的**题号列表**
-当槽位；列表里没有 25，答案区的 `25.【答案】` 无处安放，只能并进第 24 题。
-这证明题号识别是整条数据管线的根，不能靠给答案侧加例外来兜。
+这里实际是两类独立故障：
 
-现有代码已在 `question_splitter.py:1093-1101` 加了一个「粘连数字 == 上一题+1 且后接成段中文就接受」的
-局部补丁，在 `answer_blocks.py` 加了「题号单调递增才另起块」的局部补丁。两个补丁能过
-当前夹具，但都是单行规则，换一种 OCR 形态就会再次失手。本设计用**全局题号链**替代这类补丁。
+1. **题干槽位缺失**：题干没有切出 25，答案对齐只能把 `25.【答案】` 并进第 24 题；
+2. **答案区自身误判**：Q25 的解答正文 `11.4 - 3 = 8.4` 行首看似题号 11，会在答案块内
+   截断 Q25。
+
+第一类由本设计的题干链解决；第二类**不由题干链解决**，必须继续依赖
+`answer_blocks.py` 的「行首题号 + 单调递增」守卫。现有题干侧还有一个
+`question_splitter.py:1093-1101` 的 `25.16` 局部补丁；本设计会替代这个题干侧补丁，
+但不会替代或删除答案侧守卫。
 
 ## 2. 目标与非目标
 
@@ -65,6 +68,11 @@ Q24 answer 尾部出现「解得 x = 11.4」（第 25 题答案）
 7. 链接不上时报明确 issue（缺哪几个题号、候选在哪几行），不许静默吞题、不许硬凑。
 8. 复用现有 `forced_stem_lines` 第二遍切题机制，不重写题干、材料、选项、小问的组装逻辑。
 9. 同时覆盖题干区题号；答案区题号暂沿用现有块解析，但在设计中预留同一套候选/链选择抽象。
+10. `forced_stem_map` 的链结果优先于局部题号纠正；冲突必须报 issue，不能被卷末合并、
+   重复题号或十位纠错规则静默覆盖。
+11. 链未确认的行段必须进入独立 gap 段并供人工复核，不能无定义地并入上一题。
+12. 新机制通过学科能力开关启用，首批只覆盖已验证学科；语文、英语等有独立策略的学科
+    未接入前保持现有行为。
 
 ### 2.2 非目标
 
@@ -75,6 +83,7 @@ Q24 answer 尾部出现「解得 x = 11.4」（第 25 题答案）
 - 不追求识别所有历史错卷；本次以 85434/85487 及现有语料基线为准。
 - 不让 LLM 自由生成题号或行号；模型只能在规则生成的候选集合中选择。
 - 本设计中的新链仲裁只使用 refinery 配置的本地 LLM；本地模型不可用时不回退到远程模型。
+- 不在首个锚点之前默认从题号 1 强行补链，也不为 gap 段伪造新题。
 
 ## 3. 术语
 
@@ -88,6 +97,8 @@ Q24 answer 尾部出现「解得 x = 11.4」（第 25 题答案）
 | 确信区间 | 相邻两个锚点之间的行区间，候选选择只在这个区间内进行。 |
 | 安全前缀（safe prefix） | 从左锚点开始连续成立、且每个候选都通过硬过滤的高置信链段。出现缺号时可保留该前缀，不能保留断开的后半段。 |
 | 歧义区间（ambiguity） | 存在两条以上合法链，且最优链与次优链的分差不足以自动裁决的区间。 |
+| 主形态探针（main probe） | 纯只读阶段收集的标准 `N.` 行及其局部证据，用于先选锚点；此时还不能确定为题号。 |
+| gap 段（gap segment） | 链未确认、无法安全归入上一题的一段连续行；只记录在原 MD 与复核日志中，不伪造成题目。 |
 
 ## 4. 现状算法为什么不够
 
@@ -117,21 +128,23 @@ is_main_stem
 ### 5.1 处理流水线
 
 ```text
-第一遍扫描（不改状态机）
-  ├─ 收集锚点 + 候选行（含原始数字、候选解释、证据标签、行号、上下文）
-  ├─ 切出确信区间
-  └─ 输出 StemCandidate 列表（不建题）
+主形态探针（只读，不改状态机）
+  ├─ 全卷收集标准 main 形态行及局部证据
+  ├─ 按重复题号、junk、顺序等条件挑选锚点
+  └─ 锚点是“从主形态候选中选出的固定节点”，不是另一套独立规则
 
-候选解释与硬过滤（纯函数）
+区间候选展开（只读，纯函数）
+  ├─ 只在相邻锚点之间生成非锚点候选解释
   ├─ 为每行生成 0..N 个题号解释（含 OCR 丢十位等可恢复解释）
   ├─ inside_math / answer_region / score_note 等强负证据直接淘汰
-  └─ 只把通过硬过滤的解释送入链选择
+  ├─ 标记被行内专用分支消费的行，避免第二遍重复处理
+  └─ 只把同时位于行号区间和题号待填集合的候选送入链选择
 
 全局链选择（纯函数）
   ├─ 在每个确信区间内做 top-2 序列对齐
   ├─ 唯一强链：直接 accepted
   ├─ 前两名打平或分差不足：输出 ambiguity
-  └─ 无完整链：只接受从左锚点连续成立的安全前缀，其余记 gap
+  └─ 无完整链：只接受从左锚点连续成立的安全前缀，其余记 gap / gap segment
 
 歧义仲裁（仅本地 LLM）
   ├─ 每卷批量收集 ambiguity；每个区间形成独立 assignment，可合批但不得混合候选集
@@ -141,6 +154,8 @@ is_main_stem
 
 最终切题（复用现有状态机）
   ├─ accepted + 已校验的 LLM 分配作为 forced_stem_map 传入
+  ├─ forced 行先于局部题号推断命中，跳过会改号的局部纠正
+  ├─ gap segment 不并入上一题，不伪造新题
   └─ 其余题干/材料/选项/小问组装逻辑完全不变
 ```
 
@@ -175,6 +190,15 @@ forced_stem_map: dict[int, tuple[int, str, str]] | None
 
 `dropped_tens` 是解释来源，不是另一种前缀形态：`2. …` 仍按 `main` 剥离原文的 `2.`，
 但最终题号可为 12。日志必须同时记录 `raw_number=2`、`number=12`、`recovery=dropped_tens`。
+
+`forced_stem_map` 的优先级固定如下：
+
+1. 大题/部分标题、答案区入口等结构边界仍先处理，forced 不能绕过它们；
+2. 行号命中 forced map 时，直接使用链确认的最终题号，不再调用局部 `strategy.is_stem` 推断；
+3. 跳过卷末 `last_stem_no >= 20 and n <= 5` 合并规则、OCR 十位纠错和裸题号二选一规则；
+4. 若 forced 题号已在 `seen_stems` 中，产生 `stem_chain_forced_duplicate`，不得静默 skip；
+5. `last_stem_no` 使用 forced 最终题号更新；
+6. `consumed_lines` 中的行不进入 forced 普通分支，由对应专用分支唯一消费。
 
 ## 6. 数据结构
 
@@ -220,11 +244,39 @@ class StemAmbiguity:
     top_paths: tuple[StemPath, ...]    # 最多保留前两条
 
 @dataclass(frozen=True)
+class StemCollectionResult:
+    anchors: tuple[StemCandidate, ...]
+    candidates: tuple[StemCandidate, ...]
+    consumed_lines: frozenset[int]    # inline_glued 等由专用分支消费的 0 基行号
+
+@dataclass(frozen=True)
+class StemGapSegment:
+    left_question_no: int
+    right_question_no: int
+    missing_numbers: tuple[int, ...]
+    line_start: int | None             # 0 基，含；边界未知时为 None
+    line_end: int                      # 0 基，含
+    excerpt: str                       # 最长 600 字，仅供诊断
+    boundary_known: bool               # 是否找到了 gap 的可信起始行
+
+@dataclass(frozen=True)
+class StemIssue:
+    code: str
+    severity: str
+    message: str
+    line_no: int                       # 1 基，取该问题首个受影响行
+    excerpt: str
+    interval_id: str | None = None
+    candidate_ids: tuple[str, ...] = ()
+
+@dataclass(frozen=True)
 class StemChainResult:
     accepted: dict[int, tuple[int, str, str]]  # 行号 -> (题号, 形态, recovery)
     gaps: list[tuple[int, int, int]]          # (区间起点题号, 缺失题号, 行号)
+    gap_segments: list[StemGapSegment]
     ambiguities: list[StemAmbiguity]
     safe_prefix: dict[int, tuple[int, str, str]]  # 与 accepted 合并；单独留痕便于诊断
+    issues: list[StemIssue]
 ```
 
 `raw_number != number` 时必须在 `recovery` 和 evidence 中说明恢复依据；禁止无痕改号。
@@ -234,6 +286,15 @@ class StemChainResult:
 「锚点之间出现真跳号」，两者 issue 不同。
 
 ## 7. 锚点判定
+
+锚点选择和候选展开必须是两个阶段：
+
+1. 全卷只读扫描标准 `main` 形态，产出候选探针和局部证据；
+2. 从探针中按下面条件选锚点并固定；
+3. 只在相邻锚点之间展开 `glued_number`、`bare`、`orphan_dot`、`dropped_tens` 等解释。
+
+因此“全卷同题号排序最高”所需的信息在进入锚点阶段前已经可用，不存在先定锚点
+再回头计算排序的循环依赖。
 
 锚点必须满足**全部**条件，宁少勿多：
 
@@ -248,11 +309,18 @@ class StemChainResult:
 锚点一旦确定，写入 `anchor_lines` 并锁定题号；后续链选择只能填两个锚点之间的空号，
 不能改锚点题号、不能挪锚点行。
 
-若首个锚点不是 1，前面区间 `[1, first_anchor_no)` 单独走一次链选择，允许空结果。
+首个锚点之前的行默认**不生成候选、不从 1 强行补链**，只记录诊断。
+只有当正文题区起点已被明确识别，且候选能连续、按行号一对一连接到首个锚点时，
+才允许实验性恢复；否则目录、考试说明、材料正文很容易被伪造成题 1–N。
 
 ## 8. 候选生成、硬过滤与排序
 
 ### 8.1 候选来源
+
+候选展开受学科能力开关控制。`QuestionStrategy` 增加
+`supports_global_stem_chain = False`，首批只对数学等已完成真实卷回归的学科开启。
+语文、英语在接入前继续走各自策略；英语现有的 `15→5` 完形题号恢复不能与通用
+`dropped_tens` 同时生效。
 
 对每个**非锚点**行，依次尝试生成候选解释；同一行可有多个 `StemOption`。
 `raw_number` 是原文直接读到的数字，`number` 是该解释最终对应的题号：
@@ -268,11 +336,15 @@ class StemChainResult:
 
 `_GLUED_STEM_RE` 在当前主循环中已有专用分支（`question_splitter.py:1022-1035`），
 它发生在题号判定之前。候选收集器必须**复用同一个 `_split_glued_next_stem()` 判定**，
-并在生成 `forced_stem_map` 时标记该行已被专用分支消费；第二遍遇到已被消费的行
-不得再按普通候选处理，避免重复建题或把题干拆两截。
+并把被专用分支消费的 0 基行号写入 `StemCollectionResult.consumed_lines`。
+第二遍遇到 `consumed_lines` 中的行不得再按普通 forced 候选处理，避免重复建题或把题干拆两截。
 
-**候选必须落在某个确信区间内**（两个相邻锚点之间，或首尾边界之间）。区间外的候选直接丢弃，
-防止答案区、页脚、评分细则进入候集。
+候选必须同时满足：
+
+- **行号范围**：位于相邻锚点之间；首个锚点之前默认不产生候选；
+- **题号范围**：`StemOption.number` 属于该区间的待填集合 `a+1 … b-1`。
+
+任一不满足即硬丢弃，防止答案区、页脚、评分细则或区间外的数字进入候集。
 
 **丢十位恢复不是通用兜底规则**。只有同时满足以下条件才生成 `dropped_tens` 解释：
 
@@ -322,7 +394,8 @@ rank_key = (
 - `recovery_cost`：`exact=0`、`glued_suffix/missing_dot=1`、`dropped_tens=3`。
 - `paragraph_score`：前有空行、独立成段、上一段句末结束、后文形成新段等结构证据数。
 - `stem_score`：题号后正文长度、含中文/公式、含「求/证明/如图/已知」等题干词。
-- `context_score`：后续还有更大锚点、与相邻候选题号顺序协调、答案区存在同题号提示等。
+- `context_score`：离右锚点的段落距离、前后行是否形成连续题干、答案区是否存在同题号提示等。
+  不使用“后面存在更大锚点”这类在当前区间内恒真的条件。
 
 排序结果只用于形成候选链，**不得在进入链选择前按题号只留最高分候选**。
 同一题号可以保留多个解释，因为局部最高分候选可能导致行号顺序不合法，而次高分候选
@@ -371,12 +444,23 @@ paths[n] = 以题号 n 结尾、最多两条最优合法链
 3. 两条链打平或分差不足：生成 `reason=ambiguous` 的 `StemAmbiguity`。
 4. 唯一合法链含 `dropped_tens`：生成 `reason=high_risk_recovery` 的 `StemAmbiguity`，
    仍交给本地 LLM 确认。
-5. 没有完整链：从 `a+1` 开始逐个检查。只有该题号恰好有一个候选、且该候选满足上面的
-   自动裁决阈值时，才加入安全前缀；遇到缺失、多个候选分差不足或高风险恢复即停止。
-   从停止题号起记 gap，不采纳断开的后半段，避免半截链错位。
+5. 没有完整链：从 `a+1` 开始逐个检查。只有该题号恰好有一个候选、通过硬过滤、
+   至少命中一个段落边界证据和一个题干证据，且不是 `dropped_tens` 时，才加入安全前缀；
+   遇到缺失、多个候选分差不足或高风险恢复即停止。从停止题号起记 gap，
+   不采纳断开的后半段，避免半截链错位。
 
 安全前缀示例：锚点 24、27 之间只有高置信的 25，没有 26。此时采纳 25，让 Q24 正确结束，
 再报 `stem_chain_gap(25→26)`；不能因为缺 26 就把 25 也丢掉，让 Q25/26 一起并进 Q24。
+
+gap 后剩余行的归属必须满足以下规则：
+
+1. 能由一个被链拒绝但结构上像题号的行确定 gap 起点时，把该行到右锚点前的连续行作为
+   `StemGapSegment`，第二遍不得把它们追加到上一题内容；
+2. 完全找不到 gap 起始行时，不猜测、不伪造新题；允许最后一道已确认题暂存尾部内容，
+   但必须标记 `boundary_uncertain` 并让该题进入人工复核，禁止无提示入库为正常题；
+3. 两种情况下都保留原 MD 行号范围与 600 字摘要；边界未知时以最后确认题到右锚点
+   之间的保守范围为诊断范围，供人工补题和重新扫描；
+4. 不得创建题号为“未知/25?”的 `RawQuestion`，也不得把 gap 内容悄悄丢弃。
 
 ### 9.2 歧义与异常形态
 
@@ -403,17 +487,28 @@ paths[n] = 以题号 n 结尾、最多两条最优合法链
 
 ```text
 extract_questions_file (question_extract.py:709)
-  ├─ collect_stem_candidates(text, strategy)         # 新增，第一遍只读
-  ├─ select_stem_chains(candidates, anchors)         # 新增，硬过滤 + top-2 链
-  ├─ arbitrate_stem_ambiguities(local_llm, ambiguities)
-  │    ├─ 每个区间一个请求（或同一卷小批合并）
-  │    └─ 闭集选择 + 顺序/唯一性/题号校验
-  ├─ accepted |= validated_llm_assignments
-  └─ split_page(text, forced_stem_map=accepted)      # 第二遍，现有状态机
+  └─ if not strategy.supports_global_stem_chain:
+       split_page(text, strategy=strategy)             # 完全保留现有路径
+     else:
+       ├─ collect_main_stem_probes(text, strategy)      # 全卷 main 探针，只读
+       ├─ select_stem_anchors(probes)                   # 从探针中固定锚点
+       ├─ collect_interval_candidates(text, anchors)    # 区间内展开其它解释
+       ├─ collect StemCollectionResult
+       │    ├─ anchors / candidates / consumed_lines
+       │    └─ consumed_lines 防止行内专用分支重复消费
+       ├─ select_stem_chains(candidates, anchors)       # 硬过滤 + top-2 链
+       ├─ arbitrate_stem_ambiguities(local_llm, ambiguities)
+       │    ├─ 每个区间一个请求（或同一卷小批合并）
+       │    └─ 闭集选择 + 顺序/唯一性/题号校验
+       ├─ accepted |= validated_llm_assignments
+       ├─ split_result = split_page_result(
+       │      text, forced_stem_map=accepted)           # 第二遍，现有状态机
+       └─ split_result.stem_chain_result = chain_result # issue/gap 透传给 extract
 ```
 
 `split_page()` 现有签名和 `forced_stem_lines: set[int]` 保留；新增 `forced_stem_map`
-为可选参数，老调用方零改动。
+为可选参数，老调用方零改动。`SplitPageResult` 新增可选
+`stem_chain_result: StemChainResult | None`；兼容入口 `split_page()` 仍只返回题目列表。
 
 现有 `_judge_suspects()` 是「逐行判断裸题号」的旧兜底。设计落地后：
 
@@ -478,29 +573,52 @@ extract_questions_file (question_extract.py:709)
 
 ### 10.3 第一遍扫描的复用边界
 
-`collect_stem_candidates()` 只识别题号，**不**处理：材料分段、选项拆分、小问扩展、
+候选收集函数只识别题号和区间，**不**处理：材料分段、选项拆分、小问扩展、
 分数、group scope、junk 题过滤。这些仍由第二遍的 `_split_questions_only()` 处理，
 避免两套状态机对同一行做出不同结论。
 
-但锚点判定需要复用现有谓词：`is_main_stem`、`_JUNK_QUESTION_RE`、`_NOTICE_RE`、
-`is_part_header`、`is_group_header`、`is_answer_keyword`。这些函数从 `question_splitter.py`
-导入，不复制规则。
+锚点判定需要复用现有谓词：`is_main_stem`、`is_part_header`、`is_group_header`、
+`is_answer_keyword`，以及 junk/notice 判定。后两者目前是模块私有常量，
+不能由新模块直接 import `_JUNK_QUESTION_RE` / `_NOTICE_RE`；实施时在
+`question_splitter.py` 提供 `is_junk_stem_line(line)` / `is_notice_stem_line(line)`
+等公开只读谓词，或将候选收集器留在同模块。禁止复制第二份正则。
+
+`collect_interval_candidates()` 只在
+`strategy.supports_global_stem_chain is True` 时调用。能力关闭的学科完全不进入本设计，
+现有切题结果保持不变。
 
 ### 10.4 答案侧
 
 答案块解析继续用 `answer_blocks.py` 的块级强/弱边界规则。本设计不改变答案解析算法，
-但要求答案侧把「题号必须来自题干链结果」作为硬约束：
+但要求答案侧把「题号必须来自题干链结果」作为槽位集合的硬约束：
 
 - 题干链确认的题号集合即答案期望集合（现状已是如此）。
 - 解答题正文里的 `11.4 - 3 = 8.4` 一类小数/算式，由答案块的「题号递增 + 强边界」
-  规则拦截；当前 `split_answer_blocks` 的单调递增守卫是过渡实现，实施本设计后
-  保留为防御层，不删除。
+  规则拦截；`split_answer_blocks` 的 `last_no/_next_question_no` 守卫是**答案区独立修复**，
+  与题干链无关，实施和清理阶段都必须保留。
+- `2 4 0`、公式内 `4`、`$15cm$` 等由答案块的公式识别与行首边界规则处理；
+  这些规则同样保留，不在本设计的删除范围内。
 - 未来若答案区也出现同类全局错位，复用本设计的 `StemOption/StemEvidence/top-2 链`
   抽象，在 `answer_blocks.py` 内实现独立链选择，不跨模块共享状态。
 - 答案区能稳定解析出的题号可作为一个独立的 `context_score` 提示，用于辅助确认
   `2→12` 类恢复；但它不能单独决定题干边界，也不能覆盖题干侧硬否决。
 
 ## 11. issue 字典
+
+题干链问题使用独立的 `StemIssue`，不复用 `AnswerIssue`：前者包含区间、候选 ID 和
+缺失题号，后者属于逐题答案提取。传递路径固定为：
+
+```text
+StemChainResult.issues
+  → SplitPageResult.stem_chain_result
+  → question_extract
+  → output/stem_chain_issues.jsonl
+  → recognition_scan 汇总进 output/recognition_issues.jsonl
+```
+
+`question_extract` 每次处理某卷前按 `source` 清理旧 `stem_chain_issues.jsonl` 记录，
+再写本轮快照，避免已修复问题永久残留；`recognition_scan` 以
+`(source, code, line_no, candidate_ids)` 去重，不把同一链问题重复推给人工。
 
 | code | severity | 触发条件 |
 |---|---|---|
@@ -512,8 +630,10 @@ extract_questions_file (question_extract.py:709)
 | `stem_chain_llm_unresolved` | warning | 本地 LLM 明确无法形成唯一合法分配 |
 | `stem_chain_llm_invalid` | warning | LLM 返回越界候选、重复分配、乱序或漏填 |
 | `stem_chain_anchor_conflict` | error | 两个锚点题号相同，无法建区间 |
+| `stem_chain_forced_duplicate` | error | forced 最终题号与已见题号冲突 |
+| `stem_chain_boundary_uncertain` | warning | gap 起始行无法确定，尾部内容暂挂在最后一道已确认题 |
 
-所有 issue 必须带 `line_no`（1 基，面向用户）和 200 字以内的原文摘要。
+所有 issue 必须带 `line_no`（1 基，面向用户）和 600 字以内的原文摘要。
 `stem_chain_gap` 不阻断其它题的切分；安全前缀和已有题保留。
 `stem_chain_llm_*` 只描述仲裁过程，不改变原始题号；原始映射必须另写结构化日志。
 
@@ -528,10 +648,16 @@ extract_questions_file (question_extract.py:709)
 | 上例中 `3.` 后面紧跟「个/分/cm」等量词 | 该行命中 `data_line` 硬否决，不参与恢复链；缺 13 时只保留安全前缀并报 gap |
 | 锚点 8、9 之间出现 `9.5 米` | 区间 `8→9` 无中间题号，候选不进链；记 `stem_chain_out_of_order` |
 | 锚点 24、26 之间同时有 `25.16 世纪…` 和裸 `25 如上所述` | 两条都作为题 25 候选；段落/题干证据可分出唯一强链则采纳，否则交 LLM 二选一 |
-| 锚点 24、27 之间只有高置信的 25、没有 26 | 接受安全前缀 25，Q24 正确结束；记 `stem_chain_gap(25→26)`，不把 25/26 一起并进 Q24 |
+| 锚点 24、27 之间只有高置信的 25、没有 26，且存在像题号 26 的弱候选 | 接受安全前缀 25；从该弱候选行到 27 前生成 `StemGapSegment`，不把这段追加到 Q25 |
+| 上例完全找不到 26 的可能起始行 | 不伪造 26；最后一道已确认题暂存尾部但标记 `stem_chain_boundary_uncertain`，进入人工复核 |
 | 答案区的 `11.4 - 3 = 8.4` | 区间判定为答案区外，不进题干候选；由答案块规则处理 |
+| Q25 已正确切出，但答案区出现 `11.4 - 3 = 8.4` | 答案块的 `last_no` 守卫阻止其成为题 11，Q25 答案保持完整；此守卫不得随题干补丁一起删除 |
 | 本地 LLM 返回候选之外的 ID，或把同一行分给两个题号 | 整条 LLM 结论作废，记 `stem_chain_llm_invalid`，保留规则安全前缀和 gap |
 | 题号重复锚点（同一题号两处 `is_main_stem` 命中） | `stem_chain_anchor_conflict`，保留第一次出现，第二个转候选 |
+| forced 题号为 12，当前 `last_stem_no >= 20` 且原文是 `2.` | forced 分支直接使用 12，不能被“卷末回到个位数”合并规则吞掉 |
+| forced 题号与已建题号重复 | 报 `stem_chain_forced_duplicate`，不得静默 skip forced 行 |
+| 首个锚点是 11，前面只是目录、考试说明和材料 | 默认不生成 1–10 候选，只记录诊断，不从 1 强行补链 |
+| 英语完形同时满足自身 `15→5` 恢复与通用 `dropped_tens` | 英语能力开关未开启通用链，仅执行英语既有恢复，不能双重改号 |
 | 卷首说明 `4. 命题人: …` | `_JUNK_QUESTION_RE` 命中，不作为锚点也不作为候选 |
 | 卷末 `要求：1. 文体不限 2. 字数…` | 第 20 题后回到个位数，沿用现有合并规则，不生成候选 |
 
@@ -540,6 +666,7 @@ extract_questions_file (question_extract.py:709)
 ### 13.1 纯函数单测（新增 `tests/test_stem_chain.py`）
 
 - 候选解释：`12.8` / `12.16` 都能生成题 12 的 `glued_suffix` 候选。
+- 两阶段：先由全卷 `main` 探针选出锚点，再展开区间候选；不存在先选锚点后排序的循环。
 - 候选解释：锚点 11→15、候选 `2/3/4` 在条件满足时生成 `12/13/14`，
   `raw_number` 与 `number` 各自保留。
 - 硬过滤：`inside_math` / `after_operator` / `data_line` 命中后直接淘汰，
@@ -549,11 +676,20 @@ extract_questions_file (question_extract.py:709)
 - 唯一强链：只有一条合法链且不含 `dropped_tens` 时，零 LLM 调用直接采纳。
 - 高风险恢复：唯一链含 `dropped_tens` 时，必须产生 `high_risk_recovery`。
 - 安全前缀：`24→25→gap→27` 采纳 25 并报缺 26，不把整段候选都丢弃。
+- gap 段：存在弱题号候选时，gap 行不追加到上一题；无边界时标记
+  `boundary_uncertain`，但绝不伪造新题。
 - 行号顺序：候选行号不满足严格递增时，该链不成立。
 - 锚点：junk/notice/表格内行不成为锚点。
 - 形态：`glued_number` 前缀剥离后正文保留 `16 世纪…`。
 - LLM 校验：候选 ID 越界、漏填、重复使用、题号不匹配、行号乱序时整条结果作废。
 - LLM 不可用：不回退远程模型，保留规则安全前缀与 gap。
+- forced 优先级：forced 题号不被卷末 `N<=5` 合并、十位纠错或重复题号静默覆盖；
+  重复时产生 `stem_chain_forced_duplicate`。
+- 学科开关：能力关闭的语文/英语不调用链收集器；英语 `15→5` 行为不变。
+- 首锚点：目录、考试说明、材料区默认不生成锚前候选。
+- 候选区间：候选必须同时满足行号范围和题号待填集合。
+- issue 落盘：`StemIssue` 经 `SplitPageResult` 写入 `stem_chain_issues.jsonl`，
+  重跑按 source 清理，`recognition_scan` 去重汇总。
 
 ### 13.2 真实夹具回归（`tests/test_question_splitter.py`）
 
@@ -568,6 +704,8 @@ extract_questions_file (question_extract.py:709)
 - 昌平一中：子题号 `1.1 材料` 不被切成两道第 1 题。
 - 清华附中：`22→33→24` 十位错认仍纠正为 23。
 - 汇文：`18` 排在 `14` 前的乱序不误合并。
+- 85434 答案区：Q25 已单独切出时，`11.4 - 3 = 8.4` 仍不能截断 Q25 答案；
+  删除题干侧 `25.16` 补丁不影响答案侧守卫生效。
 
 ### 13.3 语料基线
 
@@ -576,35 +714,48 @@ extract_questions_file (question_extract.py:709)
 - 题号集合变化必须逐卷列出，新增/消失的题号要有对应 issue 或人工确认。
 - 不得出现新的 `content` 串题（上一题尾部出现下一题题干关键词）。
 - 答案片段长度统计：变长计为修复，变短逐条抽查（参照 2026-11-27 已核过的 8 条旧错值）。
+- 阈值校准至少使用 30 卷人工确认的、按学科/题型/OCR 形态分层抽样的独立 holdout；
+  报告题号集合完全匹配率、边界行 precision/recall、串题率、答案槽位对齐率、
+  LLM 触发率与 LLM 纠错成功率。holdout 不得包含在规则调参样本中。
 
 ## 14. 实施步骤
 
 | 步骤 | 内容 | 完成判据 |
 |---|---|---|
-| 1 | 新增 `StemCandidate/StemOption/StemEvidence/StemPath/StemAmbiguity/StemChainResult` 与硬过滤函数，不动主链 | 数据结构与硬过滤单测全绿 |
-| 2 | 实现 `collect_stem_candidates()`：直接题号、粘连数字、裸题号、孤立点、行内粘连、`dropped_tens` 六类解释 | 85434 候选含 25 的 `glued_suffix`；合成卷出现 `2→12` |
-| 3 | 实现 `select_stem_chains()` top-2 序列对齐与安全前缀 | §13.1 的链选择单测全绿 |
-| 4 | 实现 `arbitrate_stem_ambiguities()`、独立 prompt 和闭集结果校验；仅注入本地 LLM | 歧义/高风险恢复模拟测试全绿，零越界采纳 |
-| 5 | 升级 `forced_stem_map`，第二遍切题接受全部候选形态 | 现有 `forced_stem_lines` 测试全绿 |
-| 6 | 接入 `extract_questions_file`：收集 → 链选择 → 本地仲裁 → 最终切题 | 清晰区间零 LLM；歧义区间每区间一次联合请求 |
-| 7 | 撤掉 85487/85434 两处局部补丁，由链选择统一处理 | 两卷回归通过，源码无局部例外注释 |
-| 8 | 594 卷语料回归 + issue 核对 | 无新增串题，变短项已逐条裁决 |
-| 9 | 同步 `docs/constraints/数据管线.md`、`docs/ai-core-changelog.md` | 文档与实现一致 |
+| 1 | 新增 `StemEvidence/StemOption/StemCandidate/StemPath/StemAmbiguity/StemGapSegment/StemIssue/StemChainResult/StemCollectionResult`；提供公开 junk/notice 谓词 | 数据结构、issue schema、公开谓词单测全绿 |
+| 2 | 实现 `collect_main_stem_probes()` 与 `select_stem_anchors()` 两阶段流程 | 全卷重复题号、junk、顺序与锚点选择测试全绿 |
+| 3 | 实现 `collect_interval_candidates()`：六类解释、行号+题号双区间校验、`consumed_lines`、学科能力开关 | 85434 候选含 25；合成卷出现 `2→12`；语文/英语不进入链 |
+| 4 | 实现 `select_stem_chains()` top-2 序列对齐、安全前缀、gap segment 与 `StemIssue` | §13.1 的链选择/gap 单测全绿 |
+| 5 | 实现 `arbitrate_stem_ambiguities()`、独立 prompt 和闭集结果校验；仅注入本地 LLM | 歧义/高风险恢复模拟测试全绿，零越界采纳 |
+| 6 | 升级 `forced_stem_map` 优先级：forced 行先于局部推断，支持全部形态且不被局部改号规则覆盖 | forced 优先级、重复冲突、`N<=5` 与十位纠错回归全绿 |
+| 7 | 接入 `extract_questions_file` 与 `SplitPageResult`：probe → anchor → candidate → chain → LLM → final；写 `stem_chain_issues.jsonl` | 清晰区间零 LLM；歧义区间每区间一次联合请求；issue 可追溯 |
+| 8 | 用 30 卷独立 holdout 校准 `CHAIN_MARGIN`、恢复代价和最小证据门槛 | §13.3 指标有基线，holdout 不参与调参 |
+| 9 | 只撤掉 `question_splitter.py` 的 `25.16` 题干侧局部补丁 | 85434 题干回归通过；答案侧 `11.4` 截断回归仍通过 |
+| 10 | 594 卷语料回归 + issue 核对 + 同步数据管线约束与 changelog | 无新增串题，变短项已逐条裁决，文档与实现一致 |
 
-第 7 步必须最后做：在链选择与本地仲裁未稳定前保留局部补丁，避免中间态回退。
-若本地 LLM 尚未接入，第 4-6 步可以分两次合并，但不得先上线「歧义时按行号选较早候选」的中间版本。
+第 9 步在链路与本地仲裁稳定后才执行。`answer_blocks.py` 的行首题号、单调递增、
+公式内数字过滤属于答案区独立修复，**不在本设计的删除范围内**。
+若本地 LLM 尚未接入，第 5-7 步可以分两次合并，但不得先上线
+「歧义时按行号选较早候选」的中间版本。
 
 ## 15. 验收标准
 
 - [ ] 85434 第 25 题被单独切出，Q24/Q25 的题干与答案不再互相包含。
+- [ ] Q25 单独切出后，答案区 `11.4 - 3 = 8.4` 仍不截断 Q25；答案侧守卫保留。
 - [ ] 85487 的 28 题答案与原 md 参考答案段逐题一致。
 - [ ] 锚点 11、13 场景中 `10.5` 不进链，`12.8/12.16` 规则可分时自动选优，
       规则并列时只由本地 LLM 二选一。
 - [ ] 锚点 11、15 场景中 `2/3/4` 可恢复为 `12/13/14`，且必须经本地 LLM 确认。
 - [ ] 题号链断开时只接受安全前缀，并产出 `stem_chain_gap`；不静默补号、不静默吞题。
+- [ ] 有可信边界时，gap 内容进入 `StemGapSegment`，不追加到上一题；无边界时标
+      `stem_chain_boundary_uncertain` 并进入人工复核。
 - [ ] 每个候选项能打印 `raw_number / number / recovery / evidence`，无黑盒分数。
 - [ ] 本地 LLM 输出经过候选闭集、唯一分配、题号和行号顺序五类校验。
 - [ ] 本地 LLM 不可用时不回退远程模型，切题失败只落在当前区间。
+- [ ] forced 题号优先于卷末 `N<=5` 合并、十位纠错和其它局部改号规则；重复时显式报错。
+- [ ] 锚点由全卷 `main` 探针先选出，再展开区间候选；首个锚点前默认不强行补号。
+- [ ] 学科能力关闭时完全不进入新链；英语 `15→5` 等既有恢复行为不变。
+- [ ] `StemIssue` 经定义路径落盘，并按 source 清理、按 key 去重。
 - [ ] `forced_stem_lines` 老调用方零改动。
 - [ ] 全量测试通过，且新增测试覆盖上述真实卷。
 - [ ] 594 卷语料对比无新增串题。
@@ -617,6 +768,9 @@ extract_questions_file (question_extract.py:709)
 | 候选排序阈值过拟合 85434/85487 | 硬过滤与排序分离；用 594 卷基线校准阈值，并保留异常 issue |
 | `2→12` 类恢复产生假阳性 | 只在锚点区间内生成、要求个位与行序共同吻合、恢复代价最高，并强制本地 LLM 确认 |
 | 链断开时丢题比局部贪心更严重 | 只接受从左锚点连续成立的安全前缀；其余 gap 显式报出，不扩大到全卷 |
+| 把答案侧守卫误当成题干补丁删除 | 删除范围只允许 `question_splitter.py` 的 `25.16` 分支；85434 的 `11.4` 答案回归是发布门禁 |
+| forced 结果被第二遍局部规则改写 | forced 分支先于局部推断；`N<=5`、十位纠错、重复题号不得静默覆盖 |
+| 新链误伤语文/英语独立策略 | `supports_global_stem_chain` 默认关闭，按学科逐步启用 |
 | 本地模型不可用或输出幻觉 | 只接受闭集候选 ID；不可用/不合法即保留 gap，不回退远程模型 |
 | 歧义候选全部送 LLM 导致调用过多 | 只有 top-2 分差不足或 `dropped_tens` 才请求；清晰区间零调用 |
 | 第二遍状态机与候选形态不一致 | 每种 `form/recovery` 绑定唯一前缀剥离函数，单测逐一验证 |
