@@ -1,10 +1,32 @@
 """review_records：三态草稿 → 补题记录（材料槽 / 图片模式 / 答案清空）。"""
 
 import json
+from pathlib import Path
 
+import review_content
 import review_records as rr
 from review_content import Snapshot
 from review_queue import ReviewItem
+
+
+HERE = Path(__file__).resolve().parent
+REAL_76707_DIR = HERE / "fixtures" / "real_cases" / "76707"
+REAL_76707_SOURCE = "数学-初三(上)-202407-北京各-（上）期中-试卷-76707"
+REAL_76707_REL = (
+    "数学/初中/first/2024/"
+    "数学-初三(上)-202407-北京各-（上）期中-试卷-76707"
+)
+REAL_76707_Q2_STEM = "下列图案是我国国产品牌汽车的标识，其中是中心对称图形的是"
+REAL_76707_Q2_IMAGES = [
+    "images/6c38dff6997c623f425af5a376af96ef90c46ebfe3d53746d79ff29c6be21217.jpg",
+    "images/8bf675b6810221e2edf9ea9f847d7da0b9a5b1043583448cd0c4ca6e36bfd4af.jpg",
+    "images/833baef6260c8d575b0742cf102ebdf99257a335da40fcd97a3688746be4855f.jpg",
+    "images/8671b109d5ac83d34254dd8b49f7c21709a51317855809863c8136a8ee40f5e5.jpg",
+]
+REAL_76707_Q2_OLD_CONTENT = (
+    f"{REAL_76707_Q2_STEM}\n\n"
+    + "\n".join(f"![]({ref})" for ref in REAL_76707_Q2_IMAGES)
+)
 
 
 ITEM = ReviewItem(
@@ -61,6 +83,95 @@ def test_replace_images_uses_final_draft_sequence():
     rec = rr.build_record(ITEM, 19, 0, draft.patch, snap)
     assert "images/old.jpg" not in rec["content"]
     assert "images/new.jpg" in rec["content"]
+
+
+def test_keep_mode_restores_stem_images_only():
+    """keep 只补回快照里属于题干的图；选项图在 snapshot 阶段已被剔除。"""
+    snap = Snapshot(
+        content="旧题干 ![](images/stem.jpg)",
+        options=[],
+        images=["images/stem.jpg"],
+    )
+    draft = rr.ReviewDraft(snap)
+    draft.set_content("新题干", None)
+    rec = rr.build_record(ITEM, 19, 0, draft.patch, snap)
+    assert "images/stem.jpg" in rec["content"]
+
+
+def test_real_76707_q2_keep_does_not_restore_images_added_as_options(
+        tmp_path, monkeypatch):
+    """编辑前没有选项，编辑中把四张原图补成选项后，keep 不得再塞回题干。"""
+    extracted = (
+        tmp_path / "output" / "extracted" / REAL_76707_REL
+        / f"{REAL_76707_SOURCE}.jsonl"
+    )
+    extracted.parent.mkdir(parents=True)
+    extracted.write_text(
+        (REAL_76707_DIR / "extracted_before_review.jsonl").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(review_content, "ROOT", tmp_path)
+
+    issue = {
+        "source": REAL_76707_SOURCE,
+        "rel_path": REAL_76707_REL,
+        "group_order": 2,
+        "sub_no": 0,
+    }
+    snap = review_content.snapshot(issue)
+    assert snap.options == []
+    assert snap.images == REAL_76707_Q2_IMAGES
+
+    options = [
+        {"label": label, "text": f"![]({ref})"}
+        for label, ref in zip("ABCD", REAL_76707_Q2_IMAGES)
+    ]
+    draft = rr.ReviewDraft(snap)
+    draft.set_content(REAL_76707_Q2_STEM, options)
+    item = ReviewItem(
+        source=REAL_76707_SOURCE,
+        rel_path=REAL_76707_REL,
+        group_order=2,
+        sub_no=0,
+        flags=[{"kind": "incomplete_content", "reasons": ["options_0of4"]}],
+    )
+    rec = rr.build_record(item, 2, 0, draft.patch, snap)
+
+    assert rec["content"] == REAL_76707_Q2_STEM
+    assert [opt["text"] for opt in rec["options"]] == [
+        f"![]({ref})" for ref in REAL_76707_Q2_IMAGES
+    ]
+    assert not any(ref in rec["content"] for ref in REAL_76707_Q2_IMAGES)
+
+
+def test_real_76707_q2_keep_removes_option_images_still_in_stem_text():
+    """即使编辑后的题干文本还带着旧图，已归入选项的同组图也必须从题干移除。"""
+    snap = Snapshot(
+        content=REAL_76707_Q2_OLD_CONTENT,
+        options=[],
+        images=REAL_76707_Q2_IMAGES,
+    )
+    options = [
+        {"label": label, "text": f"![]({ref})"}
+        for label, ref in zip("ABCD", REAL_76707_Q2_IMAGES)
+    ]
+    draft = rr.ReviewDraft(snap)
+    draft.set_content(REAL_76707_Q2_OLD_CONTENT, options)
+    item = ReviewItem(
+        source=REAL_76707_SOURCE,
+        rel_path=REAL_76707_REL,
+        group_order=2,
+        sub_no=0,
+        flags=[{"kind": "incomplete_content", "reasons": ["options_0of4"]}],
+    )
+    rec = rr.build_record(item, 2, 0, draft.patch, snap)
+
+    assert rec["content"] == REAL_76707_Q2_STEM
+    assert [opt["text"] for opt in rec["options"]] == [
+        f"![]({ref})" for ref in REAL_76707_Q2_IMAGES
+    ]
 
 
 def test_clear_answer_uses_explicit_record_field():
@@ -134,3 +245,14 @@ def test_content_only_then_clear_answer_keeps_both():
         assert rec["content"] == "完整原文", order
         assert rec["answer"] == "" and rec["clear_answer"] is True, order
         assert "content_only" not in rec, order
+
+
+def test_review_draft_revision_only_changes_on_real_edit():
+    draft = rr.ReviewDraft(object())
+    assert draft.revision == 0
+    draft.set_content("新正文", [])
+    assert draft.revision == 1
+    draft.clear_answer()
+    assert draft.revision == 2
+    draft.use_restore_original("修复前原文")
+    assert draft.revision == 3

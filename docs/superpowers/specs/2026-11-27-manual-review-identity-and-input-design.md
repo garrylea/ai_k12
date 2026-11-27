@@ -1,7 +1,7 @@
 # 人工校对：题号身份统一与输入栏改造设计
 
 **日期**：2026-11-27
-**状态**：v2 已修订（按 review 修正 B5 根因、独立 issue 契约、`sub_no` 身份、重绘边界与真实 case 门禁）
+**状态**：v2 已实现并通过门禁（2026-11-27；按 review 修正 B5 根因、独立 issue 契约、`sub_no` 身份、重绘边界与真实 case 门禁；真实 76816 E2E + 全量 pytest 均 PASS）
 **范围**：`tools/data-refinery` 人工校对链路 —— `recognition_scan.py`、`review_queue.py`、`manual_fix.py`、`review_editor.py`、新增 `terminal_input.py`、对应测试及真实 case fixtures
 **关联**：2026-11-26 人工校对重构（`2026-11-26-manual-review-redesign-design.md`）、2026-11-27 数学题号全局链
 **实施计划**：`docs/superpowers/plans/2026-11-27-manual-review-identity-and-input.md`

@@ -201,10 +201,22 @@ def load_stem_issues_for_source(
 
 
 def _issue_key(i: dict) -> tuple:
-    """issue 身份：默认 (source, group_order, kind)，带 line_no 时再带上行号，
-    防止同一题不同行的两条题号链问题被去重成一条。"""
-    base = (i["source"], i["group_order"], i["kind"])
-    return base if i.get("line_no") is None else base + (i["line_no"],)
+    """issue 身份：(source, group_order, sub_no, kind[, related][, line])。
+
+    `sub_no` 纳入身份，旧记录缺字段按 0；`related_group_order` 纳入身份，避免同一 suspect
+    被不同缺号题引用时互相覆盖。`line_no` 仍只在非空时加入。
+    """
+    base = (
+        i["source"],
+        int(i.get("group_order") or 0),
+        int(i.get("sub_no") or 0),
+        str(i.get("kind") or ""),
+    )
+    related = i.get("related_group_order")
+    if related is not None:
+        base += ("related", int(related))
+    line_no = i.get("line_no")
+    return base if line_no is None else base + ("line", line_no)
 
 
 def _option_block_count(text: str) -> int:
@@ -293,20 +305,53 @@ def locate_pdf(pdf_root: Path, rel_dir: Path, source: str) -> Path:
     return legacy if legacy.exists() else candidate
 
 
-def fixed_numbers(source: str, fixes_dir: Path | None = None) -> dict[int, bool]:
-    """该卷人工补过的题号 -> 是否已写进库（applied）。
+def fixed_numbers(
+    source: str, fixes_dir: Path | None = None,
+) -> dict[tuple[int, int], bool]:
+    """该卷人工补过的 (题号, 小问号) -> 是否已写进库（applied）。
 
     用来判断一条已标记的识别问题到底还算不算数：补题文件被删/作废、
     或者补了但从没 `apply_fixes_cli --apply`，都说明问题还在。
+    旧记录缺 `sub_no` 时按 0 解释。
     """
     path = Path(fixes_dir or FIXES_DIR) / f"{source}.jsonl"
-    out: dict[int, bool] = {}
+    out: dict[tuple[int, int], bool] = {}
     for rec in _read_jsonl(path):
         try:
-            out[int(rec["group_order"])] = bool(rec.get("applied"))
+            key = (int(rec["group_order"]), int(rec.get("sub_no") or 0))
         except (KeyError, TypeError, ValueError):
             continue
+        out[key] = bool(rec.get("applied"))
     return out
+
+
+def _suspect_merged_issue(
+    *, source: str, rel_path: Path, md_path: Path, pdf_path: Path | None,
+    missing_no: int, suspect_row: dict, missing_reasons: list[str],
+) -> dict:
+    """缺号题的 suspect 上一题单独成卡：只带上一题的理由 + 吞并线索 + 指纹。
+
+    绝不复制缺号题自己的理由（`missing_stem` / `md_has_no_such_stem` /
+    `next_starts_with_subq_no_stem`），否则两张卡看着像同一道题（2026-11-27 设计 §4.2）。
+    """
+    reasons = [r for r in missing_reasons if str(r).startswith("prev_")]
+    reasons.insert(0, f"body_contains_stem_{missing_no}")
+    body = suspect_row.get("content") or ""
+    return {
+        "source": source,
+        "rel_path": str(rel_path),
+        "group_order": int(suspect_row["group_order"]),
+        "sub_no": int(suspect_row.get("sub_no") or 0),
+        "kind": "merged_content",
+        "reasons": reasons,
+        "excerpt": _excerpt(body),
+        "pdf": str(pdf_path) if pdf_path else None,
+        "md": str(md_path),
+        "content_sig": content_sig(body),
+        "related_group_order": missing_no,
+        "related_issue_kind": "missing",
+        "status": "pending",
+    }
 
 
 def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
@@ -341,7 +386,7 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
 
     def add(no: int | None, kind: str, reasons: list[str], excerpt: str = "", **extra):
         sub_no = extra.pop("sub_no", by_no.get(no, {}).get("sub_no", 0))
-        issues.append({
+        issue = {
             "source": source,
             "rel_path": str(rel_path),
             "group_order": no,
@@ -353,7 +398,9 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
             "md": str(md_path),
             "status": "pending",
             **extra,
-        })
+        }
+        issues.append(issue)
+        return issue
 
     # ① 缺号：看前/后相邻题谁像"吸收了它"
     # 修复步骤删过内容的题（③）是同一条线索：题号消失往往和"上一题被判定混入另一题"同时出现
@@ -396,6 +443,18 @@ def scan_paper(source: str, rel_path: Path, md_path: Path, rows: list[dict],
         if md_stem_counts.get(n, 0) > 1:
             reasons.append(f"md_stem_appears_{md_stem_counts[n]}x")
         add(n, "missing", reasons, excerpt, suspect_group_order=suspect)
+        if suspect is not None and suspect in by_no:
+            issues.append(
+                _suspect_merged_issue(
+                    source=source,
+                    rel_path=rel_path,
+                    md_path=md_path,
+                    pdf_path=pdf_path,
+                    missing_no=n,
+                    suspect_row=by_no[suspect],
+                    missing_reasons=reasons,
+                )
+            )
 
     # ② 顿号题号：md 里有「N、」但没被切成题
     for no, _count in sorted(md_stem_counts.items()):
@@ -598,7 +657,7 @@ def reopen_unbacked(records: list[dict], all_issues: list[dict],
     于是这张卷的缺题再也不会提示（一零一题28、人大附题7 因此消失）。
     """
     existing = {_issue_key(r): r for r in records}
-    fix_cache: dict[str, dict[int, bool]] = {}
+    fix_cache: dict[str, dict[tuple[int, int], bool]] = {}
     reopened = 0
     for it in all_issues:
         rec = existing.get(_issue_key(it))
@@ -613,7 +672,9 @@ def reopen_unbacked(records: list[dict], all_issues: list[dict],
             continue
         if it["source"] not in fix_cache:
             fix_cache[it["source"]] = fixed_numbers(it["source"], fixes_dir)
-        applied = fix_cache[it["source"]].get(int(it["group_order"]))
+        applied = fix_cache[it["source"]].get(
+            (int(it["group_order"]), int(it.get("sub_no") or 0))
+        )
         ok = bool(applied) if rec.get("status") == "resolved" else applied is not None
         lost = False
         # 内容层：这次还检出同一个问题，说明那次补写没生效（题干仍是空、合并没拆干净），

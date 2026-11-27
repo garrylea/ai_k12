@@ -159,7 +159,10 @@ def test_discarded_dir_is_not_counted(tmp_path):
 
 def test_fixed_numbers_reads_applied_flag(tmp_path):
     fixes = _fix(tmp_path, {7: True, 16: False})
-    assert R.fixed_numbers("物理-卷A-试卷", fixes) == {7: True, 16: False}
+    assert R.fixed_numbers("物理-卷A-试卷", fixes) == {
+        (7, 0): True,
+        (16, 0): False,
+    }
     assert R.fixed_numbers("不存在的卷", fixes) == {}
 
 
@@ -685,3 +688,76 @@ def test_stem_chain_info_resolved_is_not_sent_to_manual_queue(tmp_path):
         "question_no": 1,
     }
     assert R.stem_issue_to_recognition(row, md, None) is None
+
+
+def test_suspect_missing_creates_related_merged_issue(tmp_path):
+    md = _md(tmp_path, "13. 甲题 14. 乙题\n15. 丙题\n")
+    rows = _rows(
+        (13, "甲题 14. 乙题"),
+        (15, "丙题"),
+        (16, "丁题"),
+        (17, "戊题"),
+    )
+    issues = R.scan_paper("卷A", Path("数学/x/卷A"), md, rows, None, [])
+
+    # 扫描会同时报告 1..12 这种起始端缺口；这里只关心 13/14 这一对。
+    missing = next(
+        i for i in issues if i["kind"] == "missing" and i["group_order"] == 14
+    )
+    derived = next(
+        i for i in issues
+        if i["kind"] == "merged_content"
+        and i.get("related_issue_kind") == "missing"
+    )
+    assert missing["group_order"] == 14
+    assert derived["group_order"] == 13
+    assert derived["related_group_order"] == 14
+    assert derived["sub_no"] == 0
+    assert derived["content_sig"] == R.content_sig("甲题 14. 乙题")
+    assert "body_contains_stem_14" in derived["reasons"]
+    assert not any(
+        reason in {"missing_stem", "md_has_no_such_stem", "next_starts_with_subq_no_stem"}
+        for reason in derived["reasons"]
+    )
+
+
+def test_issue_key_and_fixed_numbers_include_sub_no(tmp_path):
+    issue = {
+        "source": "卷A",
+        "group_order": 26,
+        "sub_no": 2,
+        "kind": "incomplete_content",
+    }
+    assert R._issue_key(issue) == ("卷A", 26, 2, "incomplete_content")
+
+    fixes = tmp_path / "fixes"
+    fixes.mkdir()
+    (fixes / "卷A.jsonl").write_text(
+        json.dumps({"group_order": 26, "sub_no": 1, "applied": True}) + "\n"
+        + json.dumps({"group_order": 26, "sub_no": 2, "applied": False}) + "\n",
+        encoding="utf-8",
+    )
+    assert R.fixed_numbers("卷A", fixes) == {(26, 1): True, (26, 2): False}
+
+
+def test_related_merged_issue_reopens_when_suspect_content_changes():
+    old = {
+        "source": "卷A",
+        "group_order": 13,
+        "sub_no": 0,
+        "kind": "merged_content",
+        "related_group_order": 14,
+        "status": "resolved",
+        "verdict": "no_change",
+        "content_sig": "old",
+    }
+    fresh = {
+        "source": "卷A",
+        "group_order": 13,
+        "sub_no": 0,
+        "kind": "merged_content",
+        "related_group_order": 14,
+        "content_sig": "new",
+    }
+    assert R.reopen_changed([old], [fresh]) == 1
+    assert old["status"] == "pending"

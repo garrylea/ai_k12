@@ -2,8 +2,10 @@
 
 **日期**：2026-11-26
 **状态**：v2 已修订（2026-11-26，按设计 review 修正清空语义、Patch 合并、多题粘贴、`sub_no` 身份与写库边界）。
-其中“关联题多 target 卡”和“槽位返回后整卡重绘”两项行为已由
-`2026-11-27-manual-review-identity-and-input-design.md` v2 取代。
+以下旧表述已被 `2026-11-27-manual-review-identity-and-input-design.md` v2 取代，**以新设计为准**：
+1. §4.2 卡片示例里「! 第 18 题的正文里可能混进了本题」的含糊关联提示 → 改为 `relation_text()` 按字段生成明确题号（第 N 题可能混入了第 M 题 / 疑似被第 M 题吞并）。
+2. §4.3 `s`「不继续它的关联题目标」、§4.3 `k`「在关联题卡按 k 后继续进入本题卡」、§12「缺题先修关联题 / `ReviewItem.targets()` 先出关联卡」→ 取消关联卡；缺号题与其 suspect 在扫描阶段各自生成独立 issue，`targets()` 只返回自身，各自独立收口。
+3. §4.3「成功后只显示修改已加入本次记录」→ 提示由 `ReviewDraft.revision` 驱动，只在本次动作真改了草稿时打印「第 N 题修改已加入本次记录（尚未保存）」，不整卡重绘。
 **范围**：`tools/data-refinery` 人工校对链路 —— `manual_fix.py`、`import_cli` 第 7 步、`fix_question_cli`、`review_by_numbers`
 **实施计划**：`docs/superpowers/plans/2026-11-26-manual-review-redesign.md`
 
@@ -127,19 +129,19 @@
 
 | 输入 | 行为 |
 |---|---|
-| `1`–`5` | 进入对应槽位；成功后只显示“修改已加入本次记录”和菜单，不整卡重绘 |
+| `1`–`5` | 进入对应槽位；本次真改了草稿才显示“第 N 题修改已加入本次记录（尚未保存）”和菜单，不整卡重绘（revision 驱动，见新设计 §5.3） |
 | `E` | 编辑“题干 + 选项 + 题内材料”的副本；外置共享文章不进编辑器 |
 | `R` | 清空题干、选项、题内材料、共享材料和图片，答案保留，再收新题面 |
 | `u` | 仅 `repair_truncated`；把修复前原文放入当前草稿并返回卡片，可继续改 |
 | `k` | 当前题目身份全部 flag 置 resolved + `verdict=no_change`，不写库 |
 | 回车 | 当前卡有改动则生成记录；无改动则不写记录、不关 flag |
-| `s` | 立即结束整个当前 `ReviewItem`，不继续它的关联题目标，全部保持 pending |
+| `s` | 立即结束当前 `ReviewItem`，全部保持 pending（见新设计：已无关联目标） |
 | `q` | 抛 `SystemExit(0)`；后续由入口打印剩余 |
 
-`k` 的边界：
+`k` 的边界（见新设计 §5.1）：
 
-- 在“关联题”卡按 `k`：只关闭关联题的当前身份；随后继续进入缺题的本题卡。
-- 在本题卡按 `k`：关闭本题当前身份，结束该 `ReviewItem`。
+- 每张卡只有自身题目身份 `(source, group_order, sub_no)`；按 `k` 只关闭本题当前身份下的全部 flag，不跨题也不跨 `sub_no`。
+- 缺号题与其 suspect 已是两张独立卡，各自按 `k` 独立收口，不存在“先关联卡再本题卡”的接续。
 - `junk_question` 的 `k` 文案为“这行不是题目，忽略”。
 
 ### 4.4 槽位编辑器
@@ -351,11 +353,15 @@ class Patch:
 
 | mode | 落记录处理 |
 |---|---|
-| `keep` | 原题有、记录里没有的旧图补回题干末尾 |
+| `keep` | 以**最终记录的 options** 为准：选项引用的图只保留在选项中，并从题干删除；原题有、最终选项未引用且新题干缺失的题干图补回末尾 |
 | `append` | 使用草稿最终图片序列；替换 `[图N]`，未占用图追加 |
 | `replace` | 按 `clear` 的范围删除旧图引用，再应用最终图片序列 |
 | `clear` | 删除 content/options/`material_inline_text` 中的图片引用；不动 `material_text`（可能是文章正文） |
 | `explicit` | `E` 编辑器路径；以用户读回内容为准，不自动补旧图 |
+
+`Snapshot.images` 只能按编辑前的 options 做预过滤；生成最终记录时还必须按
+`patch.options` 落到 `rec["options"]` 后的图片引用再过滤。否则“编辑前 options 为空、
+本次编辑才把图补成选项”的场景仍会被 `keep` 重新塞回题干（76707 第 2 题）。
 
 ### 5.5 记录字段
 
@@ -564,6 +570,6 @@ cur.execute("UPDATE questions SET answer=%s WHERE id=%s", (answer, qid))
 | `_ask_material_url` 认领同卷文章 | 槽位 2 的「序号 / n」 |
 | 砍短两版裁决 | 卡片并列 + `k`（保留）/`u`（用原文） |
 | 只补答案 | `answer_missing` 直达槽位 4 |
-| 缺题先修关联题 | `ReviewItem.targets()` 先出关联卡 |
+| 缺题/被吞题 | 扫描阶段各自生成独立 issue、各自成卡收口；`ReviewItem.targets()` 只返回自身（见新设计 §5.1） |
 | 跳号误报只能一直跳过 | `k` = 卷面本来没这题 |
 | 主动重录 | 同一卡片流程（`manual_override`） |

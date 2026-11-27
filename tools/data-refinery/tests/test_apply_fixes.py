@@ -266,6 +266,25 @@ def test_apply_materializes_images_before_writing(tmp_path):
     assert (tmp_path / "assets" / expected).exists()
 
 
+def test_apply_does_not_mutate_record_options(tmp_path):
+    """物化只改写写入库的副本，不能把补题记录里的原始图路径也换掉。"""
+    md_dir = tmp_path / "md" / "卷A"
+    (md_dir / "images").mkdir(parents=True)
+    (md_dir / "images" / "a.jpg").write_bytes(b"\xff\xd8\xffA")
+    rec = dict(
+        REC,
+        content="题目",
+        options=[{"label": "A", "text": "![](images/a.jpg)"}],
+        answer="A",
+        md=str(md_dir / "卷A.md"),
+    )
+    cur = FakeCursor(paper=(54, 4), existing=6061)
+
+    A.apply_record(cur, rec, apply=True, assets_root=tmp_path / "assets")
+
+    assert rec["options"] == [{"label": "A", "text": "![](images/a.jpg)"}]
+
+
 def test_apply_rejects_when_image_source_missing(tmp_path):
     md_dir = tmp_path / "md" / "卷A"
     md_dir.mkdir(parents=True)

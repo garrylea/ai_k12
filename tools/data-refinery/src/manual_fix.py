@@ -75,6 +75,7 @@ from review_editor import (  # noqa: F401
     _restore_swallowed_option_label,
     _split_at_marker,
     console,
+    read_prompt,
     looks_like_ui_echo,
     looks_like_wrapped_copy,
 )
@@ -229,7 +230,7 @@ def render_card(state: CardState) -> None:
     c = console()
     item, target, view = state.item, state.target, state.view
     kinds = " + ".join(KIND_TEXT.get(k, k) for k in sorted(item.kinds))
-    c.step(state.index, state.total, f"第 {_label(target.group_order, target.sub_no)} 题",
+    c.step(state.index, state.total, f"第 {_label(item.group_order, item.sub_no)} 题",
            target.note)
     c.write("  " + c.paint(kinds, "cyan"))
     flag = item.flags[0] if item.flags else {}
@@ -241,8 +242,9 @@ def render_card(state: CardState) -> None:
         from cli_ui import wrap_items
         for i, line in enumerate(wrap_items(reasons, c.width - 8)):
             c.write(f"  {c.paint('依据' if i == 0 else '    ', 'dim')}  {line}")
-    if any(f.get("suspect_group_order") for f in item.flags):
-        c.warn("关联题的正文里可能混进了本题：先核对关联题，再回到本题")
+    relation = item.relation_text()
+    if relation:
+        c.warn(relation)
     render_copyable(c, "题干（可整段拷贝）", view.content, max_lines=None)
     if view.options:
         c.write("  选项  " + "  ".join(
@@ -273,8 +275,7 @@ def ask_menu(c, *, is_repair: bool, has_original: bool,
     c.write("           " + c.paint("回车 保存并结束 · s 稍后（不保存） · "
                                     "k 该题无问题（不写库） · q 退出", "dim"))
     while True:
-        c.prompt("› ")
-        raw = _read_line()
+        raw = read_prompt(c, "› ")
         if raw is None:
             return "skip", None
         ans = raw.strip()
@@ -303,22 +304,20 @@ def close_as_ok(item: ReviewItem, target: ReviewTarget) -> None:
     note = "人工确认无问题，未改动"
     if item.kinds == {"junk_question"}:
         note = "人工确认：这行不是题目，忽略"
-    elif (target.group_order, target.sub_no) != (item.group_order, item.sub_no):
-        note = "人工确认：关联题没有问题"
     elif "missing" in item.kinds:
         note = "人工确认：卷面本来没有这道题"
     flag = next(
         (
             f for f in item.flags
-            if int(f.get("group_order") or item.group_order) == target.group_order
-            and int(f.get("sub_no") or 0) == target.sub_no
+            if int(f.get("group_order") or item.group_order) == item.group_order
+            and int(f.get("sub_no") or 0) == item.sub_no
         ),
         item.flags[0] if item.flags else {},
     )
-    mark_issue(item.source, target.group_order, "resolved",
-               sub_no=target.sub_no, statuses={"pending"}, note=note,
+    mark_issue(item.source, item.group_order, "resolved",
+               sub_no=item.sub_no, statuses={"pending"}, note=note,
                verdict="no_change", content_sig=flag.get("content_sig"))
-    c.ok(f"第 {_label(target.group_order, target.sub_no)} 题已标记「确认无问题」，题库未改动")
+    c.ok(f"第 {_label(item.group_order, item.sub_no)} 题已标记「确认无问题」，题库未改动")
 
 
 def _content_options_body(view: View) -> str:
@@ -409,8 +408,7 @@ def _ask_share_with(issue: dict) -> list[int]:
         c.write(f"  {_label(no, sub_no)}  {text[:28]}")
     allowed = {no for no, _sub, _text in candidates} | {current}
     while True:
-        c.prompt("共用题号 › ")
-        raw = _read_line()
+        raw = read_prompt(c, "共用题号 › ")
         if raw is None or not raw.strip():
             return [current]
         nums = _parse_question_numbers(raw)
@@ -436,8 +434,7 @@ def edit_article_slot(state: CardState) -> None:
     hint = "回车=不改；粘贴=替换全文；:e · :f · :p 看全文"
     if cands:
         hint += " · 序号=沿用 · n=本题无材料"
-    c.prompt(f"共享材料 › （{hint}）")
-    first = _read_line()
+    first = read_prompt(c, f"共享材料 › （{hint}）")
     if first is None or not first.strip():
         return
     text = first.strip()
@@ -511,9 +508,8 @@ def edit_image_slot(state: CardState) -> None:
 
 def replace_all(state: CardState) -> None:
     c = console()
-    c.prompt("全换（题干/选项/材料/图清空，答案保留） "
-             "1 粘贴文本 · 2 图片识别（MinerU）· 3 文件 · 回车=取消 › ")
-    raw = _read_line()
+    raw = read_prompt(c, "全换（题干/选项/材料/图清空，答案保留） "
+                         "1 粘贴文本 · 2 图片识别（MinerU）· 3 文件 · 回车=取消 › ")
     if raw is None or not raw.strip():
         return
     ans = raw.strip()
@@ -546,7 +542,7 @@ def edit_whole_in_editor(state: CardState) -> None:
     body = _content_options_body(state.view)
     if (state.view.inline or "").strip():
         body = body.rstrip() + "\n\n" + state.view.inline.strip()
-    edited, _path = _file_edit(body, f"第{state.target.group_order}题题干")
+    edited, _path = _file_edit(body, f"第{state.item.group_order}题题干")
     if edited is None or not edited.strip():
         console().warn("没有收到修改")
         return
@@ -576,17 +572,27 @@ def run_card(item: ReviewItem, target: ReviewTarget, snap: Snapshot,
     state = CardState(item=item, target=target, snap=snap,
                       draft=ReviewDraft(snap), paper_dir=Path(md).parent,
                       index=index, total=total)
+    render_card(state)
+    changed_notice = (
+        f"第 {_label(item.group_order, item.sub_no)} 题"
+        "修改已加入本次记录（尚未保存）"
+    )
+
     if item.kinds == {"answer_missing"} and snap.content:
+        before = state.draft.revision
         edit_answer_slot(state)
         changed = has_changes(state.draft.patch)
+        if changed and state.draft.revision > before:
+            c.ok(changed_notice)
         return CardResult("record" if changed else "noop",
                           patch=state.draft.patch if changed else None)
+
     while True:
-        render_card(state)
         action, arg = ask_menu(
             c, is_repair=item.is_repair,
             has_original=bool(snap.repair_original),
             has_content=bool(state.view.content))
+        before = state.draft.revision
         if action not in ("ok", "skip"):
             state.armed = None
         if action == "slot":
@@ -627,52 +633,49 @@ def run_card(item: ReviewItem, target: ReviewTarget, snap: Snapshot,
                               patch=state.draft.patch if changed else None)
         elif action == "quit":
             raise SystemExit(0)
+        if state.draft.revision > before:
+            c.ok(changed_notice)
 
 
 def run_item(item: ReviewItem, index: int, total: int) -> RunResult:
     out = RunResult()
-    primary_ok = False
-    for target in item.targets():
-        snap = snapshot_for(item, target.group_order, target.sub_no,
-                            load_repair=item.is_repair)
-        result = run_card(item, target, snap, index, total)
-        if result.action == "skip":
-            out.outcome = "recorded" if out.records else "skipped"
-            return out
-        if result.action == "ok":
-            if (target.group_order, target.sub_no) == (item.group_order, item.sub_no):
-                primary_ok = True
-                break
-            continue
-        if result.action == "noop":
-            continue
-        if result.action == "batch":
-            for part in result.batch:
-                part_snap = snapshot_for(item, part.group_order, part.sub_no)
-                patch = Patch(
-                    content=part.content,
-                    options=part.options,
-                    material=MaterialPatch(
-                        article=UNSET,
-                        inline=part.material if part.material is not None else UNSET,
-                    ),
-                )
-                out.records.append(
-                    build_record(item, part.group_order, part.sub_no, patch, part_snap))
-            out.outcome = "recorded"
-            return out
-        if result.action == "record" and result.patch is not None:
-            out.records.append(
-                build_record(
-                    item, target.group_order, target.sub_no, result.patch, snap,
-                    dominant_type=(item.dominant_type
-                                   if "type_mismatch" in item.kinds else None),
-                )
-            )
-    if out.records:
-        out.outcome = "recorded"
-    elif primary_ok:
+    target = item.targets()[0]
+    snap = snapshot_for(item, item.group_order, item.sub_no,
+                        load_repair=item.is_repair)
+    result = run_card(item, target, snap, index, total)
+    if result.action == "skip":
+        out.outcome = "recorded" if out.records else "skipped"
+        return out
+    if result.action == "ok":
         out.outcome = "ok"
+        return out
+    if result.action == "noop":
+        return out
+    if result.action == "batch":
+        # 多题号粘贴是唯一例外：`part` 才是用户刚粘出的题号。
+        for part in result.batch:
+            part_snap = snapshot_for(item, part.group_order, part.sub_no)
+            patch = Patch(
+                content=part.content,
+                options=part.options,
+                material=MaterialPatch(
+                    article=UNSET,
+                    inline=part.material if part.material is not None else UNSET,
+                ),
+            )
+            out.records.append(
+                build_record(item, part.group_order, part.sub_no, patch, part_snap))
+        out.outcome = "recorded"
+        return out
+    if result.action == "record" and result.patch is not None:
+        out.records.append(
+            build_record(
+                item, item.group_order, item.sub_no, result.patch, snap,
+                dominant_type=(item.dominant_type
+                               if "type_mismatch" in item.kinds else None),
+            )
+        )
+        out.outcome = "recorded"
     return out
 
 
@@ -838,8 +841,7 @@ def _pick_paper(papers: list[dict]) -> dict | None:
     for i, p in enumerate(papers, 1):
         c.write(f"  {i}. {p['source']}")
     while True:
-        c.prompt("选择第几份（回车取消）› ")
-        raw = _read_line()
+        raw = read_prompt(c, "选择第几份（回车取消）› ")
         if raw is None or not raw.strip():
             return None
         raw = raw.strip()
@@ -870,8 +872,7 @@ def _pick_sub_no(rel_path: str, source: str, no: int) -> int:
     for i, sub in enumerate(subs, 1):
         c.write(f"  {i}) {no}({sub})")
     while True:
-        c.prompt("选哪个小问（回车=0 整题）› ")
-        raw = _read_line()
+        raw = read_prompt(c, "选哪个小问（回车=0 整题）› ")
         if raw is None or not raw.strip():
             return 0
         if raw.strip().isdigit() and 1 <= int(raw) <= len(subs):
@@ -915,8 +916,7 @@ def review_by_numbers(subject: str | None, file: str | None,
 
     total = 0
     while True:
-        c.prompt("要重录的题号 › ")
-        raw = _read_line()
+        raw = read_prompt(c, "要重录的题号 › ")
         if raw is None:
             break
         raw = raw.strip()
@@ -973,9 +973,12 @@ def main() -> int:
         # 录完就地入库 + 复扫：用户只记这一条命令，不用再跑 apply_fixes_cli
         # （2026-11-01 用户裁决「命令只能一条」）。import_cli 第 7 步不走这里。
         if res.get("fixed") and sys.stdin.isatty():
-            print(f"\n本次补录 {res['fixed']} 题，是否现在写入题库？"
-                  " y=写入 / 直接回车=暂不写 › ", end="", flush=True)
-            if (_read_line() or "").strip().lower() in ("y", "yes"):
+            answer = read_prompt(
+                console(),
+                f"\n本次补录 {res['fixed']} 题，是否现在写入题库？"
+                " y=写入 / 直接回车=暂不写 › ",
+            )
+            if (answer or "").strip().lower() in ("y", "yes"):
                 from apply_fixes import run as apply_run
                 extra = ["--source", args.source] if args.source else []
                 apply_run(["--apply", *extra])

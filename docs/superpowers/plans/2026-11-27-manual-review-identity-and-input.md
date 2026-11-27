@@ -62,7 +62,7 @@
 - Consumes: 当前真实 76816 `.md` 与 extracted JSONL。
 - Produces: `REAL_76816_PAPER`、`REAL_76816_EXTRACTED`、`REAL_76816_SOURCE`、`REAL_76816_REL`；后续任务持续运行本文件。
 
-- [ ] **Step 1: 原样复制真实 fixture**
+- [x] **Step 1: 原样复制真实 fixture**
 
 从当前被 gitignore 的 `output/` 原样复制，不重新生成或清洗：
 
@@ -87,7 +87,7 @@ paper.md          ca9c91bcd9d5fb4ba670be106ae302f7e71dfddf522095dbf03a0cf34b2012
 extracted.jsonl   011b17dfa11d3da7663cc60cdd0680a711a16f6695d0aa6b3077e04d25f669d3
 ```
 
-- [ ] **Step 2: 写真实 case 测试**
+- [x] **Step 2: 写真实 case 测试**
 
 Create `tools/data-refinery/tests/test_manual_review_76816_e2e.py`:
 
@@ -293,7 +293,7 @@ def test_real_76816_merged_issue_reopens_on_content_change(tmp_path, monkeypatch
     assert resolved["status"] == "pending"
 ```
 
-- [ ] **Step 3: 运行门禁，确认当前实现失败**
+- [x] **Step 3: 运行门禁，确认当前实现失败**
 
 Run:
 
@@ -304,13 +304,15 @@ pytest tests/test_manual_review_76816_e2e.py -q
 
 Expected: FAIL。至少缺少 `related_group_order`，且 targets 仍返回 suspect 卡。
 
-- [ ] **Step 4: Commit fixtures 与失败门禁**
+- [x] **Step 4: Commit fixtures 与失败门禁**（git add 暂存；按指令不 commit）
 
 ```bash
 git add tools/data-refinery/tests/fixtures/real_cases/76816 \
         tools/data-refinery/tests/test_manual_review_76816_e2e.py
 git commit -m "test(refinery): freeze manual review case 76816"
 ```
+
+> 执行注记（2026-11-27）：按 team-lead 指令本次不 commit/push，已用 `git add` 暂存替代。
 
 ---
 
@@ -324,7 +326,7 @@ git commit -m "test(refinery): freeze manual review case 76816"
 - Produces: `_issue_key()` 包含 `sub_no`；`fixed_numbers()` 返回 `(group_order, sub_no)` key；
   suspect issue 带 `related_group_order`、`related_issue_kind`、`content_sig`、`sub_no`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**（`test_suspect_missing_creates_related_merged_issue` 的 missing 选择器按用户裁决加 `group_order == 14` 过滤，生产扫描范围不变）
 
 Append to `test_recognition_scan.py`:
 
@@ -339,7 +341,12 @@ def test_suspect_missing_creates_related_merged_issue(tmp_path):
     )
     issues = R.scan_paper("卷A", Path("数学/x/卷A"), md, rows, None, [])
 
-    missing = next(i for i in issues if i["kind"] == "missing")
+    missing_by_no = {
+        issue["group_order"]: issue
+        for issue in issues
+        if issue["kind"] == "missing"
+    }
+    missing = missing_by_no[14]
     derived = next(
         i for i in issues
         if i["kind"] == "merged_content"
@@ -399,7 +406,7 @@ def test_related_merged_issue_reopens_when_suspect_content_changes():
     assert old["status"] == "pending"
 ```
 
-- [ ] **Step 2: 运行失败测试**
+- [x] **Step 2: 运行失败测试**
 
 ```bash
 cd tools/data-refinery
@@ -412,7 +419,7 @@ pytest \
 
 Expected: FAIL。
 
-- [ ] **Step 3: 修改 issue key 与 applied lookup**
+- [x] **Step 3: 修改 issue key 与 applied lookup**
 
 Implement:
 
@@ -453,7 +460,7 @@ applied = fix_cache[it["source"]].get(
 )
 ```
 
-- [ ] **Step 4: 生成 suspect issue**
+- [x] **Step 4: 生成 suspect issue**
 
 Implement:
 
@@ -500,7 +507,7 @@ if suspect is not None and suspect in by_no:
     )
 ```
 
-- [ ] **Step 5: 更新旧 fixed_numbers 断言**
+- [x] **Step 5: 更新旧 fixed_numbers 断言**
 
 ```python
 assert R.fixed_numbers("物理-卷A-试卷", fixes) == {
@@ -509,7 +516,7 @@ assert R.fixed_numbers("物理-卷A-试卷", fixes) == {
 }
 ```
 
-- [ ] **Step 6: 验证并提交**
+- [x] **Step 6: 验证并提交**（git add 暂存；按指令不 commit）
 
 ```bash
 cd tools/data-refinery
@@ -519,6 +526,8 @@ git add tools/data-refinery/src/recognition_scan.py \
         tools/data-refinery/tests/test_recognition_scan.py
 git commit -m "feat(refinery): derive independent suspect review issues"
 ```
+
+> 执行注记：按 team-lead 指令不 commit，已 `git add` 暂存替代。
 
 Expected: 扫描测试 PASS；真实门禁只剩 target/UI 断言失败。
 
@@ -538,7 +547,7 @@ Expected: 扫描测试 PASS；真实门禁只剩 target/UI 断言失败。
 - Produces: `ReviewItem.targets()` 始终只返回自身；`ReviewItem.relation_text() -> str | None`；
   记录、收口、显示全部使用 item 身份。
 
-- [ ] **Step 1: 重写 target 测试**
+- [x] **Step 1: 重写 target 测试**
 
 In `test_review_queue.py` replace suspect-first tests with:
 
@@ -598,7 +607,7 @@ def test_related_questions_are_independent_items(tmp_path, monkeypatch):
     }
 ```
 
-- [ ] **Step 2: 运行失败测试**
+- [x] **Step 2: 运行失败测试**
 
 ```bash
 cd tools/data-refinery
@@ -611,7 +620,7 @@ pytest \
 
 Expected: FAIL。
 
-- [ ] **Step 3: 实现单 target 与关系文案**
+- [x] **Step 3: 实现单 target 与关系文案**
 
 Implement in `review_queue.py`:
 
@@ -641,7 +650,7 @@ class ReviewItem:
         return [ReviewTarget(self.group_order, self.sub_no, self.note())]
 ```
 
-- [ ] **Step 4: 卡片改用 item 身份和关系文案**
+- [x] **Step 4: 卡片改用 item 身份和关系文案**
 
 In `render_card()`:
 
@@ -692,7 +701,7 @@ Keep multi-number paste passing `part.group_order/part.sub_no`.
 In `edit_whole_in_editor()` create the temp-file label with
 `state.item.group_order`, not target.
 
-- [ ] **Step 5: 运行身份测试和真实门禁**
+- [x] **Step 5: 运行身份测试和真实门禁**
 
 ```bash
 cd tools/data-refinery
@@ -706,7 +715,7 @@ pytest \
 
 Expected: PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**（git add 暂存；按指令不 commit）
 
 ```bash
 git add tools/data-refinery/src/review_queue.py \
@@ -716,6 +725,8 @@ git add tools/data-refinery/src/review_queue.py \
         tools/data-refinery/tests/test_manual_fix.py
 git commit -m "fix(refinery): unify manual review question identity"
 ```
+
+> 执行注记：按 team-lead 指令不 commit，已 `git add` 暂存替代。
 
 ---
 
@@ -731,7 +742,7 @@ git commit -m "fix(refinery): unify manual review question identity"
 - Produces: `ReviewDraft.revision: int`；所有实际字段修改递增 revision；
   `run_card()` 只在首帧整卡渲染；answer missing 先渲染再编辑。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**（`test_answer_missing_renders_card_before_edit` 从 `test_review_flow` 复用 `_env/_q/_i/REL` 助手）
 
 Append to `test_review_records.py`:
 
@@ -788,7 +799,7 @@ def test_answer_missing_renders_card_before_edit(tmp_path, monkeypatch):
     assert seen == ["render", "edit"]
 ```
 
-- [ ] **Step 2: 运行失败测试**
+- [x] **Step 2: 运行失败测试**
 
 ```bash
 cd tools/data-refinery
@@ -801,7 +812,7 @@ pytest \
 
 Expected: FAIL。
 
-- [ ] **Step 3: 实现 revision**
+- [x] **Step 3: 实现 revision**
 
 In `ReviewDraft`:
 
@@ -826,7 +837,7 @@ def use_restore_original(self, content):
 
 Do not increment for `unchanged`, parse failure, or cancelled editor.
 
-- [ ] **Step 4: 重构 run_card**
+- [x] **Step 4: 重构 run_card**
 
 Implement:
 
@@ -863,7 +874,7 @@ while True:
 Remove `render_card(state)` from inside the loop. `ask_menu()` continues to print the menu on
 each iteration.
 
-- [ ] **Step 5: 验证并提交**
+- [x] **Step 5: 验证并提交**（git add 暂存；按指令不 commit）
 
 ```bash
 cd tools/data-refinery
@@ -878,6 +889,8 @@ git add tools/data-refinery/src/review_records.py \
         tools/data-refinery/tests/test_manual_fix.py
 git commit -m "fix(refinery): avoid duplicate manual review redraw"
 ```
+
+> 执行注记：按 team-lead 指令不 commit，已 `git add` 暂存替代。
 
 Expected: PASS。
 
@@ -897,7 +910,7 @@ Expected: PASS。
   `review_editor.read_prompt(c, prompt)`。
 - Consumes: 现有 `_split_at_marker()`、`_restore_swallowed_option_label()` 和非 TTY loop。
 
-- [ ] **Step 1: 添加依赖与输入测试**
+- [x] **Step 1: 添加依赖与输入测试**
 
 Add to `requirements.txt`:
 
@@ -977,7 +990,7 @@ def test_read_prompt_non_tty_prints_once(monkeypatch):
     assert prompts == ["题目 › "]
 ```
 
-- [ ] **Step 2: 运行失败测试**
+- [x] **Step 2: 运行失败测试**
 
 ```bash
 cd tools/data-refinery
@@ -986,7 +999,7 @@ pytest tests/test_terminal_input.py -q
 
 Expected: FAIL with `ModuleNotFoundError: terminal_input`。
 
-- [ ] **Step 3: 实现 terminal_input**
+- [x] **Step 3: 实现 terminal_input**
 
 Create `src/terminal_input.py`:
 
@@ -1073,7 +1086,7 @@ def read_block(message="", *, default="", input=None, output=None, history=None)
         return default
 ```
 
-- [ ] **Step 4: 实现 prompt 适配与 TTY 委托**
+- [x] **Step 4: 实现 prompt 适配与 TTY 委托**
 
 In `review_editor.py`:
 
@@ -1108,7 +1121,7 @@ def _read_block(first_chunk: str = "") -> str:
     # Keep the existing non-TTY loop unchanged here.
 ```
 
-- [ ] **Step 5: 替换 prompt 配对**
+- [x] **Step 5: 替换 prompt 配对**
 
 Replace every:
 
@@ -1127,7 +1140,7 @@ Convert all `manual_fix.py` and `review_editor.py` call sites, including menus, 
 replace-all, paper/subquestion selection, read slots, image slots, editor waits, and apply
 confirmation. Export `read_prompt` through the `manual_fix.py` named imports.
 
-- [ ] **Step 6: 验证与提交**
+- [x] **Step 6: 验证与提交**（git add 暂存；按指令不 commit）
 
 ```bash
 cd tools/data-refinery
@@ -1144,9 +1157,11 @@ git add tools/data-refinery/requirements.txt \
 git commit -m "feat(refinery): add editable terminal input"
 ```
 
+> 执行注记：按 team-lead 指令不 commit，已 `git add` 暂存替代。
+
 Expected: PASS。
 
-- [ ] **Step 7: TTY 冒烟**
+- [x] **Step 7: TTY 冒烟**（PTY 实测：↑ 找回上一条、EOF 独立行收尾、整卡只渲染一次、Exit 0；:e 由单测覆盖）
 
 ```bash
 cd tools/data-refinery
@@ -1168,7 +1183,7 @@ Ctrl+D 不崩栈、`EOF` 独立行结束多行输入。
 - Consumes: Task 1-5 的最终接口和测试。
 - Produces: 设计、计划、旧设计替代说明与真实 case 一致。
 
-- [ ] **Step 1: 核对文档无冲突和占位**
+- [x] **Step 1: 核对文档无冲突和占位**
 
 ```bash
 rg -n "target 卡|整卡重绘|修改已加入本次记录" \
@@ -1180,7 +1195,7 @@ rg -n "T[B]D|T[O]DO|待[定]|以后[再]说" \
 
 Expected: 第一条命中替代说明；第二条零命中。
 
-- [ ] **Step 2: 运行唯一真实 case 门禁**
+- [x] **Step 2: 运行唯一真实 case 门禁**
 
 ```bash
 cd tools/data-refinery
@@ -1189,7 +1204,7 @@ pytest tests/test_manual_review_76816_e2e.py -q
 
 Expected: PASS。失败时立即停止。
 
-- [ ] **Step 3: 运行全量回归**
+- [x] **Step 3: 运行全量回归**（2345 passed, 10 skipped；同步更新了 test_review_editor 的两处假 TTY 用例以适配 read_prompt 适配层）
 
 ```bash
 cd tools/data-refinery
@@ -1198,7 +1213,7 @@ pytest -q
 
 Expected: PASS，network 用例按仓库规则 skip。
 
-- [ ] **Step 4: 检查工作区**
+- [x] **Step 4: 检查工作区**
 
 ```bash
 git diff --check
@@ -1207,7 +1222,7 @@ git status --short
 
 Expected: 无空白错误；真实 fixtures 已被 Git 跟踪。
 
-- [ ] **Step 5: 最终提交**
+- [x] **Step 5: 最终提交**（git add 暂存全部改动；按 team-lead 指令不 commit/push）
 
 ```bash
 git add docs/superpowers/specs/2026-11-26-manual-review-redesign-design.md \
@@ -1215,6 +1230,8 @@ git add docs/superpowers/specs/2026-11-26-manual-review-redesign-design.md \
         docs/superpowers/plans/2026-11-27-manual-review-identity-and-input.md
 git commit -m "docs(refinery): finalize manual review identity plan"
 ```
+
+> 执行注记：按 team-lead 指令不 commit/push；全部改动已 `git add` 暂存，工作区无未暂存改动。
 
 ---
 

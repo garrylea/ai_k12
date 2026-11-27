@@ -815,7 +815,9 @@ def apply_record(cur, rec: dict, apply: bool, *, assets_root: Path | None = None
 
     content = rec["content"]
     answer = rec.get("answer") or ""
-    options = rec.get("options")
+    # 物化图片会原地改写 options 的 dict/text/image_url。用副本，别污染补题记录：
+    # 回写 manual_fixes 时 rec 会被整条写回，否则记录里会混入库侧规范路径。
+    options = copy.deepcopy(rec.get("options"))
     forced_type = rec.get("expected_type") or None
 
     # 只改题干时粘贴内容里没有 A/B/C/D，补题记录的 options 是 None；直接写库会把

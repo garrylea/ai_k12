@@ -38,8 +38,20 @@ def console() -> Console:
     return _CONSOLE
 
 
+def read_prompt(c: Console, prompt: str) -> str | None:
+    """提示 + 读一行；TTY 用 prompt_toolkit（提示只出现一次），非 TTY 保持原路径。"""
+    if sys.stdin.isatty():
+        from terminal_input import read_line
+        return read_line(c.paint(prompt, "cyan"))
+    c.prompt(prompt)
+    return _read_line()
+
+
 def _read_line(prompt: str = "") -> str | None:
     """读一行；输入流结束时返回 None（不抛 EOFError，避免半路崩栈）。"""
+    if prompt and sys.stdin.isatty():
+        from terminal_input import read_line
+        return read_line(prompt)
     if prompt:
         print(prompt, end="", flush=True)
     line = sys.stdin.readline()
@@ -136,6 +148,14 @@ def _restore_swallowed_option_label(lines: list[str]) -> list[str]:
 def _read_block(first_chunk: str = "") -> str:
     """读到结束标记为止，返回正文；first_chunk 是已经读到的那一段。"""
     c = console()
+    if sys.stdin.isatty():
+        from terminal_input import read_block
+        raw = read_block(default=first_chunk)
+        body, _done = _split_at_marker(raw)
+        lines = body.splitlines() if body else []
+        c.ok(f"已收到 {len(lines)} 行")
+        return "\n".join(_restore_swallowed_option_label(lines)).strip()
+    # 非 TTY：保持原有逐行读取路径（字节输出、EOF 语义不变）。
     body, done = _split_at_marker(first_chunk)
     lines = body.splitlines() if body else []
     while not done:
@@ -204,8 +224,7 @@ def looks_like_ui_echo(text: str) -> bool:
 
 def _ask_path(prompt: str) -> Path | None:
     """读一个路径（去掉引号/空白）；空输入返回 None。"""
-    console().prompt(prompt)
-    raw = (_read_line() or "").strip().strip("'\"")
+    raw = (read_prompt(console(), prompt) or "").strip().strip("'\"")
     if not raw:
         return None
     return Path(raw).expanduser()
@@ -372,8 +391,7 @@ def _line_edit(text: str) -> str | None:
               ("r N", "整段替换（多行，EOF 结束）"), ("i N 内容", "第 N 行后插入"),
               ("p", "重看"), ("w", "完成"), ("q", "放弃")])
     while True:
-        c.prompt("编辑› ")
-        raw = _read_line()
+        raw = read_prompt(c, "编辑› ")
         if raw is None:
             return "\n".join(_restore_swallowed_option_label(lines))
         raw = raw.strip()
@@ -506,8 +524,7 @@ def _file_edit(text: str | None, label: str = "题干",
             c.write(f"  {line}")
         c.info(f"文件已写好，也可以手动打开：{path}")
         while True:
-            c.prompt("装好后按回车重新检测 / q 取消 › ")
-            raw = _read_line()
+            raw = read_prompt(c, "装好后按回车重新检测 / q 取消 › ")
             if raw is None or raw.strip().lower() in ("q", "quit"):
                 return None, path
             editor = _find_editor()
@@ -532,8 +549,7 @@ def _file_edit(text: str | None, label: str = "题干",
         c.write(f"  {path}")
 
     while True:
-        c.prompt("改完按回车确认 / c 取消 › ")
-        raw = _read_line()
+        raw = read_prompt(c, "改完按回车确认 / c 取消 › ")
         if raw is None:
             return None, path
         ans = raw.strip().lower()
@@ -631,8 +647,7 @@ def read_slot(
         if pre is None:
             if hint:
                 c.write("  " + c.paint(hint, "dim"))
-            c.prompt(f"{label} › ")
-            raw = _read_line()
+            raw = read_prompt(c, f"{label} › ")
         else:
             raw, pre = pre, None
         if raw is None:
@@ -718,10 +733,9 @@ def _collect_image_paths(c, *, clipboard_only: bool = False) -> list[Path]:
 
     while True:
         if clipboard_only:
-            c.prompt(f"图片{len(paths) + 1}：回车收剪贴板 / eof 结束 › ")
+            raw = read_prompt(c, f"图片{len(paths) + 1}：回车收剪贴板 / eof 结束 › ")
         else:
-            c.prompt("图片路径（多个用逗号；回车读剪贴板；eof 结束）› ")
-        raw = _read_line()
+            raw = read_prompt(c, "图片路径（多个用逗号；回车读剪贴板；eof 结束）› ")
         if raw is None:
             break
         s = raw.strip()
@@ -775,8 +789,7 @@ def read_images(c, current, paper_md_dir: Path) -> tuple[str, list[Path]]:
         c.write("  图（当前 0 张）")
     c.legend([("1", "追加图片"), ("2", "替换全部"), ("3", "清空"), ("回车", "不改")])
     while True:
-        c.prompt("选择 1/2/3（回车=不改）› ")
-        raw = _read_line()
+        raw = read_prompt(c, "选择 1/2/3（回车=不改）› ")
         if raw is None:
             return "unchanged", []
         s = raw.strip()

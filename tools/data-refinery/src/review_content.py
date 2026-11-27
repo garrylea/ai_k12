@@ -285,6 +285,18 @@ def _image_refs(*texts: str) -> list[str]:
     return out
 
 
+def _option_image_refs(options: list[dict] | None) -> list[str]:
+    """收集最终选项引用的图片，同时兼容 text 内联和已物化的 image_url。"""
+    refs = _image_refs(
+        *(str((opt or {}).get("text") or "") for opt in (options or []))
+    )
+    for opt in options or []:
+        ref = str((opt or {}).get("image_url") or "").strip()
+        if ref and ref not in refs:
+            refs.append(ref)
+    return refs
+
+
 def _append_missing_images(text: str, refs: list[str]) -> str:
     """把没被新文本引用的原图补到末尾（只改文字、保留原图）。"""
     missing = [r for r in refs if r not in text]
@@ -347,12 +359,17 @@ def snapshot(issue: dict, *, load_repair: bool = False) -> Snapshot:
     row = _current_question(issue) or {}
     slots = _material_slots(issue)
     opts = row.get("options") or []
-    images = _image_refs(
-        row.get("content") or "",
-        row.get("material_text") or "",
-        row.get("_post_material_text") or "",
-        *(str((o or {}).get("text") or "") for o in opts),
-    )
+    # 图一旦出现在选项里就不属于题干：keep 模式要用 images 把原图补回题干，
+    # 这里必须只收题干/材料独有的图，否则选项图会被重复塞回题干（2026-11-27 76707）。
+    option_refs = _option_image_refs(opts)
+    images = [
+        r for r in _image_refs(
+            row.get("content") or "",
+            row.get("material_text") or "",
+            row.get("_post_material_text") or "",
+        )
+        if r not in option_refs
+    ]
     return Snapshot(
         content=(row.get("content") or "").strip(),
         options=opts,

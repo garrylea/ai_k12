@@ -1092,7 +1092,7 @@ def has_changes(patch: Patch) -> bool:
    - `clear`：对 content/options/material 字段执行 `strip_all_images()`；
    - `replace`：先清旧图，再 `_apply_image_placeholders()`；
    - `append`：直接应用最终序列；
-   - `keep`：仅在没有任何显式清理时保留旧图；
+   - `keep`：以最终 options 为准，删掉已归选项的图，只补回真正的题干图；
    - `explicit`：不自动补旧图。
 
 关键实现：
@@ -1119,7 +1119,10 @@ def _apply_images_to_record(rec: dict, patch: Patch, snap: Snapshot) -> None:
     if mode in ("append", "replace") and patch.images:
         rec["content"] = _apply_image_placeholders(rec["content"], patch.images)
     elif mode == "keep":
-        rec["content"] = preserve_images(rec["content"], snap.images)
+        option_refs = _option_image_refs(rec.get("options"))
+        rec["content"] = _strip_image_refs(rec["content"], option_refs)
+        stem_images = [ref for ref in snap.images if ref not in option_refs]
+        rec["content"] = preserve_images(rec["content"], stem_images)
 ```
 
 材料字段实现必须直接在同一个 `MaterialPatch` 上读取三态，不新增第二份状态：

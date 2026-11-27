@@ -50,22 +50,28 @@ def test_recorded_flags_does_not_downgrade_resolved(tmp_path, monkeypatch):
     assert [r["status"] for r in saved] == ["recorded", "resolved"]
 
 
-def test_targets_puts_suspect_before_self():
+def test_targets_always_returns_self_only():
     rows = [
-        {"source": "卷A", "group_order": 19, "sub_no": 0, "kind": "missing",
-         "status": "pending", "suspect_group_order": 18, "suspect_sub_no": 0},
+        {"source": "卷A", "group_order": 14, "sub_no": 0, "kind": "missing",
+         "status": "pending", "suspect_group_order": 13},
     ]
     item = review_queue.group_items(rows)[0]
-    got = [(t.group_order, t.sub_no) for t in item.targets()]
-    assert got == [(18, 0), (19, 0)], "先问把下一题吞进来的那道，再问本题"
-    assert item.note() == "题目缺失或被吞，请按原卷补录"
+    assert [(t.group_order, t.sub_no) for t in item.targets()] == [(14, 0)]
 
 
-def test_targets_ignores_non_integer_suspect():
-    """旧实现有 isinstance 守卫；手改过的 issues 里 suspect 可能是字符串，不能崩。"""
-    rows = [
-        {"source": "卷A", "group_order": 19, "sub_no": 0, "kind": "missing",
-         "status": "pending", "suspect_group_order": "18"},
-    ]
-    item = review_queue.group_items(rows)[0]
-    assert [(t.group_order, t.sub_no) for t in item.targets()] == [(19, 0)]
+def test_relation_text_uses_explicit_numbers():
+    missing = review_queue.ReviewItem(
+        source="卷A", rel_path="数学/x/卷A", group_order=26,
+        flags=[{"kind": "missing", "status": "pending", "suspect_group_order": 25}],
+    )
+    merged = review_queue.ReviewItem(
+        source="卷A", rel_path="数学/x/卷A", group_order=25,
+        flags=[{
+            "kind": "merged_content",
+            "status": "pending",
+            "related_group_order": 26,
+            "related_issue_kind": "missing",
+        }],
+    )
+    assert missing.relation_text() == "第 26 题疑似被第 25 题吞并"
+    assert merged.relation_text() == "第 25 题可能混入了第 26 题"

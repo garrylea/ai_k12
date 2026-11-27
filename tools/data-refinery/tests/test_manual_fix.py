@@ -976,3 +976,47 @@ def _prep_editor_issue(monkeypatch):
     return issue
 
 
+# ---------- revision 控制重绘（2026-11-27）----------
+
+
+def test_edit_success_does_not_render_whole_card_again(tmp_path, monkeypatch):
+    _prep_content(tmp_path, monkeypatch)
+    calls = []
+    original = manual_fix.render_card
+    monkeypatch.setattr(
+        manual_fix,
+        "render_card",
+        lambda state: calls.append(state.item.group_order) or original(state),
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO("1\n修正后的题干\nEOF\n\n"))
+    manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+    assert calls == [27]
+
+
+def test_answer_missing_renders_card_before_edit(tmp_path, monkeypatch):
+    # 临时环境助手与 test_review_flow 共用（题卡环境构造逻辑相同）。
+    from test_review_flow import REL, _env, _i, _q
+
+    md = str(tmp_path / "output/md" / REL / "卷A.md")
+    _env(
+        tmp_path, monkeypatch,
+        questions=[_q(19, content="19. 题干", answer="")],
+        issues=[_i(19, "answer_missing", md=md)],
+    )
+    seen = []
+    original_render = manual_fix.render_card
+    monkeypatch.setattr(
+        manual_fix,
+        "render_card",
+        lambda state: seen.append("render") or original_render(state),
+    )
+
+    def edit(state):
+        seen.append("edit")
+        state.draft.set_answer("D")
+
+    monkeypatch.setattr(manual_fix, "edit_answer_slot", edit)
+    manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
+    assert seen == ["render", "edit"]
+
+

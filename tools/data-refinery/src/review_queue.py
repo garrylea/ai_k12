@@ -117,6 +117,10 @@ def humanize_reasons(reasons: list[str]) -> list[str]:
     return out
 
 
+def _label(no: int, sub_no: int = 0) -> str:
+    return f"{no}({sub_no})" if sub_no else str(no)
+
+
 @dataclass
 class ReviewItem:
     source: str
@@ -163,37 +167,26 @@ class ReviewItem:
             return "题目缺失或被吞，请按原卷补录"
         return "请按原卷校对本题"
 
+    def relation_text(self) -> str | None:
+        """根据关系字段生成明确题号的提示；旧记录没有字段时不显示。"""
+        for flag in self.flags:
+            related = flag.get("related_group_order")
+            if related is not None and flag.get("related_issue_kind") == "missing":
+                return (
+                    f"第 {_label(self.group_order, self.sub_no)} 题"
+                    f"可能混入了第 {int(related)} 题"
+                )
+            suspect = flag.get("suspect_group_order")
+            if isinstance(suspect, int) and suspect != self.group_order:
+                return (
+                    f"第 {_label(self.group_order, self.sub_no)} 题"
+                    f"疑似被第 {suspect} 题吞并"
+                )
+        return None
+
     def targets(self) -> list["ReviewTarget"]:
-        seq: list[ReviewTarget] = []
-        if "missing" in self.kinds:
-            flag = next(
-                (f for f in self.flags if f.get("suspect_group_order")),
-                None,
-            )
-            # 旧实现（manual_fix._targets）有 isinstance 守卫：issues.jsonl 可能被手改，
-            # suspect 是字符串时不能 int() 硬转，更不能让整轮校对崩掉 —— 退化成本题目标。
-            raw = flag.get("suspect_group_order") if flag else None
-            if isinstance(raw, int):
-                try:
-                    suspect_sub = int(flag.get("suspect_sub_no") or 0)
-                except (TypeError, ValueError):
-                    suspect_sub = 0
-                if (raw, suspect_sub) != (self.group_order, self.sub_no):
-                    seq.append(
-                        ReviewTarget(
-                            raw,
-                            suspect_sub,
-                            "这一题的正文里混进了下一题，请只保留本题自己的内容",
-                        )
-                    )
-        seq.append(
-            ReviewTarget(
-                self.group_order,
-                self.sub_no,
-                self.note(),
-            )
-        )
-        return seq
+        """一题一卡：目标恒为自身。关联题已在扫描阶段生成独立 issue。"""
+        return [ReviewTarget(self.group_order, self.sub_no, self.note())]
 
 
 @dataclass

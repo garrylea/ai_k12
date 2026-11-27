@@ -23,6 +23,7 @@ from review_content import (
     _apply_image_placeholders,
     _current_question,
     _image_refs,
+    _option_image_refs,
 )
 from review_editor import console
 from review_queue import FIXES_DIR, _read_jsonl, _write_jsonl
@@ -57,9 +58,14 @@ class ReviewDraft:
     def __init__(self, snap):
         self.snap = snap
         self.patch = Patch()
+        self.revision = 0
+
+    def _touch(self):
+        self.revision += 1
 
     def _regular_edit(self):
         self.patch.content_only = False
+        self._touch()
 
     def set_content(self, content, options):
         self._regular_edit()
@@ -114,6 +120,7 @@ class ReviewDraft:
         # 之后再改别的字段时才降级成普通记录（content 已是原文）。
         self.patch.content = content
         self.patch.content_only = True
+        self._touch()
 
 
 def has_changes(patch: Patch) -> bool:
@@ -145,6 +152,19 @@ def preserve_images(text: str, refs: list[str]) -> str:
     return _append_missing_images(text, list(refs or []))
 
 
+def _strip_image_refs(text: str, refs: list[str]) -> str:
+    """只删除指定图片引用，保留题干独有的配图。"""
+    wanted = set(refs or [])
+    if not wanted:
+        return text
+
+    def repl(match: re.Match) -> str:
+        return "" if match.group(1) in wanted else match.group(0)
+
+    out = re.sub(r"!\[[^\]]*\]\(([^)]+)\)\n?", repl, text or "")
+    return re.sub(r"\n{3,}", "\n\n", out).strip()
+
+
 def _apply_images_to_record(rec: dict, patch: Patch, snap) -> None:
     mode = patch.images_mode
     if mode in ("clear", "replace"):
@@ -161,7 +181,10 @@ def _apply_images_to_record(rec: dict, patch: Patch, snap) -> None:
     if mode in ("append", "replace") and patch.images:
         rec["content"] = _apply_image_placeholders(rec["content"], patch.images)
     elif mode == "keep":
-        rec["content"] = preserve_images(rec["content"], snap.images)
+        option_refs = _option_image_refs(rec.get("options"))
+        rec["content"] = _strip_image_refs(rec["content"], option_refs)
+        stem_images = [ref for ref in snap.images if ref not in option_refs]
+        rec["content"] = preserve_images(rec["content"], stem_images)
 
 
 def _material_record_values(patch: Patch, snap, subject: str) -> dict:

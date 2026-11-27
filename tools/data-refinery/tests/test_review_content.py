@@ -1,9 +1,19 @@
 import json
+from pathlib import Path
 
 import pytest
 
 import manual_fix
 import review_content
+
+
+HERE = Path(__file__).resolve().parent
+REAL_76707_DIR = HERE / "fixtures" / "real_cases" / "76707"
+REAL_76707_SOURCE = "数学-初三(上)-202407-北京各-（上）期中-试卷-76707"
+REAL_76707_REL = (
+    "数学/初中/first/2024/"
+    "数学-初三(上)-202407-北京各-（上）期中-试卷-76707"
+)
 
 
 def _write(tmp_path, monkeypatch, issue, rows):
@@ -18,6 +28,28 @@ def _write(tmp_path, monkeypatch, issue, rows):
     md.write_text("", encoding="utf-8")
     monkeypatch.setattr(review_content, "ROOT", tmp_path)
     return {**issue, "md": str(md)}
+
+
+def _real_76707_rows(name):
+    return [
+        json.loads(line)
+        for line in (REAL_76707_DIR / name).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _real_76707_issue(tmp_path, monkeypatch, fixture_name):
+    return _write(
+        tmp_path,
+        monkeypatch,
+        {
+            "source": REAL_76707_SOURCE,
+            "rel_path": REAL_76707_REL,
+            "group_order": 2,
+            "sub_no": 0,
+        },
+        _real_76707_rows(fixture_name),
+    )
 
 
 def test_snapshot_matches_sub_no(tmp_path, monkeypatch):
@@ -60,6 +92,16 @@ def test_snapshot_images_include_inline_material(tmp_path, monkeypatch):
     )
     snap = review_content.snapshot(issue)
     assert "images/inline.jpg" in snap.images
+
+
+def test_real_76707_q2_snapshot_excludes_recognized_option_images(
+        tmp_path, monkeypatch):
+    """76707 第 2 题识别出选项后，题干里的同组图不再算题干原图。"""
+    issue = _real_76707_issue(
+        tmp_path, monkeypatch, "extracted_with_options.jsonl"
+    )
+    snap = review_content.snapshot(issue)
+    assert snap.images == []
 
 
 def _editable_row(*, material_url, material_text, inline):

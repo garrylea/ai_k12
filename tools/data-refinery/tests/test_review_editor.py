@@ -112,12 +112,15 @@ def test_file_edit_offers_install_hints_then_retries(tmp_path, monkeypatch, caps
     launched = []
     monkeypatch.setattr(ed.subprocess, "call", lambda argv: launched.append(argv))
     monkeypatch.setattr("sys.stdin", _TTY("\n\n"))
+    # TTY 读行已改走 prompt_toolkit 适配层；这里 stub read_prompt 验证提示文本与重试。
+    prompts = []
+    monkeypatch.setattr(ed, "read_prompt", lambda c, p: prompts.append(p) or "")
 
     got, _path = ed._file_edit("原始题干")
 
     out = capsys.readouterr().out
     assert ("brew install" in out) or ("apt install" in out) or ("winget" in out)
-    assert "装好后按回车重新检测" in out
+    assert any("装好后按回车重新检测" in p for p in prompts)
     assert launched and got == "原始题干"
 
 
@@ -125,6 +128,7 @@ def test_file_edit_no_editor_q_cancels(tmp_path, monkeypatch):
     monkeypatch.setattr(ed, "ROOT", tmp_path)
     monkeypatch.setattr(ed, "_find_editor", lambda: None)
     monkeypatch.setattr("sys.stdin", _TTY("q\n"))
+    monkeypatch.setattr(ed, "read_prompt", lambda c, p: "q")
 
     got, path = ed._file_edit("原始题干")
 

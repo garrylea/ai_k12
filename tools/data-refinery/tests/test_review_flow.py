@@ -139,19 +139,29 @@ def test_multi_number_paste_records_each_question(tmp_path, monkeypatch):
     assert res["fixed"] == 2
 
 
-def test_missing_question_asks_suspect_card_first(tmp_path, monkeypatch):
+def test_related_questions_are_independent_items(tmp_path, monkeypatch):
     md = str(tmp_path / "output/md" / REL / "卷A.md")
     issues = _env(
         tmp_path, monkeypatch,
         questions=[_q(27, content="27. 上一题"), _q(28, content="")],
-        issues=[_i(28, "missing", md=md, suspect_group_order=27)],
+        issues=[
+            _i(28, "missing", md=md, suspect_group_order=27),
+            _i(
+                27,
+                "merged_content",
+                md=md,
+                related_group_order=28,
+                related_issue_kind="missing",
+            ),
+        ],
     )
-    monkeypatch.setattr("sys.stdin", io.StringIO(
-        "1\n27 只留自己的正文\nEOF\n\n"
-        "1\n28 补录正文\nEOF\n\n"))
+    monkeypatch.setattr("sys.stdin", io.StringIO("s\ns\n"))
     manual_fix.review_pending(fixes_dir=tmp_path / "fixes")
-    assert [r["group_order"] for r in _records(tmp_path)] == [27, 28]
-    assert json.loads(issues.read_text(encoding="utf-8"))["status"] == "recorded"
+    rows = [json.loads(line) for line in issues.read_text(encoding="utf-8").splitlines()]
+    assert {(r["group_order"], r["status"]) for r in rows} == {
+        (27, "pending"),
+        (28, "pending"),
+    }
 
 
 def test_list_shows_question_count_and_remaining(tmp_path, monkeypatch, capsys):
