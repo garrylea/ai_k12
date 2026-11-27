@@ -42,6 +42,7 @@ out/
 apps/server/uploads/
 .superpowers/
 .codebuddy/
+.worktrees/
 tools/runtime/
 
 
