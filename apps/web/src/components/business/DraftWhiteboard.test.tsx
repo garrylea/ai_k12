@@ -629,6 +629,116 @@ describe('草稿白板：旋转', () => {
   });
 });
 
+describe('草稿白板：复制粘贴选中图形', () => {
+  const selectRect = (container: Element, canvas: Element) => {
+    pickTool(container, '选中');
+    fireEvent.pointerDown(canvas, { pointerId: 51, pointerType: 'mouse', button: 0, clientX: 150, clientY: 130 });
+    fireEvent.pointerUp(canvas, { pointerId: 51, pointerType: 'mouse', clientX: 150, clientY: 130 });
+  };
+
+  const copy = () => fireEvent.keyDown(document, { key: 'c', ctrlKey: true });
+
+  const paste = (
+    target: EventTarget = document,
+    items: Array<{ kind: string; type: string; getAsFile: () => File }> = [],
+  ) => {
+    const evt = new Event('paste', { bubbles: true, cancelable: true }) as Event & {
+      clipboardData?: unknown;
+    };
+    Object.defineProperty(evt, 'clipboardData', { value: { items } });
+    return fireEvent(target as Element, evt);
+  };
+
+  it('复制矩形后粘贴：副本相对原图右下各偏移 10px', () => {
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    selectRect(container, canvas);
+
+    fireEvent.keyDown(document, { key: 'c', metaKey: true });
+    paste();
+
+    const [original, pasted] = getDraft('q1');
+    expect(getDraft('q1')).toHaveLength(2);
+    expect(pasted.points.map(({ x, y }) => ({ x, y }))).toEqual(
+      original.points.map(({ x, y }) => ({ x: x + 10, y: y + 10 })),
+    );
+  });
+
+  it('连续粘贴按 10px 递增，不会盖住上一份副本', () => {
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    selectRect(container, canvas);
+
+    copy();
+    paste();
+    paste();
+    paste();
+
+    expect(getDraft('q1').map((s) => s.points[0].x)).toEqual([100, 110, 120, 130]);
+    expect(getDraft('q1').map((s) => s.points[0].y)).toEqual([100, 110, 120, 130]);
+  });
+
+  it('复制不占撤销步骤，一次粘贴可一次撤销', () => {
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    selectRect(container, canvas);
+
+    copy();
+    paste();
+    expect(getDraft('q1')).toHaveLength(2);
+
+    fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+    expect(getDraft('q1')).toHaveLength(1);
+    expect(getDraft('q1')[0].points[0]).toMatchObject({ x: 100, y: 100 });
+  });
+
+  it('复制后移动原图形，粘贴仍从复制瞬间的位置偏移 10px', () => {
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    selectRect(container, canvas);
+    copy();
+
+    fireEvent.pointerDown(canvas, { pointerId: 52, pointerType: 'mouse', button: 0, clientX: 150, clientY: 130 });
+    fireEvent.pointerMove(canvas, { pointerId: 52, pointerType: 'mouse', buttons: 1, clientX: 200, clientY: 180 });
+    fireEvent.pointerUp(canvas, { pointerId: 52, pointerType: 'mouse', clientX: 200, clientY: 180 });
+
+    paste();
+
+    expect(getDraft('q1')[0].points[0]).toMatchObject({ x: 150, y: 150 });
+    expect(getDraft('q1')[1].points[0]).toMatchObject({ x: 110, y: 110 });
+  });
+
+  it('选中图形后焦点仍留在输入框：Cmd/Ctrl+C/V 仍复制粘贴图形', () => {
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    selectRect(container, canvas);
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: 'c', metaKey: true });
+    paste(input);
+
+    expect(getDraft('q1')).toHaveLength(2);
+    expect(getDraft('q1')[1].points[0]).toMatchObject({ x: 110, y: 110 });
+    input.remove();
+  });
+
+  it('已复制图形后系统剪贴板里仍有旧图片：不会同时走图片插入', () => {
+    const readAsDataURL = vi.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(() => {});
+    const { container, canvas } = setup();
+    rectShape(container, canvas);
+    selectRect(container, canvas);
+    copy();
+
+    const oldImage = new File([new Uint8Array([1])], 'old.png', { type: 'image/png' });
+    paste(document, [{ kind: 'file', type: 'image/png', getAsFile: () => oldImage }]);
+
+    expect(getDraft('q1')).toHaveLength(2);
+    expect(readAsDataURL).not.toHaveBeenCalled();
+  });
+});
+
 describe('草稿白板：导出快照', () => {
   type UrlCall = { type: string; quality: number | undefined };
 
@@ -898,6 +1008,43 @@ describe('草稿白板：选中包围盒内的空白点按 = 取消选中', () =
 
     expect(getDraft('q1')).toHaveLength(1);
     expect(getDraft('q1')[0].points[0]).toMatchObject({ x: 20, y: 20 });
+  });
+});
+
+describe('草稿白板：手写笔图形手势被系统打断', () => {
+  it('直线已拖出后收到 pointercancel：保留当前直线，不能静默丢掉', () => {
+    const { container, canvas } = setup();
+    pickTool(container, '直线');
+
+    fireEvent.pointerDown(canvas, { pointerId: 41, pointerType: 'pen', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 41, pointerType: 'pen', buttons: 1, clientX: 200, clientY: 160 });
+    fireEvent.pointerCancel(canvas, { pointerId: 41, pointerType: 'pen', clientX: 200, clientY: 160 });
+
+    expect(getDraft('q1')).toHaveLength(1);
+    expect(getDraft('q1')[0].points).toEqual([
+      expect.objectContaining({ x: 100, y: 100 }),
+      expect.objectContaining({ x: 200, y: 160 }),
+    ]);
+  });
+
+  it('矩形拖拽中手掌误触第二点：不把笔手势误判成两指平移', () => {
+    const { container } = render(<DraftWhiteboard questionId="q1" scrollMode="scroll-y" />);
+    const canvas = container.querySelector('canvas')!;
+    pickTool(container, '矩形');
+
+    fireEvent.pointerDown(canvas, { pointerId: 42, pointerType: 'pen', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas, { pointerId: 42, pointerType: 'pen', buttons: 1, clientX: 200, clientY: 160 });
+    fireEvent.pointerDown(canvas, { pointerId: 43, pointerType: 'touch', button: 0, clientX: 300, clientY: 220 });
+    fireEvent.pointerUp(canvas, { pointerId: 43, pointerType: 'touch', clientX: 300, clientY: 220 });
+    fireEvent.pointerUp(canvas, { pointerId: 42, pointerType: 'pen', clientX: 200, clientY: 160 });
+
+    expect(getDraft('q1')).toHaveLength(1);
+    expect(getDraft('q1')[0].points).toEqual(expect.arrayContaining([
+      expect.objectContaining({ x: 100, y: 100 }),
+      expect.objectContaining({ x: 200, y: 100 }),
+      expect.objectContaining({ x: 200, y: 160 }),
+      expect.objectContaining({ x: 100, y: 160 }),
+    ]));
   });
 });
 

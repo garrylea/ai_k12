@@ -190,6 +190,19 @@ function cloneStroke(s: Stroke): Stroke {
   };
 }
 
+function cloneStrokeOffset(s: Stroke, dx: number, dy: number): Stroke {
+  const clone = cloneStroke(s);
+  for (const p of clone.points) {
+    p.x += dx;
+    p.y += dy;
+  }
+  if (clone.center) {
+    clone.center.x += dx;
+    clone.center.y += dy;
+  }
+  return clone;
+}
+
 /** 选中笔迹的并集包围盒（null = 没有选中笔迹） */
 function unionStrokeBounds(sel: Iterable<Stroke>): { x0: number; y0: number; x1: number; y1: number } | null {
   let out: { x0: number; y0: number; x1: number; y1: number } | null = null;
@@ -693,6 +706,8 @@ export function DraftWhiteboard({
   const boardRef = useRef<HTMLDivElement>(null);
   // 两指平移（仅 scroll-y 模式）：活动指针表（pointerId -> clientY / 类型 / 最后活动时间）+ 平移标志 + 上一帧质心 clientY
   const activePointersRef = useRef<Map<number, { y: number; type: string; at: number }>>(new Map());
+  /** 当前落笔的手写笔 pointerId：它抬起前，后续 touch 触点属于手掌/指腹，绝不能拿来起第二笔或触发两指平移 */
+  const activePenPointerIdRef = useRef<number | null>(null);
   const panRef = useRef(false);
   const panLastYRef = useRef(0);
   // 圆规状态机：state 供控制条渲染（提示文案/半径读数），ref 供指针手势与 redraw 读写（连续更新不拿旧闭包）
@@ -718,6 +733,9 @@ export function DraftWhiteboard({
   const [selectedImageIds, setSelectedImageIds] = useState<ReadonlySet<string>>(EMPTY_SET);
   const selectedStrokesRef = useRef<Set<Stroke>>(new Set());
   const selectedImageIdsRef = useRef<Set<string>>(new Set());
+  /** 选中图形的复制快照；每次粘贴再深拷贝一份，连续粘贴按 10/20/30px 递增偏移 */
+  const strokeClipboardRef = useRef<Stroke[] | null>(null);
+  const pasteGenerationRef = useRef(0);
   const selectGestureRef = useRef<
     | { kind: 'move'; startX: number; startY: number; lastX: number; lastY: number; moved: boolean; pivotPick: { x: number; y: number } | null; origImages: Map<string, { x: number; y: number }>; blankInside: boolean }
     | { kind: 'marquee'; startX: number; startY: number; x: number; y: number }
@@ -882,6 +900,10 @@ export function DraftWhiteboard({
   // 焦点在输入框时放行（正常粘贴文本），只拦图片文件
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
+      const draftShapePaste = tool === 'select'
+        && selectedStrokesRef.current.size > 0
+        && (strokeClipboardRef.current?.length ?? 0) > 0;
+      if (draftShapePaste) return; // 图形复制是用户刚刚发起的显式操作，优先于系统剪贴板旧内容
       if (isEditableTarget(e.target)) return;
       const file = Array.from(e.clipboardData?.items ?? [])
         .find((it) => it.kind === 'file' && it.type.startsWith('image/'))
@@ -892,7 +914,7 @@ export function DraftWhiteboard({
     };
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
-  }, [insertImages]);
+  }, [insertImages, tool]);
 
   // 圆规状态更新：ref + state 同步 + 重绘（参考层读 ref）
   const updateCompass = useCallback((next: CompassState) => {
@@ -1149,6 +1171,42 @@ export function DraftWhiteboard({
     || compassRef.current.phase === 'resizing'
     || compassRef.current.phase === 'drawing'
   ), []);
+
+  // Ctrl/Cmd+C：仅复制「选中」工具当前选中的笔迹/图形，不占历史；后续移动原图不会改到快照。
+  useEffect(() => {
+    if (tool !== 'select') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (e.key.toLowerCase() !== 'c') return;
+      if (selectedStrokesRef.current.size === 0 || gestureBusy()) return;
+      e.preventDefault();
+      strokeClipboardRef.current = Array.from(selectedStrokesRef.current).map(cloneStroke);
+      pasteGenerationRef.current = 0;
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [tool, gestureBusy]);
+
+  // 粘贴选中图形：图片文件优先走现有图片粘贴链路；这里只消费内部复制的图形快照。
+  useEffect(() => {
+    if (tool !== 'select') return;
+    const onPaste = (e: ClipboardEvent) => {
+      const copied = strokeClipboardRef.current;
+      if (!copied || copied.length === 0) return;
+      if (gestureBusy()) return;
+
+      e.preventDefault();
+      pasteGenerationRef.current += 1;
+      const offset = pasteGenerationRef.current * 10;
+      const pasted = copied.map((s) => cloneStrokeOffset(s, offset, offset));
+      strokesRef.current = [...strokesRef.current, ...pasted];
+      if (persist) setDraft(questionId, strokesRef.current);
+      setSelection(new Set(pasted), new Set());
+      pushHistory();
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [tool, gestureBusy, persist, questionId, setSelection, pushHistory]);
 
   /** 把历史快照写回视图与 store；选区必须清空——快照里是另一批对象引用 */
   const applyHistoryState = useCallback((snap: DraftState) => {
@@ -1551,6 +1609,8 @@ export function DraftWhiteboard({
     selectedImageIdsRef.current = new Set();
     setSelectedImageIds(new Set());
     selectGestureRef.current = null;
+    strokeClipboardRef.current = null;
+    pasteGenerationRef.current = 0;
     // 历史登记初始态：必须在任何 pushState 之前，否则第一笔会被当成初始态、撤销不到空板
     initHistory(questionId, { strokes: strokesRef.current, images: imagesRef.current });
     bumpHistory((v) => v + 1);
@@ -1624,7 +1684,8 @@ export function DraftWhiteboard({
 
   /** scroll-y：落笔前清掉「已经不在屏幕上」的指针记录。不清会被误数成两指齐下 →
    *  画布从此只滚不画、只有重开面板才好（手写笔场景手掌/侧键的 up 被系统吞掉时必现）。
-   *  ① 掌贴拒绝：笔/鼠标按下时，touch 记录一律当手掌误触丢弃（真两指平移两根都是 touch，不受影响）；
+   *  ① 掌贴拒绝：笔/鼠标按下时，touch 记录一律当手掌误触丢弃；笔未抬起时新 touch 也在四个指针入口直接忽略
+   *     （真两指平移两根都是 touch，没有 activePen，不受影响）；
    *  ② 超时：太久没动、又没收到抬手的记录当已消失。 */
   const pruneStalePointers = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const ptrs = activePointersRef.current;
@@ -1638,6 +1699,9 @@ export function DraftWhiteboard({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const activePenId = activePenPointerIdRef.current;
+    if (activePenId !== null && e.pointerId !== activePenId && e.pointerType === 'touch') return;
+    if (e.pointerType === 'pen') activePenPointerIdRef.current = e.pointerId;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -1723,6 +1787,8 @@ export function DraftWhiteboard({
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const activePenId = activePenPointerIdRef.current;
+    if (activePenId !== null && e.pointerId !== activePenId && e.pointerType === 'touch') return;
     if (panRef.current) {
       activePointersRef.current.set(e.pointerId, { y: e.clientY, type: e.pointerType, at: Date.now() });
       const meanY = meanActiveY();
@@ -1771,6 +1837,8 @@ export function DraftWhiteboard({
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const activePenId = activePenPointerIdRef.current;
+    if (activePenId !== null && e.pointerId !== activePenId && e.pointerType === 'touch') return;
     endPointer(e);
     const p = pointFromEvent(e);
     // 收尾按「起手时的手势」而不是「当前工具」：手势进行中被切走工具（触屏第二指/手掌点到工具条）时，
@@ -1786,21 +1854,28 @@ export function DraftWhiteboard({
     if (selectGestureRef.current) selectUp(p.x, p.y);
     if (shapeGestureRef.current) shapeUp();
     if (triDragRef.current !== null) triangleUp();
+    if (activePenId !== null && e.pointerId === activePenId) activePenPointerIdRef.current = null;
   };
 
-  // 系统打断（来电/手势接管）或捕获丢失：指针从表中移除；笔画已追加进数组，按落笔收尾记一步，
-  // 否则它会成为「历史外的孤儿笔画」，与下一笔合成一步让撤销一次退掉多笔。
+  // 系统打断（来电/手势接管）或捕获丢失：指针从表中移除；手写笔迹已追加进数组，按落笔收尾记一步，
+  // 否则它会成为「历史外的孤儿笔画」，与下一笔合成一步让撤销一次退掉多笔。图形同样按当前预览落定，
+  // 手写笔在抬手瞬间被系统 cancel / 丢捕获时不能静默丢掉已经拖出的直线或矩形。
   const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const activePenId = activePenPointerIdRef.current;
+    if (activePenId !== null && e.pointerId !== activePenId && e.pointerType === 'touch') return;
     endPointer(e);
     finishPenStroke();
     eraserActiveRef.current = false; // 系统打断橡皮拖拽：手势结束，撤销恢复可用
     flushEraserHistory(); // 对无橡皮手势幂等
     cancelCompass();
     cancelSelect();
-    cancelShape();
+    shapeUp(); // 已拖出的直线/矩形按当前预览落定；手写笔在抬手瞬间被系统 cancel 时不能静默丢掉整个图形
     if (triDragRef.current !== null) triangleUp(); // 顶点拖拽固定当前位置（不丢已放的三角形）
+    if (activePenId !== null && e.pointerId === activePenId) activePenPointerIdRef.current = null;
   };
   const handleLostPointerCapture = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const activePenId = activePenPointerIdRef.current;
+    if (activePenId !== null && e.pointerId !== activePenId && e.pointerType === 'touch') return;
     endPointer(e);
     // 捕获真的丢了（元素被移除/被别的元素抢走）时 pointerup 可能永远不来：
     // 与 pointercancel 同口径，按落笔收尾记一步（笔画已进数组，不记就会并入下一笔）
@@ -1809,8 +1884,9 @@ export function DraftWhiteboard({
     flushEraserHistory(); // 对无橡皮手势幂等
     cancelCompass(); // 正常抬手后此事件仍会触发，各 cancel 对无手势态幂等
     cancelSelect();
-    cancelShape();
+    shapeUp(); // 同 pointercancel：捕获丢失时提交已拖出的图形，未成形的点按仍由 shapeUp 清掉
     if (triDragRef.current !== null) triangleUp();
+    if (activePenId !== null && e.pointerId === activePenId) activePenPointerIdRef.current = null;
   };
 
   const handleClear = () => {

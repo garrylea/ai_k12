@@ -69,7 +69,6 @@ const pasteGenerationRef = useRef(0);
 监听 `document.keydown`：
 
 - 仅在 `tool === 'select'` 时处理。
-- `isEditableTarget(e.target)` 为真时放行，输入框/文本域保留原生文字复制。
 - 仅接受 `Ctrl/Cmd+C`，带 `Alt` 时忽略。
 - 没有选中笔迹时放行。
 - 有手势正在进行时忽略，避免复制到半截状态。
@@ -81,9 +80,10 @@ const pasteGenerationRef = useRef(0);
 
 复用 `DraftWhiteboard` 现有的 `document.paste` 监听：
 
-1. 输入框/文本域内直接放行。
-2. 剪贴板含图片文件时，优先执行现有 `insertImages`，不粘贴图形。
-3. 没有图片文件、存在内部图形剪贴板且当前为「选中」工具时：
+1. 当前为「选中」工具且存在内部图形剪贴板时，先粘贴图形；这一步优先于焦点位置和系统剪贴板旧内容。
+2. 否则输入框/文本域内直接放行。
+3. 没有内部图形剪贴板、剪贴板含图片文件时，执行现有 `insertImages`。
+4. 存在内部图形剪贴板且当前为「选中」工具时：
    - `preventDefault()`。
    - `pasteGenerationRef += 1`。
    - 深拷贝剪贴板中的每条笔迹，所有点与圆心标记额外偏移
@@ -91,7 +91,7 @@ const pasteGenerationRef = useRef(0);
    - 追加到 `strokesRef.current`，`persist` 为真时写回 `setDraft`。
    - 整次粘贴只调用一次 `pushHistory()`。
    - 把新副本设为当前选区并重绘。
-4. 没有内部图形剪贴板时放行浏览器默认行为。
+5. 没有内部图形剪贴板时放行浏览器默认行为。
 
 粘贴过程中若检测到手势正在进行，则不处理，保持按钮/绘图状态一致。
 
@@ -99,8 +99,8 @@ const pasteGenerationRef = useRef(0);
 
 | 按键 | 行为 |
 |---|---|
-| `Ctrl/Cmd+C` | 复制选中笔迹/图形；无选区时保留原生行为 |
-| `Ctrl/Cmd+V` | 无图片时粘贴内部图形；有图片时粘贴图片 |
+| `Ctrl/Cmd+C` | 复制选中笔迹/图形；选中图形时即使焦点在输入框也优先复制草稿；无选区时保留原生行为 |
+| `Ctrl/Cmd+V` | 有内部图形时优先粘贴图形；否则输入框/图片粘贴走原生行为 |
 | `Ctrl/Cmd+Z` | 撤销；一次粘贴可一次撤销 |
 | `Ctrl/Cmd+Shift+Z`、`Ctrl+Y` | 重做 |
 | Delete/Backspace | 删除粘贴后自动选中的副本 |
@@ -137,8 +137,8 @@ const pasteGenerationRef = useRef(0);
 3. 复制后移动原图，再粘贴：副本仍基于复制瞬间的位置偏移 10px。
 4. 粘贴一次后 `Ctrl+Z`：只撤销该次粘贴，原图和之前内容保留。
 5. 多选两个图形复制粘贴：两条副本整体同量偏移，并成为当前选区。
-6. 输入框聚焦时 `Ctrl+C` / `Ctrl+V`：草稿不响应。
-7. 剪贴板同时含图片文件时按 `Ctrl+V`：走现有图片插入，不粘贴内部图形。
+6. 选中图形后焦点仍在输入框：`Ctrl/Cmd+C` / `Ctrl/Cmd+V` 仍复制粘贴草稿图形。
+7. 已复制图形、系统剪贴板仍含旧图片时按 `Ctrl+V`：只粘贴图形，不同时插入旧图片。
 8. 只选中贴图时 `Ctrl+C`：不占用图片的原生复制粘贴路径。
 9. 切换 `questionId` 后粘贴：不会把上一题图形带入新题。
 
