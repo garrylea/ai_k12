@@ -281,3 +281,17 @@ def test_chinese_parse_answers_adapter_keeps_existing_result():
 def test_generic_strategy_exposes_block_answer_parser():
     strategy = get_strategy("math")
     assert callable(strategy.parse_answers)
+
+
+def test_number_prefix_of_formula_is_not_next_question():
+    """「+ 240x」里的 24 不能被当成第 24 题的题号（2026-11-27 北京各 85487）。"""
+    block = _block(
+        "numbered",
+        "23.【答案】（1） $w = -2x^{2} + 240x - 5400$ ; （2）1600.",
+        "24.【答案】如图所示，求证：……",
+    )
+    fragments, issues = parse_numbered_block(block, [23, 24])
+    got = {fragment.question_no: fragment.text for fragment in fragments}
+    assert "240x" in got[23] and "5400" in got[23]
+    assert "240x" not in got[24]
+    assert not [issue for issue in issues if issue.code == "answer_missing"]

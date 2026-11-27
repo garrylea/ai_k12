@@ -281,7 +281,9 @@ def _find_marker(
 ) -> re.Match[str] | None:
     digits = r"\s*".join(str(expected_no))
     pattern = re.compile(
-        rf"(?<!\d)(?P<number>{digits})\s*(?P<dot>[.．])?"
+        # `(?!\d)` 不能省：否则「…+ 240x …」里的 24 会被当成第 24 题的题号，
+        # 把第 23 题答案从数字中间切开（2026-11-27 北京各 85487 实测）。
+        rf"(?<!\d)(?P<number>{digits})(?!\d)\s*(?P<dot>[.．])?"
         rf"(?:\s*(?=\S)|(?=\n|$))"
     )
     for match in pattern.finditer(text, start):
