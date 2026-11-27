@@ -2183,3 +2183,28 @@ def test_split_page_wrapper_keeps_list_contract():
     )
     assert isinstance(questions, list)
     assert questions[0].group_order == 9
+
+
+def test_dot_glued_number_is_next_stem_not_decimal():
+    """`25.16 世纪…` 是第 25 题（`25.` 与正文 `16 世纪` 粘在一起），不是小数。
+
+    2026-11-27 北京各 85434：旧规则把 `25.16` 当小数，第 25 题整段并进
+    第 24 题；答案也因为没有 25 号槽位而跟着错位。
+    """
+    from question_splitter import split_page
+
+    text = (
+        "24. 第 24 题题干，圆的综合题。\n\n"
+        "25.16 世纪中叶，我国发明了一种新式火箭。\n\n"
+        "(1) 若火箭第二级的引发点高度为 3.6km，求 a, b 的值。\n\n"
+        "26. 第 26 题题干，二次函数题。\n\n"
+        "# 参考答案\n\n"
+        "24. 第 24 题答案\n\n"
+        "25. 第 25 题答案\n\n"
+        "26. 第 26 题答案\n"
+    )
+    got = {q.group_order: q for q in split_page(text, Path("x.md"))}
+    assert [no for no in (24, 25, 26) if no not in got] == []
+    assert "16 世纪" not in got[24].content
+    assert got[25].content.startswith("16 世纪中叶")
+    assert got[25].answer == "第 25 题答案"

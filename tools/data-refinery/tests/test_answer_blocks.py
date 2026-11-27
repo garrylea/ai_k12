@@ -284,14 +284,97 @@ def test_generic_strategy_exposes_block_answer_parser():
 
 
 def test_number_prefix_of_formula_is_not_next_question():
-    """「+ 240x」里的 24 不能被当成第 24 题的题号（2026-11-27 北京各 85487）。"""
+    """公式里带空格的「2 4 0」不能把第 24 题号切出来（2026-11-27 北京各 85487 原样数据）。
+
+    上一版只用 ``240x``（数字连写）做 case，漏掉了 MinerU 实际输出的
+    ``+ 2 4 0 x - 5 4 0 0`` 这种数字之间带空格的公式。
+    """
     block = _block(
         "numbered",
         "23.【答案】（1） $w = -2x^{2} + 240x - 5400$ ; （2）1600.",
-        "24.【答案】如图所示，求证：……",
+        "",
+        "$$",
+        "\\therefore w = - 2 x ^ {2} + 2 4 0 x - 5 4 0 0.",
+        "$$",
+        "",
+        "故答案为： $w = -2x^{2} + 240x - 5400$ .",
+        "",
+        "24.【答案】（1）见解析；",
+        "",
+        "(2) $\\angle B = 30^{\\circ}$ , $AC = 2\\sqrt{3}$ .",
     )
-    fragments, issues = parse_numbered_block(block, [23, 24])
+    fragments, _issues = parse_numbered_block(block, [23, 24])
     got = {fragment.question_no: fragment.text for fragment in fragments}
-    assert "240x" in got[23] and "5400" in got[23]
-    assert "240x" not in got[24]
-    assert not [issue for issue in issues if issue.code == "answer_missing"]
+    assert "2 4 0 x" in got[23] and "5 4 0 0" in got[23]
+    assert "（1）见解析" in got[24]
+    assert "2\\sqrt{3}" in got[24]
+    assert "5 4 0 0" not in got[24]
+
+
+def test_bare_digit_inside_display_math_is_not_next_question():
+    """``\\therefore x ^ {2} - 4 x = 4`` 里的 4 不是第 4 题（2026-11-27 北京各 85487）。"""
+    block = _block(
+        "numbered",
+        "2.【答案】 $A$",
+        "",
+        "【解答】解： $\\because x^{2}-4x-4=0,$",
+        "",
+        "$$",
+        "\\therefore x ^ {2} - 4 x = 4,",
+        "$$",
+        "",
+        "则 $x^{2}-4x+4=4+4$ ，即 $(x-2)^{2}=8$ ，",
+        "",
+        "故选：A.",
+        "",
+        "【点评】配方法.",
+    )
+    fragments, _issues = parse_numbered_block(block, [2, 3, 4])
+    got = {fragment.question_no: fragment.text for fragment in fragments}
+    assert 4 not in got
+    assert "x = 4," in got[2] and "点评" in got[2]
+
+
+def test_number_inside_inline_math_with_unit_is_not_next_question():
+    """``$15cm$`` 里的 15 不是第 15 题（2026-11-27 北京各 85487）。"""
+    block = _block(
+        "numbered",
+        "12.【答案】相切.",
+        "",
+        "【分析】由 $\\odot O$ 的直径为 $15cm$ ，求得 $\\odot O$ 的半径为 $7.5cm$ ，"
+        "而圆心 $O$ 与直线 $l$ 的距离为 $7.5cm$ ，所以 $l$ 与 $\\odot O$ 相切.",
+    )
+    fragments, _issues = parse_numbered_block(block, [12, 13, 15])
+    got = {fragment.question_no: fragment.text for fragment in fragments}
+    assert 15 not in got
+    assert "15cm" in got[12]
+
+
+def test_decimal_line_does_not_truncate_previous_answer():
+    """`11.4 - 3 = 8.4` 行首是 `11.`，不能把第 25 题答案截断（85434 第 25 题）。"""
+    lines = [
+        AnswerLine(1, "25.【答案】(1) ① a = -1/15 ; ② 8.4 km"),
+        AnswerLine(2, ""),
+        AnswerLine(3, "【解答】解：①将点代入求解。"),
+        AnswerLine(4, "解得 $x = 11.4$"),
+        AnswerLine(5, ""),
+        AnswerLine(6, "11.4 - 3 = 8.4 (km)"),
+        AnswerLine(7, ""),
+        AnswerLine(8, "∴这两个位置之间的距离 8.4km."),
+        AnswerLine(9, ""),
+        AnswerLine(10, "【小问 2 详解】解：当水平距离超过 15km 时，求得 a = -2/27."),
+        AnswerLine(11, ""),
+        AnswerLine(12, "26.【答案】(1) 1 (2) m >= 1/2"),
+    ]
+    result = parse_answer_region(
+        lines,
+        [
+            AnswerQuestion(no=25, group_id=None),
+            AnswerQuestion(no=26, group_id=None),
+        ],
+        first_line_no=1,
+    )
+    got = {fragment.question_no: fragment.text for fragment in result.fragments}
+    assert "8.4 (km)" in got[25]
+    assert "小问 2 详解" in got[25]
+    assert "(1) 1" in got[26]

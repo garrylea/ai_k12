@@ -1090,6 +1090,15 @@ def _split_questions_only(text: str, md_path: Path,
             if amb and _has_next_stem(lines, i + 1, int(amb.group(1)),
                                       is_stem=strategy.is_stem):
                 ok, n = True, int(amb.group(1))
+        if not ok and last_stem_no > 0:
+            # 解答题里 OCR 常把「25.」和正文「16 世纪…」粘成 `25.16 世纪…`，
+            # 形似小数。只有数字正好是上一题+1、且去掉「25.」后是成段中文时
+            # 才按新题号处理（85434 第 25 题）——避免把正文里的 `9.5 米` 当题号。
+            amb = _AMBIGUOUS_NUM_RE.match(line)
+            if amb and int(amb.group(1)) == last_stem_no + 1:
+                rest = _STEM_PREFIX_RE.sub('', line, count=1).strip()
+                if len(rest) >= 6 and re.search(r"[\u4e00-\u9fff]", rest):
+                    ok, n = True, int(amb.group(1))
         if not ok and has_blank_before \
                 and last_stem_no > 0:
             orphan = _ORPHAN_STEM_DOT_RE.match(line)
