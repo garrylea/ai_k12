@@ -2208,3 +2208,72 @@ def test_dot_glued_number_is_next_stem_not_decimal():
     assert "16 世纪" not in got[24].content
     assert got[25].content.startswith("16 世纪中叶")
     assert got[25].answer == "第 25 题答案"
+
+
+# ---- Task 6: 第二遍切题 forced 优先级 / gap suppression ----
+
+def test_forced_map_bypasses_end_of_paper_small_number_merge():
+    md = """20. 第二十题
+
+2. 该行最终题号是第二十一题
+
+22. 第二十二题
+"""
+    lines = md.split("\n")
+    forced_line = lines.index("2. 该行最终题号是第二十一题")
+    qs = split_page(
+        md,
+        Path("x.md"),
+        strategy=_math_strategy(),
+        forced_stem_map={forced_line: (21, "main", "dropped_tens")},
+    )
+    assert [q.group_order for q in qs] == [20, 21, 22]
+    assert qs[1].content.startswith("该行最终题号")
+
+
+def test_suppressed_gap_range_is_not_appended_to_previous_question():
+    md = """1. 第一题正文
+
+26. 属于未确认 gap 的正文
+
+27. 第二十七题
+"""
+    lines = md.split("\n")
+    gap_line = lines.index("26. 属于未确认 gap 的正文")
+    qs = split_page(
+        md,
+        Path("x.md"),
+        strategy=_math_strategy(),
+        suppressed_ranges=[(gap_line, gap_line)],
+    )
+    assert [q.group_order for q in qs] == [1, 27]
+    assert "属于未确认 gap" not in qs[0].content
+
+
+def test_split_page_result_carries_stem_chain_result():
+    from question_splitter import split_page_result
+
+    marker = object()
+    result = split_page_result(
+        "1. 第一题正文",
+        Path("x.md"),
+        strategy=_math_strategy(),
+        stem_chain_result=marker,
+    )
+    assert result.stem_chain_result is marker
+
+
+def test_inline_glued_is_controlled_by_forced_map_when_map_is_supplied():
+    md = """1. 第一题正文。2. 第二题正文
+
+3. 第三题正文
+"""
+    line_no = 0
+    qs = split_page(
+        md,
+        Path("x.md"),
+        strategy=_math_strategy(),
+        forced_stem_map={line_no: (1, "main", "exact")},
+    )
+    assert [q.group_order for q in qs] == [1, 3]
+    assert "2. 第二题正文" in qs[0].content
