@@ -44,8 +44,9 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
   const [phase, setPhase] = useState<Phase>('answering');
   const [countdown, setCountdown] = useState(5);
   const [finalResults, setFinalResults] = useState<Record<string, RunnerAnswerRecord> | null>(null);
-  // 结果页错题解析：末题后批量拉取（key = questionN）；孤儿题（questionId null）无解析不拉
+  // 结果页错题思路/解析：末题后批量只读题库（key = questionN）；孤儿题（questionId null）不拉
   const [explanations, setExplanations] = useState<Record<string, string | null>>({});
+  const [approaches, setApproaches] = useState<Record<string, string | null>>({});
 
   // 主线清零是 `error_fix` 的第二个入口（spec §6.5）：答对且确实清掉未清错题时后端发分，
   // 结果就挂在判题响应的 `pointsAwarded` / `awardReason` 上。必须读出来交给共享决策表，
@@ -150,14 +151,17 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
 
     if (wrongQids.length > 0) {
       void getTrainingExplanations(wrongQids)
-        .then(({ explanations: expls }) => {
+        .then(({ explanations: expls, approaches: approachMap }) => {
           const byN: Record<string, string | null> = {};
+          const approachByN: Record<string, string | null> = {};
           for (const e of errors) {
             if (e.questionId != null && expls[e.questionId]) byN[e.questionN] = expls[e.questionId];
+            if (e.questionId != null && approachMap[e.questionId]) approachByN[e.questionN] = approachMap[e.questionId];
           }
           setExplanations(byN);
+          setApproaches(approachByN);
         })
-        .catch(() => { /* 拉取失败：结果页显示「正在生成中 + 刷新」 */ });
+        .catch(() => { /* 拉取失败只影响解析入口，不阻断结果页 */ });
     }
   }, [errors]);
 
@@ -272,6 +276,7 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
           questions={questions}
           answers={finalResults ?? {}}
           initialExplanations={explanations}
+          initialApproaches={approaches}
           onClose={() => onComplete(false)}
         />
       </div>

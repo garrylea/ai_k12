@@ -14,6 +14,7 @@ import ProfilePage from '@/pages/student/ProfilePage';
 import RewardsPage from '@/pages/student/RewardsPage';
 import PracticeHistoryPage from '@/pages/student/PracticeHistoryPage';
 import PracticeHistoryDetailPage from '@/pages/student/PracticeHistoryDetailPage';
+import FeaturedSetsPage from '@/pages/student/FeaturedSetsPage';
 import TrainingHomePage from '@/pages/student/training/TrainingHomePage';
 import ErrorPracticePage from '@/pages/student/training/ErrorPracticePage';
 import ErrorPracticeRunPage from '@/pages/student/training/ErrorPracticeRunPage';
@@ -512,7 +513,7 @@ export const routes: RouteObject[] = [
       </RequireRole>
     ),
   },
-  // 浅停留页外壳（第 59 行「禁用夜间切换」）：个人中心/奖励册写死日间、无侧栏、无日夜切换。
+  // 浅停留页外壳（第 59 行「禁用夜间切换」）：个人中心/奖励册/精选题单写死日间、无侧栏、无日夜切换。
   // 独立成顶层路由（第 58 行「启用日夜切换」那一类学习沉浸页不再挂 `/student` 外壳）。
   {
     path: '/student/profile',
@@ -531,6 +532,15 @@ export const routes: RouteObject[] = [
       </RequireRole>
     ),
     children: [{ index: true, element: <RewardsPage /> }],
+  },
+  {
+    path: '/student/featured-sets',
+    element: (
+      <RequireRole role="student">
+        <StudentStayLayout />
+      </RequireRole>
+    ),
+    children: [{ index: true, element: <FeaturedSetsPage /> }],
   },
   // 练习记录（2026-11-01）：同属浅停留页外壳；列表 + 详情共用布局。
   {

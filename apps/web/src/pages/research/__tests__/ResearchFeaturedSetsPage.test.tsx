@@ -76,6 +76,7 @@ function detail(over: Partial<ResearchFeaturedSetDetail> = {}): ResearchFeatured
         type: 'single_choice',
         answer: '2',
         explanation: '解析文本',
+        approach: '思路文本',
       },
     ],
     publications: [],
@@ -213,6 +214,33 @@ describe('ResearchFeaturedSetsPage 详情抽屉', () => {
     fireEvent.click(await screen.findByTestId('featured-set-row-7'));
 
     await waitFor(() => expect(toastMock).toHaveBeenCalledWith('error', '详情接口挂了'));
+  });
+
+  it('解析按思路→详解顺序展示，且两段都走共享 Markdown 管线', async () => {
+    detailMock.mockResolvedValue(
+      detail({
+        questions: [
+          {
+            questionId: 101,
+            text: '已知 x=1，求 x+1',
+            type: 'single_choice',
+            answer: '2',
+            approach: '## 思路\n\n先找 **等量关系**。',
+            explanation: '## 详解\n\n1. 代入\n2. **检验**',
+          },
+        ],
+      }),
+    );
+
+    renderPage();
+    fireEvent.click(await screen.findByTestId('featured-set-row-7'));
+    const dialog = await screen.findByRole('dialog');
+    const approach = await within(dialog).findByTestId('featured-approach-101');
+    const explanation = within(dialog).getByTestId('featured-explanation-101');
+
+    expect(within(approach).getByText('等量关系').tagName).toBe('STRONG');
+    expect(within(explanation).getByText('检验').tagName).toBe('STRONG');
+    expect(approach.compareDocumentPosition(explanation) & 4).toBe(4);
   });
 
   it('键盘 Enter 激活行内「发布」按钮：触发发布而不打开详情抽屉', async () => {

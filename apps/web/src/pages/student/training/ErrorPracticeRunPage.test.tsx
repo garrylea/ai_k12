@@ -114,7 +114,7 @@ describe('ErrorPracticeRunPage 发分反馈', () => {
     variationsMock.mockReset();
     completeSpecialMock.mockReset();
     bumpMock.mockResolvedValue(undefined);
-    explanationsMock.mockResolvedValue({ explanations: {} });
+    explanationsMock.mockResolvedValue({ explanations: {}, approaches: {} });
     variationsMock.mockResolvedValue({ variations: [] });
     completeSpecialMock.mockResolvedValue({ completed: true });
     sessionStorage.setItem('training:errors', JSON.stringify([ENTRY]));
@@ -182,7 +182,7 @@ describe('ErrorPracticeRunPage 变式提示卡（2026-10-11）', () => {
     variationsMock.mockReset();
     completeSpecialMock.mockReset();
     bumpMock.mockResolvedValue(undefined);
-    explanationsMock.mockResolvedValue({ explanations: {} });
+    explanationsMock.mockResolvedValue({ explanations: {}, approaches: {} });
     variationsMock.mockResolvedValue({ variations: [] });
     completeSpecialMock.mockResolvedValue({ completed: true });
     sessionStorage.setItem('training:errors', JSON.stringify([ENTRY]));
@@ -309,7 +309,7 @@ describe('ErrorPracticeRunPage 会话 uid 与完成端点（Task 10）', () => {
     selfAssessMock.mockReset();
     completeSpecialMock.mockReset();
     bumpMock.mockResolvedValue(undefined);
-    explanationsMock.mockResolvedValue({ explanations: {} });
+    explanationsMock.mockResolvedValue({ explanations: {}, approaches: {} });
     variationsMock.mockResolvedValue({ variations: [] });
     selfAssessMock.mockResolvedValue({});
     completeSpecialMock.mockResolvedValue({ completed: true });

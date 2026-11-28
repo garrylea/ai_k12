@@ -41,13 +41,15 @@ export default function TargetedRunPage() {
   const subjectId = parseSubjectId(searchParams.get('subjectId'));
   const subjectQuery = `?subjectId=${subjectId}`;
   /**
-   * 练习记录详情页发起的练习带 `returnTo`（回详情页）。只放行**固定形状**的练习记录详情路径
-   * （`/student/practice-history/{exam|special}/{数字}`），不用前缀判断——前缀判断会放过
+   * 练习记录详情页 / 精选题单 Tab 发起的练习带 `returnTo`。只放行两个固定落点：
+   * `/student/featured-sets`，以及**固定形状**的练习记录详情路径
+   * （`/student/practice-history/{exam|special}/{数字}`）。不用前缀判断——前缀判断会放过
    * `/student/practice-history/../../admin/x` 这类穿越路径。其它值退回专项配置页。
    */
   const returnToRaw = searchParams.get('returnTo');
   const exitTarget =
-    returnToRaw && /^\/student\/practice-history\/(exam|special)\/\d+$/.test(returnToRaw)
+    returnToRaw === '/student/featured-sets'
+      || (returnToRaw && /^\/student\/practice-history\/(exam|special)\/\d+$/.test(returnToRaw))
       ? returnToRaw
       : `/student/training/targeted${subjectQuery}`;
   /** 仅数学显示补偿套题，读学科配置（后端 remediation 也只认 math_targeted 会话）。 */
@@ -70,8 +72,9 @@ export default function TargetedRunPage() {
     { open: false, questionId: null },
   );
   const [marking, setMarking] = useState(false);
-  // 结果页错题解析：末题后批量拉取（key = q.n）；null = 生成中/未生成
+  // 结果页错题思路/解析：末题后批量只读题库（key = q.n）；null = 题库暂无
   const [explanations, setExplanations] = useState<Record<string, string | null>>({});
+  const [approaches, setApproaches] = useState<Record<string, string | null>>({});
   // X 确认后放行导航（同步置 ref.current=false 再 navigate，绕开 RunExitGuard 二次拦截——ref 是同步生效的）
   const guardRef = useRef(true);
   // null = mount 读取中（本页无异步请求，仅同步解析 sessionStorage 后立即落值）
@@ -271,16 +274,19 @@ export default function TargetedRunPage() {
     }
     if (wrongIds.length > 0) {
       void getTrainingExplanations(wrongIds)
-        .then(({ explanations: expls }) => {
+        .then(({ explanations: expls, approaches: approachMap }) => {
           const byN: Record<string, string | null> = {};
+          const approachByN: Record<string, string | null> = {};
           for (const q of questions ?? []) {
             const qid = entryByN.get(q.n)?.questionId;
             if (qid != null && expls[qid]) byN[q.n] = expls[qid];
+            if (qid != null && approachMap[qid]) approachByN[q.n] = approachMap[qid];
           }
           setExplanations(byN);
+          setApproaches(approachByN);
         })
         .catch(() => {
-          // 拉取失败视为全部未生成，结果页显示「正在生成中 + 刷新」
+          // 拉取失败只影响解析入口，不阻断结果页
         });
     }
   }, [entryByN, questions, completeSession, mode, sessionUid]);
@@ -310,6 +316,7 @@ export default function TargetedRunPage() {
             questions={resultQuestions}
             answers={finalResults ?? {}}
             initialExplanations={explanations}
+            initialApproaches={approaches}
             // 发分失败时挂在结果弹窗顶部：可重试的（网络 / award_failed）给出口；
             // 客户端 4xx（token 失效 / 会话被删）重试必然失败，只给诚实说明
             headerExtra={

@@ -96,6 +96,7 @@ function renderPage(url = '/') {
       { path: '/', element: <TargetedRunPage /> },
       { path: '/student/training/targeted', element: <div>已回到配置页</div> },
       { path: '/student/practice-history/exam/9', element: <div>已回到详情页</div> },
+      { path: '/student/featured-sets', element: <div>已回到精选题单</div> },
     ],
     { initialEntries: [url] },
   );
@@ -165,7 +166,7 @@ describe('TargetedRunPage 完成发分', () => {
     recommendMock.mockReset();
     selfAssessMock.mockReset();
     judgeMock.mockResolvedValue(JUDGED);
-    explanationsMock.mockResolvedValue({ explanations: {} });
+    explanationsMock.mockResolvedValue({ explanations: {}, approaches: {} });
     getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
     completeSpecialMock.mockResolvedValue({ completed: true });
     recommendMock.mockResolvedValue({ setId: 3, alreadyRecommended: false });
@@ -222,6 +223,25 @@ describe('TargetedRunPage 完成发分', () => {
 
     expect(screen.getByText('答题结果')).toBeInTheDocument();
     expect(screen.queryByText('判题中，请稍候…')).toBeNull();
+  });
+
+  it('批量返回思路与解析后，展开解析先显示思路再显示详解', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+    judgeMock.mockResolvedValue({ ...JUDGED, isCorrect: false });
+    explanationsMock.mockResolvedValue({
+      explanations: { 101: '详细过程' },
+      approaches: { 101: '先分析等量关系' },
+    });
+
+    await answerOnlyQuestion();
+    await userEvent.click(await screen.findByRole('button', { name: '查看解析' }));
+
+    const approach = screen.getByTestId('result-approach-101');
+    const explanation = screen.getByTestId('result-explanation-101');
+    expect(approach).toHaveTextContent('先分析等量关系');
+    expect(explanation).toHaveTextContent('详细过程');
+    expect(approach.compareDocumentPosition(explanation) & 4).toBe(4);
   });
 
   it('balance 为 null（award_failed）：提示稍后到账 + 重试，不 push 假分；点重试再调一次 complete', async () => {
@@ -350,6 +370,18 @@ describe('TargetedRunPage 完成发分', () => {
     });
 
     expect(await screen.findByText('已回到详情页')).toBeTruthy();
+  });
+
+  it('featured 的 returnTo 指向精选题单：结果页「确认」回精选题单 Tab', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+
+    await answerOnlyQuestion(`/?subjectId=1&returnTo=${encodeURIComponent('/student/featured-sets')}`);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '确认' }));
+    });
+
+    expect(await screen.findByText('已回到精选题单')).toBeTruthy();
   });
 
   it('returnTo 不在白名单：忽略并退回配置页', async () => {
@@ -565,7 +597,7 @@ describe('TargetedRunPage featured 模式', () => {
     recommendMock.mockReset();
     selfAssessMock.mockReset();
     judgeMock.mockResolvedValue(JUDGED);
-    explanationsMock.mockResolvedValue({ explanations: {} });
+    explanationsMock.mockResolvedValue({ explanations: {}, approaches: {} });
     completeSpecialMock.mockResolvedValue({ completed: true });
     recommendMock.mockResolvedValue({ setId: 3, alreadyRecommended: false });
     selfAssessMock.mockResolvedValue({});

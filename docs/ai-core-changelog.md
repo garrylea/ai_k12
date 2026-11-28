@@ -2,6 +2,24 @@
 
 本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-16；迁出后的新条目继续追加在顶部），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
 
+## 2026-11-28 答案块支持顿号题号并透传全局块错误
+
+**问题**：试卷 76522（`exam_papers.id=1480`）答案区完整，但第 9–16 题答案为空。
+原答案用中文顿号编号：`9、 … 10、-2 …`；块边界和块内题号扫描只认 `.` / `．`，
+整组答案落入 `unknown` 块，答案文档从 8 直接跳到 17。
+
+**修法**：
+
+1. `answer_blocks.py` 的块边界与块内题号扫描同步支持 `、`；顿号仅作为答案题号分隔符，
+   不进入全局标点归一化，避免大题标题混入上一题答案。
+2. `generic.py` 不再只在整卷零命中时写全局 issue；所有 `question_no=None` 的
+   `answer_block_unparsed` / `answer_region_no_assignments` 等块级错误都追加到
+   `answer_issues.jsonl`，已有其他答案时也不再静默吞掉。
+3. 新增 76522 真实两行答案回归，以及“已有题目答案但另有未知块”的透传回归。
+
+**验证**：76522 `answer_extract_cli --dry-run` 恢复为 27 题 / 27 题有答案，
+第 9–16 题逐项与原文一致；data-refinery 全量 `2382 passed, 10 skipped`。
+
 ## 2026-11-28 专项/错题练习末题卡在「判题中」60 秒
 
 **问题（lc1 实测）**：数学专项「初三上学期 · 第8题」3 题（全是选择题）答完提交后，一直显示「判题中，请稍候…」，约 1 分钟后才出结果页。
@@ -4544,3 +4562,22 @@ MDM 描述文件（`com.apple.applicationaccess` 的 `allowAssistant=false`，ma
 **保留的原路径**：学科选择页选科目、课程详情的「完成/下一课」「返回关卡星图」、浅停留页「退出本页」且会话有效、浏览器后退——这些都带 `subjectId` 或属于用户主动导航，仍去星图。
 
 **为什么不改 `RequireRole`**：它是同步组件、挂在所有受保护路由上，逐个发探测请求会把每个页面的首屏都变成两次往返；这条旧地址是唯一「不发任何请求就跳转」的落点，就地修即可。
+
+---
+
+## 2026-11-28 · 普通判题恢复 + 精选题单投递收敛
+
+**现象**：普通专项带 `sessionUid` 判题返回 500，前端拿不到答案对错；结果页主观题在无解析时仍显示解析入口，客观错题则显示“正在生成中… + 刷新”。
+
+**根因**：`TrainingService.judgeTraining` 在调用判题核心前无条件查询 `special_practice_sessions.featured_publication_id`，而精选迁移尚未执行，MySQL 返回 `ER_BAD_FIELD_ERROR`。新列不是判题或解析所需，只用于精选题单的积分策略，却被绑定成所有专项判题的硬依赖。结果页又把 `explanation-wait` 当成解析可用性入口，与“题库有解析才显示”的产品口径冲突。
+
+**修复**：
+
+- `isFeaturedSession` 只对错误码 `ER_BAD_FIELD_ERROR` 且消息包含 `featured_publication_id` 降级为普通会话；核心表缺失和其他异常继续抛出。
+- `AnswerResultList` 不再等待/刷新解析：客观题错题仅解析非空时显示【查看解析】；主观题解析为空时不显示解析，但考试页仍可用独立的【查看参考答案】完成自评。
+- 结果页移除题号；新增 `footerExtra`，专项/精选/重做结果页的推荐按钮与【导出 PDF】【确认】同处底部操作栏。
+- 精选 publication 改为不可复用投递：删除 `status` 和 `(set_id, grade_code)` 唯一键，以 `withdrawn_at IS NULL` 判断有效，普通可空 `active_publication_key` + 唯一键保证并发唯一。有效同年级重发只改标题；撤回后重发新增 ID，不删除旧 reads。
+- `special_practice_sessions.featured_publication_id` 外键由 `SET NULL` 改为 `RESTRICT`。重复打开 publication 会生成新 session，完成数按 `(publication_id, student_id)` 去重。
+- 迁移采用普通 active key 而非 generated column：当前 MySQL 不允许该表 generated column 与现有三条外键共存（实测 1215），普通列由发布/撤回事务原子维护。
+
+**验证**：迁移连续执行两次成功；`schema_reconcile.py` 86 张表结构差异 0（仅存在历史 `_bak_35_*` 备份表提示）。server 225 文件 / 3056 用例通过，`npm run build` 通过；web 199 文件 / 2077 用例通过，`npm run build` 通过。`npm run lint` 仍有 4 个与本批无关的存量 error（`tracker.test.ts`、`markdown.tsx` ×2、`MobilePointsPage.test.tsx`），31 个存量 warning；本批修改文件无新增 lint error。

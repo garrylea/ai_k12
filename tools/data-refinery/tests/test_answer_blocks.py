@@ -194,6 +194,42 @@ def test_inline_dotted_numeric_answers_split_consecutive_question_numbers():
     assert got[16] == "$\\sqrt{13}$"
 
 
+def test_chinese_enumeration_numbers_parse_76522_fill_blank_answers():
+    """76522 的真实两行答案用顿号作题号分隔符，不能整块落入 unknown。"""
+    result = parse_answer_region(
+        [
+            AnswerLine(
+                295,
+                "9、 $(-3, 4)$ 10、-2 11、2 < x < 5 "
+                "12、 $(30 - x)(18 - x) = 288$",
+            ),
+            AnswerLine(
+                297,
+                "13、 $3\\sqrt{3}$ 14、 $a \\geq 1$ 15、> "
+                "16、4； $2\\sqrt{3}$",
+            ),
+        ],
+        [AnswerQuestion(no=number, group_id="二") for number in range(9, 17)],
+        first_line_no=295,
+    )
+    got = {fragment.question_no: fragment.text for fragment in result.fragments}
+
+    assert got == {
+        9: "$(-3, 4)$",
+        10: "-2",
+        11: "2 < x < 5",
+        12: "$(30 - x)(18 - x) = 288$",
+        13: "$3\\sqrt{3}$",
+        14: "$a \\geq 1$",
+        15: ">",
+        16: "4； $2\\sqrt{3}$",
+    }
+    assert not [
+        issue for issue in result.issues
+        if issue.code in {"answer_block_unparsed", "answer_missing"}
+    ]
+
+
 def test_region_reports_missing_without_writing_neighbor():
     lines = [
         AnswerLine(10, "9. (-1,-2) 10. 4"),

@@ -6,6 +6,7 @@ import {
   markdownComponents,
   markdownRehypePlugins,
   markdownRemarkPlugins,
+  markdownRemarkPluginsWithBreaks,
   preprocessMarkdown,
 } from '@/components/markdown';
 import {
@@ -442,8 +443,37 @@ export default function ResearchFeaturedSetsPage() {
                         </ReactMarkdown>
                       </div>
                       <div style={{ color: 'var(--text-secondary)' }}>{`答案：${q.answer}`}</div>
-                      {q.explanation && (
-                        <div style={{ color: 'var(--text-secondary)' }}>{q.explanation}</div>
+                      {(q.approach || q.explanation) && (
+                        <div className="space-y-3 rounded-lg bg-[var(--bg-base)] p-3">
+                          {q.approach && (
+                            <div data-testid={`featured-approach-${q.questionId}`}>
+                              <div className="mb-1 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>思路</div>
+                              <div className="leading-[1.7]" style={{ color: 'var(--text-primary)' }}>
+                                <ReactMarkdown
+                                  remarkPlugins={markdownRemarkPluginsWithBreaks}
+                                  rehypePlugins={markdownRehypePlugins}
+                                  components={markdownComponents}
+                                >
+                                  {preprocessMarkdown(q.approach)}
+                                </ReactMarkdown>
+                              </div>
+                            </div>
+                          )}
+                          {q.explanation && (
+                            <div data-testid={`featured-explanation-${q.questionId}`}>
+                              <div className="mb-1 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>详解</div>
+                              <div className="leading-[1.7]" style={{ color: 'var(--text-primary)' }}>
+                                <ReactMarkdown
+                                  remarkPlugins={markdownRemarkPluginsWithBreaks}
+                                  rehypePlugins={markdownRehypePlugins}
+                                  components={markdownComponents}
+                                >
+                                  {preprocessMarkdown(q.explanation)}
+                                </ReactMarkdown>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   ))}

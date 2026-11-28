@@ -67,6 +67,11 @@ function renderStay(
         element: <StudentStayLayout />,
         children: [{ index: true, element: <div>奖励册内容</div> }],
       },
+      {
+        path: '/student/featured-sets',
+        element: <StudentStayLayout />,
+        children: [{ index: true, element: <div>精选题单内容</div> }],
+      },
     ],
     { initialEntries: [initialEntry] },
   );
@@ -183,6 +188,18 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
     expect(screen.getByRole('button', { name: '退出本页' })).toBeInTheDocument();
   });
 
+  it('浅停留页新增「精选题单」顶层 Tab，可独立进入完整列表', async () => {
+    const user = userEvent.setup();
+    const router = renderStay({ pathname: '/student/profile' });
+
+    const link = screen.getByRole('link', { name: '精选题单' });
+    expect(link).toHaveAttribute('href', '/student/featured-sets');
+
+    await user.click(link);
+    expect(router.state.location.pathname).toBe('/student/featured-sets');
+    expect(screen.getByText('精选题单内容')).toBeInTheDocument();
+  });
+
   it('会话已失效（停留期间 token 过期/被清）→ 退出本页直接回登录页带原因，不落到来源页', async () => {
     const user = userEvent.setup();
     const router = renderStay({
@@ -203,7 +220,7 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
 /**
  * 练习记录（2026-11-06 用户实测后修正）：2026-11-02 曾把它当个人中心的下级页、
  * 按层级「列表→个人中心、详情→列表」；但那是给左侧「返回」定的。左侧按钮删除后，
- * 唯一出口「退出本页」的语义是「从哪进回哪」—— 三个 tab 同权，练习记录也回最初来源。
+ * 唯一出口「退出本页」的语义是「从哪进回哪」—— 四个 tab 同权，练习记录也回最初来源。
  */
 function renderPracticeHistory(
   initialPath: string,
@@ -296,7 +313,7 @@ describe('StudentStayLayout 剩余时长浮层', () => {
     renderStay({ pathname: '/student/profile' }, { locked: true, remainingMs: 30 * 60_000 });
     expect(screen.getByTestId('pill-reveal-zone')).toBeInTheDocument();
     expect(screen.getByTestId('locked-pill').className).toContain('pointer-events-none');
-    // 三个 tab 仍然可点（胶囊在它们下方、且 pointer-events-none）
+    // 四个 tab 仍然可点（胶囊在它们下方、且 pointer-events-none）
     expect(screen.getByRole('link', { name: '练习记录' })).toBeInTheDocument();
   });
 });
@@ -304,7 +321,7 @@ describe('StudentStayLayout 剩余时长浮层', () => {
 /**
  * 切 tab 重新触发 3 秒自动显示。
  *
- * 三个 tab 是**兄弟路由**，React Router v6 在它们之间导航时会复用同一位置的
+ * 四个 tab 是**兄弟路由**，React Router v6 在它们之间导航时会复用同一位置的
  * 同一类型组件（`<RequireRole>` → `<StudentStayLayout />` 不重挂），所以
  * `LockedPillReveal` 的 `visible` 状态会跨 tab 存活、effect 依赖不变 ——
  * 不强制重挂，3 秒只在第一次进入浅停留区时出现一次。

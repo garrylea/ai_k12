@@ -56,8 +56,9 @@ export default function ErrorPracticeRunPage() {
   const guardRef = useRef(true);
   // null = mount 读取中（本页无异步请求，仅同步解析 sessionStorage 后立即落值）
   const [entries, setEntries] = useState<TrainingErrorBookEntry[] | null>(null);
-  // 结果页错题解析：末题后批量拉取（key = q.n）；孤儿题（questionId null）无解析不拉
+  // 结果页错题思路/解析：末题后批量只读题库（key = q.n）；孤儿题（questionId null）不拉
   const [explanations, setExplanations] = useState<Record<string, string | null>>({});
+  const [approaches, setApproaches] = useState<Record<string, string | null>>({});
   // 结果页变式提示卡（PRD §7.10）：null = 未查询/查询中；8s 补查的一次性 timer
   const [varPending, setVarPending] = useState<TrainingVariationItem[] | null>(null);
   const varRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -236,15 +237,18 @@ export default function ErrorPracticeRunPage() {
       }
       if (wrongQids.length > 0) {
         void getTrainingExplanations(wrongQids)
-          .then(({ explanations: expls }) => {
+          .then(({ explanations: expls, approaches: approachMap }) => {
             const byN: Record<string, string | null> = {};
+            const approachByN: Record<string, string | null> = {};
             for (const e of entries ?? []) {
               if (e.questionId != null && expls[e.questionId]) byN[String(e.errorBookId)] = expls[e.questionId];
+              if (e.questionId != null && approachMap[e.questionId]) approachByN[String(e.errorBookId)] = approachMap[e.questionId];
             }
             setExplanations(byN);
+            setApproaches(approachByN);
           })
           .catch(() => {
-            // 拉取失败视为全部未生成，结果页显示「正在生成中 + 刷新」
+            // 拉取失败只影响解析入口，不阻断结果页
           });
       }
     },
@@ -271,6 +275,7 @@ export default function ErrorPracticeRunPage() {
                 questions={resultQuestions}
                 answers={finalResults ?? {}}
                 initialExplanations={explanations}
+                initialApproaches={approaches}
                 onClose={() => navigate(`/student/training/errors${subjectQuery}`)}
                 onExport={() => setPrintOpen(true)}
               />

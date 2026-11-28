@@ -17,10 +17,17 @@ import type { RemediationOverview } from '@/services/api';
 const getRemediationOverview = vi.hoisted(() => vi.fn());
 const getTrainingErrorBook = vi.hoisted(() => vi.fn());
 const getFeaturedUnreadSummary = vi.hoisted(() => vi.fn());
+const openFeaturedSet = vi.hoisted(() => vi.fn());
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
-  return { ...actual, getRemediationOverview, getTrainingErrorBook, getFeaturedUnreadSummary };
+  return {
+    ...actual,
+    getRemediationOverview,
+    getTrainingErrorBook,
+    getFeaturedUnreadSummary,
+    openFeaturedSet,
+  };
 });
 
 afterEach(() => {
@@ -32,6 +39,7 @@ beforeEach(() => {
   getRemediationOverview.mockReset();
   getTrainingErrorBook.mockReset();
   getFeaturedUnreadSummary.mockReset();
+  openFeaturedSet.mockReset();
   getTrainingErrorBook.mockResolvedValue([]);
   // mockReset 会清掉实现：给两个「默认静默」的桩，单个用例再按需覆盖
   getRemediationOverview.mockResolvedValue({
@@ -57,6 +65,8 @@ function renderPage() {
       { path: '/student/training/remediation/run', element: <div>作答页桩</div> },
       { path: '/student/training/weak-points', element: <div>薄弱点图谱页桩</div> },
       { path: '/student/profile', element: <div>个人中心页桩</div> },
+      { path: '/student/featured-sets', element: <div>精选题单页桩</div> },
+      { path: '/student/training/targeted/run', element: <div>精选题作答页桩</div> },
     ],
     { initialEntries: ['/student/training/home'] },
   );
@@ -77,6 +87,8 @@ function renderAt(path: string) {
       { path: '/student/training/weak-points', element: <div>图谱页桩</div> },
       { path: '/student/training/remediation/run', element: <div>作答页桩</div> },
       { path: '/student/profile', element: <div>个人中心页桩</div> },
+      { path: '/student/featured-sets', element: <div>精选题单页桩</div> },
+      { path: '/student/training/targeted/run', element: <div>精选题作答页桩</div> },
     ],
     { initialEntries: [path] },
   );
@@ -215,10 +227,24 @@ describe('TrainingHomePage 学科参数化', () => {
 });
 
 describe('TrainingHomePage 新精选题单 Banner', () => {
-  it('有未读精选题时显示 Banner，点击进入个人中心', async () => {
+  it('有未读精选题时显示 Banner，点击直接打开最新一条并进入作答页', async () => {
     getFeaturedUnreadSummary.mockResolvedValue({
       count: 2,
       latest: { publicationId: 1, title: '七年级数学精选' },
+    });
+    openFeaturedSet.mockResolvedValue({
+      mode: 'featured',
+      sessionUid: 'server-uid-banner',
+      subjectId: 1,
+      title: '七年级数学精选',
+      questions: [{
+        questionId: 101,
+        text: '1 + 1 = ?',
+        type: 'choice',
+        options: ['A. 1', 'B. 2'],
+        materialText: null,
+        materialUrl: null,
+      }],
     });
 
     const { router } = await renderSettled();
@@ -226,7 +252,16 @@ describe('TrainingHomePage 新精选题单 Banner', () => {
     expect(await screen.findByText('有 2 个新精选题单')).toBeInTheDocument();
     expect(screen.getByText('最新：七年级数学精选')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看' }));
-    await waitFor(() => expect(router.state.location.pathname).toBe('/student/profile'));
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe('/student/training/targeted/run'),
+    );
+    expect(openFeaturedSet).toHaveBeenCalledWith(1);
+    expect(JSON.parse(sessionStorage.getItem('training:targeted')!)).toMatchObject({
+      mode: 'featured',
+      sessionId: null,
+      sessionUid: 'server-uid-banner',
+    });
+    expect(router.state.location.search).toContain('returnTo=%2Fstudent%2Ffeatured-sets');
   });
 
   it('count=0 时静默，不显示 Banner', async () => {

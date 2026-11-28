@@ -28,6 +28,8 @@ import {
   getTrainingVariations,
   getUnreadMessageCount,
   getWeakPoints,
+  getFeaturedUnreadSummary,
+  listFeaturedSets,
   listMyStudents,
   listResearchFeaturedSets,
   putParentControls,
@@ -96,6 +98,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     getKnowledgeGraphMastery: vi.fn(),
     getWeakPoints: vi.fn(),
     getMyPointRules: vi.fn(),
+    listFeaturedSets: vi.fn(),
+    getFeaturedUnreadSummary: vi.fn(),
     // `/student/locked`（订阅锁定页新页）：挂载即拉订阅状态
     getSubscriptionStatus: vi.fn(),
     // 家长端顶栏裁决结果条（BillingNoticeBar）挂载即拉：默认无未读 → 不渲染
@@ -129,6 +133,8 @@ const getTrainingVariationsMock = vi.mocked(getTrainingVariations);
 const getKnowledgeGraphMasteryMock = vi.mocked(getKnowledgeGraphMastery);
 const getWeakPointsMock = vi.mocked(getWeakPoints);
 const getMyPointRulesMock = vi.mocked(getMyPointRules);
+const listFeaturedSetsMock = vi.mocked(listFeaturedSets);
+const getFeaturedUnreadSummaryMock = vi.mocked(getFeaturedUnreadSummary);
 const getSubscriptionStatusMock = vi.mocked(getSubscriptionStatus);
 const listUnreadBillingNoticesMock = vi.mocked(listUnreadBillingNotices);
 const listResearchFeaturedSetsMock = vi.mocked(listResearchFeaturedSets);
@@ -309,6 +315,10 @@ beforeEach(() => {
   getKnowledgeGraphMasteryMock.mockReset();
   getWeakPointsMock.mockReset();
   getMyPointRulesMock.mockReset();
+  listFeaturedSetsMock.mockReset();
+  listFeaturedSetsMock.mockResolvedValue({ items: [], page: 1, pageSize: 20, total: 0 });
+  getFeaturedUnreadSummaryMock.mockReset();
+  getFeaturedUnreadSummaryMock.mockResolvedValue({ count: 0, latest: null });
   getSubscriptionStatusMock.mockReset();
   // 顶栏订阅提示条（SubscriptionNoticeBar）挂载即拉：默认「订阅正常」→ 不渲染，不干扰既有用例
   getSubscriptionStatusMock.mockResolvedValue({
@@ -386,6 +396,10 @@ function expectStayPageShell() {
     'href',
     '/student/practice-history',
   );
+  expect(screen.getByRole('link', { name: '精选题单' })).toHaveAttribute(
+    'href',
+    '/student/featured-sets',
+  );
   // 退出本页（2026-11-06 用户要求：回进入本页之前的那一页，不是固定回入口选择页、也不是登出）
   expect(screen.getByRole('button', { name: '退出本页' })).toBeInTheDocument();
 }
@@ -430,6 +444,19 @@ describe('路由表：积分相关页面', () => {
 
     expect(await screen.findByRole('heading', { name: '练习记录' })).toBeInTheDocument();
     expect(await screen.findByTestId('history-empty')).toBeInTheDocument();
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    expectStayPageShell();
+  });
+
+  it('/student/featured-sets 渲染精选题单完整列表（浅停留页外壳）', async () => {
+    setStudentSession();
+
+    renderAt('/student/featured-sets');
+
+    expect(await screen.findByRole('heading', { name: '精选题单' })).toBeInTheDocument();
+    expect(await screen.findByText('暂无精选题单')).toBeInTheDocument();
+    expect(listFeaturedSetsMock).toHaveBeenCalledWith(1);
+    expect(getFeaturedUnreadSummaryMock).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
     expectStayPageShell();
   });

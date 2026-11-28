@@ -1173,11 +1173,13 @@ export class TrainingService {
     return this.hiddenRepo.findAllByStudent(studentId, subjectId);
   }
 
-  /** 批量拉解析：**只读库**——有就给、没有给 null；不等待在途生成、不触发新生成（2026-11-28 用户口径）。 */
-  async getExplanations(ids: number[]): Promise<{ explanations: Record<number, string | null> }> {
+  /** 批量拉思路/解析：**只读库**——有就给、没有给 null；不等待在途生成、不触发新生成。 */
+  async getExplanations(ids: number[]): Promise<{
+    explanations: Record<number, string | null>;
+    approaches: Record<number, string | null>;
+  }> {
     const clean = ids.filter((x) => Number.isInteger(x) && x > 0);
-    const explanations = await this.explanationCache.readExplanations(clean);
-    return { explanations };
+    return this.explanationCache.readExplanations(clean);
   }
 
   /** 单题刷新等待：DB 无解析且无在途 -> 重新触发生成；120s 超时；失败写管理员通知（同题同 type 未读去重）。

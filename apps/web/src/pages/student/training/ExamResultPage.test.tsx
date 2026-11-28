@@ -133,7 +133,7 @@ describe('ExamResultPage 交卷发分庆祝', () => {
     getMyPointsMock.mockReset();
     sessionMock.mockResolvedValue(SESSION);
     resultsMock.mockResolvedValue({ ...SUMMARY, items: [ITEM] });
-    explanationsMock.mockResolvedValue({ explanations: {} });
+    explanationsMock.mockResolvedValue({ explanations: {}, approaches: {} });
     getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
   });
 
@@ -390,7 +390,7 @@ describe('ExamResultPage 同题号小问不串数据', () => {
     selfAssessMock.mockReset();
     getMyPointsMock.mockReset();
     sessionMock.mockResolvedValue(SESSION);
-    explanationsMock.mockResolvedValue({ explanations: {} });
+    explanationsMock.mockResolvedValue({ explanations: {}, approaches: {} });
     getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
     selfAssessMock.mockResolvedValue({ saved: true } as never);
   });

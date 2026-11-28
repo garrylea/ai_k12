@@ -61,7 +61,7 @@ def _parse_block(
     if block.kind == "numbered":
         fragments, issues = parse_numbered_block(block, expected)
         for number in sorted(assigned_numbers):
-            if re.search(rf"(?m)^\s*{number}\s*[.．]", text):
+            if re.search(rf"(?m)^\s*{number}\s*[.．、]", text):
                 issues.append(AnswerIssue(
                     code="answer_duplicate_ignored",
                     severity="warning",

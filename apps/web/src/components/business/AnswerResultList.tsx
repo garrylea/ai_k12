@@ -40,6 +40,8 @@ interface Props {
   footerExtra?: ReactNode;
   /** 批量拉取的解析（父层末题后调 getTrainingExplanations 获得），key = q.n；缺省 {} */
   initialExplanations?: Record<string, string | null>;
+  /** 与解析同批拉取的解题思路，展开时先于详解展示；key = q.n；缺省 {} */
+  initialApproaches?: Record<string, string | null>;
   /** 主观题参考答案（key = q.n；考试结果页传，训练结果页不传——自评时已看过） */
   referenceAnswers?: Record<string, string | null>;
   /** 结果页自评提交（考试结果页传）；返回后父层更新 answers 消除 needsSelfAssess */
@@ -62,6 +64,7 @@ export function AnswerResultList({
   headerExtra,
   footerExtra,
   initialExplanations = {},
+  initialApproaches = {},
   referenceAnswers,
   onSelfAssess,
   onExport,
@@ -69,6 +72,7 @@ export function AnswerResultList({
   const [expandedN, setExpandedN] = useState<string | null>(null);
   // 解析缓存：初值来自父层末题后批量拉取；父层后续补拉时合并。
   const [explanations, setExplanations] = useState<Record<string, string | null>>(initialExplanations);
+  const [approaches, setApproaches] = useState<Record<string, string | null>>(initialApproaches);
   const [assessingN, setAssessingN] = useState<string | null>(null);
 
   // 父层异步补拉（如考试结果页 mount 后补拉）到达时合并：只接受非空值，
@@ -86,6 +90,20 @@ export function AnswerResultList({
       return changed ? next : prev;
     });
   }, [initialExplanations]);
+
+  useEffect(() => {
+    setApproaches((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const [k, v] of Object.entries(initialApproaches)) {
+        if (v != null && next[k] !== v) {
+          next[k] = v;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [initialApproaches]);
 
   const handleSelfAssess = async (n: string, assessment: 'correct' | 'incorrect') => {
     if (!onSelfAssess || assessingN) return;
@@ -161,6 +179,7 @@ export function AnswerResultList({
               const correct = !!a?.isCorrect && !failed;
               const expanded = expandedN === q.n;
               const explanation = explanations[q.n] ?? null;
+              const approach = approaches[q.n] ?? null;
               const rec = a;
               const unscored = rec?.unscored === true;
               const subjective = !unscored && (!!rec?.needsSelfAssess || rec?.method === 'self_assess');
@@ -315,10 +334,23 @@ export function AnswerResultList({
                         {a.errorType && (
                           <div className="text-xs font-semibold text-[var(--warning)] mb-1.5">错因：{a.errorType}</div>
                         )}
-                        <div className="text-[13px] text-[var(--text-primary)] leading-[1.7]">
-                          <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
-                            {preprocessMarkdown(normalizeAnswerMath(explanation))}
-                          </ReactMarkdown>
+                        {approach && (
+                          <div data-testid={`result-approach-${q.n}`} className="mb-3">
+                            <div className="text-xs font-semibold text-[var(--warning)] mb-1">思路</div>
+                            <div className="text-[13px] text-[var(--text-primary)] leading-[1.7]">
+                              <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                                {preprocessMarkdown(normalizeAnswerMath(approach))}
+                              </ReactMarkdown>
+                            </div>
+                          </div>
+                        )}
+                        <div data-testid={`result-explanation-${q.n}`}>
+                          <div className="text-xs font-semibold text-[var(--warning)] mb-1">详解</div>
+                          <div className="text-[13px] text-[var(--text-primary)] leading-[1.7]">
+                            <ReactMarkdown remarkPlugins={markdownRemarkPluginsWithBreaks} rehypePlugins={markdownRehypePlugins} components={markdownComponents}>
+                              {preprocessMarkdown(normalizeAnswerMath(explanation))}
+                            </ReactMarkdown>
+                          </div>
                         </div>
                       </div>
                     </div>

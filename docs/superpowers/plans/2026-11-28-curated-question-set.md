@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 实现“学生推荐题集 → 教研员审核 → 按单一年级发布 → 学生在个人中心作答”的精选题单闭环，并保证记录练习历史但不发积分。
+**Goal:** 实现“学生推荐题集 → 教研员审核 → 按单一年级发布 → 学生在精选题单 Tab 作答”的精选题单闭环，并保证记录练习历史但不发积分。
 
 **Architecture:** 新增独立 `featured-sets` 后端模块，题集、推荐、按年级 publication 和学生已读分开建模；发布后的 publication 就是学生收件项。学生端复用 `TargetedRunPage`，由 `open` 创建带 `featured_publication_id` 的服务端专项会话，判题服务据此强制压制 `error_fix`。
 
@@ -16,7 +16,7 @@
 - 一个 publication 只对应一个标准 `grade_N` 年级；同一题集可分别发布到多个年级。
 - 标题属于 publication，不属于题集。
 - 年级匹配使用 `resolveGradeInfo(student.grade)?.code`，不比较原始年级字符串。
-- 完整精选题单列表在个人中心；训练首页仅保留未读 Banner，不增加常驻入口。
+- 完整精选题单列表在浅停留页独立「精选题单」Tab；训练首页仅保留未读 Banner，点击直达最新一条作答。
 - 精选题单使用服务端 `sessionUid` 写现有专项历史；`sessionId` 恒为 `null`。
 - featured session 必须由服务端强制压制 `error_fix`，不得只信客户端 `suppressErrorFixPoints`。
 - 不新增 `judge source='featured'`；判题来源继续使用 `targeted`。
@@ -1333,21 +1333,24 @@ git commit -m "feat(featured): run curated sets without points"
 
 ---
 
-### Task 11: 个人中心精选题单卡片与训练 Banner
+### Task 11: 精选题单独立 Tab 与训练 Banner 直达
 
 **Files:**
 - Create: `apps/web/src/components/business/FeaturedSetsCard.tsx`
 - Create: `apps/web/src/components/business/FeaturedSetsCard.test.tsx`
+- Create: `apps/web/src/pages/student/FeaturedSetsPage.tsx`
 - Modify: `apps/web/src/pages/student/ProfilePage.tsx`
 - Modify: `apps/web/src/pages/student/ProfilePage.test.tsx`
+- Modify: `apps/web/src/components/layout/StudentStayLayout.tsx`
 - Modify: `apps/web/src/pages/student/training/TrainingHomePage.tsx`
 - Modify: `apps/web/src/pages/student/training/TrainingHomePage.test.tsx`
+- Modify: `apps/web/src/routes/routeTable.tsx`
 
 **Interfaces:**
 - Consumes: `listFeaturedSets`, `openFeaturedSet`, `getFeaturedUnreadSummary`.
 - Produces: `FeaturedSetsCard` with pagination and open/dispatch.
 
-- [ ] **Step 1: 写个人中心卡片失败测试**
+- [ ] **Step 1: 写精选题单 Tab 失败测试**
 
 ```tsx
 it('渲染未读精选题，点击开题后写入 featured 交接体并跳运行页', async () => {
@@ -1391,27 +1394,27 @@ sessionStorage.setItem('training:targeted', JSON.stringify({
   title: payload.title,
   mode: 'featured',
 }));
-navigate(`/student/training/targeted/run?subjectId=${payload.subjectId}&returnTo=${encodeURIComponent('/student/profile')}`);
+navigate(`/student/training/targeted/run?subjectId=${payload.subjectId}&returnTo=${encodeURIComponent('/student/featured-sets')}`);
 ```
 
-- [ ] **Step 3: 把卡片放在个人中心标题之后、段位卡之前**
+- [ ] **Step 3: 新增 `/student/featured-sets` 浅停留 Tab**
 
 ```tsx
-<h1>个人中心</h1>
-<FeaturedSetsCard />
+// StudentStayLayout
+{ to: '/student/featured-sets', label: '精选题单' }
 ```
 
-不要把列表放到训练首页，也不要增加第四个浅停留页 Tab。
+个人中心移除 `FeaturedSetsCard`；精选题单列表只在独立 Tab 展示。
 
 - [ ] **Step 4: 写训练 Banner 失败测试**
 
 ```tsx
-it('有未读精选题时显示 Banner，点击进入个人中心', async () => {
+it('有未读精选题时显示 Banner，点击直接打开最新一条并进入作答页', async () => {
   getFeaturedUnreadSummaryMock.mockResolvedValue({ count: 2, latest: { publicationId: 1, title: '七年级数学精选' } });
   const { router } = await renderSettled();
   expect(screen.getByText(/2 个新精选题单/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '查看' }));
-  await waitFor(() => expect(router.state.location.pathname).toBe('/student/profile'));
+  await waitFor(() => expect(router.state.location.pathname).toBe('/student/training/targeted/run'));
 });
 ```
 
@@ -1420,7 +1423,7 @@ it('有未读精选题时显示 Banner，点击进入个人中心', async () => 
 - 调 `getFeaturedUnreadSummary()`；
 - `count=0` 或请求失败时静默；
 - 放在相似题待办 Banner 之后；
-- 不添加常驻入口；
+- 点击「查看」调 `openFeaturedSet(latest.publicationId)`，写交接体并进入作答器；
 - 挂载和 `window.focus` 时刷新；
 - 关闭只设当前页面 state。
 
@@ -1439,7 +1442,7 @@ Expected: PASS。
 
 ```bash
 git add apps/web/src/components/business/FeaturedSetsCard.tsx apps/web/src/components/business/FeaturedSetsCard.test.tsx apps/web/src/pages/student/ProfilePage.tsx apps/web/src/pages/student/ProfilePage.test.tsx apps/web/src/pages/student/training/TrainingHomePage.tsx apps/web/src/pages/student/training/TrainingHomePage.test.tsx
-git commit -m "feat(featured): show curated sets in profile"
+git commit -m "feat(featured): add curated sets tab and direct-open banner"
 ```
 
 ---
@@ -1595,7 +1598,7 @@ PRD 新增精选题单章节，内容固定包含：
 
 - 学生只推荐已做过的在架题；
 - 教研员按单一年级发布；
-- 个人中心是完整列表，训练首页只有未读 Banner；
+- 「精选题单」浅停留 Tab 是完整列表，训练首页只有可直达作答的未读 Banner；
 - 记录练习历史，不发积分；
 - PRD §11 冲突修订为“学习明细仅家长可见；教研员可看推荐票的年级聚合，不可反查到个人”。
 
@@ -1622,7 +1625,7 @@ OpenAPI 必须同步：
 - [ ] **Step 4: 同步数据库、UX 与约束文档**
 
 - DB 文档新增 5 张表和增量列，删卷引用从 7 张改 8 张。
-- UX 文档新增个人中心卡片、训练 Banner、教研审核页。
+- UX 文档新增「精选题单」浅停留 Tab、训练 Banner 直达、教研审核页。
 - `专项子系统.md` 记录：featured 无 `training_sessions`、无 `point_ledger`、`error_fix` 服务端压制、历史照常写。
 
 - [ ] **Step 5: 全量验证**
@@ -1648,8 +1651,8 @@ Expected: 全部 PASS。
 2. 点「推荐这套题」；
 3. 教研员看到 1 人推荐和年级分布；
 4. 填写该年级标题并发布；
-5. 学生个人中心看到未读精选题；
-6. 训练首页看到 Banner，点「查看」进入个人中心；
+5. 学生「精选题单」Tab 看到未读精选题；
+6. 训练首页看到 Banner，点「查看」直接进入作答器；
 7. 打开精选题，完成题单；
 8. 结果页无积分元素；
 9. 练习记录可回看；

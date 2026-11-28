@@ -1337,11 +1337,20 @@ describe('TrainingService.listHidden', () => {
 describe('TrainingService.getExplanations', () => {
   it('过滤非正整数 id 后透传 explanationCache.readExplanations（只读库，不等待生成）', async () => {
     const deps = mk({
-      explanationCache: { readExplanations: vi.fn().mockResolvedValue({ 10: '题解' }), waitExplanation: vi.fn() },
+      explanationCache: {
+        readExplanations: vi.fn().mockResolvedValue({
+          explanations: { 10: '题解' },
+          approaches: { 10: '先分析' },
+        }),
+        waitExplanation: vi.fn(),
+      },
     });
     const r = await mkSvc(deps).getExplanations([10, 0, -1, 11]);
     expect(deps.explanationCache.readExplanations).toHaveBeenCalledWith([10, 11]);
-    expect(r).toEqual({ explanations: { 10: '题解' } });
+    expect(r).toEqual({
+      explanations: { 10: '题解' },
+      approaches: { 10: '先分析' },
+    });
   });
 });
 

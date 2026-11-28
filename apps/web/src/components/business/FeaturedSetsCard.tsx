@@ -9,9 +9,13 @@ import {
   type FeaturedSetPage,
   type FeaturedUnreadSummary,
 } from '@/services/api';
+import {
+  featuredRunPath,
+  saveFeaturedRunHandoff,
+} from '@/pages/student/training/featured-run';
 
 /**
- * 个人中心「精选题单」卡片（计划 §3 Task 11）。
+ * 精选题单完整列表（浅停留页独立 Tab）。
  *
  * 列表与未读数是**两个独立请求**：未读总数来自 unread-count 端点，翻页只重拉列表，
  * 不能拿当前页里的 isRead 行数冒充总数。开题成功后写 `training:targeted` 交接体：
@@ -20,8 +24,6 @@ import {
  */
 
 const PAGE_SIZE = 20;
-const HANDOFF_KEY = 'training:targeted';
-
 /** 精选题单未读行的圆点：线性 SVG（无 emoji、无装饰图）。 */
 const UnreadDot = () => (
   <svg viewBox="0 0 8 8" width="8" height="8" fill="none" aria-hidden="true">
@@ -76,19 +78,8 @@ export default function FeaturedSetsCard() {
     setOpenFailed(false);
     try {
       const payload = await openFeaturedSet(item.publicationId);
-      sessionStorage.setItem(
-        HANDOFF_KEY,
-        JSON.stringify({
-          sessionId: null,
-          sessionUid: payload.sessionUid,
-          questions: payload.questions,
-          title: payload.title,
-          mode: 'featured',
-        }),
-      );
-      navigate(
-        `/student/training/targeted/run?subjectId=${payload.subjectId}&returnTo=${encodeURIComponent('/student/profile')}`,
-      );
+      saveFeaturedRunHandoff(payload);
+      navigate(featuredRunPath(payload));
     } catch {
       setOpenFailed(true);
       setOpeningId(null);
@@ -100,7 +91,7 @@ export default function FeaturedSetsCard() {
   return (
     <Card data-testid="featured-sets-card" className="p-6">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-bold text-[var(--text-primary)]">精选题单</h2>
+        <h1 className="text-xl font-black tracking-tight text-[var(--text-primary)]">精选题单</h1>
         {unread && unread.count > 0 && (
           <span className="shrink-0 rounded-full bg-[var(--brand-500)]/10 px-2 py-0.5 text-xs font-semibold text-[var(--brand-600)]">
             {`${unread.count} 条未读`}

@@ -543,7 +543,10 @@ describe('FeaturedQuestionSetsRepository — 教研审核列表', () => {
       ], []])
       .mockResolvedValueOnce([[{ grade_code: 'grade_7', cnt: 3 }], []]) // 年级分布
       .mockResolvedValueOnce([[
-        { question_id: 3, text: '题一', type: 'choice', answer: 'A', explanation: null },
+        {
+          question_id: 3, text: '题一', type: 'choice', answer: 'A',
+          approach: '先找等量关系', explanation: null,
+        },
       ], []])
       .mockResolvedValueOnce([[
         {
@@ -563,12 +566,13 @@ describe('FeaturedQuestionSetsRepository — 教研审核列表', () => {
       subjectName: '数学',
       recommendationCount: 3,
       gradeDistribution: [{ gradeCode: 'grade_7', count: 3 }],
-      questions: [{ questionId: 3, text: '题一', answer: 'A' }],
+      questions: [{ questionId: 3, text: '题一', answer: 'A', approach: '先找等量关系' }],
       publications: [
         { publicationId: 22, gradeCode: 'grade_7', reachCount: 36, status: 'published' },
         { publicationId: 21, gradeCode: 'grade_7', reachCount: 18, status: 'withdrawn' },
       ],
     });
+    expect(sqlOf(execute.mock.calls[2])).toContain('q.approach');
     const publicationSql = sqlOf(execute.mock.calls[3]);
     expect(publicationSql).toContain("WHEN p.withdrawn_at IS NULL THEN 'published'");
     expect(publicationSql).toContain("ELSE 'withdrawn'");

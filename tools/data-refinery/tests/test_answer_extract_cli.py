@@ -94,6 +94,33 @@ def test_generic_answer_result_carries_missing_issue_details():
     )
 
 
+def test_generic_extract_surfaces_global_unparsed_block_with_assignments():
+    text = """1. 第一题
+
+# 参考答案
+
+## 一、选择题
+
+1. C
+
+## 二、填空题
+
+无法识别的一段文本
+"""
+    answers = get_strategy("math").extract_answers(
+        text,
+        Path("数学/初中/first/2025/test.md"),
+    )
+
+    assert any(item.no == 1 and item.answer == "C" for item in answers)
+    assert any(
+        issue["code"] == "answer_block_unparsed"
+        and issue["question_no"] is None
+        for item in answers
+        for issue in item.issue_details
+    )
+
+
 def test_generic_extract_answers_carries_approach_and_explanation():
     text = """1. 已知函数
 

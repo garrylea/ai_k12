@@ -121,7 +121,7 @@ describe('FeaturedSetsCard', () => {
     });
     expect(openFeaturedSetMock).toHaveBeenCalledWith(12);
     expect(router.state.location.search).toContain('subjectId=1');
-    expect(router.state.location.search).toContain('returnTo=%2Fstudent%2Fprofile');
+    expect(router.state.location.search).toContain('returnTo=%2Fstudent%2Ffeatured-sets');
   });
 
   it('交接体能被 TargetedRunPage 的 parseRunHandoff 原样读回（题目/title 不丢）', async () => {

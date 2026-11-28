@@ -14,6 +14,18 @@ from question_splitter import is_main_stem, split_options, split_page_result
 from subject_strategies.types import ExtractedAnswer, MaterialPolicy, NO_MATERIAL
 
 
+def _issue_detail(issue) -> dict:
+    return {
+        "code": issue.code,
+        "severity": issue.severity,
+        "message": issue.message,
+        "question_no": issue.question_no,
+        "line_start": issue.line_start,
+        "line_end": issue.line_end,
+        "excerpt": issue.excerpt,
+    }
+
+
 def extract_generic_answers(text: str, md_path: Path,
                             strategy=None) -> list[ExtractedAnswer]:
     """整卷切分 → 取每题已对齐的答案（空答案原样留空，不猜）。
@@ -27,15 +39,7 @@ def extract_generic_answers(text: str, md_path: Path,
     answers: list[ExtractedAnswer] = []
     for question in result.questions:
         details = [
-            {
-                "code": issue.code,
-                "severity": issue.severity,
-                "message": issue.message,
-                "question_no": issue.question_no,
-                "line_start": issue.line_start,
-                "line_end": issue.line_end,
-                "excerpt": issue.excerpt,
-            }
+            _issue_detail(issue)
             for issue in (parse_result.issues if parse_result else [])
             if issue.question_no == question.group_order
         ]
@@ -47,28 +51,16 @@ def extract_generic_answers(text: str, md_path: Path,
             issues=[detail["message"] for detail in details],
             issue_details=details,
         ))
-    if parse_result is not None and not any(answer.answer for answer in answers):
-        sentinel = next(
-            (
-                issue
-                for issue in parse_result.issues
-                if issue.code == "answer_region_no_assignments"
-            ),
-            None,
-        )
-        if sentinel is not None:
+    if parse_result is not None:
+        global_issues = [
+            issue for issue in parse_result.issues if issue.question_no is None
+        ]
+        if global_issues:
+            details = [_issue_detail(issue) for issue in global_issues]
             answers.append(ExtractedAnswer(
                 no=0,
-                issues=[sentinel.message],
-                issue_details=[{
-                    "code": sentinel.code,
-                    "severity": sentinel.severity,
-                    "message": sentinel.message,
-                    "question_no": sentinel.question_no,
-                    "line_start": sentinel.line_start,
-                    "line_end": sentinel.line_end,
-                    "excerpt": sentinel.excerpt,
-                }],
+                issues=[detail["message"] for detail in details],
+                issue_details=details,
             ))
     return answers
 

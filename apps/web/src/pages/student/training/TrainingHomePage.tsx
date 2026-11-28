@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Banner, Button, PageHeader } from '@/components/base';
+import { Banner, Button, PageHeader, toast } from '@/components/base';
 import { StudentAccountActions } from '@/components/business';
 import {
   getFeaturedUnreadSummary,
   getRemediationOverview,
   getTrainingErrorBook,
+  openFeaturedSet,
   type FeaturedUnreadSummary,
   type RemediationOverview,
 } from '@/services/api';
 import { parseSubjectId, subjectName, SUBJECT_MATH } from '@/constants';
+import { featuredRunPath, saveFeaturedRunHandoff } from './featured-run';
 
 /** 专项练习：靶心（线性 SVG）。 */
 const TargetIcon = ({ className = 'w-8 h-8' }: { className?: string }) => (
@@ -102,6 +104,7 @@ export default function TrainingHomePage() {
   // 新精选题单未读：null = 拉取中/失败（静默，不显示 Banner）
   const [featuredUnread, setFeaturedUnread] = useState<FeaturedUnreadSummary | null>(null);
   const [featuredDismissed, setFeaturedBismissed] = useState(false);
+  const [featuredOpening, setFeaturedOpening] = useState(false);
 
   // 相似题 overview 仅数学有（新学科尚未接入），非数学直接跳过 —— 不发请求、不渲染提示条
   useEffect(() => {
@@ -167,6 +170,20 @@ export default function TrainingHomePage() {
   const showRemediation = isMath && remediation?.active === true && !remediationDismissed && remediationPending > 0;
   const showFeaturedBanner = !featuredDismissed && (featuredUnread?.count ?? 0) > 0;
 
+  const openLatestFeatured = async () => {
+    const latest = featuredUnread?.latest;
+    if (!latest || featuredOpening) return;
+    setFeaturedOpening(true);
+    try {
+      const payload = await openFeaturedSet(latest.publicationId);
+      saveFeaturedRunHandoff(payload);
+      navigate(featuredRunPath(payload));
+    } catch {
+      toast('error', '精选题单打开失败，请稍后重试');
+      setFeaturedOpening(false);
+    }
+  };
+
   return (
     <div
       data-theme="student-day"
@@ -205,7 +222,7 @@ export default function TrainingHomePage() {
           </div>
         )}
 
-        {/* 新精选题单未读提示（只在训练首页露个头，完整列表在个人中心） */}
+        {/* 新精选题单未读提示：直接开最新一条，完整列表在浅停留页「精选题单」Tab */}
         {showFeaturedBanner && featuredUnread && (
           <div className="mt-6">
             <Banner
@@ -220,9 +237,10 @@ export default function TrainingHomePage() {
                   type="button"
                   variant="primary"
                   size="sm"
-                  onClick={() => navigate('/student/profile')}
+                  disabled={featuredOpening || !featuredUnread.latest}
+                  onClick={() => void openLatestFeatured()}
                 >
-                  查看
+                  {featuredOpening ? '正在打开…' : '查看'}
                 </Button>
               }
             />

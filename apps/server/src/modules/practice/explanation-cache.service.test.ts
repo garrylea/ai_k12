@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ExplanationCacheService } from './explanation-cache.service.js';
 
 function makeQuestion(over = {} as Partial<{
-  id: number; answer: string; explanation: string;
+  id: number; answer: string; approach: string; explanation: string;
   content: string; options: string | null;
   material_text: string | null; material_url: string | null;
 }>) {
@@ -135,12 +135,15 @@ describe('ExplanationCacheService', () => {
 
   it('readExplanations：DB 有就给、没有（含空白）给 null；不触发新生成', async () => {
     deps.questionsRepo.findById
-      .mockResolvedValueOnce(makeQuestion({ explanation: '已有' }))
-      .mockResolvedValueOnce(makeQuestion())
-      .mockResolvedValueOnce(makeQuestion({ explanation: '   ' }));
+      .mockResolvedValueOnce(makeQuestion({ explanation: '已有', approach: '先分析' }))
+      .mockResolvedValueOnce(makeQuestion({ approach: '先建模' }))
+      .mockResolvedValueOnce(makeQuestion({ explanation: '   ', approach: '   ' }));
     const svc = new ExplanationCacheService(deps.questionsRepo as any, deps.explanation as any);
     const out = await svc.readExplanations([1, 2, 3]);
-    expect(out).toEqual({ 1: '已有', 2: null, 3: null });
+    expect(out).toEqual({
+      explanations: { 1: '已有', 2: null, 3: null },
+      approaches: { 1: '先分析', 2: '先建模', 3: null },
+    });
     expect(deps.explanation.explain).not.toHaveBeenCalled(); // 批量只读，不生成
   });
 
@@ -152,7 +155,10 @@ describe('ExplanationCacheService', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     // 旧行为会在这里等满超时；新口径必须立即返回 null
-    await expect(svc.readExplanations([1])).resolves.toEqual({ 1: null });
+    await expect(svc.readExplanations([1])).resolves.toEqual({
+      explanations: { 1: null },
+      approaches: { 1: null },
+    });
     expect(deps.explanation.explain).toHaveBeenCalledTimes(1);
   });
 

@@ -67,6 +67,7 @@ export interface ReviewQuestion {
   text: string;
   type: string;
   answer: string;
+  approach: string | null;
   explanation: string | null;
 }
 
@@ -299,9 +300,10 @@ export class FeaturedQuestionSetsRepository {
       text: string;
       type: string;
       answer: string;
+      approach: string | null;
       explanation: string | null;
     })[]>(
-      `SELECT q.id AS question_id, q.content AS text, q.type, q.answer, q.explanation
+      `SELECT q.id AS question_id, q.content AS text, q.type, q.answer, q.approach, q.explanation
          FROM featured_question_set_items fqsi
          JOIN questions q ON q.id = fqsi.question_id
         WHERE fqsi.set_id = ? AND q.is_active = 1
@@ -339,6 +341,7 @@ export class FeaturedQuestionSetsRepository {
         text: r.text,
         type: r.type,
         answer: r.answer,
+        approach: r.approach ?? null,
         explanation: r.explanation ?? null,
       })),
       publications: pubRows.map((r) => ({

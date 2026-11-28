@@ -128,6 +128,26 @@ describe('AnswerResultList 解析入口', () => {
     await userEvent.click(screen.getByRole('button', { name: '查看解析' }));
     expect(screen.getByText('完整解析')).toBeInTheDocument();
   });
+
+  it('展开解析时先显示思路、再显示详解，两段都按 Markdown 渲染', async () => {
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '题面' }]}
+        answers={{ '1': { isCorrect: false, method: 'exact', studentAnswer: 'B' } }}
+        initialExplanations={{ '1': '## 详解\n\n先代入，再 **检验**。' }}
+        initialApproaches={{ '1': '## 思路\n\n先找 **等量关系**。' }}
+        onClose={() => {}}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: '查看解析' }));
+    const approach = screen.getByTestId('result-approach-1');
+    const explanation = screen.getByTestId('result-explanation-1');
+
+    expect(within(approach).getByText('等量关系').tagName).toBe('STRONG');
+    expect(within(explanation).getByText('检验').tagName).toBe('STRONG');
+    expect(approach.compareDocumentPosition(explanation) & 4).toBe(4);
+  });
 });
 
 describe('AnswerResultList 无参考答案（method=no_standard_answer）', () => {

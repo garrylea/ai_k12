@@ -63,7 +63,7 @@ class AnswerParseResult:
 _GROUP_HEADER_RE = re.compile(
     r"^#{0,6}\s*([一二三四五六七八九十]+)、\s*(.*)$"
 )
-_INLINE_NUMBER_RE = re.compile(r"(?<!\d)\d{1,2}\s*[.．]")
+_INLINE_NUMBER_RE = re.compile(r"(?<!\d)\d{1,2}\s*[.．、]")
 _COMPACT_CHOICE_TAIL_RE = re.compile(
     r"(?<![A-Za-z])(?P<answers>[A-Da-d]{2,}(?:[ \t]+[A-Da-d]{1,4})*)[ \t]*$"
 )
@@ -134,7 +134,7 @@ def _line_start_question_no(text: str, numbers) -> int | None:
     stripped = text.lstrip()
     for number in numbers:
         digits = r"\s*".join(str(number))
-        if re.match(rf"{digits}\s*[.．]", stripped):
+        if re.match(rf"{digits}\s*[.．、]", stripped):
             return number
         # 裸题号必须连写（`9 $x$`），不能是「2 2」这种空格拆开的公式数字；
         # 后面紧跟数字或「分」的也不算（`1 分` 是分值）。
@@ -317,9 +317,11 @@ def _marker_allowed(
     previous = before[-1:] if before else ""
     raw_previous = text[match.start() - 1:match.start()] if match.start() else ""
     at_line_start = match.start() in line_starts or not before
-    has_dot = match.group("dot") is not None
-    dot_end = match.end("dot") if has_dot else match.end()
-    followed_by_digit = has_dot and text[dot_end:dot_end + 1].isdigit()
+    separator = match.group("separator")
+    has_separator = separator is not None
+    has_dot = separator in {".", "．"}
+    separator_end = match.end("separator") if has_separator else match.end()
+    followed_by_digit = has_dot and text[separator_end:separator_end + 1].isdigit()
 
     if raw_previous and (
         (raw_previous.isalnum() and raw_previous != "分")
@@ -332,7 +334,7 @@ def _marker_allowed(
             or previous == "分"
             or _is_compact_previous(previous_answer)
         )
-    if not has_dot:
+    if not has_separator:
         # 不带点的题号必须是连写数字；「2 4」这种数字拆开的形式只在带点
         # （`1 3 .`）时成立，否则和公式里的空格数字分不开。
         if re.search(r"\s", match.group("number")):
@@ -377,7 +379,7 @@ def _find_marker(
     pattern = re.compile(
         # `(?!\d)` 不能省：否则「…+ 240x …」里的 24 会被当成第 24 题的题号，
         # 把第 23 题答案从数字中间切开（2026-11-27 北京各 85487 实测）。
-        rf"(?<!\d)(?P<number>{digits})(?!\d)\s*(?P<dot>[.．])?"
+        rf"(?<!\d)(?P<number>{digits})(?!\d)\s*(?P<separator>[.．、])?"
         rf"(?:\s*(?=\S)|(?=\n|$))"
     )
     for match in pattern.finditer(text, start):

@@ -21,7 +21,8 @@ import {
  * 3. `nextLevel === null`（满级）→ 显示「已达最高段位」且**不含「还差」**；
  * 4. 流水正/负分样式不同；`kind === 'redeem'` 的负流水用**中性色**，绝不用 `--error`；
  * 5. 分页只作用于流水列表，翻页以 `page=2` 调 `me/ledger`；
- * 6. 「兑换记录」没有独立端点（`me/redemptions` 不存在，那在家长端），
+ * 6. 精选题单已迁出个人中心，作为浅停留页独立 Tab；
+ * 7. 「兑换记录」没有独立端点（`me/redemptions` 不存在，那在家长端），
  *    用**当前页流水里的 redeem 行**渲染，并明说范围与「以家长端为准」——不编造
  *    「还没有兑换记录」（流水里明明可能有）。
  */
@@ -99,20 +100,17 @@ beforeEach(() => {
 });
 
 describe('ProfilePage', () => {
-  it('精选题单卡片位于「个人中心」标题之后、段位卡之前', async () => {
+  it('个人中心不再混入精选题单列表', async () => {
     getMyPointsMock.mockResolvedValue(POINTS);
     getMyLedgerMock.mockResolvedValue(ledgerPage());
 
     renderPage();
 
-    const heading = screen.getByRole('heading', { name: '个人中心' });
-    const featured = await screen.findByTestId('featured-sets-card');
-    const rank = screen.getByTestId('profile-level-icon');
-    expect(heading.compareDocumentPosition(featured) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(featured.compareDocumentPosition(rank) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText('暂无精选题单')).toBeInTheDocument();
-    expect(listFeaturedSetsMock).toHaveBeenCalledWith(1);
-    expect(getFeaturedUnreadSummaryMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('heading', { name: '个人中心' })).toBeInTheDocument();
+    expect(screen.queryByTestId('featured-sets-card')).toBeNull();
+    expect(screen.queryByText('精选题单')).toBeNull();
+    expect(listFeaturedSetsMock).not.toHaveBeenCalled();
+    expect(getFeaturedUnreadSummaryMock).not.toHaveBeenCalled();
   });
 
   it('加载中显示骨架，不先渲染 0 分', () => {

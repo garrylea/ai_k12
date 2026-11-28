@@ -1,7 +1,7 @@
 # 学生精选题单推荐与年级发布设计
 
 **日期**：2026-11-28
-**状态**：v1.1 已按 review 修订，待用户复核后进入实施计划
+**状态**：v1.2 已按用户反馈修订（精选题单独立 Tab、Banner 直达作答）
 **取代**：`docs/superpowers/specs/2026-11-28-student-sharing-design.md` 中的学生好友与互发方案
 
 ## 1. 结论
@@ -15,7 +15,7 @@
   → 点「推荐这套题」
   → 精选题单进入教研员审核
   → 教研员填写标题并选择一个目标年级后发布
-  → 对应年级学生在个人中心看到题单
+  → 对应年级学生在「精选题单」浅停留 Tab 看到题单
   → 打开现有题单运行器作答
   → 记录普通练习历史，但不发积分
 ```
@@ -30,7 +30,7 @@
 - 推荐按题目集合聚合并进入教研员审核队列。
 - 教研员可拒绝、按单个年级发布、撤回某次发布。
 - 同一题集可分别发布到多个年级；每个 publication 只对应一个年级。
-- 个人中心展示精选题单完整列表和未读状态。
+- 「精选题单」浅停留 Tab 展示完整列表和未读状态；个人中心不承载精选题单。
 - 训练首页保留条件式未读 Banner，作为发现提示。
 - 精选题单复用 `TargetedRunPage`，记录练习历史，不发积分。
 
@@ -92,20 +92,19 @@
 ### 3.3 学生查看与作答
 
 ```text
-个人中心 → 精选题单
+浅停留页「精选题单」Tab
   → 点击题单
   → 标记该 publication 已读
   → 现有 TargetedRunPage
   → 结果页
-  → 返回个人中心
+  → 返回「精选题单」Tab
 ```
 
 训练首页仅在有未读题单时显示 Banner：
 
 - 展示最新一条或聚合后的未读数量；
 - 本次页面会话内可关闭；
-- 点击「查看」进入个人中心，不直接开始做题；
-- 不增加训练首页常驻入口；
+- 点击「查看」直接打开 `latest.publicationId` 并进入作答器，不绕个人中心；
 - 不做定时轮询，只在页面挂载和窗口重新聚焦时刷新。
 
 ## 4. 数据模型
@@ -387,20 +386,20 @@ mode?: 'similar' | 'redo' | 'featured';
 - 末题完成后照常展示结果。
 - 不显示积分彩带、段位或“本次不发分”说明。
 - 完成后调用现有专项 session 完成接口，结束历史记录。
-- `returnTo` 只允许 `/student/profile`。
-- 刷新导致 sessionStorage 交接体丢失时回个人中心。
+- `returnTo` 只允许 `/student/featured-sets`。
+- 刷新导致 sessionStorage 交接体丢失时回「精选题单」Tab。
 
 ## 8. 页面
 
-### 8.1 个人中心
+### 8.1 精选题单 Tab
 
-`ProfilePage` 在标题下方、段位卡上方新增「精选题单」卡片：
+新增浅停留路由 `/student/featured-sets`，与奖励册 / 个人中心 / 练习记录同级：
 
 - 无题单时仍显示入口和空态“暂无精选题单”；
 - 有题单时展示未读数以及分页列表，每页 20；
 - 列表项包含标题、学科、题数、发布时间和未读标记；
 - 点击后进入运行器；
-- 不使用独立浅停留 Tab，不新增个人中心侧栏或导航。
+- 个人中心移除精选题单卡片。
 
 ### 8.2 训练首页 Banner
 
@@ -409,7 +408,7 @@ mode?: 'similar' | 'redo' | 'featured';
 - 只在当前年级存在未读 publication 时出现；
 - 放在现有相似题待办 Banner 之后；
 - 多条未读聚合为“有 N 个新精选题单”，并显示最新标题；
-- 按钮「查看」导航到 `/student/profile`；
+- 按钮「查看」调用 `openFeaturedSet(latest.publicationId)` 并直接进入运行器；
 - 本次页面会话内可关闭；
 - 页面重新聚焦时重新获取，不使用固定定时器。
 
@@ -475,15 +474,15 @@ mode?: 'similar' | 'redo' | 'featured';
 
 ### 前端
 
-11. `ProfilePage`：卡片空态、未读、分页、点击写 sessionStorage 并导航。
-12. `TrainingHomePage`：有未读显示 Banner，无未读不显示，关闭只影响当前渲染，点击进入个人中心。
+11. `FeaturedSetsPage`：空态、未读、分页、点击写 sessionStorage 并导航；个人中心不再渲染该列表。
+12. `TrainingHomePage`：有未读显示 Banner，无未读不显示，关闭只影响当前渲染，点击直接打开 `latest` 并进入作答器。
 13. `parseRunHandoff`：`featured` 且带服务端 `sessionUid` 合法；缺 `sessionId:null` 或 `sessionUid` 非法。
 14. `TargetedRunPage(featured)`：沿用交接体 sessionUid；判题与自评不依赖客户端发分布尔；完成写历史；不调积分完成；结果页无积分元素。
 15. 教研审核页：pending 角标、列表、详情、发布、拒绝、重新审核、撤回及对应空态/错误态。
 
 ### 手工冒烟
 
-一条链路：学生完成 3 题专项 → 推荐 → 教研员看到 1 人和年级分布 → 发布到该年级 → 学生个人中心看到未读题单 → 训练首页出现 Banner → 从个人中心打开 → 答错 1 题 → 结果页无积分 → 练习记录可回看 → 错题本出现该题。
+一条链路：学生完成 3 题专项 → 推荐 → 教研员看到 1 人和年级分布 → 发布到该年级 → 学生「精选题单」Tab 看到未读题单 → 训练首页出现 Banner → Banner 直达作答 → 答错 1 题 → 结果页无积分 → 返回「精选题单」Tab → 练习记录可回看 → 错题本出现该题。
 
 ## 12. 度量与去留判据
 
@@ -499,7 +498,7 @@ mode?: 'similar' | 'redo' | 'featured';
 | 指标 | 阈值 | 不达标处理 |
 |---|---|---|
 | 推荐学生数 | ≥10 | 需求不成立：下线推荐入口和 Banner，保留数据，停止继续投入 |
-| 打开率（打开数/触达数） | ≥50% | 发现路径或题单标题不吸引：先调整个人中心卡片和 Banner；连续两周仍低于阈值则下线 |
+| 打开率（打开数/触达数） | ≥50% | 发现路径或题单标题不吸引：先调整「精选题单」Tab 和 Banner；连续两周仍低于阈值则下线 |
 | 打开后完成率（完成数/打开数） | ≥60% | 题目不合适：教研员缩短题数或提高选题质量；无改善则停止学生推荐，只保留人工精选能力或整体下线 |
 
 低使用率时不保留半成品：隐藏入口和列表，保留数据表用于复盘。不得因为打开率低而重新引入学生好友或学生直发。
@@ -512,7 +511,7 @@ mode?: 'similar' | 'redo' | 'featured';
 | `docs/API接口与数据流设计文档.md` | 新增 Student Featured Sets / Research Featured Sets 端点与数据流；补 1008 限流实现注；`open/publish/reject/reopen/withdraw` 记 200 |
 | `docs/api/openapi.yaml` | 同步 11 个 operation 和响应 schema |
 | `docs/K12智学系统-数据库设计文档.md` | 新增 5 张表、`special_practice_sessions.featured_publication_id` 及删卷阻断关系 |
-| `docs/UX-UI设计文档.md` | 新增个人中心题单卡片、训练首页 Banner、教研审核发布页规范 |
+| `docs/UX-UI设计文档.md` | 新增「精选题单」浅停留 Tab、训练首页直达 Banner、教研审核发布页规范 |
 | `docs/constraints/专项子系统.md` 或新建专题约束 | 记录“记历史但不发分”、无通用学生消息、freeform 不推荐 |
 
 ## 14. 实施顺序
@@ -521,8 +520,8 @@ mode?: 'similar' | 'redo' | 'featured';
 2. 后端学生推荐与聚合：repo / service / controller / 单测。
 3. 后端学生列表与打开：当前年级匹配、在架过滤、服务端 session、已读幂等。
 4. 后端教研审核发布：列表、详情、pending count、发布、拒绝、重新审核、撤回。
-5. 运行器：`mode='featured'`、历史写入、不发分、返回个人中心。
-6. 前端个人中心与训练 Banner。
+5. 运行器：`mode='featured'`、历史写入、不发分、返回「精选题单」Tab。
+6. 前端「精选题单」Tab 与训练 Banner 直达。
 7. 前端教研空间审核发布页。
 8. 文档同步、14 天度量查询与一条链路冒烟。
 
@@ -530,7 +529,7 @@ mode?: 'similar' | 'redo' | 'featured';
 
 - 学生之间不存在任何直接分享、好友或消息入口。
 - 教研员只能按单一年级发布；同题集可分别发多个年级。
-- 精选题单完整列表位于个人中心；训练首页只在未读时提供 Banner。
+- 精选题单完整列表位于浅停留页「精选题单」Tab；训练首页只在未读时提供 Banner，且 Banner 直达最新未读题单。
 - 学生必须登录且当前年级匹配才能打开。
 - 作答进入练习历史和错题本，但不产生任何积分流水。
 - 撤回、拒绝、下架、年级变化和重复推荐均有确定行为。
@@ -541,7 +540,7 @@ mode?: 'similar' | 'redo' | 'featured';
 | 模块 | 现有落点 | 需要改动 |
 |---|---|---|
 | 交接体 | `apps/web/src/pages/student/training/run-handoff.ts` | `mode` 加 `featured`；featured 必须带服务端 `sessionUid` |
-| 运行页 | `apps/web/src/pages/student/training/TargetedRunPage.tsx` | 使用交接体 sessionUid；featured 不发积分；返回个人中心 |
+| 运行页 | `apps/web/src/pages/student/training/TargetedRunPage.tsx` | 使用交接体 sessionUid；featured 不发积分；返回「精选题单」Tab |
 | 不发分 hook | `apps/web/src/pages/student/training/session-completion.ts` | 不改；`sessionId=null` 天然跳过 |
 | 判题入口 | `apps/server/src/modules/training/training.service.ts` | 按 sessionUid 查 featured session，服务端强制压制 `error_fix` |
 | 自评结算 | `apps/server/src/modules/training/self-assessment-settlement.service.ts` | 校验 featured session；保持无奖励路径 |
@@ -549,10 +548,10 @@ mode?: 'similar' | 'redo' | 'featured';
 | 判题核心 | `apps/server/src/modules/practice/judge-core.service.ts` | 不改发分判断；只消费服务端传入的 `suppressErrorFixPoints` |
 | 删卷阻断 | `apps/server/src/database/repositories/research-papers.repo.ts` | `BLOCKING_TABLES` 增加 `featured_question_set_items`，补测试 |
 | 年级 | `apps/server/src/common/utils/grade.ts` | 复用 `grade_N` 与宽容解析，不新增年级模型 |
-| 个人中心 | `apps/web/src/pages/student/ProfilePage.tsx` | 新增精选题单卡片、分页、未读、进入运行器 |
-| 训练首页 | `apps/web/src/pages/student/training/TrainingHomePage.tsx` | 新增未读 Banner，不新增常驻入口 |
+| 精选题单 Tab | `apps/web/src/pages/student/FeaturedSetsPage.tsx` | 分页、未读、进入运行器；个人中心不渲染该列表 |
+| 训练首页 | `apps/web/src/pages/student/training/TrainingHomePage.tsx` | 未读 Banner 直接打开 `latest` 并进入作答器 |
 | 教研导航 | `apps/web/src/components/layout/ResearchNav.tsx` | 增加入口与 pending 角标 |
-| 路由 | `apps/web/src/routes/routeTable.tsx` | 新增教研列表/详情路由；个人中心仍复用 `StudentStayLayout` |
+| 路由 | `apps/web/src/routes/routeTable.tsx` | 新增 `/student/featured-sets` 与教研列表/详情路由 |
 
 ## 17. 风险与裁决
 
@@ -562,7 +561,7 @@ mode?: 'similar' | 'redo' | 'featured';
 | 客户端漏传 `suppressErrorFixPoints` | open 创建带 `featured_publication_id` 的服务端 session；判题/自评服务端强制识别并压制 |
 | 历史无法对应发布、完成率失真 | `special_practice_sessions.featured_publication_id` 建立归属；用 read 与 completed session 计算漏斗 |
 | 学生升年级后题单消失 | **已确认的一次性投递语义**：按发布时目标年级当前匹配，升级后不再投递；历史练习记录仍保留 |
-| 个人中心入口发现率低 | 用户已裁决完整列表放个人中心；训练首页保留未读 Banner，不增加常驻入口，上线两周按打开率验证 |
+| 独立 Tab 发现率低 | 训练首页保留未读 Banner 并直达作答；上线两周按打开率验证 |
 | 被拒题集永久不可见 | 增加「重新审核」状态迁移 |
 | 教研员长期不处理队列 | ResearchNav 显示 pending 角标；进入页面与窗口聚焦刷新 |
 | 推荐数据被刷 | 题目必须出现在该生已有作答事实中；同一学生同一题集幂等；每日新题集上限 10 |

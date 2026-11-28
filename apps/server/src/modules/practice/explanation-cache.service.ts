@@ -85,13 +85,18 @@ export class ExplanationCacheService {
    * 以前这里会等 in-flight（60s 兜底），而解析由强模型生成（实测单题 38s–8min），
    * 导致每次答错都把结果页挡满 60 秒。
    */
-  async readExplanations(ids: number[]): Promise<Record<number, string | null>> {
-    const out: Record<number, string | null> = {};
+  async readExplanations(ids: number[]): Promise<{
+    explanations: Record<number, string | null>;
+    approaches: Record<number, string | null>;
+  }> {
+    const explanations: Record<number, string | null> = {};
+    const approaches: Record<number, string | null> = {};
     for (const id of ids) {
       const q = await this.questionsRepo.findById(id);
-      out[id] = q?.explanation?.trim() || null;
+      explanations[id] = q?.explanation?.trim() || null;
+      approaches[id] = q?.approach?.trim() || null;
     }
-    return out;
+    return { explanations, approaches };
   }
 
   /** 单题刷新等待（explanation-wait）：DB 有直返；in-flight 等；无在途且无解析 -> 重新触发生成再等（120s）。 */

@@ -6114,12 +6114,12 @@ paths:
   /training/questions/explanations:
     get:
       tags: [Training]
-      summary: 批量拉取题目解析（结果页末题后）
+      summary: 批量拉取题目思路与解析（结果页末题后）
       description: >-
-        按题目 id 批量取 questions.explanation（student JWT）。ids 为逗号分隔的
+        按题目 id 批量取 questions.explanation 与 questions.approach（student JWT）。ids 为逗号分隔的
         questionId 列表；**只读库**——DB 有解析就返回，没有就返回 null；
         既不等待在途生成，也不触发新生成（解析生成由判错时的后台任务负责）。
-        解析为题级公开数据（不分学生）。
+        思路/解析为题级公开数据（不分学生）；结果页先展示思路，再展示详解。
       operationId: getTrainingExplanations
       security: [{ bearerAuth: [] }]
       parameters:
@@ -6131,7 +6131,7 @@ paths:
           description: 逗号分隔的 questionId 列表（如 ids=1,2,3）
       responses:
         '200':
-          description: 解析映射
+          description: 思路与解析映射
           content:
             application/json:
               schema:
@@ -6141,7 +6141,20 @@ paths:
                     properties:
                       data:
                         type: object
-                        description: '{ questionId: 解析文本或 null }'
+                        required: [explanations, approaches]
+                        properties:
+                          explanations:
+                            type: object
+                            additionalProperties:
+                              type: string
+                              nullable: true
+                            description: '{ questionId: questions.explanation 或 null }'
+                          approaches:
+                            type: object
+                            additionalProperties:
+                              type: string
+                              nullable: true
+                            description: '{ questionId: questions.approach 或 null }'
 
   /training/questions/{questionId}/explanation-wait:
     get:
@@ -14784,12 +14797,16 @@ components:
         publishedAt: { type: string, format: date-time }
     ResearchFeaturedQuestion:
       type: object
-      required: [questionId, text, type, answer, explanation]
+      required: [questionId, text, type, answer, approach, explanation]
       properties:
         questionId: { type: integer }
         text: { type: string }
         type: { type: string }
         answer: { type: string }
+        approach:
+          type: string
+          nullable: true
+          description: 题库解题思路（Markdown/LaTeX 原值）
         explanation: { type: string, nullable: true }
     ResearchFeaturedSetDetail:
       allOf:

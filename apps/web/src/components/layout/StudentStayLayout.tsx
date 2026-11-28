@@ -6,7 +6,7 @@ import { probeStudentSession } from '@/services/api';
 import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 
 /**
- * 浅停留页外壳 —— 个人中心（P5.1）、奖励册（P5.2）与练习记录（含详情）专用。
+ * 浅停留页外壳 —— 个人中心（P5.1）、奖励册（P5.2）、精选题单与练习记录（含详情）专用。
  *
  * **为什么单独有这个外壳（别再把它并进任何跟随主题的外壳）**
  *
@@ -35,7 +35,7 @@ import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
  * **不是**回退浏览器历史，也**不是**登出（2026-11-04 用户裁决）、**不是**固定回 `/student/entry`：
  * tab 互跳会把兄弟页压进历史栈，学生从星图进来、切过奖励册再切回来，仍要回星图而不是奖励册
  * （2026-09-21 用户实测反馈）。学生从课程详情进来就回课程详情（连它的 `location.state` 一起还回去），
- * 从带 query 的训练页进来也原样带回 query。**三个 tab 同权**：练习记录（含详情）也回最初来源，
+ * 从带 query 的训练页进来也原样带回 query。**四个 tab 同权**：练习记录（含详情）也回最初来源，
  * 不再按层级回个人中心（2026-11-06 用户实测修正）。来源缺失时兜底回星图。
  * 登出仍只在开始页右上角完成（`LogoutButton` 在 `EntrySelectPage` 保留）。
  *
@@ -44,6 +44,7 @@ import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 const stayItems = [
   { to: '/student/rewards', label: '奖励册' },
   { to: '/student/profile', label: '个人中心' },
+  { to: '/student/featured-sets', label: '精选题单' },
   { to: '/student/practice-history', label: '练习记录' },
 ];
 
@@ -51,12 +52,12 @@ export default function StudentStayLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   // 「退出本页」落点 + 来源页自己的 location.state（课程详情缺 state 会被自己的「缺少课程信息」挡住）
-  // 三个 tab 同权：不管当前在奖励册 / 个人中心 / 练习记录（含详情），都回进入浅停留页之前的那一页
+  // 四个 tab 同权：不管当前在哪一页（含练习记录详情），都回进入浅停留页之前的那一页
   const back = resolveStayReturn(location.state);
-  // 两页互跳时把来源原样带过去，否则切一次 tab 来源就丢了
+  // 页间互跳时把来源原样带过去，否则切一次 tab 来源就丢了
   const carriedReturnState = buildStayReturnState(back.to, back.state);
 
-  // 三个 tab 是兄弟路由，路由会复用本外壳；用 key 强制 reveal 重挂，切 tab 才重新显示 3 秒。
+  // 四个 tab 是兄弟路由，路由会复用本外壳；用 key 强制 reveal 重挂，切 tab 才重新显示 3 秒。
   // 详情页归到 practice-history 这一段：列表 → 详情不重挂，避免学生看记录时被闪一下（spec §2.2）。
   const staySection = location.pathname.startsWith('/student/practice-history')
     ? '/student/practice-history'
@@ -69,7 +70,7 @@ export default function StudentStayLayout() {
       className="flex h-screen flex-col overflow-hidden bg-[var(--bg-base)] text-[var(--text-primary)]"
     >
       {/* 剩余时长浮层：锁定态由上层 `LearningSessionShell` 经 context 下发，
-          没有上下文 / 未锁定时它自己渲染 null。三个 tab 是**兄弟路由**，React Router
+          没有上下文 / 未锁定时它自己渲染 null。四个 tab 是**兄弟路由**，React Router
           在它们之间导航时会**复用**本外壳（同位置、同类型，不会重挂），所以必须用
           `key={staySection}` 强制 reveal 重挂 —— 否则它的 `visible` 状态跨 tab
           存活，3 秒自动显示只在第一次进入浅停留区时出现一次。key 只精确到 tab 段、
@@ -83,7 +84,7 @@ export default function StudentStayLayout() {
         {/* 占位：与右侧「退出」对称，别删 */}
         <div aria-hidden="true" />
 
-        {/* 两页互跳入口（UX P5.1「入口：奖励册…」），当前页高亮 */}
+        {/* 浅停留页互跳入口，当前页高亮 */}
         <nav className="justify-self-center flex items-center gap-1 bg-[var(--bg-subtle)] rounded-[var(--radius-pill)] p-1">
           {stayItems.map((item) => (
             <NavLink

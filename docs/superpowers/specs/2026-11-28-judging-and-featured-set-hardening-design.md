@@ -359,9 +359,9 @@ KEY idx_fqsp_grade_active (grade_code, withdrawn_at, published_at)
 2. 从结果页底部点击【推荐这套题】。
 3. 教研员看到推荐人数和年级分布。
 4. 教研员填写标题并发布到匹配年级。
-5. 学生个人中心看到一条未读精选题单。
+5. 学生「精选题单」浅停留 Tab 看到一条未读精选题单。
 6. 训练首页出现未读 Banner。
-7. 学生打开题单，服务端创建带 publication ID 的 session。
+7. 学生从 Banner 直接打开最新未读题单，服务端创建带 publication ID 的 session。
 8. 答错一题：结果页不显示题号，错题照常入错题本。
 9. 答对一道原本未清零的错题：错题被清零，但不写 `error_fix` 流水。
 10. 结果页无积分元素，推荐按钮位于底部操作栏。
