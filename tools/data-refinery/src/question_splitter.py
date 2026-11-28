@@ -160,7 +160,10 @@ def is_main_stem(line: str) -> tuple[bool, int | None]:
     """
     m = _MAIN_STEM_RE.match(line)
     if m:
-        return True, int(m.group(1) or m.group(2) or m.group(3))
+        n = int(m.group(1) or m.group(2) or m.group(3))
+        # 题号从 1 开始：OCR 在图片/表格两栏处常把「10.」误读成「0.」，
+        # 若按题号采纳就会生成一条 group_order=0 的幽灵题（通州 2026 期末物理实测）。
+        return (True, n) if n >= 1 else (False, None)
     return False, None
 
 
@@ -221,6 +224,8 @@ def _bare_stem_candidate(line: str) -> tuple[int, str] | None:
     if not m:
         return None
     n = int(m.group(1))
+    if n < 1:  # 题号必须从 1 开始，0 是 OCR 误读（见 is_main_stem）
+        return None
     rest = line[m.end():].strip()
     if not rest:
         return None
@@ -1192,6 +1197,11 @@ def _split_questions_only(text: str, md_path: Path,
                         "before": "\n".join(lines[max(0, i - 2):i]),
                         "after": "\n".join(lines[i + 1:i + 3]),
                     })
+
+        # 兜底：题号必须从 1 开始。无论 n 来自规则判定、forced map 还是
+        # LLM 第二遍，0/负号一律不当题号，降级为正文并入上一题。
+        if ok and n is not None and n < 1:
+            ok = False
 
         # 题干区
         if policy.attach:

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from question_splitter import (
     is_answer_structure_line, is_date_trap, is_group_header, is_main_stem,
-    is_sub_stem, is_answer_keyword, split_inline_stems,
+    is_sub_stem, is_answer_keyword, split_inline_stems, bare_stem_candidate,
 )
 from question_splitter import split_page, RawQuestion
 from question_splitter import _strip_main_stem_prefix
@@ -55,6 +55,21 @@ def test_is_main_stem_rejects_split_sub_number():
     # 昌平一中 2024：'1.1 材料' 被 OCR 拆成 '1. 1 材料'，不能当成主题号
     ok, _ = is_main_stem("1. 1 材料")
     assert not ok
+
+
+def test_is_main_stem_rejects_zero():
+    # 通州 2026 期末物理：铭牌表格两栏处 OCR 把「10.」误读成「0.」，
+    # 题号必须从 1 开始，0 不是合法题号
+    ok, _ = is_main_stem("0. 商场里有甲、乙两种电热水壶，其铭牌如图所示。下确的是")
+    assert not ok
+    ok, _ = is_main_stem("0．下确的是")
+    assert not ok
+    ok, _ = is_main_stem("0: 下确的是")
+    assert not ok
+
+
+def test_bare_stem_candidate_rejects_zero():
+    assert bare_stem_candidate("0 商场里有甲、乙两种电热水壶") is None
 
 
 def test_is_sub_stem_half_and_full_width():
@@ -115,6 +130,20 @@ def test_split_page_two_questions():
     assert result[1].group_order == 10
     assert result[0].content.startswith("若代数式")
     assert result[1].content.startswith("分解因式")
+
+
+def test_split_page_zero_stem_merged_into_previous_question():
+    # 通州 2026 期末物理实测：题10 的「10.」在铭牌图片/表格两栏处被 OCR
+    # 重复识别成「0.」并截断了「下列正确的是」。该行必须并入题10 正文，
+    # 不得生成一条 group_order=0 的幽灵题。
+    text = (
+        "10. 商场里有甲、乙两种电热水壶，其铭牌如图所示。下列正确的是\n"
+        "0. 商场里有甲、乙两种电热水壶，其铭牌如图所示。下确的是\n"
+        "11. 小通分别测量了小灯泡的电流值，下列说法中正确的是\n"
+    )
+    result = split_page(text, Path("test.md"))
+    assert [q.group_order for q in result] == [10, 11]
+    assert "下确的是" in result[0].content  # 重复行并入上一题正文
 
 
 def test_split_page_sub_questions_merged_into_parent():
