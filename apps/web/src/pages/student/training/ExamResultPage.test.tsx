@@ -50,7 +50,6 @@ vi.mock('@/services/api', async (importOriginal) => {
     getExamResults: vi.fn(),
     getTrainingExplanations: vi.fn(),
     selfAssessTraining: vi.fn(),
-    waitTrainingExplanation: vi.fn(),
     getMyPoints: vi.fn(),
   };
 });
@@ -244,7 +243,7 @@ describe('ExamResultPage 交卷发分庆祝', () => {
     expect(screen.getAllByRole('button', { name: '我做对了' })).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: '我做错了' })).toHaveLength(1);
     // 客观题照常显示、照常计入
-    expect(screen.getByTestId('result-qno-1')).toBeTruthy();
+    expect(screen.queryByTestId('result-qno-1')).toBeNull();
     expect(screen.getByText(/对\s*1/)).toBeTruthy();
   });
 
@@ -429,8 +428,8 @@ describe('ExamResultPage 同题号小问不串数据', () => {
     });
 
     renderResult();
-    const explainButtons = await screen.findAllByRole('button', { name: '查看解析' });
-    fireEvent.click(explainButtons[0]);
+    const referenceButtons = await screen.findAllByRole('button', { name: '查看参考答案' });
+    fireEvent.click(referenceButtons[0]);
     expect(screen.getByText('参考答案甲')).toBeTruthy();
     expect(screen.queryByText('参考答案乙')).toBeNull();
 

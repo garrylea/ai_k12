@@ -24,7 +24,6 @@ vi.mock('@/services/api', async (importOriginal) => {
     bumpErrorLevels: vi.fn(),
     getTrainingExplanations: vi.fn(),
     selfAssessPractice: vi.fn(),
-    waitTrainingExplanation: vi.fn(),
   };
 });
 

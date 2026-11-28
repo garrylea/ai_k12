@@ -1661,7 +1661,6 @@ CREATE TABLE IF NOT EXISTS featured_question_set_publications (
   grade_code VARCHAR(10) NOT NULL,
   title VARCHAR(60) NOT NULL,
   reach_count INT NOT NULL,
-  status VARCHAR(16) NOT NULL DEFAULT 'published',
   published_by BIGINT NOT NULL,
   published_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   withdrawn_by BIGINT DEFAULT NULL,
@@ -1669,8 +1668,10 @@ CREATE TABLE IF NOT EXISTS featured_question_set_publications (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
-  UNIQUE KEY uniq_fqsp_set_grade (set_id, grade_code),
-  KEY idx_fqsp_grade_status (grade_code, status, published_at),
+  active_publication_key VARCHAR(64) DEFAULT NULL
+    COMMENT '有效投递固定为 set_id:grade_code；撤回时置 NULL',
+  UNIQUE KEY uniq_fqsp_active (active_publication_key),
+  KEY idx_fqsp_grade_active (grade_code, withdrawn_at, published_at),
   CONSTRAINT fk_fqsp_set FOREIGN KEY (set_id)
     REFERENCES featured_question_sets (id) ON DELETE CASCADE,
   CONSTRAINT fk_fqsp_publisher FOREIGN KEY (published_by) REFERENCES admins (id)
@@ -1719,7 +1720,7 @@ CREATE TABLE IF NOT EXISTS special_practice_sessions (
   CONSTRAINT fk_sps_student FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
   CONSTRAINT fk_sps_featured_publication
     FOREIGN KEY (featured_publication_id)
-    REFERENCES featured_question_set_publications (id) ON DELETE SET NULL
+    REFERENCES featured_question_set_publications (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS special_answer_records (

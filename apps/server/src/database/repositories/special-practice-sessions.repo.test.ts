@@ -168,4 +168,39 @@ describe('SpecialPracticeSessionsRepository', () => {
     expect(await repo.isFeaturedSession('u-1', 7)).toBe(false);
     expect(await repo.isFeaturedSession('u-1', 7)).toBe(false);
   });
+
+  it('isFeaturedSession：精选列尚未迁移时返回 false', async () => {
+    const pool = mockPool();
+    pool.execute.mockRejectedValueOnce(Object.assign(
+      new Error("Unknown column 'featured_publication_id' in 'field list'"),
+      { code: 'ER_BAD_FIELD_ERROR' },
+    ));
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+
+    await expect(repo.isFeaturedSession('u-1', 7)).resolves.toBe(false);
+  });
+
+  it('isFeaturedSession：ER_NO_SUCH_TABLE 继续抛出', async () => {
+    const pool = mockPool();
+    const err = Object.assign(
+      new Error("Table 'ai_k12.special_practice_sessions' doesn't exist"),
+      { code: 'ER_NO_SUCH_TABLE' },
+    );
+    pool.execute.mockRejectedValueOnce(err);
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+
+    await expect(repo.isFeaturedSession('u-1', 7)).rejects.toBe(err);
+  });
+
+  it('isFeaturedSession：其他列缺失错误继续抛出', async () => {
+    const pool = mockPool();
+    const err = Object.assign(
+      new Error("Unknown column 'other_column' in 'field list'"),
+      { code: 'ER_BAD_FIELD_ERROR' },
+    );
+    pool.execute.mockRejectedValueOnce(err);
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+
+    await expect(repo.isFeaturedSession('u-1', 7)).rejects.toBe(err);
+  });
 });

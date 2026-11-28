@@ -1,5 +1,12 @@
-import { HttpException, Injectable, Inject } from '@nestjs/common';
+import { HttpException, Injectable, Inject, Logger } from '@nestjs/common';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+
+function isMissingFeaturedColumnError(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown };
+  return e.code === 'ER_BAD_FIELD_ERROR'
+    && typeof e.message === 'string'
+    && e.message.includes('featured_publication_id');
+}
 
 /** 专项会话 module 值：语文三专项 + 英语背单词 + 各学科 targeted（英语/道法已补齐）。 */
 export type SpecialSessionModule =
@@ -32,6 +39,9 @@ export interface SessionListRow {
 
 @Injectable()
 export class SpecialPracticeSessionsRepository {
+  private readonly logger = new Logger(SpecialPracticeSessionsRepository.name);
+  private warnedMissingFeaturedColumn = false;
+
   constructor(@Inject('DATABASE_POOL') private readonly pool: Pool) {}
 
   /**
@@ -145,13 +155,22 @@ export class SpecialPracticeSessionsRepository {
    * 客户端传来的 suppressErrorFixPoints=false 不可信，判题前按 uid + student 查库定夺。
    */
   async isFeaturedSession(sessionUid: string, studentId: number): Promise<boolean> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT featured_publication_id
-       FROM special_practice_sessions
-      WHERE session_uid = ? AND student_id = ?`,
-      [sessionUid, studentId],
-    );
-    return rows[0]?.featured_publication_id != null;
+    try {
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT featured_publication_id
+         FROM special_practice_sessions
+        WHERE session_uid = ? AND student_id = ?`,
+        [sessionUid, studentId],
+      );
+      return rows[0]?.featured_publication_id != null;
+    } catch (err) {
+      if (!isMissingFeaturedColumnError(err)) throw err;
+      if (!this.warnedMissingFeaturedColumn) {
+        this.warnedMissingFeaturedColumn = true;
+        this.logger.warn('精选 schema 未迁移，判题按普通专项会话处理');
+      }
+      return false;
+    }
   }
 
   /** 单个 session 归属校验（防 IDOR）。 */

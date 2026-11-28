@@ -8825,7 +8825,7 @@ paths:
       tags: [StudentFeaturedSets]
       summary: 打开精选题单（建服务端 session + 幂等标已读）
       description: >-
-        单事务：FOR UPDATE 锁 publication → 校验 status=published、学生当前年级匹配、至少一题在架
+        单事务：FOR UPDATE 锁 publication → 校验 withdrawn_at IS NULL、学生当前年级匹配、至少一题在架
         → 服务端生成 sessionUid 建 special_practice_sessions（写 featured_publication_id）→ 幂等标已读。
         年级不符/已撤回/全部下架均 404/1002，不泄露 publication 是否存在、不写已读。
         显式 @HttpCode(200)。
@@ -8933,7 +8933,9 @@ paths:
       tags: [ResearchFeaturedSets]
       summary: 按单一年级发布（教研）
       description: >-
-        标题 1~60 字 + 标准 grade_N；upsert publication（独立标题 + reach_count 快照）、置题集 approved。
+        标题 1~60 字 + 标准 grade_N。有效同 set/grade 只更新标题并复用 publicationId；
+        无有效投递则新增 publication（独立标题 + reach_count 快照）。撤回后重发新增 ID，
+        历史 reads/session 保留。置题集 approved。
         已 approved 追加其它年级不重复改审核字段；撤回后重发清旧 read 行。显式 @HttpCode(200)。
       operationId: publishResearchFeaturedSet
       security: [{ bearerAuth: [] }]
@@ -8996,7 +8998,8 @@ paths:
       tags: [ResearchFeaturedSets]
       summary: 撤回一次发布（教研）
       description: >-
-        仓储守卫 WHERE id=? AND status='published' 只允许撤 published；写 withdrawn_by/withdrawn_at。
+        仓储守卫 WHERE id=? AND withdrawn_at IS NULL 只允许撤当前有效投递；
+        原子写 active_publication_key=NULL、withdrawn_by/withdrawn_at。
         阅读与作答历史保留；撤回后学生列表/未读不再可见。显式 @HttpCode(200)。
       operationId: withdrawResearchFeaturedSetPublication
       security: [{ bearerAuth: [] }]
@@ -9004,7 +9007,7 @@ paths:
         - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
       responses:
         '200': { description: 撤回成功（显式 200，无响应体） }
-        '404': { description: publication 不存在或非 published（code=1002） }
+        '404': { description: publication 不存在或已撤回（code=1002） }
         '403': { description: 非 researcher（code=1005） }
 
 components:

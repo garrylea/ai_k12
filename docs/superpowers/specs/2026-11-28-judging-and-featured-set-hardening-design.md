@@ -245,21 +245,18 @@ explanations[q.n] 为空 → 不显示任何解析入口
 
 ### 6.4 活跃 publication 唯一性
 
-同一题集同一时间只能有一个目标年级的有效投递。使用存储生成列和唯一键保证：
+同一题集同一时间只能有一个目标年级的有效投递。当前 MySQL 不允许该表同时使用
+generated active key 与现有三条外键，因此使用普通可空列 + 唯一键：
 
 ```sql
-active_publication_key VARCHAR(64)
-  GENERATED ALWAYS AS (
-    CASE
-      WHEN withdrawn_at IS NULL THEN CONCAT(set_id, ':', grade_code)
-      ELSE NULL
-    END
-  ) STORED,
+active_publication_key VARCHAR(64) DEFAULT NULL
+  COMMENT '有效投递固定为 set_id:grade_code；撤回时置 NULL',
 UNIQUE KEY uniq_fqsp_active (active_publication_key),
 KEY idx_fqsp_grade_active (grade_code, withdrawn_at, published_at)
 ```
 
-历史撤回行生成值为 `NULL`，MySQL 唯一键允许多行 `NULL`，因此历史 publication 可以保留。
+发布事务写入 `${setId}:${gradeCode}`，撤回事务原子置 `NULL`。历史撤回行可保留多行
+`NULL`，唯一键只约束当前有效投递。
 
 迁移必须显式删除旧约束和索引：
 

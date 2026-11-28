@@ -2,7 +2,7 @@
 // 注意：本组件还会渲染题面/解析等多处 Markdown —— 用例里只放一张图（在学生答案里），
 // 也不展开「查看解析」，否则 getByRole('img') 会命中多个。
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AnswerResultList } from './AnswerResultList';
 
@@ -56,43 +56,77 @@ describe('AnswerResultList 材料排版', () => {
 });
 
 describe('AnswerResultList 题号', () => {
-  it('每道题在状态图标左侧显示题号（2026-11-01 用户要求）', () => {
+  it('结果列表不显示题号，但保留题干与状态', () => {
     render(
       <AnswerResultList
-        questions={[{ n: '1', text: '题一' }, { n: '2', text: '题二' }]}
-        answers={{
-          '1': { isCorrect: true, method: 'exact', studentAnswer: 'A' },
-          '2': { isCorrect: false, method: 'exact', studentAnswer: 'B' },
-        }}
+        questions={[{ n: '2', text: '题二' }]}
+        answers={{ '2': { isCorrect: true, method: 'exact', studentAnswer: 'A' } }}
         onClose={() => {}}
       />,
     );
-    expect(screen.getByTestId('result-qno-1')).toHaveTextContent('1');
-    expect(screen.getByTestId('result-qno-2')).toHaveTextContent('2');
+    expect(screen.queryByTestId('result-qno-2')).toBeNull();
+    expect(screen.getByText('题二')).toBeInTheDocument();
+  });
+});
+
+describe('AnswerResultList 解析入口', () => {
+  it('客观错题无解析：不显示查看解析、生成中或刷新', () => {
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '题面' }]}
+        answers={{ '1': { isCorrect: false, method: 'exact', studentAnswer: 'B' } }}
+        initialExplanations={{}}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '查看解析' })).toBeNull();
+    expect(screen.queryByText('正在生成中…')).toBeNull();
+    expect(screen.queryByRole('button', { name: '刷新解析' })).toBeNull();
   });
 
-  it('题号用原始 questionNo：前序题被 is_active=0 隐藏时，不从 1 重新编排', () => {
-    // 复刻 session 50 / paper 361 的真实场景：第 1 题 is_active=0 被过滤，
-    // 学生答题时 ExamRunPage 显示「第 2 题」…（原始题号）。结果页必须同样用
-    // 原始题号，而不是按数组下标重编成 1/2/3。
+  it('客观错题有解析：显示查看解析', () => {
     render(
       <AnswerResultList
-        questions={[
-          { n: '2', text: '题二' },
-          { n: '3', text: '题三' },
-          { n: '5', text: '题五（跳号）' },
-        ]}
-        answers={{
-          '2': { isCorrect: true, method: 'exact', studentAnswer: 'A' },
-          '3': { isCorrect: false, method: 'exact', studentAnswer: 'B' },
-          '5': { isCorrect: true, method: 'exact', studentAnswer: 'C' },
-        }}
+        questions={[{ n: '1', text: '题面' }]}
+        answers={{ '1': { isCorrect: false, method: 'exact', studentAnswer: 'B' } }}
+        initialExplanations={{ '1': '完整解析' }}
         onClose={() => {}}
       />,
     );
-    expect(screen.getByTestId('result-qno-2')).toHaveTextContent('2');
-    expect(screen.getByTestId('result-qno-3')).toHaveTextContent('3');
-    expect(screen.getByTestId('result-qno-5')).toHaveTextContent('5');
+    expect(screen.getByRole('button', { name: '查看解析' })).toBeTruthy();
+  });
+
+  it('主观题无解析：不显示查看解析，但保留自评入口', () => {
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '证明题' }]}
+        answers={{ '1': {
+          isCorrect: true, method: 'self_assess', studentAnswer: '作答', needsSelfAssess: true,
+        } }}
+        initialExplanations={{}}
+        referenceAnswers={{ '1': '参考答案' }}
+        onClose={() => {}}
+        onSelfAssess={async () => {}}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '查看解析' })).toBeNull();
+    expect(screen.getByRole('button', { name: '查看参考答案' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '我做对了' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '我做错了' })).toBeInTheDocument();
+  });
+
+  it('主观题有解析：显示查看解析并可展开', async () => {
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '证明题' }]}
+        answers={{ '1': { isCorrect: true, method: 'self_assess', studentAnswer: '作答' } }}
+        initialExplanations={{ '1': '完整解析' }}
+        referenceAnswers={{ '1': '参考答案' }}
+        onClose={() => {}}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: '查看解析' }));
+    expect(screen.getByText('完整解析')).toBeInTheDocument();
   });
 });
 
@@ -138,6 +172,22 @@ describe('AnswerResultList 无参考答案（method=no_standard_answer）', () =
 });
 
 describe('AnswerResultList 导出入口', () => {
+  it('footerExtra 与导出、确认同处底部操作栏', () => {
+    render(
+      <AnswerResultList
+        questions={[{ n: '1', text: '题面' }]}
+        answers={{ '1': { isCorrect: true, method: 'exact', studentAnswer: 'A' } }}
+        onClose={() => {}}
+        onExport={() => {}}
+        footerExtra={<button type="button">扩展操作</button>}
+      />,
+    );
+    const footer = screen.getByTestId('answer-result-footer');
+    expect(within(footer).getByRole('button', { name: '扩展操作' })).toBeInTheDocument();
+    expect(within(footer).getByRole('button', { name: '导出 PDF' })).toBeInTheDocument();
+    expect(within(footer).getByRole('button', { name: '确认' })).toBeInTheDocument();
+  });
+
   it('传 onExport 时出现「导出 PDF」并可点击', async () => {
     const onExport = vi.fn();
     render(

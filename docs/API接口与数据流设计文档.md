@@ -983,7 +983,7 @@ Body（可选）：`{olderThanHours?: number}`，缺省 24，范围 1–720，�
 
 **1. `GET /api/student/featured-sets`（200）**
 
-Query：`page`（正整数，缺省 1，非法 1001）；`pageSize` 固定 20。年级取 `resolveGradeInfo(student.grade)?.code`（`grade_N`），解析失败 1001。只返回 `status='published'` 且 `grade_code` 匹配且当前至少 1 道在架题的 publication，按 `published_at DESC` 分页。返回（`StudentFeaturedSetListResponse`）：
+Query：`page`（正整数，缺省 1，非法 1001）；`pageSize` 固定 20。年级取 `resolveGradeInfo(student.grade)?.code`（`grade_N`），解析失败 1001。只返回 `withdrawn_at IS NULL` 且 `grade_code` 匹配且当前至少 1 道在架题的 publication，按 `published_at DESC` 分页。返回（`StudentFeaturedSetListResponse`）：
 
 ```json
 {"items":[{"publicationId":12,"setId":7,"title":"七年级数学期末高频错题","subjectId":1,"subjectName":"数学","questionCount":8,"publishedAt":"2026-11-28T10:00:00.000Z","isRead":false}],"page":1,"pageSize":20,"total":3}
@@ -1013,13 +1013,13 @@ Body：`{questionIds: number[]}`。校验顺序固定：① 去重后 1～20 且
 
 **4. `POST /api/student/featured-sets/publications/{id}/open`（200）**
 
-单连接事务内：① `SELECT ... FOR UPDATE` 锁 publication；② 校验 `status='published'`、学生当前 `grade_N = grade_code`、至少 1 道在架题，任一不满足 → 404/1002（**不泄露 publication 是否存在、不写已读**）；③ 服务端生成 `sessionUid` 并建 `special_practice_sessions`（写 `featured_publication_id`）；④ 幂等写 `featured_question_set_reads`；⑤ 提交后返回（`StudentFeaturedSetOpenResponse`）：
+单连接事务内：① `SELECT ... FOR UPDATE` 锁 publication；② 校验 `withdrawn_at IS NULL`、学生当前 `grade_N = grade_code`、至少 1 道在架题，任一不满足 → 404/1002（**不泄露 publication 是否存在、不写已读**）；③ 服务端生成 `sessionUid` 并建 `special_practice_sessions`（写 `featured_publication_id`）；④ 幂等写 `featured_question_set_reads`；⑤ 提交后返回（`StudentFeaturedSetOpenResponse`）：
 
 ```json
 {"mode":"featured","sessionUid":"9b92...","subjectId":1,"title":"七年级数学期末高频错题","questions":[{"questionId":101,"text":"...","type":"choice","options":[{"label":"A","text":"..."}],"materialText":null,"materialUrl":null,"subNo":1,"materialPosition":null,"source":"bank","questionNo":3}]}
 ```
 
-`sessionUid` 必须由服务端生成，运行器不得自行生成（判题按它识别 featured 会话）。部分题下架时标题仍用 publication 手填标题、只返回在架题；全部下架 → 1002。任何一步失败整事务回滚，绝不返回无服务端凭据的题单。
+`sessionUid` 必须由服务端生成，运行器不得自行生成（判题按它识别 featured 会话）。每次 open 都生成新的专项 session；已读记录保持幂等。部分题下架时标题仍用 publication 手填标题、只返回在架题；全部下架 → 1002。任何一步失败整事务回滚，绝不返回无服务端凭据的题单。
 
 ---
 
@@ -1065,7 +1065,12 @@ Query：`status`（`pending|approved|rejected`，缺省 `pending`，非法 1001�
 
 **4. `POST /api/research/featured-sets/{id}/publish`（200）**
 
-Body（`PublishFeaturedSetRequest`）：`{ "title": "七年级数学期末高频错题", "gradeCode": "grade_7" }`。`title` 为 1～60 字（trim 后），`gradeCode` 必须是标准 `grade_N`（`gradeInfoByCode` 校验），否则 1001；题集不存在 404/1002、已 `rejected` 不能发布 1004。事务内按 `(set_id, grade_code)` upsert publication（独立标题、`reach_count` = 发布时该年级有效学生数快照），置题集 `approved` 并写审核人/时间；已 approved 追加其它年级不重复改审核字段。撤回后重发复用该行、刷新 `published_at`、清空撤回字段并删除旧 read 行（形成新未读投递）。返回 `{ "publicationId": 12 }`。
+Body（`PublishFeaturedSetRequest`）：`{ "title": "七年级数学期末高频错题", "gradeCode": "grade_7" }`。`title` 为 1～60 字（trim 后），`gradeCode` 必须是标准 `grade_N`（`gradeInfoByCode` 校验），否则 1001；题集不存在 404/1002、已 `rejected` 不能发布 1004。事务内锁题集：
+
+- 同 set/grade 已有有效 publication：只更新标题，返回原 `publicationId`；发布快照不变；
+- 无有效 publication：插入新行，`active_publication_key = set_id:grade_code`，`reach_count` 取发布时该年级有效学生数快照，返回新 ID。
+
+置题集 `approved` 并写审核人/时间；已 approved 追加其它年级不重复改审核字段。撤回只置 `active_publication_key = NULL` 和撤回审计字段；撤回后重发新增 publication，不删除旧 read。返回 `{ "publicationId": 12 }`。
 
 **5. `POST /api/research/featured-sets/{id}/reject`（200）**
 
@@ -1077,7 +1082,7 @@ Body（`PublishFeaturedSetRequest`）：`{ "title": "七年级数学期末高频
 
 **7. `POST /api/research/featured-sets/publications/{id}/withdraw`（200）**
 
-仓储 SQL 守卫 `WHERE id = ? AND status = 'published'` 保证只撤 published；写 `status='withdrawn'` + `withdrawn_by/withdrawn_at`。**阅读与作答历史一律保留**；撤回后学生列表/未读数不再可见（1002）。无响应体。
+仓储 SQL 守卫 `WHERE id = ? AND withdrawn_at IS NULL` 保证只撤当前有效投递；原子写 `active_publication_key=NULL` + `withdrawn_by/withdrawn_at`。**阅读与作答历史一律保留**；撤回后学生列表/未读数不再可见（1002）。无响应体。
 
 ---
 
@@ -2540,7 +2545,7 @@ judge/stream（HTTP 200，text/event-stream）
   → GET /api/research/featured-sets：按 review_status 分页，推荐人数/年级分布只来自 GROUP BY 聚合
   → GET /api/research/featured-sets/{id}：只读题目 + 聚合 + 各年级 publication（无学生身份）
   → POST /api/research/featured-sets/{id}/publish {title, gradeCode}
-      → 锁题集、禁用 rejected、upsert publication（独立标题 + reach_count 快照）、置 approved
+      → 锁题集、禁用 rejected；有效同年级只改标题，否则新增 publication（独立标题 + reach_count 快照）、置 approved
       → 200 {publicationId}
   → 学生 GET /api/student/featured-sets → 当前 grade_N / published / 至少一题在架的完整列表
     学生 GET /api/student/featured-sets/unread-count → {count, latest}（训练首页 Banner）
@@ -2558,7 +2563,7 @@ judge/stream（HTTP 200，text/event-stream）
 1. **隐私**：教研只读推荐人数 + 推荐时年级聚合，不可反查个人（PRD §11 裁决 C1，§4.33 注）；学生看不到推荐者身份；不新增 `behavior_events` 与 `SubscriptionGuard` 豁免。
 2. **一次性投递**：按发布时目标年级匹配，学生升年级后不再投递；撤回/全部下架后打开报 1002、不写已读；撤回后重发清空旧 read 行形成新未读。
 3. **积分隔离**：featured 会话不发积分、不写 `training_sessions` / `point_ledger`，但照常写练习历史与错题本；`error_fix` 由服务端依据 `featured_publication_id` 强制压制，不信任客户端布尔值。
-4. **度量**（首发后 14 天，`tools/db/featured_question_set_metrics.sql`）：推荐学生数 = 去重 `student_id`；触达数 = `SUM(reach_count)`；打开数 = 去重 `(publication_id, student_id)` 已读；完成数 = 去重 `(featured_publication_id, student_id)` 且 `completed_at IS NOT NULL`。不达标判据见设计 spec §12。
+4. **度量**（首发后 14 天，`tools/db/featured_question_set_metrics.sql`）：推荐学生数 = 去重 `student_id`；触达数 = `SUM(reach_count)`；打开数 = 去重 `(publication_id, student_id)` 已读；完成数 = 至少一条 session 完成，按 `(featured_publication_id, student_id)` 去重。重复打开同一 publication 不重复计完成。不达标判据见设计 spec §12。
 
 ---
 
@@ -2763,6 +2768,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.40 | 2026-11-28 | **判题稳定性 + 精选题 publication 投递收敛**：① `isFeaturedSession` 只对 `ER_BAD_FIELD_ERROR` 且消息含 `featured_publication_id` 做窄降级，普通判题不再因精选 schema 未迁移而 500；核心表缺失仍抛错。② 结果页只展示题库已有解析，不显示生成中/刷新；移除结果题号，推荐按钮移至底部操作栏。③ publication 取消 `status` 与 `(set_id, grade_code)` 唯一键，改用 `withdrawn_at IS NULL` + 普通可空 `active_publication_key` 唯一键；有效同年级重发只改标题，撤回后重发新增 ID，不删除 reads。④ `featured_publication_id` FK 改 RESTRICT；重复 open 生成新 session，完成数按 `(publication_id, student_id)` 去重。openapi.yaml 同步描述。 |
 | v4.39 | 2026-11-28 | **学生精选题单**（11 个端点，§4.32 学生 4 / §4.33 教研 7，数据流 §5.34）。学生列表 `{items,page,pageSize:20,total}`、未读摘要 `{count,latest}`、推荐 201 `{setId,alreadyRecommended}`、`open` 显式 200；教研列表同分页格式、pending-count `{count}`、详情含聚合与 publications；`publish/reject/reopen/withdraw` 均为状态迁移 POST 显式 200。错误码 1008 补「精选题每日新题集上限」（429）。删卷 RESTRICT 表由 7 张增至 **8 张**（加 `featured_question_set_items`）。`openapi.yaml` 同步 11 个 operation 与 7 个响应 schema。PRD §11 隐私裁决 C1：学习明细仅家长可见，教研只能看推荐票年级聚合。 |
 | v4.38 | 2026-11-28 | **结果页批量拉解析改为纯读库**。`GET /api/training/questions/explanations` 不再等待在途生成（原「等 in-flight，60s 兜底」）、也不触发新生成：DB 有就给、没有给 null。根因：解析由强模型生成（实测单题 38s–8min），旧语义让每次答错后末题在「判题中」卡满 60 秒（`api_request_logs` 实测 latency 60004ms，而三次判题均 <50ms）。前端专项/错题练习/错题巩固也改为先渲染结果页、解析到达后合并。单题刷新 `explanation-wait`（120s，触发补生成）语义不变。openapi.yaml 同步。 |
 | v4.37 | 2026-11-24 | **英语训练轨四模块（真题考试 / 专项练习 / 错题练习 / 薄弱点图谱）**。① 考试复用 §4.19 七端点、`subjectId=3`，无新端点；英语 `short_answer`/`proof` 走**显式自评**（闸门①，不依赖 `JUDGE_SUBJECTIVE_MODE`）。② 收卷新增**最高优先级分支**：无参考答案（`questions.answer` 空）**任何科目**统一落 `is_correct=NULL + score=NULL + method='no_standard_answer'`——不判、不计分、不入错题本、不要求自评（英语 974 卷 35 题全无答案；取代原「记错但不入本」口径）。③ 汇总新增 `unscoredCount`（无答案题数，已从 `totalCount` 与 accuracy 分母剔除）；`ExamResultItem` 新增 `method`、`hasStandardAnswer`，`needsSelfAssessment = hasStandardAnswer && method='self_assess'`。④ 任务码新增 `en_paper`（50 分/套、不限次）与 `en_targeted`（1/3/5/10 → 2/8/15/35，日限 5）；§4.18 `targeted/start` 学科表补 `3→en_targeted`。⑤ §4.5 `coverage` 口径改五学科。openapi.yaml 的 `ExamSummary`/`ExamResultItem` 同步。 |

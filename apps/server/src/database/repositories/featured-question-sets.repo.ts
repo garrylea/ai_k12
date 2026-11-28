@@ -316,10 +316,12 @@ export class FeaturedQuestionSetsRepository {
       status: 'published' | 'withdrawn';
       published_at: Date;
     })[]>(
-      `SELECT p.id AS publication_id, p.grade_code, p.title, p.reach_count, p.status, p.published_at
+      `SELECT p.id AS publication_id, p.grade_code, p.title, p.reach_count,
+              CASE WHEN p.withdrawn_at IS NULL THEN 'published' ELSE 'withdrawn' END AS status,
+              p.published_at
          FROM featured_question_set_publications p
         WHERE p.set_id = ?
-        ORDER BY p.published_at DESC`,
+        ORDER BY p.published_at DESC, p.id DESC`,
       [id],
     );
 
@@ -358,8 +360,8 @@ export class FeaturedQuestionSetsRepository {
   }
 
   /**
-   * 发布：事务内锁题集、校验非 rejected、按 (set_id, grade_code) upsert publication，
-   * 写独立标题与 reach_count 快照、题集置 approved；撤回后重发时清掉旧 read 行。
+   * 发布：事务内锁题集。有效同 set/grade 只改标题；撤回后重发插入新 publication，
+   * 不覆盖历史发布快照，也不删除 reads。
    */
   async publish(input: {
     setId: number;
@@ -382,44 +384,35 @@ export class FeaturedQuestionSetsRepository {
         throw new Error(`featured question set ${input.setId} is rejected`);
       }
 
-      const [existingRows] = await conn.execute<(RowDataPacket & {
-        id: number;
-        status: 'published' | 'withdrawn';
-      })[]>(
-        `SELECT id, status FROM featured_question_set_publications
-          WHERE set_id = ? AND grade_code = ?`,
+      const [activeRows] = await conn.execute<(RowDataPacket & { id: number })[]>(
+        `SELECT id
+           FROM featured_question_set_publications
+          WHERE set_id = ? AND grade_code = ? AND withdrawn_at IS NULL
+          FOR UPDATE`,
         [input.setId, input.gradeCode],
       );
-      const existing = existingRows[0];
-
-      // 用行别名 `AS new` 而非已弃用的 `VALUES()`（MySQL 8.0.20+ 打弃用告警）。
-      await conn.execute<ResultSetHeader>(
-        `INSERT INTO featured_question_set_publications
-           (set_id, grade_code, title, reach_count, status, published_by, published_at, withdrawn_by, withdrawn_at)
-         VALUES (?, ?, ?, ?, 'published', ?, NOW(3), NULL, NULL) AS new
-         ON DUPLICATE KEY UPDATE
-           title = new.title, reach_count = new.reach_count, status = 'published',
-           published_by = new.published_by, published_at = NOW(3),
-           withdrawn_by = NULL, withdrawn_at = NULL`,
-        [input.setId, input.gradeCode, input.title, input.reachCount, input.reviewerId],
-      );
-
-      const [pubRows] = await conn.execute<(RowDataPacket & { id: number })[]>(
-        `SELECT id FROM featured_question_set_publications
-          WHERE set_id = ? AND grade_code = ?`,
-        [input.setId, input.gradeCode],
-      );
-      const publicationId = pubRows[0]?.id;
-      if (publicationId === undefined) {
-        throw new Error(`publication not found for set ${input.setId} / ${input.gradeCode}`);
-      }
-
-      // 撤回后重发 = 一次新的未读投递：旧已读记录必须清掉。
-      if (existing?.status === 'withdrawn') {
+      const active = activeRows[0];
+      let publicationId: number;
+      if (active) {
+        publicationId = Number(active.id);
         await conn.execute(
-          `DELETE FROM featured_question_set_reads WHERE publication_id = ?`,
-          [publicationId],
+          `UPDATE featured_question_set_publications SET title = ? WHERE id = ? AND withdrawn_at IS NULL`,
+          [input.title, publicationId],
         );
+      } else {
+        const [insert] = await conn.execute<ResultSetHeader>(
+          `INSERT INTO featured_question_set_publications
+             (set_id, grade_code, title, reach_count, published_by, active_publication_key)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            input.setId, input.gradeCode, input.title, input.reachCount, input.reviewerId,
+            `${input.setId}:${input.gradeCode}`,
+          ],
+        );
+        publicationId = Number(insert.insertId);
+        if (!publicationId) {
+          throw new Error(`publication insert returned no id for set ${input.setId}`);
+        }
       }
 
       // 已 approved 的题集追加其它年级时不再改写审核人与时间。
@@ -431,7 +424,7 @@ export class FeaturedQuestionSetsRepository {
       );
 
       await conn.commit();
-      return { publicationId: Number(publicationId) };
+      return { publicationId };
     } catch (err) {
       await conn.rollback();
       throw err;
@@ -458,15 +451,15 @@ export class FeaturedQuestionSetsRepository {
     );
   }
 
-  /** 撤回只改 publication 状态与审计字段；阅读与作答历史一律保留。 */
+  /** 撤回只写当前有效 publication 的审计字段；阅读与作答历史一律保留。 */
   async withdraw(publicationId: number, reviewerId: number): Promise<void> {
     const conn = await this.pool.getConnection();
     try {
       await conn.beginTransaction();
       await conn.execute<ResultSetHeader>(
         `UPDATE featured_question_set_publications
-            SET status = 'withdrawn', withdrawn_by = ?, withdrawn_at = NOW(3)
-          WHERE id = ? AND status = 'published'`,
+            SET active_publication_key = NULL, withdrawn_by = ?, withdrawn_at = NOW(3)
+          WHERE id = ? AND withdrawn_at IS NULL`,
         [reviewerId, publicationId],
       );
       await conn.commit();
@@ -489,7 +482,7 @@ export class FeaturedQuestionSetsRepository {
       `SELECT COUNT(*) AS cnt FROM (
          SELECT p.id, ${AVAILABLE_COUNT_SQL} AS available_count
            FROM featured_question_set_publications p
-          WHERE p.status = 'published' AND p.grade_code = ?
+           WHERE p.withdrawn_at IS NULL AND p.grade_code = ?
        ) t WHERE t.available_count > 0`,
       [gradeCode],
     );
@@ -517,7 +510,7 @@ export class FeaturedQuestionSetsRepository {
              FROM featured_question_set_publications p
              JOIN featured_question_sets s ON s.id = p.set_id
              JOIN subjects subj ON subj.id = s.subject_id
-            WHERE p.status = 'published' AND p.grade_code = ?
+            WHERE p.withdrawn_at IS NULL AND p.grade_code = ?
          ) t
          LEFT JOIN featured_question_set_reads r
                 ON r.publication_id = t.publication_id AND r.student_id = ?
@@ -548,7 +541,7 @@ export class FeaturedQuestionSetsRepository {
       `SELECT COUNT(*) AS c FROM (
          SELECT p.id, ${AVAILABLE_COUNT_SQL} AS available_count
            FROM featured_question_set_publications p
-          WHERE p.status = 'published' AND p.grade_code = ?
+          WHERE p.withdrawn_at IS NULL AND p.grade_code = ?
             AND NOT EXISTS (
               SELECT 1 FROM featured_question_set_reads r
                WHERE r.publication_id = p.id AND r.student_id = ?
@@ -563,7 +556,7 @@ export class FeaturedQuestionSetsRepository {
     })[]>(
       `SELECT p.id AS publicationId, p.title
          FROM featured_question_set_publications p
-        WHERE p.status = 'published' AND p.grade_code = ?
+        WHERE p.withdrawn_at IS NULL AND p.grade_code = ?
           AND NOT EXISTS (
             SELECT 1 FROM featured_question_set_reads r
              WHERE r.publication_id = p.id AND r.student_id = ?
@@ -603,7 +596,7 @@ export class FeaturedQuestionSetsRepository {
       `SELECT p.id AS publication_id, p.set_id, p.title, s.subject_id
          FROM featured_question_set_publications p
          JOIN featured_question_sets s ON s.id = p.set_id
-        WHERE p.id = ? AND p.grade_code = ? AND p.status = 'published'
+        WHERE p.id = ? AND p.grade_code = ? AND p.withdrawn_at IS NULL
         FOR UPDATE`,
       [publicationId, gradeCode],
     );

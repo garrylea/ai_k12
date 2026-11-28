@@ -18,12 +18,8 @@ SELECT
        WHERE read_at >= @window_start
        GROUP BY publication_id, student_id
      ) t) AS opened_count,
-  (SELECT COUNT(*)
-     FROM (
-       SELECT featured_publication_id, student_id
-       FROM special_practice_sessions
-       WHERE featured_publication_id IS NOT NULL
-         AND completed_at IS NOT NULL
-         AND started_at >= @window_start
-       GROUP BY featured_publication_id, student_id
-     ) t) AS completed_count;
+  (SELECT COUNT(DISTINCT CONCAT(featured_publication_id, ':', student_id))
+     FROM special_practice_sessions
+    WHERE featured_publication_id IS NOT NULL
+      AND completed_at IS NOT NULL
+      AND started_at >= @window_start) AS completed_count;

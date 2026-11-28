@@ -69,7 +69,9 @@ export class FeaturedDeliveryService {
 
   async open(studentId: number, publicationId: number): Promise<FeaturedRunPayload> {
     const gradeCode = await this.gradeCode(studentId);
-    // 服务端生成并持有 sessionUid：运行器不得自行生成，否则判题无法识别 featured 会话。
+    // 每次打开都是一次新的专项作答事实：生成新的 sessionUid/session。
+    // publication 已读用 INSERT IGNORE 幂等；完成率在指标层按
+    // (publication_id, student_id) 去重，不按 session 数累加。
     const sessionUid = randomUUID();
 
     const conn = await this.pool.getConnection();

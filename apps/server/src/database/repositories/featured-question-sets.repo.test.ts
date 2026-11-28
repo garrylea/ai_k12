@@ -214,14 +214,13 @@ describe('FeaturedQuestionSetsRepository — 限流、审核与状态迁移', ()
     expect(paramsOf(execute.mock.calls[0])).toEqual([9]);
   });
 
-  it('publish：在事务内写独立标题与 reach_count，置 approved 并写 reviewer', async () => {
+  it('publish：有效同 set/grade 只更新标题，不覆盖发布快照', async () => {
     const conn = makeConn();
     conn.execute
-      .mockResolvedValueOnce([[{ id: 5, review_status: 'pending' }], []]) // 锁 set
-      .mockResolvedValueOnce([[]])                                        // 查既有 publication（无）
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []])                   // publication upsert
-      .mockResolvedValueOnce([[{ id: 22 }], []])                          // 回读 publication id
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []]);                  // set 置 approved
+      .mockResolvedValueOnce([[{ id: 5, review_status: 'pending' }], []])
+      .mockResolvedValueOnce([[{ id: 22 }], []])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]);
     const { repo } = repoWithConn(conn);
 
     await expect(
@@ -234,37 +233,36 @@ describe('FeaturedQuestionSetsRepository — 限流、审核与状态迁移', ()
       }),
     ).resolves.toEqual({ publicationId: 22 });
 
-    const upsertCall = conn.execute.mock.calls.find((c) =>
-      sqlOf(c).includes('INSERT INTO featured_question_set_publications'),
-    )!;
-    expect(sqlOf(upsertCall)).toContain('title');
-    expect(sqlOf(upsertCall)).toContain('reach_count');
-    expect(paramsOf(upsertCall)).toEqual(expect.arrayContaining(['八年级数学精选', 36]));
+    expect(sqlOf(conn.execute.mock.calls[2])).toContain(
+      'UPDATE featured_question_set_publications SET title = ? WHERE id = ? AND withdrawn_at IS NULL',
+    );
+    expect(paramsOf(conn.execute.mock.calls[2])).toEqual(['八年级数学精选', 22]);
+    expect(conn.execute.mock.calls.some((c) =>
+      sqlOf(c).includes('INSERT INTO featured_question_set_publications'))).toBe(false);
     expect(conn.execute.mock.calls.some((c) => sqlOf(c).includes("review_status = 'approved'"))).toBe(true);
     expect(conn.commit).toHaveBeenCalledTimes(1);
     expect(conn.rollback).not.toHaveBeenCalled();
   });
 
-  it('publish：原 publication 为 withdrawn 时清掉旧 read 行，形成新的未读投递', async () => {
+  it('publish：无有效 publication 时插入新行', async () => {
     const conn = makeConn();
     conn.execute
-      .mockResolvedValueOnce([[{ id: 5, review_status: 'approved' }], []]) // 锁 set
-      .mockResolvedValueOnce([[{ id: 22, status: 'withdrawn' }], []])      // 既有 publication 已撤回
-      .mockResolvedValueOnce([{ affectedRows: 2 }, []])                    // upsert（复用行）
-      .mockResolvedValueOnce([[{ id: 22 }], []])                           // 回读 id
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []])                    // DELETE reads
-      .mockResolvedValueOnce([{ affectedRows: 0 }, []]);                   // approved 不再重复改审核字段
+      .mockResolvedValueOnce([[{ id: 5, review_status: 'approved' }], []])
+      .mockResolvedValueOnce([[], []])
+      .mockResolvedValueOnce([{ insertId: 31, affectedRows: 1 }, []])
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]);
     const { repo } = repoWithConn(conn);
 
     await expect(
       repo.publish({ setId: 5, title: '重新发布', gradeCode: 'grade_8', reviewerId: 8, reachCount: 20 }),
-    ).resolves.toEqual({ publicationId: 22 });
+    ).resolves.toEqual({ publicationId: 31 });
 
-    const deleteReads = conn.execute.mock.calls.find((c) =>
-      sqlOf(c).includes('DELETE FROM featured_question_set_reads'),
-    )!;
-    expect(deleteReads).toBeDefined();
-    expect(paramsOf(deleteReads)).toEqual([22]);
+    const insertCall = conn.execute.mock.calls[2];
+    expect(sqlOf(insertCall)).toContain('INSERT INTO featured_question_set_publications');
+    expect(sqlOf(insertCall)).toContain('active_publication_key');
+    expect(paramsOf(insertCall)).toEqual([5, 'grade_8', '重新发布', 20, 8, '5:grade_8']);
+    expect(conn.execute.mock.calls.some((c) =>
+      sqlOf(c).includes('DELETE FROM featured_question_set_reads'))).toBe(false);
   });
 
   it('publish：rejected 题集禁止发布并 rollback', async () => {
@@ -304,14 +302,18 @@ describe('FeaturedQuestionSetsRepository — 限流、审核与状态迁移', ()
     expect(paramsOf(execute.mock.calls[0])).toEqual([5]);
   });
 
-  it('withdraw 只改指定 publication 为 withdrawn，不删除任何历史', async () => {
+  it('withdraw 只更新当前有效 publication，不删除任何历史', async () => {
     const conn = makeConn();
     conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, []]);
     const { repo } = repoWithConn(conn);
 
     await repo.withdraw(22, 8);
 
-    expect(conn.execute).toHaveBeenCalledWith(expect.stringContaining("status = 'withdrawn'"), [8, 22]);
+    expect(conn.execute).toHaveBeenCalledWith(
+      expect.stringContaining('SET active_publication_key = NULL, withdrawn_by = ?, withdrawn_at = NOW(3)'),
+      [8, 22],
+    );
+    expect(sqlOf(conn.execute.mock.calls[0])).toContain('withdrawn_at IS NULL');
     expect(conn.execute.mock.calls.some((c) => /DELETE FROM special_practice_sessions/.test(sqlOf(c)))).toBe(false);
     expect(conn.commit).toHaveBeenCalledTimes(1);
   });
@@ -362,7 +364,7 @@ describe('FeaturedQuestionSetsRepository — 学生投递', () => {
 
     const listCall = query.mock.calls.find((c) => sqlOf(c).includes('featured_question_set_publications'))!;
     expect(listCall).toBeDefined();
-    expect(sqlOf(listCall)).toContain("status = 'published'");
+    expect(sqlOf(listCall)).toContain('withdrawn_at IS NULL');
     expect(sqlOf(listCall)).toContain('grade_code = ?');
     expect(sqlOf(listCall)).toContain('available_count > 0');
     expect(paramsOf(listCall)).toEqual(['grade_7', 9, 20, 0]);
@@ -392,10 +394,10 @@ describe('FeaturedQuestionSetsRepository — 学生投递', () => {
       latest: { publicationId: 8, title: '最新精选' },
     });
 
-    expect(sqlOf(execute.mock.calls[0])).toContain("status = 'published'");
+    expect(sqlOf(execute.mock.calls[0])).toContain('withdrawn_at IS NULL');
     expect(sqlOf(execute.mock.calls[0])).toContain('available_count > 0');
     expect(paramsOf(execute.mock.calls[0])).toEqual(['grade_7', 9]);
-    expect(sqlOf(execute.mock.calls[1])).toContain("status = 'published'");
+    expect(sqlOf(execute.mock.calls[1])).toContain('withdrawn_at IS NULL');
     expect(paramsOf(execute.mock.calls[1])).toEqual(['grade_7', 9]);
     expect(sqlOf(execute.mock.calls[1])).toContain('LIMIT 1');
   });
@@ -437,7 +439,7 @@ describe('FeaturedQuestionSetsRepository — 学生投递', () => {
         },
       ],
     });
-    expect(sqlOf(conn.execute.mock.calls[0])).toContain("p.status = 'published'");
+    expect(sqlOf(conn.execute.mock.calls[0])).toContain('p.withdrawn_at IS NULL');
     expect(sqlOf(conn.execute.mock.calls[0])).toContain('p.grade_code = ?');
     // 设计 §6.1 步骤 1：open 事务内先锁 publication，避免并发撤回/重发读到旧题单。
     expect(sqlOf(conn.execute.mock.calls[0])).toContain('FOR UPDATE');
@@ -548,6 +550,10 @@ describe('FeaturedQuestionSetsRepository — 教研审核列表', () => {
           publication_id: 22, grade_code: 'grade_7', title: '七年级数学精选',
           reach_count: 36, status: 'published', published_at: new Date('2026-11-28T00:00:00Z'),
         },
+        {
+          publication_id: 21, grade_code: 'grade_7', title: '七年级旧投递',
+          reach_count: 18, status: 'withdrawn', published_at: new Date('2026-11-20T00:00:00Z'),
+        },
       ], []]);
 
     const detail = await repo.getReviewSet(7);
@@ -558,8 +564,14 @@ describe('FeaturedQuestionSetsRepository — 教研审核列表', () => {
       recommendationCount: 3,
       gradeDistribution: [{ gradeCode: 'grade_7', count: 3 }],
       questions: [{ questionId: 3, text: '题一', answer: 'A' }],
-      publications: [{ publicationId: 22, gradeCode: 'grade_7', reachCount: 36, status: 'published' }],
+      publications: [
+        { publicationId: 22, gradeCode: 'grade_7', reachCount: 36, status: 'published' },
+        { publicationId: 21, gradeCode: 'grade_7', reachCount: 18, status: 'withdrawn' },
+      ],
     });
+    const publicationSql = sqlOf(execute.mock.calls[3]);
+    expect(publicationSql).toContain("WHEN p.withdrawn_at IS NULL THEN 'published'");
+    expect(publicationSql).toContain("ELSE 'withdrawn'");
 
     const missing = repoWithPool();
     missing.execute.mockResolvedValueOnce([[], []]);

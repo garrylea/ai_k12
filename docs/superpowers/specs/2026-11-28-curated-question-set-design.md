@@ -189,7 +189,10 @@ CREATE TABLE IF NOT EXISTS featured_question_set_recommendations (
 
 ### 4.4 `featured_question_set_publications`
 
-一次发布 = 一个年级 = 一个学生收件项。
+一次投放 = 一个年级 = 一个不可复用 publication ID。
+
+> **2026-11-28 修订**：以下旧版 DDL/复用语义已由
+> `2026-11-28-judging-and-featured-set-hardening-design.md` 取代。
 
 ```sql
 CREATE TABLE IF NOT EXISTS featured_question_set_publications (
@@ -198,8 +201,6 @@ CREATE TABLE IF NOT EXISTS featured_question_set_publications (
   grade_code VARCHAR(10) NOT NULL,
   title VARCHAR(60) NOT NULL COMMENT '每个年级独立标题',
   reach_count INT NOT NULL COMMENT '发布时该年级有效学生数快照',
-  status VARCHAR(16) NOT NULL DEFAULT 'published'
-    COMMENT 'published|withdrawn',
   published_by BIGINT NOT NULL COMMENT 'admins.id, role=researcher',
   published_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   withdrawn_by BIGINT DEFAULT NULL,
@@ -207,8 +208,10 @@ CREATE TABLE IF NOT EXISTS featured_question_set_publications (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
-  UNIQUE KEY uniq_fqsp_set_grade (set_id, grade_code),
-  KEY idx_fqsp_grade_status (grade_code, status, published_at),
+  active_publication_key VARCHAR(64) DEFAULT NULL
+    COMMENT '有效投递固定为 set_id:grade_code；撤回时置 NULL',
+  UNIQUE KEY uniq_fqsp_active (active_publication_key),
+  KEY idx_fqsp_grade_active (grade_code, withdrawn_at, published_at),
   CONSTRAINT fk_fqsp_set FOREIGN KEY (set_id)
     REFERENCES featured_question_sets (id) ON DELETE CASCADE,
   CONSTRAINT fk_fqsp_publisher FOREIGN KEY (published_by) REFERENCES admins (id)
@@ -220,7 +223,8 @@ CREATE TABLE IF NOT EXISTS featured_question_set_publications (
 
 标题属于 publication，不允许同一题集发到七年级和八年级时互相覆盖标题。发布时按当前有效学生数写 `reach_count` 快照。
 
-同一题集同一真实年级只有一个 publication。撤回后若再次发布，复用该行、替换标题和 `reach_count`、恢复 `published`、清空撤回字段并刷新 `published_at`；同时删除该 publication 的旧 read 行，让重新发布形成一次新的未读投递。
+同一题集同一真实年级同一时间只有一个有效 publication。有效时再次发布只更新标题；
+撤回后再次发布新增 publication，不覆盖旧 `published_at/reach_count`，也不删除旧 reads。
 
 ### 4.5 `featured_question_set_reads`
 
@@ -249,7 +253,7 @@ ALTER TABLE special_practice_sessions
   ADD KEY idx_sps_featured_publication (featured_publication_id);
 ```
 
-随后增加外键引用 `featured_question_set_publications(id) ON DELETE SET NULL`。该列非空时，普通判题/自评服务必须从服务端强制压制 `error_fix`，不信任客户端布尔值。
+随后增加外键引用 `featured_question_set_publications(id) ON DELETE RESTRICT`。该列非空时，普通判题/自评服务必须从服务端强制压制 `error_fix`，不信任客户端布尔值。
 
 以上 `ALTER TABLE` 只是字段示意。迁移必须兼容现有 MySQL 版本并按 `information_schema` 判断列/索引/外键是否已存在，保持可重复执行。
 
@@ -308,7 +312,7 @@ ALTER TABLE special_practice_sessions
 `open` 必须在一个事务内：
 
 1. 锁 publication；
-2. 校验 `status='published'`；
+2. 校验 `withdrawn_at IS NULL`；
 3. 校验学生当前 `grade_N` 等于 `grade_code`；
 4. 读取在架题；
 5. 题目数为 0 时回 1002，不写 read；

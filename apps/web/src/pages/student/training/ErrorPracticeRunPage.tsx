@@ -18,7 +18,6 @@ import {
   getTrainingVariations,
   judgeTraining,
   selfAssessTraining,
-  waitTrainingExplanation,
   type TrainingErrorBookEntry,
   type TrainingVariationItem,
 } from '@/services/api';
@@ -272,11 +271,6 @@ export default function ErrorPracticeRunPage() {
                 questions={resultQuestions}
                 answers={finalResults ?? {}}
                 initialExplanations={explanations}
-                questionIdOf={(n) => entryByN.get(n)?.questionId ?? null}
-                onWaitExplanation={async (qid) => {
-                  const res = await waitTrainingExplanation(qid);
-                  return res.explanation;
-                }}
                 onClose={() => navigate(`/student/training/errors${subjectQuery}`)}
                 onExport={() => setPrintOpen(true)}
               />

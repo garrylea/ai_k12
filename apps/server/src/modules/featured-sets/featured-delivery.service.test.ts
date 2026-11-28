@@ -125,6 +125,15 @@ describe('FeaturedDeliveryService', () => {
     expect(repository.markRead).toHaveBeenCalledWith(22, 9, conn);
   });
 
+  it('同一学生重复 open：sessionUid 不同、session/read 各再写一次', async () => {
+    const first = await service.open(9, 22);
+    const second = await service.open(9, 22);
+
+    expect(second.sessionUid).not.toBe(first.sessionUid);
+    expect(specialSessions.upsertSession).toHaveBeenCalledTimes(2);
+    expect(repository.markRead).toHaveBeenCalledTimes(2);
+  });
+
   it('open 单连接事务：三处仓储调用共用同一 executor，commit 在 markRead 之后', async () => {
     await service.open(9, 22);
 

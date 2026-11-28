@@ -13,7 +13,6 @@ import {
   bumpErrorLevels,
   getTrainingExplanations,
   selfAssessPractice,
-  waitTrainingExplanation,
   type PreviousErrorDetail,
   type JudgeResult,
 } from '@/services/api';
@@ -273,12 +272,6 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
           questions={questions}
           answers={finalResults ?? {}}
           initialExplanations={explanations}
-          // questionN 可能跨卡撞号：取首个有 questionId 的候选（判题 handleSubmit 用题面匹配，此处题面不可得）
-          questionIdOf={(n) => (errorsByN.get(n) ?? []).find((e) => e.questionId != null)?.questionId ?? null}
-          onWaitExplanation={async (qid) => {
-            const res = await waitTrainingExplanation(qid);
-            return res.explanation;
-          }}
           onClose={() => onComplete(false)}
         />
       </div>

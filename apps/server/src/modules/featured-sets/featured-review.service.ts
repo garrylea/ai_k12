@@ -81,7 +81,7 @@ export class FeaturedReviewService {
     return this.featuredRepo.reopen(setId);
   }
 
-  /** 仓储 withdraw 的 SQL 守卫 `WHERE id = ? AND status = 'published'` 负责只允许 published。 */
+  /** 仓储 withdraw 的 SQL 守卫 `WHERE id = ? AND withdrawn_at IS NULL` 只允许撤当前有效投递。 */
   async withdraw(publicationId: number, user: JwtUser): Promise<void> {
     return this.featuredRepo.withdraw(publicationId, user.sub);
   }

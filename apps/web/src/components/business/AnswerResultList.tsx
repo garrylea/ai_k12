@@ -36,12 +36,10 @@ interface Props {
   onClose: () => void;
   /** 插入在头部与列表之间的内容（考试结果页的得分卡等）。 */
   headerExtra?: ReactNode;
+  /** 底部操作栏左侧扩展动作；考试结果页不传。 */
+  footerExtra?: ReactNode;
   /** 批量拉取的解析（父层末题后调 getTrainingExplanations 获得），key = q.n；缺省 {} */
   initialExplanations?: Record<string, string | null>;
-  /** q.n -> 题库 questionId（孤儿题返回 null，不渲染刷新按钮）。 */
-  questionIdOf?: (n: string) => number | null;
-  /** 单题刷新等待（父层注入 waitTrainingExplanation），120s 倒计时。 */
-  onWaitExplanation?: (questionId: number) => Promise<string | null>;
   /** 主观题参考答案（key = q.n；考试结果页传，训练结果页不传——自评时已看过） */
   referenceAnswers?: Record<string, string | null>;
   /** 结果页自评提交（考试结果页传）；返回后父层更新 answers 消除 needsSelfAssess */
@@ -50,9 +48,6 @@ interface Props {
   onExport?: () => void;
 }
 
-/** 刷新等待上限（秒），与后端 explanation-wait 端点 120s 对齐。 */
-const REFRESH_TIMEOUT_SECONDS = 120;
-
 /**
  * 学生答案专用 components（作答大图）。
  * 模块级常量：渲染里现造组件表会让 <img> 每次重挂、反复下载。
@@ -60,37 +55,21 @@ const REFRESH_TIMEOUT_SECONDS = 120;
  */
 const answerComponents = makeAnswerComponents();
 
-function formatCountdown(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = String(s % 60).padStart(2, '0');
-  return `${m}:${sec}`;
-}
-
 export function AnswerResultList({
   questions,
   answers,
   onClose,
   headerExtra,
+  footerExtra,
   initialExplanations = {},
-  questionIdOf,
-  onWaitExplanation,
   referenceAnswers,
   onSelfAssess,
   onExport,
 }: Props) {
   const [expandedN, setExpandedN] = useState<string | null>(null);
-  // 解析缓存：初值来自父层末题后批量拉取；单题刷新后回写。
+  // 解析缓存：初值来自父层末题后批量拉取；父层后续补拉时合并。
   const [explanations, setExplanations] = useState<Record<string, string | null>>(initialExplanations);
-  const [refreshingN, setRefreshingN] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState<number | null>(null);
   const [assessingN, setAssessingN] = useState<string | null>(null);
-
-  // 刷新倒计时（mm:ss），请求返回即停。
-  useEffect(() => {
-    if (countdown == null) return;
-    const t = setInterval(() => setCountdown((c) => (c == null || c <= 1 ? null : c - 1)), 1000);
-    return () => clearInterval(t);
-  }, [countdown]);
 
   // 父层异步补拉（如考试结果页 mount 后补拉）到达时合并：只接受非空值，
   // 不覆盖已展示/已刷新的解析。父层须 memoize/set-once 保持引用稳定，避免每渲染重置。
@@ -107,21 +86,6 @@ export function AnswerResultList({
       return changed ? next : prev;
     });
   }, [initialExplanations]);
-
-  const handleRefresh = async (q: PracticeQuestion) => {
-    if (!onWaitExplanation || refreshingN) return;
-    const qid = questionIdOf?.(q.n) ?? null;
-    if (qid == null) return;
-    setRefreshingN(q.n);
-    setCountdown(REFRESH_TIMEOUT_SECONDS);
-    try {
-      const text = await onWaitExplanation(qid);
-      setExplanations((prev) => ({ ...prev, [q.n]: text }));
-    } finally {
-      setRefreshingN(null);
-      setCountdown(null);
-    }
-  };
 
   const handleSelfAssess = async (n: string, assessment: 'correct' | 'incorrect') => {
     if (!onSelfAssess || assessingN) return;
@@ -197,25 +161,17 @@ export function AnswerResultList({
               const correct = !!a?.isCorrect && !failed;
               const expanded = expandedN === q.n;
               const explanation = explanations[q.n] ?? null;
-              const hasQuestionId = (questionIdOf?.(q.n) ?? null) != null;
               const rec = a;
               const unscored = rec?.unscored === true;
               const subjective = !unscored && (!!rec?.needsSelfAssess || rec?.method === 'self_assess');
               const noAnswer = !unscored && rec?.method === 'unanswered';
+              const objectiveWrong = !correct && !noAnswer && !unscored;
+              const showExplanationButton = !failed && !!explanation && (subjective || objectiveWrong);
+              const showReferenceButton = !failed && subjective && !explanation && !!referenceAnswers?.[q.n];
               const slots = materialSlots(q);
               return (
                 <div key={q.n} className="bg-[var(--bg-card)] rounded-xl border border-[var(--bg-subtle)] overflow-hidden">
                   <div className="p-3.5 flex items-start gap-3">
-                    {/* 题号（2026-11-01 用户要求：状态图标左侧小字）。
-                        显示**原始题号 q.n**（后端 questionNo），与答题页 ExamRunPage 的
-                        「第 {q.n} 题」一致。不能用 idx+1：试卷里有题被 is_active=0 隐藏时，
-                        顺序位会整体前移，学生看到「第 8 题」其实是第 9 题（2026-11-03 汇文事故）。 */}
-                    <span
-                      data-testid={`result-qno-${q.n}`}
-                      className="shrink-0 mt-0.5 min-w-[1.25rem] text-right text-xs text-[var(--text-tertiary)] tabular-nums"
-                    >
-                      {q.n}
-                    </span>
                     {/* Status icon */}
                     <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center mt-0.5 ${failed || unscored ? 'bg-[var(--bg-subtle)]' : subjective || noAnswer ? 'bg-[var(--brand-100)]' : correct ? 'bg-[#E8F5EE]' : 'bg-[#FCE8E6]'}`}>
                       {failed ? (
@@ -276,20 +232,14 @@ export function AnswerResultList({
                           <span className="text-[13px] text-[var(--text-tertiary)]">（未作答）</span>
                         )}
                       </div>
-                      {/* 主观题：无对错状态；参考答案/解析展开 + （待自评时）自评按钮 */}
+                      {/* 主观题：无对错状态；自评按钮独立于解析是否存在 */}
                       {subjective && !failed && (
                         <div className="mt-2.5 flex flex-col gap-2">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setExpandedN(expanded ? null : q.n)}
-                              className="px-4 py-1.5 rounded-lg border border-[var(--warning)] bg-[var(--brand-100)] text-[var(--warning)] text-xs font-medium hover:bg-[var(--warning)] hover:text-white transition-colors"
-                            >
-                              {expanded ? '收起解析' : '查看解析'}
-                            </button>
-                            {rec?.selfAssessment && (
+                          {rec?.selfAssessment && (
+                            <div className="flex items-center gap-2">
                               <span className="text-xs text-[var(--text-tertiary)]">已自评：{rec.selfAssessment === 'correct' ? '做对了' : '做错了'}</span>
-                            )}
-                          </div>
+                            </div>
+                          )}
                           {rec?.needsSelfAssess && onSelfAssess && (
                             <div className="flex items-center gap-2">
                               <span className="text-xs text-[var(--text-secondary)]">对照参考答案，这题你做对了还是做错了？</span>
@@ -329,31 +279,17 @@ export function AnswerResultList({
                           <span className="text-xs text-[var(--text-tertiary)]">AI 判定失败，请稍后重试</span>
                         </div>
                       )}
-                      {/* 解析（wrong only, non-failed）：有解析看解析 / 无解析有 questionId 可刷新 / 孤儿题暂无 */}
-                      {!correct && !failed && !subjective && !noAnswer && !unscored && (
+                      {/* 解析：只展示题库中已有内容；不等待生成，也不提供刷新。 */}
+                      {(showExplanationButton || showReferenceButton) && (
                         <div className="mt-2.5 flex items-center gap-2">
-                          {explanation ? (
-                            <button
-                              onClick={() => setExpandedN(expanded ? null : q.n)}
-                              className="px-4 py-1.5 rounded-lg border border-[var(--warning)] bg-[var(--brand-100)] text-[var(--warning)] text-xs font-medium hover:bg-[var(--warning)] hover:text-white transition-colors"
-                            >
-                              {expanded ? '收起解析' : '查看解析'}
-                            </button>
-                          ) : hasQuestionId ? (
-                            <>
-                              <span className="text-xs text-[var(--text-tertiary)]">正在生成中…</span>
-                              <button
-                                onClick={() => handleRefresh(q)}
-                                disabled={refreshingN != null}
-                                className="px-3 py-1.5 rounded-lg border border-[var(--warning)] text-[var(--warning)] text-xs font-medium hover:bg-[var(--warning)] hover:text-white transition-colors disabled:opacity-40"
-                                aria-label="刷新解析"
-                              >
-                                {refreshingN === q.n && countdown != null ? formatCountdown(countdown) : '刷新'}
-                              </button>
-                            </>
-                          ) : (
-                            <span className="text-xs text-[var(--text-tertiary)]">暂无解析，试试让 AI 讲一讲</span>
-                          )}
+                          <button
+                            onClick={() => setExpandedN(expanded ? null : q.n)}
+                            className="px-4 py-1.5 rounded-lg border border-[var(--warning)] bg-[var(--brand-100)] text-[var(--warning)] text-xs font-medium hover:bg-[var(--warning)] hover:text-white transition-colors"
+                          >
+                            {expanded
+                              ? (showExplanationButton ? '收起解析' : '收起参考答案')
+                              : (showExplanationButton ? '查看解析' : '查看参考答案')}
+                          </button>
                         </div>
                       )}
                     </div>
@@ -394,21 +330,29 @@ export function AnswerResultList({
         </div>
 
         {/* ═══ Footer ═══ */}
-        <div className="shrink-0 px-5 py-3 border-t border-[var(--bg-subtle)] flex items-center justify-center gap-3">
-          {onExport && (
+        <div
+          data-testid="answer-result-footer"
+          className={`shrink-0 px-5 py-3 border-t border-[var(--bg-subtle)] flex flex-wrap items-center gap-3 ${
+            footerExtra ? 'justify-between' : 'justify-center'
+          }`}
+        >
+          {footerExtra && <div className="min-w-0">{footerExtra}</div>}
+          <div className="ml-auto flex items-center justify-center gap-3">
+            {onExport && (
+              <button
+                onClick={onExport}
+                className="px-5 py-2.5 rounded-[10px] border border-[var(--bg-subtle)] text-sm font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-base)] transition-colors"
+              >
+                导出 PDF
+              </button>
+            )}
             <button
-              onClick={onExport}
-              className="px-5 py-2.5 rounded-[10px] border border-[var(--bg-subtle)] text-sm font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-base)] transition-colors"
+              onClick={onClose}
+              className="px-8 py-2.5 rounded-[10px] bg-[var(--brand-500)] text-white text-sm font-semibold hover:bg-[var(--brand-600)] transition-colors shadow-sm"
             >
-              导出 PDF
+              确认
             </button>
-          )}
-          <button
-            onClick={onClose}
-            className="px-8 py-2.5 rounded-[10px] bg-[var(--brand-500)] text-white text-sm font-semibold hover:bg-[var(--brand-600)] transition-colors shadow-sm"
-          >
-            确认
-          </button>
+          </div>
         </div>
       </div>
     </div>

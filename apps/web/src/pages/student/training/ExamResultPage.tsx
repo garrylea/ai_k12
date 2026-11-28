@@ -9,7 +9,6 @@ import {
   getExamSession,
   getTrainingExplanations,
   selfAssessTraining,
-  waitTrainingExplanation,
   type ExamResultItem,
   type ExamSummary,
 } from '@/services/api';
@@ -295,11 +294,6 @@ export default function ExamResultPage() {
           questions={resultQuestions}
           answers={answers}
           initialExplanations={explanations}
-          questionIdOf={(n) => questionIdByN.get(n) ?? null}
-          onWaitExplanation={async (qid) => {
-            const res = await waitTrainingExplanation(qid);
-            return res.explanation;
-          }}
           referenceAnswers={referenceAnswers}
           onSelfAssess={handleSelfAssess}
           headerExtra={

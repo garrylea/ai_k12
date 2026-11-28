@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import TargetedRunPage from './TargetedRunPage';
@@ -655,7 +655,20 @@ describe('TargetedRunPage featured 模式', () => {
 
     await answerOnlyQuestion();
 
-    fireEvent.click(screen.getByRole('button', { name: '推荐这套题' }));
+    const footer = screen.getByTestId('answer-result-footer');
+    const recommend = within(footer).getByRole('button', { name: '推荐这套题' });
+    expect(recommend.closest('[data-testid="recommend-featured-slot"]')).not.toBeNull();
+    fireEvent.click(recommend);
     await waitFor(() => expect(recommendMock).toHaveBeenCalledWith([101]));
+  });
+
+  it('推荐按钮不占用答题结果标题下方槽位', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+
+    await answerOnlyQuestion();
+
+    const slot = screen.getByTestId('recommend-featured-slot');
+    expect(slot.closest('[data-testid="answer-result-footer"]')).not.toBeNull();
   });
 });

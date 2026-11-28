@@ -636,7 +636,7 @@ Expected: 测试全绿、TypeScript 0 error。
 
 **Interfaces:**
 - Produces: `featured_question_set_publications` 不再有 `status` 列。
-- Produces: `active_publication_key VARCHAR(64) STORED`、`uniq_fqsp_active`、`idx_fqsp_grade_active`。
+- Produces: 普通可空 `active_publication_key VARCHAR(64)`、`uniq_fqsp_active`、`idx_fqsp_grade_active`。
 - Produces: `special_practice_sessions.featured_publication_id` FK 使用 `ON DELETE RESTRICT`。
 
 - [ ] **Step 1: 改 migration 的目标表结构**
@@ -657,13 +657,8 @@ CREATE TABLE IF NOT EXISTS featured_question_set_publications (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
     ON UPDATE CURRENT_TIMESTAMP(3),
-  active_publication_key VARCHAR(64)
-    GENERATED ALWAYS AS (
-      CASE
-        WHEN withdrawn_at IS NULL THEN CONCAT(set_id, ':', grade_code)
-        ELSE NULL
-      END
-    ) STORED,
+  active_publication_key VARCHAR(64) DEFAULT NULL
+    COMMENT '有效投递固定为 set_id:grade_code；撤回时置 NULL',
   UNIQUE KEY uniq_fqsp_active (active_publication_key),
   KEY idx_fqsp_grade_active (grade_code, withdrawn_at, published_at),
   CONSTRAINT fk_fqsp_set FOREIGN KEY (set_id)
@@ -735,7 +730,7 @@ SET @has_active_col := (
 );
 SET @ddl := IF(
   @has_active_col = 0,
-  'ALTER TABLE featured_question_set_publications ADD COLUMN active_publication_key VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN withdrawn_at IS NULL THEN CONCAT(set_id, '':'', grade_code) ELSE NULL END) STORED',
+  'ALTER TABLE featured_question_set_publications ADD COLUMN active_publication_key VARCHAR(64) DEFAULT NULL COMMENT ''有效投递固定为 set_id:grade_code；撤回时置 NULL''',
   'SELECT 1'
 );
 PREPARE stmt FROM @ddl;
@@ -1141,9 +1136,12 @@ if (active) {
 } else {
   const [insert] = await conn.execute<ResultSetHeader>(
     `INSERT INTO featured_question_set_publications
-       (set_id, grade_code, title, reach_count, published_by)
-     VALUES (?, ?, ?, ?, ?)`,
-    [input.setId, input.gradeCode, input.title, input.reachCount, input.reviewerId],
+       (set_id, grade_code, title, reach_count, published_by, active_publication_key)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      input.setId, input.gradeCode, input.title, input.reachCount, input.reviewerId,
+      `${input.setId}:${input.gradeCode}`,
+    ],
   );
   publicationId = Number(insert.insertId);
   if (!publicationId) {

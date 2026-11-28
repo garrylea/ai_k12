@@ -20,7 +20,6 @@ import {
   judgeTraining,
   markTrainingHidden,
   selfAssessTraining,
-  waitTrainingExplanation,
   type TargetedPracticeQuestion,
 } from '@/services/api';
 import { toast } from '@/components/base/Toast';
@@ -311,45 +310,41 @@ export default function TargetedRunPage() {
             questions={resultQuestions}
             answers={finalResults ?? {}}
             initialExplanations={explanations}
-            questionIdOf={(n) => entryByN.get(n)?.questionId ?? null}
             // 发分失败时挂在结果弹窗顶部：可重试的（网络 / award_failed）给出口；
             // 客户端 4xx（token 失效 / 会话被删）重试必然失败，只给诚实说明
             headerExtra={
-              // 推荐按钮恒在：正常专项 / featured / redo 结果页都可把本轮题单推荐给教研员。
-              // 其余槽位按条件出现；remediationOfferVisible 为假时连它的槽位都不渲染，
-              // 免得外层 space-y-3 多出一个空块（AnswerResultList 对 truthy headerExtra 画 border-b）。
-              <div className="space-y-3">
-                <div className="px-5 pt-4" data-testid="recommend-featured-slot">
-                  <RecommendFeaturedSetButton
-                    questionIds={(entries ?? []).map((q) => q.questionId)}
-                  />
+              needsRetry || unrecoverable || remediationOfferVisible ? (
+                <div className="space-y-3">
+                  {needsRetry || unrecoverable ? (
+                    <div className="px-5 py-3">
+                      <SessionPointsRetryNotice
+                        variant={unrecoverable ? 'unrecoverable' : 'retry'}
+                        retrying={retrying}
+                        onRetry={retry}
+                      />
+                    </div>
+                  ) : undefined}
+                  {/* 错题补偿套题询问卡槽位：remediationOfferVisible 为假时连槽位都不渲染 */}
+                  {remediationOfferVisible && (
+                    <div className="px-5 pb-4 empty:hidden" data-testid="remediation-offer-slot">
+                      <RemediationOfferCard
+                        source="targeted"
+                        sessionId={sessionId}
+                        wrongCount={remediationWrongIds.length}
+                        wrongQuestionIds={remediationWrongIds}
+                      />
+                    </div>
+                  )}
                 </div>
-                {needsRetry || unrecoverable ? (
-                  <div className="px-5 py-3">
-                    <SessionPointsRetryNotice
-                      variant={unrecoverable ? 'unrecoverable' : 'retry'}
-                      retrying={retrying}
-                      onRetry={retry}
-                    />
-                  </div>
-                ) : undefined}
-                {/* 错题补偿套题询问卡槽位：remediationOfferVisible 为假时连槽位都不渲染 */}
-                {remediationOfferVisible && (
-                  <div className="px-5 pb-4 empty:hidden" data-testid="remediation-offer-slot">
-                    <RemediationOfferCard
-                      source="targeted"
-                      sessionId={sessionId}
-                      wrongCount={remediationWrongIds.length}
-                      wrongQuestionIds={remediationWrongIds}
-                    />
-                  </div>
-                )}
+              ) : undefined
+            }
+            footerExtra={
+              <div data-testid="recommend-featured-slot">
+                <RecommendFeaturedSetButton
+                  questionIds={(entries ?? []).map((q) => q.questionId)}
+                />
               </div>
             }
-            onWaitExplanation={async (qid) => {
-              const res = await waitTrainingExplanation(qid);
-              return res.explanation;
-            }}
             onClose={() => navigate(exitTarget)}
             onExport={() => setPrintOpen(true)}
           />
