@@ -249,6 +249,9 @@ export default function ResearchFeaturedSetsPage() {
   };
 
   const onRowKeyDown = (e: KeyboardEvent<HTMLDivElement>, setId: number) => {
+    // 只处理行本身的按键；行内「发布/拒绝/重新审核」按钮的 keydown 冒泡上来时
+    // 不能 preventDefault（会吞掉按钮的默认 click），也不能打开详情抽屉。
+    if (e.target !== e.currentTarget) return;
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       openDetail(setId);

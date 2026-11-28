@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import ResearchFeaturedSetsPage from '../ResearchFeaturedSetsPage';
 import {
@@ -212,6 +213,32 @@ describe('ResearchFeaturedSetsPage 详情抽屉', () => {
     fireEvent.click(await screen.findByTestId('featured-set-row-7'));
 
     await waitFor(() => expect(toastMock).toHaveBeenCalledWith('error', '详情接口挂了'));
+  });
+
+  it('键盘 Enter 激活行内「发布」按钮：触发发布而不打开详情抽屉', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const row = await screen.findByTestId('featured-set-row-7');
+    const publish = within(row).getByTestId('featured-publish-7');
+
+    publish.focus();
+    await user.keyboard('{Enter}');
+
+    // 行内按钮的 keydown 冒泡到行时不能被吞掉：详情抽屉绝不能打开
+    expect(detailMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: '题单详情' })).not.toBeInTheDocument();
+
+    // 按钮的默认 click 正常触发，走发布流程
+    const publishDialog = await screen.findByRole('dialog', { name: '发布精选题单' });
+    fireEvent.change(within(publishDialog).getByTestId('publish-title-input'), {
+      target: { value: '键盘发布' },
+    });
+    fireEvent.click(within(publishDialog).getByTestId('publish-submit'));
+
+    await waitFor(() =>
+      expect(publishMock).toHaveBeenCalledWith(7, { title: '键盘发布', gradeCode: 'grade_7' }),
+    );
+    expect(detailMock).not.toHaveBeenCalled();
   });
 });
 

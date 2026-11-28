@@ -61,6 +61,7 @@ describe('FeaturedQuestionSetsRepository — 推荐事务', () => {
       contentKey: 'k',
       studentId: 9,
       gradeCode: 'grade_7',
+      dailyLimitReached: false,
     });
 
     expect(out).toEqual({ setId: 42, alreadyRecommended: false });
@@ -96,6 +97,7 @@ describe('FeaturedQuestionSetsRepository — 推荐事务', () => {
       contentKey: 'fresh',
       studentId: 9,
       gradeCode: 'grade_7',
+      dailyLimitReached: false,
     });
 
     expect(out).toEqual({ setId: 7, alreadyRecommended: false });
@@ -122,6 +124,7 @@ describe('FeaturedQuestionSetsRepository — 推荐事务', () => {
       contentKey: 'k',
       studentId: 9,
       gradeCode: 'grade_7',
+      dailyLimitReached: false,
     });
 
     expect(out).toEqual({ setId: 42, alreadyRecommended: true });
@@ -144,12 +147,60 @@ describe('FeaturedQuestionSetsRepository — 推荐事务', () => {
         contentKey: 'boom',
         studentId: 9,
         gradeCode: 'grade_7',
+        dailyLimitReached: false,
       }),
     ).rejects.toThrow('item insert failed');
 
     expect(conn.rollback).toHaveBeenCalledTimes(1);
     expect(conn.commit).not.toHaveBeenCalled();
     expect(conn.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('额度已满 + 新建题集（affectedRows=1）→ 429/1008，rollback 且不写 items/推荐票', async () => {
+    const conn = makeConn();
+    conn.execute
+      .mockResolvedValueOnce([{ insertId: 7, affectedRows: 1 }, []]); // set upsert：fresh INSERT
+    const { repo } = repoWithConn(conn);
+
+    const err = await repo.createRecommendation({
+      subjectId: 1,
+      questionIds: [3, 7],
+      contentKey: 'fresh-at-cap',
+      studentId: 9,
+      gradeCode: 'grade_7',
+      dailyLimitReached: true,
+    }).catch((e) => e);
+
+    expect(err.getStatus()).toBe(429);
+    expect(err.response).toMatchObject({ code: 1008, message: '今日推荐已达上限，请明天再试' });
+    expect(conn.execute).toHaveBeenCalledTimes(1); // 判定 fresh 后立即拒绝，不再写 items / 推荐票
+    expect(conn.execute.mock.calls.filter((c) => itemInsert.test(sqlOf(c)))).toHaveLength(0);
+    expect(conn.execute.mock.calls.some((c) => sqlOf(c).includes('featured_question_set_recommendations'))).toBe(false);
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('额度已满但命中既有题集（affectedRows=2）→ 幂等成功，不 429、不 rollback', async () => {
+    const conn = makeConn();
+    conn.execute
+      .mockResolvedValueOnce([{ insertId: 42, affectedRows: 2 }, []]) // duplicate UPDATE
+      .mockResolvedValueOnce([[{ id: 42 }], []])                      // SELECT id
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]);              // 推荐命中唯一键 → alreadyRecommended=true
+    const { repo } = repoWithConn(conn);
+
+    await expect(repo.createRecommendation({
+      subjectId: 1,
+      questionIds: [3],
+      contentKey: 'dup-at-cap',
+      studentId: 9,
+      gradeCode: 'grade_7',
+      dailyLimitReached: true,
+    })).resolves.toEqual({ setId: 42, alreadyRecommended: true });
+
+    expect(conn.execute.mock.calls.filter((c) => itemInsert.test(sqlOf(c)))).toHaveLength(0);
+    expect(conn.commit).toHaveBeenCalledTimes(1);
+    expect(conn.rollback).not.toHaveBeenCalled();
   });
 });
 

@@ -1,5 +1,5 @@
 import {
-  BadRequestException, HttpException, HttpStatus, Injectable, NotFoundException,
+  BadRequestException, Injectable, NotFoundException,
 } from '@nestjs/common';
 import {
   FeaturedQuestionSetsRepository,
@@ -65,13 +65,10 @@ export class FeaturedRecommendationService {
       throw new BadRequestException({ code: 1004, message: '只能推荐自己做过的题' });
     }
 
-    // 9. 每日额度在真正建集之前校验，超限直接 429/1008。
-    if (await this.featuredRepo.countSetsCreatedToday(studentId) >= DAILY_SET_LIMIT) {
-      throw new HttpException(
-        { code: 1008, message: '今日推荐已达上限，请明天再试' },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
+    // 9. 每日额度只数「今日新建题集」（§3.1/§10）。这里只算出信号并透传给仓储：
+    //    重复推荐既有题集不占额度，真正的 429/1008 由仓储在确认为 fresh INSERT 后触发。
+    const dailyLimitReached =
+      (await this.featuredRepo.countSetsCreatedToday(studentId)) >= DAILY_SET_LIMIT;
 
     // 10~11. content key 由排序后的题集计算，顺序不同仍归同一题集；建集/投票交给仓储事务。
     const subjectId = [...subjectIds][0];
@@ -81,6 +78,7 @@ export class FeaturedRecommendationService {
       contentKey: createFeaturedContentKey(subjectId, ids),
       studentId,
       gradeCode: grade.code,
+      dailyLimitReached,
     });
   }
 }

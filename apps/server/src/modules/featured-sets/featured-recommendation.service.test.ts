@@ -64,6 +64,7 @@ describe('FeaturedRecommendationService.recommend', () => {
       contentKey: createFeaturedContentKey(1, [1, 2]),
       studentId: 7,
       gradeCode: 'grade_8',
+      dailyLimitReached: false,
     });
   });
 
@@ -111,13 +112,29 @@ describe('FeaturedRecommendationService.recommend', () => {
       .rejects.toMatchObject({ response: { code: 1001, message: '只能推荐同一学科的题' } });
   });
 
-  it('当日新题集数达到 10 -> 429/1008，且不建集', async () => {
+  it('当日新建题集数达到 10：服务层不提前 429，只把 dailyLimitReached=true 透传给仓储', async () => {
     featuredRepo.countSetsCreatedToday.mockResolvedValue(10);
 
-    const err = await service.recommend(7, [1, 2]).catch((e) => e);
-    expect(err.getStatus()).toBe(429);
-    expect(err.response).toMatchObject({ code: 1008 });
-    expect(featuredRepo.createRecommendation).not.toHaveBeenCalled();
+    await expect(service.recommend(7, [1, 2])).resolves.toEqual({ setId: 3, alreadyRecommended: false });
+    expect(featuredRepo.createRecommendation).toHaveBeenCalledWith({
+      subjectId: 1,
+      questionIds: [1, 2],
+      contentKey: createFeaturedContentKey(1, [1, 2]),
+      studentId: 7,
+      gradeCode: 'grade_8',
+      dailyLimitReached: true,
+    });
+  });
+
+  it('已达上限但重复推荐既有题集：服务不拦截，幂等结果正常透传（不 429）', async () => {
+    featuredRepo.countSetsCreatedToday.mockResolvedValue(10);
+    featuredRepo.createRecommendation.mockResolvedValue({ setId: 3, alreadyRecommended: true });
+
+    await expect(service.recommend(7, [1, 2]))
+      .resolves.toEqual({ setId: 3, alreadyRecommended: true });
+    expect(featuredRepo.createRecommendation).toHaveBeenCalledWith(
+      expect.objectContaining({ dailyLimitReached: true }),
+    );
   });
 
   it('按固定顺序校验：freeform 优先于作答事实，作答事实优先于每日额度', async () => {

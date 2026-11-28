@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Inject } from '@nestjs/common';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { PAPER_QUESTION_NO_SQL } from './questions.repo.js';
 
@@ -8,6 +8,8 @@ export interface CreateRecommendationInput {
   contentKey: string;
   studentId: number;
   gradeCode: string;
+  /** 服务层 Step 9 统计出的「今日新建题集数已达上限」信号；仅对新建题集生效。 */
+  dailyLimitReached: boolean;
 }
 
 /** 打开精选题时从 questions 读出的原始题面（交给 mapper 转成运行器题目）。 */
@@ -140,6 +142,15 @@ export class FeaturedQuestionSetsRepository {
         throw new Error(`featured_question_sets upsert: unexpected affectedRows=${affectedRows}`);
       }
       const isNewSet = affectedRows === 1;
+
+      // §3.1/§10：额度只约束「新建题集」。重复命中既有题集永不占额度、永不 429；
+      // 只有确认为 fresh INSERT 且额度已满才回滚（由下方 catch 统一 rollback）并拒绝。
+      if (isNewSet && input.dailyLimitReached) {
+        throw new HttpException(
+          { code: 1008, message: '今日推荐已达上限，请明天再试' },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
 
       const [rows] = await conn.execute<(RowDataPacket & { id: number })[]>(
         `SELECT id FROM featured_question_sets WHERE content_key = ?`,
