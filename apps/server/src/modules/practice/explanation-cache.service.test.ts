@@ -133,28 +133,26 @@ describe('ExplanationCacheService', () => {
     await svc.waitExplanation(1, 5000);
   });
 
-  it('waitForExplanations：DB 已有直返，in-flight 等待，无在途且无解析返回 null', async () => {
+  it('readExplanations：DB 有就给、没有（含空白）给 null；不触发新生成', async () => {
     deps.questionsRepo.findById
       .mockResolvedValueOnce(makeQuestion({ explanation: '已有' }))
-      .mockResolvedValueOnce(makeQuestion());
+      .mockResolvedValueOnce(makeQuestion())
+      .mockResolvedValueOnce(makeQuestion({ explanation: '   ' }));
     const svc = new ExplanationCacheService(deps.questionsRepo as any, deps.explanation as any);
-    const out = await svc.waitForExplanations([1, 2], 100);
-    expect(out[1]).toBe('已有');
-    expect(out[2]).toBeNull();
-    expect(deps.explanation.explain).not.toHaveBeenCalled(); // 批量不触发新生成
+    const out = await svc.readExplanations([1, 2, 3]);
+    expect(out).toEqual({ 1: '已有', 2: null, 3: null });
+    expect(deps.explanation.explain).not.toHaveBeenCalled(); // 批量只读，不生成
   });
 
-  it('waitForExplanations：in-flight 等待返回生成文本', async () => {
-    let resolve!: (v: any) => void;
-    deps.explanation.explain.mockImplementation(() => new Promise((r) => { resolve = r; }));
+  it('readExplanations：在途生成不等待（结果页不能被题解生成挡住）', async () => {
+    deps.explanation.explain.mockImplementation(() => new Promise(() => {})); // 永不返回
     deps.questionsRepo.findById.mockResolvedValue(makeQuestion());
     const svc = new ExplanationCacheService(deps.questionsRepo as any, deps.explanation as any);
-    svc.ensureExplanation(makeQuestion({ answer: 'B' })); // 触发在途生成，explain 挂起
-    await new Promise((r) => setTimeout(r, 0)); // 让 generate 到达 explain 挂起点
-    const waiting = svc.waitForExplanations([1], 5000); // 命中 in-flight -> 等待而非返回 null
-    resolve({ content: '题解', mode: 'solution' });
-    const out = await waiting;
-    expect(out[1]).toBe('题解');
+    svc.ensureExplanation(makeQuestion({ answer: 'B' })); // 触发在途生成
+    await new Promise((r) => setTimeout(r, 0));
+
+    // 旧行为会在这里等满超时；新口径必须立即返回 null
+    await expect(svc.readExplanations([1])).resolves.toEqual({ 1: null });
     expect(deps.explanation.explain).toHaveBeenCalledTimes(1);
   });
 

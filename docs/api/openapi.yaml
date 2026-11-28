@@ -6113,9 +6113,9 @@ paths:
       summary: 批量拉取题目解析（结果页末题后）
       description: >-
         按题目 id 批量取 questions.explanation（student JWT）。ids 为逗号分隔的
-        questionId 列表；DB 已有直返；解析仍在后台生成中（判错触发的 in-flight）
-        则等待其完成（总超时 60s 兜底）；既无解析也无在途生成（从未触发或曾失败）
-        返回 null——不触发新生成。解析为题级公开数据（不分学生）。
+        questionId 列表；**只读库**——DB 有解析就返回，没有就返回 null；
+        既不等待在途生成，也不触发新生成（解析生成由判错时的后台任务负责）。
+        解析为题级公开数据（不分学生）。
       operationId: getTrainingExplanations
       security: [{ bearerAuth: [] }]
       parameters:

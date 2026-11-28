@@ -155,7 +155,8 @@ export class TrainingController {
 
   // ==================== 解析拉取（2026-09-08，判题解析缓存化） ====================
 
-  /** 批量拉解析（末题后结果页）：ids 逗号分隔；后端等 in-flight（60s 兜底）。
+  /** 批量拉解析（末题后结果页）：ids 逗号分隔；**只读库**——有就给、没有给 null，
+   *  不等待在途生成、不触发新生成（2026-11-28 用户口径；解析生成由判错时的后台任务负责）。
    *  注意：须声明在 questions/:questionId/explanation-wait 之前（Nest 按声明顺序匹配，防 'explanations' 被 ':questionId' 吞掉）。 */
   @Get('questions/explanations')
   async getExplanations(@Query('ids') idsStr: string) {

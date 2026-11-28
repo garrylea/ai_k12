@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { CleanupPhase } from './CleanupPhase';
-import { judgePractice, type JudgeResult, type PreviousErrorDetail } from '@/services/api';
+import { judgePractice, getTrainingExplanations, type JudgeResult, type PreviousErrorDetail } from '@/services/api';
 import { usePointsStore } from '@/store/pointsStore';
 
 /**
@@ -31,12 +31,23 @@ vi.mock('@/services/api', async (importOriginal) => {
 vi.mock('./answer/QuestionRunner', () => ({
   QuestionRunner: ({
     onSubmit,
+    onFinish,
   }: {
     onSubmit: (q: { n: string; text: string }, answer: string) => Promise<unknown>;
+    onFinish: (results: Record<string, { isCorrect: boolean; method: string; errorType: null; studentAnswer: string }>) => void;
   }) => (
-    <button type="button" onClick={() => void onSubmit({ n: '1', text: '题面' }, '我的答案')}>
-      提交
-    </button>
+    <>
+      <button type="button" onClick={() => void onSubmit({ n: '1', text: '题面' }, '我的答案')}>
+        提交
+      </button>
+      {/* 收尾（末题判题全部完成）→ 父层 handleFinish */}
+      <button
+        type="button"
+        onClick={() => onFinish({ '1': { isCorrect: false, method: 'exact', errorType: null, studentAnswer: '我的答案' } })}
+      >
+        完成
+      </button>
+    </>
   ),
 }));
 
@@ -114,5 +125,18 @@ describe('CleanupPhase 发分反馈', () => {
 
     await waitFor(() => expect(usePointsStore.getState().queue).toHaveLength(1));
     expect(usePointsStore.getState().queue[0]).toMatchObject({ points: 0, title: '错题订正' });
+  });
+
+  /**
+   * 2026-11-28：与专项页同款——解析请求不得挡住结果页（当时后端还会等 in-flight 生成，60s 兜底）。
+   */
+  it('解析请求未返回 → 结果页立即出现，不卡在「判题中」', async () => {
+    vi.mocked(getTrainingExplanations).mockReturnValue(new Promise(() => {}));
+
+    renderPhase();
+    fireEvent.click(screen.getByRole('button', { name: '完成' }));
+
+    expect(await screen.findByText('答题结果')).toBeInTheDocument();
+    expect(screen.queryByText('判题中，请稍候…')).toBeNull();
   });
 });

@@ -129,25 +129,13 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
       } catch { /* best-effort */ }
     }
 
-    // 错题批量拉解析（后端等 in-flight 生成，60s 兜底）：孤儿题（questionId null）无解析不拉。
-    // 客观题答错 + 主观题（self_assess，无论自评对错）都要解析。
+    // 错题批量拉解析（解析是后台补的）
     const wrongQids: number[] = [];
     for (const e of errors) {
       const a = results[e.questionN];
       if (e.questionId == null || !a || a.failed) continue;
       if (!a.isCorrect || a.method === 'self_assess') wrongQids.push(e.questionId);
     }
-    let expls: Record<number, string | null> = {};
-    if (wrongQids.length > 0) {
-      try {
-        expls = (await getTrainingExplanations(wrongQids)).explanations;
-      } catch { /* 拉取失败：结果页显示「正在生成中 + 刷新」 */ }
-    }
-    const byN: Record<string, string | null> = {};
-    for (const e of errors) {
-      if (e.questionId != null && expls[e.questionId]) byN[e.questionN] = expls[e.questionId];
-    }
-    setExplanations(byN);
 
     const allCorrect = stillWrongIds.length === 0
       && errors.every((e) => {
@@ -155,8 +143,23 @@ export function CleanupPhase({ errors, lessonId, subjectId, onComplete }: Props)
         return a && a.isCorrect;
       });
 
+    // 结果页先渲染：解析是后台补的（接口只读库，有就给、没有给 null），拉到再合并。
+    // 以前 await 在 setPhase 之前，加上后端等在途生成，末题会卡在「判题中」60 秒
+    // （2026-11-28 专项页同款问题，见 TargetedRunPage 注释）。
     setFinalResults(results);
     setPhase(allCorrect ? 'allClear' : 'hasErrors');
+
+    if (wrongQids.length > 0) {
+      void getTrainingExplanations(wrongQids)
+        .then(({ explanations: expls }) => {
+          const byN: Record<string, string | null> = {};
+          for (const e of errors) {
+            if (e.questionId != null && expls[e.questionId]) byN[e.questionN] = expls[e.questionId];
+          }
+          setExplanations(byN);
+        })
+        .catch(() => { /* 拉取失败：结果页显示「正在生成中 + 刷新」 */ });
+    }
   }, [errors]);
 
   // ========== ANSWERING 态：答题核心收敛到 QuestionRunner（embedded）==========

@@ -92,7 +92,7 @@ export function AnswerResultList({
     return () => clearInterval(t);
   }, [countdown]);
 
-  // 父层异步补拉（如考试结果页 mount 后等 in-flight）到达时合并：只接受非空值，
+  // 父层异步补拉（如考试结果页 mount 后补拉）到达时合并：只接受非空值，
   // 不覆盖已展示/已刷新的解析。父层须 memoize/set-once 保持引用稳定，避免每渲染重置。
   useEffect(() => {
     setExplanations((prev) => {

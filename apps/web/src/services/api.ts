@@ -1426,8 +1426,8 @@ export function getTrainingHint(questionId: number): Promise<HintResult> {
 
 // --- Training: explanations（判题解析缓存化，2026-09-08） ---
 
-/** 批量拉解析（末题后结果页用）：ids 逗号分隔；后端等 in-flight 生成完成（60s 兜底），不触发新生成。
- *  返回键为 questionId 的映射，未就绪的题值为 null。 */
+/** 批量拉解析（末题后结果页用）：ids 逗号分隔；**只读库**——有就给、没有给 null，
+ *  不等待在途生成、不触发新生成（2026-11-28）。返回键为 questionId 的映射。 */
 export function getTrainingExplanations(ids: number[]): Promise<{ explanations: Record<number, string | null> }> {
   const qs = new URLSearchParams({ ids: ids.join(',') });
   return fetchApi<{ explanations: Record<number, string | null> }>(`/training/questions/explanations?${qs.toString()}`);

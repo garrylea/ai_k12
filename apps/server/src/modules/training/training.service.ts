@@ -1162,10 +1162,10 @@ export class TrainingService {
     return this.hiddenRepo.findAllByStudent(studentId, subjectId);
   }
 
-  /** 批量拉解析：等 in-flight 生成完成（60s），不触发新生成。 */
+  /** 批量拉解析：**只读库**——有就给、没有给 null；不等待在途生成、不触发新生成（2026-11-28 用户口径）。 */
   async getExplanations(ids: number[]): Promise<{ explanations: Record<number, string | null> }> {
     const clean = ids.filter((x) => Number.isInteger(x) && x > 0);
-    const explanations = await this.explanationCache.waitForExplanations(clean);
+    const explanations = await this.explanationCache.readExplanations(clean);
     return { explanations };
   }
 

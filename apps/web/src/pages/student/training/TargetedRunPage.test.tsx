@@ -187,6 +187,25 @@ describe('TargetedRunPage 完成发分', () => {
     expect(screen.getByText('答题结果')).toBeTruthy();
   });
 
+  /**
+   * 2026-11-28 用户实测：末题提交后一直停在「判题中」。
+   * 根因不是判题——判题早已返回；是 `handleFinish` 把批量拉解析 `await` 在 `setPhase('result')`
+   * 之前，当时后端该端点还会等 in-flight 解析生成（60s 兜底；现已改纯读库）。
+   * 钉住：前端不得再让解析请求挡住结果页——请求未返回（甚至永不返回）也必须先渲染结果。
+   */
+  it('解析请求未返回 → 结果页立即可见，不卡在「判题中」', async () => {
+    seed(77);
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+    judgeMock.mockResolvedValue({ ...JUDGED, isCorrect: false });
+    // 永不 resolve：模拟请求挂住（网络慢 / 后端异常）
+    explanationsMock.mockReturnValue(new Promise(() => {}));
+
+    await answerOnlyQuestion();
+
+    expect(screen.getByText('答题结果')).toBeInTheDocument();
+    expect(screen.queryByText('判题中，请稍候…')).toBeNull();
+  });
+
   it('balance 为 null（award_failed）：提示稍后到账 + 重试，不 push 假分；点重试再调一次 complete', async () => {
     seed(77);
     const retry = deferred<CompleteTrainingSessionResult>();

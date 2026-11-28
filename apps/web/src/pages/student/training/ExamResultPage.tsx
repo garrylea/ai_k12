@@ -74,7 +74,7 @@ export default function ExamResultPage() {
   const [items, setItems] = useState<ExamResultItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 错题解析：初始为 getExamResults 的 explanation（存量历史 analysis 兜底）；
-  // mount 后对仍为空的错题后台补拉（等 in-flight 生成，60s 兜底），完成后合并。
+  // mount 后对仍为空的错题后台补拉（只读库，有就给、没有给 null），完成后合并。
   const [explanations, setExplanations] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
@@ -110,7 +110,7 @@ export default function ExamResultPage() {
         }
         setExplanations(base);
 
-        // 后台补拉（不阻塞首屏）：批量端点等 in-flight 生成完成，合并非空结果
+        // 后台补拉（不阻塞首屏）：批量端点只读库（有就给、没有给 null），合并非空结果
         if (missingIds.length > 0) {
           try {
             const { explanations: fetched } = await getTrainingExplanations(missingIds);

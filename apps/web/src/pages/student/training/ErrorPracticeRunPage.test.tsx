@@ -353,4 +353,17 @@ describe('ErrorPracticeRunPage 会话 uid 与完成端点（Task 10）', () => {
       sessionUid: uid, source: 'error_practice', questionId: 102,
     }));
   });
+
+  /**
+   * 2026-11-28：与专项页同款——解析请求不得挡住结果页（当时后端还会等 in-flight 生成，60s 兜底）。
+   */
+  it('解析请求未返回 → 结果页立即出现，不卡在「判题中」', async () => {
+    judgeMock.mockResolvedValue(judged({ isCorrect: false }));
+    explanationsMock.mockReturnValue(new Promise(() => {}));
+
+    await answerOnlyQuestion();
+
+    expect(await screen.findByText('答题结果')).toBeTruthy();
+    expect(screen.queryByText('判题中，请稍候…')).toBeNull();
+  });
 });

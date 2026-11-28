@@ -242,7 +242,15 @@ export default function TargetedRunPage() {
       completeSpecialSession(sessionUid).catch(() => {});
     }
 
-    // 末题判题完成后：收集需要解析的 questionId 批量拉取（后端等 in-flight 生成，60s 兜底）。
+    // 与错题重做的差异点：专项练习答错已由后端 judge 端点自动入错题本，
+    // 收尾无需 bump，直接进结果页。
+    // ⚠️ 必须**先**渲染结果页：解析是后台补的（接口只读库，有就给、没有给 null），
+    // 拉取结果到了再合并。以前把 `await getTrainingExplanations` 放在 setPhase 之前，
+    // 加上后端当时会等在途生成，末题会停在「判题中」满 60 秒（2026-11-28 用户实测）。
+    setPhase('result');
+
+    // 末题判题完成后：收集需要解析的 questionId 后台批量拉取，到达后合并进结果页
+    // （AnswerResultList 只合并非空值；未生成完的题显示「正在生成中 + 刷新」）。
     // 解析为题级公开数据，题单条目必来自题库（questionId 非空）。
     const wrongIds: number[] = [];
     for (const q of questions ?? []) {
@@ -252,24 +260,20 @@ export default function TargetedRunPage() {
       // 客观题答错 + 主观题（self_assess，无论自评对错）都要解析
       if (!r.isCorrect || r.method === 'self_assess') wrongIds.push(qid);
     }
-    let expls: Record<number, string | null> = {};
     if (wrongIds.length > 0) {
-      try {
-        expls = (await getTrainingExplanations(wrongIds)).explanations;
-      } catch {
-        // 拉取失败视为全部未生成，结果页显示「正在生成中 + 刷新」
-      }
+      void getTrainingExplanations(wrongIds)
+        .then(({ explanations: expls }) => {
+          const byN: Record<string, string | null> = {};
+          for (const q of questions ?? []) {
+            const qid = entryByN.get(q.n)?.questionId;
+            if (qid != null && expls[qid]) byN[q.n] = expls[qid];
+          }
+          setExplanations(byN);
+        })
+        .catch(() => {
+          // 拉取失败视为全部未生成，结果页显示「正在生成中 + 刷新」
+        });
     }
-    const byN: Record<string, string | null> = {};
-    for (const q of questions ?? []) {
-      const qid = entryByN.get(q.n)?.questionId;
-      if (qid != null && expls[qid]) byN[q.n] = expls[qid];
-    }
-    setExplanations(byN);
-
-    // 与错题重做的差异点：专项练习答错已由后端 judge 端点自动入错题本，
-    // 收尾无需 bump，直接进结果页。
-    setPhase('result');
   }, [entryByN, questions, completeSession, mode, sessionUid]);
 
   const confirmMarkHidden = useCallback(async () => {

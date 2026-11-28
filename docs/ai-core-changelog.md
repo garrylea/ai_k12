@@ -2,6 +2,21 @@
 
 本文件是从根目录 `CLAUDE.md` 迁出的带日期修正/新增记录（2026-07-24 → 2026-09-16；迁出后的新条目继续追加在顶部），原文保留、未做删改。目的是控制 CLAUDE.md 体积、避免模型上下文失焦。
 
+## 2026-11-28 专项/错题练习末题卡在「判题中」60 秒
+
+**问题（lc1 实测）**：数学专项「初三上学期 · 第8题」3 题（全是选择题）答完提交后，一直显示「判题中，请稍候…」，约 1 分钟后才出结果页。
+
+**证据**：`api_request_logs` 显示三条 `POST /api/training/judge` 都在 30–50ms 内返回；真正卡住的是 `GET /api/training/questions/explanations`，`latency_ms=60004`（后端等 in-flight 解析生成的上限）。`llm_call_logs` 里同批解析调用耗时 133s / 38.6s / 497.8s（20,959 output tokens）。即**判题早已完成**，页面是在等题解生成。
+
+**根因**：`TargetedRunPage` / `ErrorPracticeRunPage` / `CleanupPhase` 的 `handleFinish` 把 `await getTrainingExplanations(...)` 放在 `setPhase('result')` 之前，批量拉解析会阻塞结果页，而后端该端点要等 in-flight 解析生成（60s 兜底）。解析由强模型生成（本次最慢 8 分钟），所以每次有错题都会把末题挡满 60 秒。判题链路与 2026-11-26 的自评结算改动均无关。
+
+**修法**（用户口径：题解**有就给、没有就不给，不在此时生成**）：
+
+1. 后端 `GET /training/questions/explanations` 改为**纯读库**——`ExplanationCacheService.waitForExplanations`（等 in-flight 60s）换成 `readExplanations`，不等待、不触发生成。`explanation-wait`（单题刷新，120s，触发补生成）语义不变。
+2. 前端 `TargetedRunPage` / `ErrorPracticeRunPage` / `CleanupPhase` 三处 `handleFinish` 都改为**先渲染结果页**，批量拉解析改成后台请求（`.then` 到达后 `setExplanations` 合并）；未生成完的题沿用结果页既有的「正在生成中 + 刷新」状态。
+
+**验证**：新增 4 条回归（后端「在途生成不等待」；三个页面「解析请求永不返回时结果页必须已出现、且不出现判题中」）；apps/web `npm test` 2014/2014、`tsc -b`、ESLint 通过；server 相关用例通过。
+
 **人工校对改为一题一卡（2026-11-26）**：题目身份升级为 `(source, group_order, sub_no)`；卡片一次给全现状（题干/选项/共享材料/题内材料/答案/图/依据），主菜单 `1–5` 选段 + `E` 编辑器改整题 / `R` 全换 / `k` 确认无问题 / `u` 用修复前原文；槽位统一「回车=不改、其余都是内容、命令一律 `:` 前缀」。材料用三态草稿（`UNSET` / `None` / 值）字段级合并，图片支持追加/替换/清空且不动共享文章正文；答案清空新增向后兼容的 `clear_answer=True` 记录字段（主 UPDATE 的 `COALESCE(NULLIF(...))` 清不掉空串）；多题号粘贴按题拆分生成记录但不批量改答案。`k`/回车/`s` 三个不写库出口分开；非 TTY 在 `fix_question_cli` 入口直接打印唯一入口命令。旧补题记录继续兼容；旧菜单（verdict / edit-mode / image-mode / confirm / 答案富输入）删除，`manual_fix.py` 从 2695 行降到约 1000 行，原语/快照/队列/记录拆到 `review_editor` / `review_content` / `review_queue` / `review_records`。
 
 **题解内嵌分段统一拆分（2026-11-27）**：新增 `answer_sections.py`，在答案块完成题号归属后统一把

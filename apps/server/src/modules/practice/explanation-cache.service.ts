@@ -79,28 +79,17 @@ export class ExplanationCacheService {
     this.enqueue(q.id);
   }
 
-  /** 批量等待（结果页首次拉取）：DB 有直返；in-flight 等（总超时 60s）；无在途且无解析 -> null（不触发新生成）。 */
-  async waitForExplanations(ids: number[], timeoutMs = 60_000): Promise<Record<number, string | null>> {
+  /**
+   * 批量读解析（结果页取数）：**只读库**——有就返回，没有返回 null。
+   * 不等待 in-flight 生成、不触发新生成（用户口径 2026-11-28）。
+   * 以前这里会等 in-flight（60s 兜底），而解析由强模型生成（实测单题 38s–8min），
+   * 导致每次答错都把结果页挡满 60 秒。
+   */
+  async readExplanations(ids: number[]): Promise<Record<number, string | null>> {
     const out: Record<number, string | null> = {};
-    const pending: number[] = [];
     for (const id of ids) {
       const q = await this.questionsRepo.findById(id);
-      const text = q?.explanation?.trim();
-      if (text) out[id] = text;
-      else if (this.inFlight.has(id)) pending.push(id);
-      else out[id] = null;
-    }
-    if (pending.length > 0) {
-      const deadline = Date.now() + timeoutMs;
-      const settled = await Promise.all(pending.map(async (id) => {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) return null;
-        // 顺序 await 期间该题生成可能已完成并从 map 删除 -> 先取再判空，避免 `!` 解引用抛 TypeError
-        const p = this.inFlight.get(id);
-        return p ? withTimeout(p, remaining, null) : null;
-      }));
-      // settled 里的 null（超时/生成失败）也要写回 out，避免遗留 undefined
-      pending.forEach((id, i) => { out[id] = settled[i] ?? null; });
+      out[id] = q?.explanation?.trim() || null;
     }
     return out;
   }

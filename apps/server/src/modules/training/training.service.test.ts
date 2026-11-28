@@ -37,7 +37,7 @@ const mk = (overrides: any = {}) => ({
   },
   // 解析拉取（Task 7）+ 自评 incorrect 触发解析缓存兜底。
   explanationCache: {
-    waitForExplanations: vi.fn().mockResolvedValue({}),
+    readExplanations: vi.fn().mockResolvedValue({}),
     waitExplanation: vi.fn().mockResolvedValue(null),
     ensureExplanation: vi.fn(),
   },
@@ -1239,12 +1239,12 @@ describe('TrainingService.listHidden', () => {
 });
 
 describe('TrainingService.getExplanations', () => {
-  it('过滤非正整数 id 后透传 explanationCache.waitForExplanations', async () => {
+  it('过滤非正整数 id 后透传 explanationCache.readExplanations（只读库，不等待生成）', async () => {
     const deps = mk({
-      explanationCache: { waitForExplanations: vi.fn().mockResolvedValue({ 10: '题解' }), waitExplanation: vi.fn() },
+      explanationCache: { readExplanations: vi.fn().mockResolvedValue({ 10: '题解' }), waitExplanation: vi.fn() },
     });
     const r = await mkSvc(deps).getExplanations([10, 0, -1, 11]);
-    expect(deps.explanationCache.waitForExplanations).toHaveBeenCalledWith([10, 11]);
+    expect(deps.explanationCache.readExplanations).toHaveBeenCalledWith([10, 11]);
     expect(r).toEqual({ explanations: { 10: '题解' } });
   });
 });
@@ -1263,7 +1263,7 @@ describe('TrainingService.waitForExplanation', () => {
   it('解析成功 -> 返回 explanation，不写通知', async () => {
     const deps = mk({
       questionsRepo: { findById: vi.fn().mockResolvedValue(activeQuestion), findRandomByKpAndType: vi.fn() },
-      explanationCache: { waitForExplanations: vi.fn(), waitExplanation: vi.fn().mockResolvedValue('题解') },
+      explanationCache: { readExplanations: vi.fn(), waitExplanation: vi.fn().mockResolvedValue('题解') },
     });
     const r = await mkSvc(deps).waitForExplanation(10);
     expect(r).toEqual({ explanation: '题解' });
