@@ -11,6 +11,7 @@ import { PrintIconButton } from '@/components/business/print/PrintIconButton';
 import { PrintPreview } from '@/components/business/print/PrintPreview';
 import { Modal } from '@/components/base';
 import { CelebrationOverlay } from '@/components/business';
+import RecommendFeaturedSetButton from '@/components/business/RecommendFeaturedSetButton';
 import type { PracticeQuestion } from '@/components/business/AnswerModal';
 import {
   completeSpecialSession,
@@ -78,12 +79,14 @@ export default function TargetedRunPage() {
   const [entries, setEntries] = useState<TargetedPracticeQuestion[] | null>(null);
   // 配置页交接来的会话 id：收尾发分的唯一凭据；null = 会话 INSERT 降级（不发分）
   const [sessionId, setSessionId] = useState<number | null>(null);
-  // 两种模式共用一个页面：similar（等同普通专项，带会话发分）/ redo（单题、不记录、不发分）
-  const [mode, setMode] = useState<'similar' | 'redo'>('similar');
+  // 三种模式共用一个页面：similar（等同普通专项，带会话发分）/ redo（单题、不记录、不发分）
+  // / featured（精选题单：sessionId 恒 null 不发分，sessionUid 用服务端生成的那个）
+  const [mode, setMode] = useState<'similar' | 'redo' | 'featured'>('similar');
   // 交接体里的标题（练习记录详情页会写；配置页老入口没有 → 用默认标题）
   const [runTitle, setRunTitle] = useState<string | null>(null);
-  // 作答历史（2026-11-01）：本次练习 UUID，判题时带上 → 后端写 special_answer_records
-  const sessionUid = useMemo(() => newSessionUid(), []);
+  // 作答历史（2026-11-01）：本次练习 UUID，判题时带上 → 后端写 special_answer_records。
+  // featured 必须在 mount effect 里覆盖成服务端 open 端点生成的 uid（见下），绝不能自备。
+  const [sessionUid, setSessionUid] = useState(() => newSessionUid());
 
   // 完成发分（乙类会话页唯一入口）：末题收尾时调 complete；失败可重试
   // redo 的 sessionId 恒为 null → hook 内部直接跳过，不发分、不报错
@@ -109,6 +112,9 @@ export default function TargetedRunPage() {
     setSessionId(handoff?.sessionId ?? null);
     setMode(handoff?.mode ?? 'similar');
     setRunTitle(handoff?.title ?? null);
+    // featured 的 uid 来自服务端（openFeaturedSet），原样沿用；普通/重做入口不带这个字段，
+    // 继续用 mount 时生成的 uid。交接体解析失败时也不会走到这里（entries 空 → 踢回来源页）。
+    if (handoff?.sessionUid) setSessionUid(handoff.sessionUid);
   }, []);
 
   // 空题单（直接访问 / 解析失败 / 刷新后读不到）：回来源页（练习记录详情 / 配置页）
@@ -195,7 +201,8 @@ export default function TargetedRunPage() {
         source: 'targeted',
         // 会话留痕（后端累加 judged_count）；sessionId 为 null 时不带这个字段
         ...(sessionId != null ? { sessionId } : {}),
-        // 两种模式分流：redo 只要「不算分不记录」这一个信号；similar/普通专项走完整会话链路
+        // 三种模式分流：redo 只要「不算分不记录」这一个信号；featured 走完整会话链路但
+        // 额外压制错题积分（真正的保证在服务端 session，见 Task 7）；similar 走普通专项
         ...(mode === 'redo'
           ? { suppressErrorFixPoints: true }
           : {
@@ -204,6 +211,7 @@ export default function TargetedRunPage() {
               title: runTitle ?? `${subjectName(subjectId)}专项练习`,
               questionCount: questions.length,
               plannedQuestionIds: (entries ?? []).map((e) => e.questionId),
+              ...(mode === 'featured' ? { suppressErrorFixPoints: true } : {}),
             }),
         questionOrder: orderByQuestionId.get(q.n) ?? 1,
       });
@@ -237,7 +245,9 @@ export default function TargetedRunPage() {
     completeSession();
 
     // 专项会话收尾（Task 10）：判题已写 special_answer_records，此处置会话 completed_at。
-    // redo 不建会话故不调；best-effort，不阻断发分与结果页。
+    // similar 与 featured 都调（featured 用服务端 uid）；redo 不建会话故不调。
+    // best-effort，不阻断发分与结果页。featured 的 sessionId 恒 null → 上面 completeSession
+    // 内部直接跳过，绝不会调 completeTrainingSession / 弹积分反馈。
     if (mode !== 'redo') {
       completeSpecialSession(sessionUid).catch(() => {});
     }
@@ -305,33 +315,36 @@ export default function TargetedRunPage() {
             // 发分失败时挂在结果弹窗顶部：可重试的（网络 / award_failed）给出口；
             // 客户端 4xx（token 失效 / 会话被删）重试必然失败，只给诚实说明
             headerExtra={
-              // 只有真有内容可展示时才给 headerExtra —— 否则返回 undefined，
-              // 让 AnswerResultList 不画那条 border-b（全对且发分正常是常见路径）
-              needsRetry || unrecoverable || remediationOfferVisible ? (
-                <div className="space-y-3">
-                  {needsRetry || unrecoverable ? (
-                    <div className="px-5 py-3">
-                      <SessionPointsRetryNotice
-                        variant={unrecoverable ? 'unrecoverable' : 'retry'}
-                        retrying={retrying}
-                        onRetry={retry}
-                      />
-                    </div>
-                  ) : undefined}
-                  {/* 错题补偿套题询问卡槽位：remediationOfferVisible 为假时连槽位都不渲染，
-                      否则外层 space-y-3 仍非空、headerExtra 仍 truthy → 多出分隔线 */}
-                  {remediationOfferVisible && (
-                    <div className="px-5 pb-4 empty:hidden" data-testid="remediation-offer-slot">
-                      <RemediationOfferCard
-                        source="targeted"
-                        sessionId={sessionId}
-                        wrongCount={remediationWrongIds.length}
-                        wrongQuestionIds={remediationWrongIds}
-                      />
-                    </div>
-                  )}
+              // 推荐按钮恒在：正常专项 / featured / redo 结果页都可把本轮题单推荐给教研员。
+              // 其余槽位按条件出现；remediationOfferVisible 为假时连它的槽位都不渲染，
+              // 免得外层 space-y-3 多出一个空块（AnswerResultList 对 truthy headerExtra 画 border-b）。
+              <div className="space-y-3">
+                <div className="px-5 pt-4" data-testid="recommend-featured-slot">
+                  <RecommendFeaturedSetButton
+                    questionIds={(entries ?? []).map((q) => q.questionId)}
+                  />
                 </div>
-              ) : undefined
+                {needsRetry || unrecoverable ? (
+                  <div className="px-5 py-3">
+                    <SessionPointsRetryNotice
+                      variant={unrecoverable ? 'unrecoverable' : 'retry'}
+                      retrying={retrying}
+                      onRetry={retry}
+                    />
+                  </div>
+                ) : undefined}
+                {/* 错题补偿套题询问卡槽位：remediationOfferVisible 为假时连槽位都不渲染 */}
+                {remediationOfferVisible && (
+                  <div className="px-5 pb-4 empty:hidden" data-testid="remediation-offer-slot">
+                    <RemediationOfferCard
+                      source="targeted"
+                      sessionId={sessionId}
+                      wrongCount={remediationWrongIds.length}
+                      wrongQuestionIds={remediationWrongIds}
+                    />
+                  </div>
+                )}
+              </div>
             }
             onWaitExplanation={async (qid) => {
               const res = await waitTrainingExplanation(qid);
@@ -389,8 +402,8 @@ export default function TargetedRunPage() {
                       source: 'targeted',
                       // 自评回写作答历史对错（2026-11-26）：重做不记录，故同 judge 不传 uid
                       ...(mode === 'redo' ? {} : { sessionUid }),
-                      // 重做不计分：错题本仍要更新，但不得触发错题积分
-                      suppressErrorFixPoints: mode === 'redo',
+                      // 重做/精选不发错题积分：错题本仍要更新，但最终保证在服务端 session
+                      suppressErrorFixPoints: mode === 'redo' || mode === 'featured',
                     });
                   }}
                   onFinish={handleFinish}

@@ -63,4 +63,27 @@ describe('parseRunHandoff', () => {
   it('title 不是字符串 -> null', () => {
     expect(parseRunHandoff(JSON.stringify({ sessionId: 1, questions: [], title: 1 }))).toBeNull();
   });
+
+  /**
+   * featured 精选题单（2026-11-28 Task 10）：sessionUid 由服务端 open 端点生成并随交接体写入，
+   * 运行器不得自行生成。缺 uid 视为形状不对——否则会拿页面新生成的 uid 去 complete 一个
+   * 服务端根本不存在的专项会话。
+   */
+  it('featured 缺 sessionUid 时视为非法', () => {
+    expect(parseRunHandoff(JSON.stringify({
+      sessionId: null, questions: [], title: '精选', mode: 'featured',
+    }))).toBeNull();
+  });
+
+  it('featured 带 sessionUid 时保留服务端 uid', () => {
+    expect(parseRunHandoff(JSON.stringify({
+      sessionId: null, questions: [], title: '精选', mode: 'featured', sessionUid: 'u-1',
+    }))).toMatchObject({ mode: 'featured', sessionUid: 'u-1' });
+  });
+
+  it('featured 的 sessionUid 为空串 -> null', () => {
+    expect(parseRunHandoff(JSON.stringify({
+      sessionId: null, questions: [], mode: 'featured', sessionUid: '',
+    }))).toBeNull();
+  });
 });

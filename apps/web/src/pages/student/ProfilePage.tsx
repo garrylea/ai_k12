@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { Button, Card, LevelIcon, Progress, Skeleton } from '@/components/base';
+import FeaturedSetsCard from '@/components/business/FeaturedSetsCard';
 import {
   getMyLedger,
   getMyPoints,
@@ -107,6 +108,9 @@ export default function ProfilePage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-6 py-8">
       <h1 className="text-2xl font-black tracking-tight text-[var(--text-primary)]">个人中心</h1>
+
+      {/* 精选题单完整列表：只在个人中心，训练首页只有未读 Banner */}
+      <FeaturedSetsCard />
 
       {loading ? (
         <div data-testid="profile-skeleton" className="space-y-6">

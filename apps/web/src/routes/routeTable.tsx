@@ -79,6 +79,7 @@ import AdminBillingPage from '@/pages/admin/AdminBillingPage';
 import AdminSecurityPage from '@/pages/admin/AdminSecurityPage';
 import ResearchPapersPage from '@/pages/research/ResearchPapersPage';
 import ResearchPaperDetailPage from '@/pages/research/ResearchPaperDetailPage';
+import ResearchFeaturedSetsPage from '@/pages/research/ResearchFeaturedSetsPage';
 import ResearchAuditPage from '@/pages/research/ResearchAuditPage';
 import AnalyticsOverviewPage from '@/pages/admin/analytics/AnalyticsOverviewPage';
 import AnalyticsFunnelPage from '@/pages/admin/analytics/AnalyticsFunnelPage';
@@ -154,6 +155,8 @@ export const routes: RouteObject[] = [
       { path: '', element: <Navigate to="papers" replace /> },
       { path: 'papers', element: <ResearchPapersPage /> },
       { path: 'papers/:id', element: <ResearchPaperDetailPage /> },
+      // 精选题单审核工作台（2026-11-28）：侧栏「精选题单」入口指向本页
+      { path: 'featured-sets', element: <ResearchFeaturedSetsPage /> },
       { path: 'audit', element: <ResearchAuditPage /> },
     ],
   },

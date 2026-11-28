@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Banner, Button, PageHeader } from '@/components/base';
 import { StudentAccountActions } from '@/components/business';
-import { getRemediationOverview, getTrainingErrorBook, type RemediationOverview } from '@/services/api';
+import {
+  getFeaturedUnreadSummary,
+  getRemediationOverview,
+  getTrainingErrorBook,
+  type FeaturedUnreadSummary,
+  type RemediationOverview,
+} from '@/services/api';
 import { parseSubjectId, subjectName, SUBJECT_MATH } from '@/constants';
 
 /** 专项练习：靶心（线性 SVG）。 */
@@ -93,6 +99,9 @@ export default function TrainingHomePage() {
   // 相似题专项练习：null = 载入中/失败（不显示提示条）
   const [remediation, setRemediation] = useState<RemediationOverview | null>(null);
   const [remediationDismissed, setRemediationDismissed] = useState(false);
+  // 新精选题单未读：null = 拉取中/失败（静默，不显示 Banner）
+  const [featuredUnread, setFeaturedUnread] = useState<FeaturedUnreadSummary | null>(null);
+  const [featuredDismissed, setFeaturedBismissed] = useState(false);
 
   // 相似题 overview 仅数学有（新学科尚未接入），非数学直接跳过 —— 不发请求、不渲染提示条
   useEffect(() => {
@@ -124,6 +133,27 @@ export default function TrainingHomePage() {
     };
   }, [subjectId]);
 
+  // 未读数：挂载 + 窗口重新聚焦时刷新（无定时器）。失败静默，不阻塞三卡。
+  // 关闭只改本页 state，不写存储、不持久屏蔽。
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      getFeaturedUnreadSummary()
+        .then((summary) => {
+          if (!cancelled) setFeaturedUnread(summary);
+        })
+        .catch(() => {
+          // 静默：拉不到就不显示 Banner
+        });
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
+
   const errorCountText =
     unclearedCount == null
       ? '未清零 -- 题'
@@ -135,6 +165,7 @@ export default function TrainingHomePage() {
   // 但数据管线按卷 purge 可能留下 0 题的 active 套题，此处兜底避免「待完成 0 题」的荒谬文案。
   const remediationPending = remediation ? remediation.itemCount - remediation.correctCount : 0;
   const showRemediation = isMath && remediation?.active === true && !remediationDismissed && remediationPending > 0;
+  const showFeaturedBanner = !featuredDismissed && (featuredUnread?.count ?? 0) > 0;
 
   return (
     <div
@@ -168,6 +199,30 @@ export default function TrainingHomePage() {
                   onClick={() => navigate('/student/training/remediation/run')}
                 >
                   开始练习
+                </Button>
+              }
+            />
+          </div>
+        )}
+
+        {/* 新精选题单未读提示（只在训练首页露个头，完整列表在个人中心） */}
+        {showFeaturedBanner && featuredUnread && (
+          <div className="mt-6">
+            <Banner
+              type="warning"
+              title={`有 ${featuredUnread.count} 个新精选题单`}
+              description={
+                featuredUnread.latest ? `最新：${featuredUnread.latest.title}` : undefined
+              }
+              onClose={() => setFeaturedBismissed(true)}
+              action={
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => navigate('/student/profile')}
+                >
+                  查看
                 </Button>
               }
             />

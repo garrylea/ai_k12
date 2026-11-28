@@ -66,6 +66,10 @@ tags:
     description: 做题入口（自由做题）：题图/文字识别切题 + 判题 SSE
   - name: Research
     description: 教研角色（researcher）：试卷管理迁移 + 题目五字段纠错 + 图片生命周期 + 内容审计；改答案不回填历史数据
+  - name: StudentFeaturedSets
+    description: 学生精选题单（student）：推荐、完整列表、未读摘要、打开作答（内容分发，不发积分）
+  - name: ResearchFeaturedSets
+    description: 教研精选题单（researcher）：审核列表/详情/角标、按年级发布、拒绝、重新审核、撤回；只看推荐票聚合
 paths:
   # Auth
   /auth/register:
@@ -8725,6 +8729,284 @@ paths:
         '400': { description: olderThanHours 非 1–720 整数（code=1001） }
         '403': { description: 非 researcher（code=1005） }
 
+  # Student Featured Sets（学生精选题单，2026-11-28）
+  /student/featured-sets:
+    get:
+      tags: [StudentFeaturedSets]
+      summary: 精选题单完整列表（学生）
+      description: >-
+        当前年级（resolveGradeInfo 的 grade_N code）+ published + 至少一题在架的完整列表，按 published_at DESC。
+        pageSize 固定 20；studentId 只取 JWT sub。
+      operationId: listStudentFeaturedSets
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StudentFeaturedSetListResponse'
+        '400': { description: page 非正整数 / 年级无法解析（code=1001） }
+        '401': { description: 未登录 / token 失效（code=1003） }
+        '403': { description: 非 student（code=1005）/ 订阅过期（code=2001） }
+  /student/featured-sets/unread-count:
+    get:
+      tags: [StudentFeaturedSets]
+      summary: 精选题单未读摘要（学生，训练首页 Banner）
+      description: 口径与列表一致；无未读时 count=0、latest=null。
+      operationId: getStudentFeaturedSetUnreadCount
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StudentFeaturedSetUnreadSummary'
+        '401': { description: 未登录 / token 失效（code=1003） }
+        '403': { description: 非 student（code=1005）/ 订阅过期（code=2001） }
+  /student/featured-sets/recommend:
+    post:
+      tags: [StudentFeaturedSets]
+      summary: 推荐题集（学生）
+      description: >-
+        只推自己做过的、在架的、有标准答案的、同学科非 freeform 题；去重后 1~20 道。
+        同 contentKey 幂等建集，同生同集只一票。每生每自然日最多新建 10 个题集，超限 429/1008
+        （含精选题每日新题集上限），重复推荐同一题集不占额度。
+      operationId: recommendStudentFeaturedSet
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [questionIds]
+              properties:
+                questionIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: 推荐成功（Nest `@Post` 默认 201；重复推荐亦为 201 + alreadyRecommended=true）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [setId, alreadyRecommended]
+                        properties:
+                          setId: { type: integer }
+                          alreadyRecommended: { type: boolean }
+        '400': { description: 题数/题目 id 非法、跨学科、freeform、无答案、未做过（code=1001/1004） }
+        '404': { description: 题目不存在或已下架（code=1002） }
+        '429': { description: 当日新题集已达上限（code=1008） }
+        '403': { description: 非 student（code=1005）/ 订阅过期（code=2001） }
+  /student/featured-sets/publications/{id}/open:
+    post:
+      tags: [StudentFeaturedSets]
+      summary: 打开精选题单（建服务端 session + 幂等标已读）
+      description: >-
+        单事务：FOR UPDATE 锁 publication → 校验 status=published、学生当前年级匹配、至少一题在架
+        → 服务端生成 sessionUid 建 special_practice_sessions（写 featured_publication_id）→ 幂等标已读。
+        年级不符/已撤回/全部下架均 404/1002，不泄露 publication 是否存在、不写已读。
+        显式 @HttpCode(200)。
+      operationId: openStudentFeaturedSetPublication
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: 打开成功（显式 200）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StudentFeaturedSetOpenResponse'
+        '404': { description: 年级不符 / 已撤回 / 全部下架（code=1002） }
+        '403': { description: 非 student（code=1005）/ 订阅过期（code=2001） }
+
+  # Research Featured Sets（教研精选题单，2026-11-28）
+  /research/featured-sets:
+    get:
+      tags: [ResearchFeaturedSets]
+      summary: 精选题单审核列表（教研）
+      description: 按 review_status 分页，缺省 pending；推荐人数与年级分布只来自聚合，不返回学生身份。
+      operationId: listResearchFeaturedSets
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [pending, approved, rejected], default: pending } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, page, pageSize, total]
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/ResearchFeaturedSetListItem'
+                          page: { type: integer }
+                          pageSize: { type: integer, example: 20 }
+                          total: { type: integer }
+        '400': { description: status 非法 / page 非正整数（code=1001） }
+        '403': { description: 非 researcher（code=1005） }
+  /research/featured-sets/pending-count:
+    get:
+      tags: [ResearchFeaturedSets]
+      summary: 待审核角标（教研）
+      description: 必须先于 /research/featured-sets/{id} 声明，避免被当成 :id。
+      operationId: getResearchFeaturedSetsPendingCount
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [count]
+                        properties:
+                          count: { type: integer }
+        '403': { description: 非 researcher（code=1005） }
+  /research/featured-sets/{id}:
+    get:
+      tags: [ResearchFeaturedSets]
+      summary: 精选题单详情（教研）
+      description: 只读题目 + 推荐人数 + 年级聚合分布 + 各年级 publication；不返回学生身份。
+      operationId: getResearchFeaturedSet
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ResearchFeaturedSetDetail'
+        '404': { description: 题集不存在（code=1002） }
+        '403': { description: 非 researcher（code=1005） }
+  /research/featured-sets/{id}/publish:
+    post:
+      tags: [ResearchFeaturedSets]
+      summary: 按单一年级发布（教研）
+      description: >-
+        标题 1~60 字 + 标准 grade_N；upsert publication（独立标题 + reach_count 快照）、置题集 approved。
+        已 approved 追加其它年级不重复改审核字段；撤回后重发清旧 read 行。显式 @HttpCode(200)。
+      operationId: publishResearchFeaturedSet
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishFeaturedSetRequest'
+      responses:
+        '200':
+          description: 发布成功（显式 200）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CommonResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [publicationId]
+                        properties:
+                          publicationId: { type: integer }
+        '400': { description: 标题/年级非法（code=1001）/ 已拒绝题集（code=1004） }
+        '404': { description: 题集不存在（code=1002） }
+        '403': { description: 非 researcher（code=1005） }
+  /research/featured-sets/{id}/reject:
+    post:
+      tags: [ResearchFeaturedSets]
+      summary: 拒绝 pending 题集（教研）
+      description: 仅 pending 可拒绝，否则 1004；已拒绝题集新增推荐不自动回 pending，需手动 reopen。显式 @HttpCode(200)。
+      operationId: rejectResearchFeaturedSet
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: 拒绝成功（显式 200，无响应体） }
+        '400': { description: 非 pending 题集（code=1004） }
+        '404': { description: 题集不存在（code=1002） }
+        '403': { description: 非 researcher（code=1005） }
+  /research/featured-sets/{id}/reopen:
+    post:
+      tags: [ResearchFeaturedSets]
+      summary: rejected 题集重新审核（教研）
+      description: 仅 rejected 可重开，否则 1004；置回 pending 并清空审核字段。显式 @HttpCode(200)。
+      operationId: reopenResearchFeaturedSet
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: 重新审核成功（显式 200，无响应体） }
+        '400': { description: 非 rejected 题集（code=1004） }
+        '404': { description: 题集不存在（code=1002） }
+        '403': { description: 非 researcher（code=1005） }
+  /research/featured-sets/publications/{id}/withdraw:
+    post:
+      tags: [ResearchFeaturedSets]
+      summary: 撤回一次发布（教研）
+      description: >-
+        仓储守卫 WHERE id=? AND status='published' 只允许撤 published；写 withdrawn_by/withdrawn_at。
+        阅读与作答历史保留；撤回后学生列表/未读不再可见。显式 @HttpCode(200)。
+      operationId: withdrawResearchFeaturedSetPublication
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: 撤回成功（显式 200，无响应体） }
+        '404': { description: publication 不存在或非 published（code=1002） }
+        '403': { description: 非 researcher（code=1005） }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -14401,3 +14683,129 @@ components:
         draftFileId:
           type: string
           description: 可选；附上的草稿合成图文件 id
+
+    # 学生精选题单（2026-11-28）
+    StudentFeaturedPublication:
+      type: object
+      required: [publicationId, setId, title, subjectId, subjectName, questionCount, publishedAt, isRead]
+      properties:
+        publicationId: { type: integer }
+        setId: { type: integer }
+        title: { type: string }
+        subjectId: { type: integer }
+        subjectName: { type: string }
+        questionCount: { type: integer, description: 当前在架且可展示题数，不是发布时快照 }
+        publishedAt: { type: string, format: date-time }
+        isRead: { type: boolean }
+    StudentFeaturedSetListResponse:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudentFeaturedPublication'
+        page: { type: integer, minimum: 1 }
+        pageSize: { type: integer, example: 20 }
+        total: { type: integer }
+    StudentFeaturedSetUnreadSummary:
+      type: object
+      required: [count, latest]
+      properties:
+        count: { type: integer }
+        latest:
+          type: object
+          nullable: true
+          required: [publicationId, title]
+          properties:
+            publicationId: { type: integer }
+            title: { type: string }
+          description: 无未读时为 null
+    FeaturedRunQuestion:
+      type: object
+      required: [questionId, text, type, options, materialText, materialUrl, subNo, materialPosition, source, questionNo]
+      properties:
+        questionId: { type: integer }
+        text: { type: string }
+        type: { type: string }
+        options: { type: array, nullable: true, items: {} }
+        materialText: { type: string, nullable: true }
+        materialUrl: { type: string, nullable: true }
+        subNo: { type: integer }
+        materialPosition: { type: string, enum: [before], nullable: true }
+        source: { type: string, nullable: true }
+        questionNo: { type: integer, nullable: true }
+    StudentFeaturedSetOpenResponse:
+      type: object
+      required: [mode, sessionUid, subjectId, title, questions]
+      properties:
+        mode: { type: string, enum: [featured] }
+        sessionUid: { type: string, format: uuid, description: 服务端事务内生成，运行器不得自行生成 }
+        subjectId: { type: integer }
+        title: { type: string, description: publication 手填标题（部分题下架也不变） }
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeaturedRunQuestion'
+    FeaturedGradeDistribution:
+      type: object
+      required: [gradeCode, count]
+      properties:
+        gradeCode: { type: string, description: 标准 grade_N code，推荐时年级快照 }
+        count: { type: integer }
+    ResearchFeaturedSetListItem:
+      type: object
+      required: [setId, subjectId, subjectName, questionCount, recommendationCount, gradeDistribution, reviewStatus, createdAt]
+      properties:
+        setId: { type: integer }
+        subjectId: { type: integer }
+        subjectName: { type: string }
+        questionCount: { type: integer }
+        recommendationCount: { type: integer, description: 去重推荐人数 }
+        gradeDistribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeaturedGradeDistribution'
+          description: 仅聚合人数，不含学生身份（PRD §11 裁决 C1）
+        reviewStatus: { type: string, enum: [pending, approved, rejected] }
+        createdAt: { type: string, format: date-time }
+    FeaturedSetPublication:
+      type: object
+      required: [publicationId, gradeCode, title, reachCount, status, publishedAt]
+      properties:
+        publicationId: { type: integer }
+        gradeCode: { type: string, description: 标准 grade_N code }
+        title: { type: string }
+        reachCount: { type: integer, description: 发布时该年级有效学生数快照 }
+        status: { type: string, enum: [published, withdrawn] }
+        publishedAt: { type: string, format: date-time }
+    ResearchFeaturedQuestion:
+      type: object
+      required: [questionId, text, type, answer, explanation]
+      properties:
+        questionId: { type: integer }
+        text: { type: string }
+        type: { type: string }
+        answer: { type: string }
+        explanation: { type: string, nullable: true }
+    ResearchFeaturedSetDetail:
+      allOf:
+        - $ref: '#/components/schemas/ResearchFeaturedSetListItem'
+        - type: object
+          required: [questions, publications]
+          properties:
+            questions:
+              type: array
+              description: 仅返回仍 is_active 的题
+              items:
+                $ref: '#/components/schemas/ResearchFeaturedQuestion'
+            publications:
+              type: array
+              items:
+                $ref: '#/components/schemas/FeaturedSetPublication'
+    PublishFeaturedSetRequest:
+      type: object
+      required: [title, gradeCode]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 60 }
+        gradeCode: { type: string, description: 标准 grade_N 年级编码，如 grade_7 }

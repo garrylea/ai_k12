@@ -87,7 +87,7 @@
 | 1004 | 操作被拒绝（如未清零强行解锁） |
 | 1005 | AI 额度不足 |
 | 1007 | 优惠券无效或已过期 |
-| 1008 | 订单已支付或已取消 |
+| 1008 | 订单已支付或已取消；**现行实际语义：请求过于频繁**（含精选题每日新题集上限，见下方实现注） |
 | 1009 | 支付失败（第三方平台返回错误） |
 | 2001 | 学习无关内容（AI 阻断）；**订阅门禁复用**（2026-09-30 起，见下方实现注） |
 | 2002 | 订单状态不允许该操作（已有 pending 单换套餐/渠道下单 / 取消非 pending 单 / 终态单再操作） |
@@ -106,7 +106,7 @@
 
 > **2026-09-17 实现注（积分错误码语义）**：`3001`–`3005` 由 `points` 模块抛出（§4.20 / §4.21）。凡「不满足条件」的拒绝都发生在事务之前，失败时**零写入**（不会留下半张兑换单/半批规则）；入参格式错误仍沿用 `1001`、资源不存在沿用 `1002`。
 
-> **2026-08-14 实现注（auth/parent 端点现行语义，与上表历史规划并存）**：1003 = 未登录/token 失效/用户名或密码错误/账号已停用（auth 与角色守卫）；**1013 = 账号已在其他设备登录（单点登录互踢，2026-10-10 起，见 §4.1 注）**；1004 = 该手机号已注册/用户名已存在；1005 = 无权访问该资源（角色守卫）/无权操作该学生（归属校验）；1008 = 请求过于频繁（登录限流 10 次/分/IP）。
+> **2026-08-14 实现注（auth/parent 端点现行语义，与上表历史规划并存）**：1003 = 未登录/token 失效/用户名或密码错误/账号已停用（auth 与角色守卫）；**1013 = 账号已在其他设备登录（单点登录互踢，2026-10-10 起，见 §4.1 注）**；1004 = 该手机号已注册/用户名已存在；1005 = 无权访问该资源（角色守卫）/无权操作该学生（归属校验）；1008 = 请求过于频繁（登录限流 10 次/分/IP；**2026-11-28 起含精选题每日新题集上限**：每生每自然日最多新建 10 个新题集，重复推荐同一题集不占额度，超限 HTTP 429/1008，见 §4.32）。
 
 > **2026-08-18 实现注（admin 端点现行语义）**：1009 = 连通性测试失败（`POST /api/admin/routes/validate-connection` 返回，message 含 provider 原始错误，HTTP 502）；上表 1009=支付失败 为 P2 Billing 设计占位（Billing 未实现），两者不冲突。
 
@@ -155,6 +155,8 @@
 | Dev | `/api/dev/handwriting` | 手写汉字识别率调研（dev-only：模型清单 + 图片转写；不落库、无埋点、限 admin） | ai-core（`modules/dev`） |
 | Freeform | `/api/freeform` | 做题入口：题图/文字识别切题 + 判题 SSE（freeform 题隔离，不发分/不写练习记录/不更新掌握度） | Freeform Service |
 | Research | `/api/research` | 教研（researcher）：试卷列表/明细/删卷、题目五字段纠错、图片上传/清理/GC、内容审计日志；改答案不回填历史数据 | Research Service（`modules/research`） |
+| StudentFeaturedSets | `/api/student/featured-sets` | 学生精选题单：推荐、完整列表、未读摘要、打开题单（内容与年级分发，不发积分） | FeaturedSets Service（`modules/featured-sets`） |
+| ResearchFeaturedSets | `/api/research/featured-sets` | 教研精选题单：审核列表/详情/角标、按年级发布、拒绝、重新审核、撤回；只看推荐票聚合 | FeaturedSets Service（`modules/featured-sets`） |
 
 ---
 
@@ -934,7 +936,7 @@ Query（zod 校验，空串视为未填）：`subjectId?`（正整数）/ `year?
 
 **3. `GET /api/research/papers/{id}/delete-preview`（迁移）**
 
-逻辑/返回同原 admin 版（只读、不加锁）：卷不存在 404。返回 `{paperId, title, subjectName, questionCount, sharedCount, exclusiveCount, deletableCount, retainedCount, sessionCount, answerCount}`。`deletableCount` = 独占且未被 7 张 RESTRICT 表（main_error_books / aux_error_books / answers / exam_answers / variation_questions / special_answer_records / remediation_set_items）引用；`retainedCount` = 独占但被引用（删除时保留）。错误：1001、1003、1005、404。
+逻辑/返回同原 admin 版（只读、不加锁）：卷不存在 404。返回 `{paperId, title, subjectName, questionCount, sharedCount, exclusiveCount, deletableCount, retainedCount, sessionCount, answerCount}`。`deletableCount` = 独占且未被 **8 张** RESTRICT 表（main_error_books / aux_error_books / answers / exam_answers / variation_questions / special_answer_records / remediation_set_items / **featured_question_set_items**，2026-11-28 精选题单加入）引用；`retainedCount` = 独占但被引用（删除时保留）。错误：1001、1003、1005、404。
 
 **4. `DELETE /api/research/papers/{id}`（迁移 + 图片清理）**
 
@@ -965,6 +967,117 @@ Body：`{urls: string[]}`，每条须以 `/uploads/research/` 开头（否则 10
 Body（可选）：`{olderThanHours?: number}`，缺省 24，范围 1–720，非法 → 1001。扫 `uploaded_files WHERE source='research' AND created_at < NOW() - INTERVAL ? HOUR`，逐条做引用检查；无引用则删 DB 行 + 磁盘文件；有 `extract_tasks` 关联的跳过。返回 `{scanned, deleted, skipped, failed}`（**201**，Nest 默认）。调用方式：运维手动触发或纳入现有定时维护，本期不做后台常驻进程。错误：1001、1003、1005。
 
 **图片清理铁律（端点 4/5/8/9 共用）**：① 只清 `source='research'` 且 URL 以 `/uploads/research/` 开头的图，**绝不动** auxiliary/freeform/题库静态图；② 删前全局扫描 `questions` 五列（`content/options/answer/explanation/approach`）确认无其它引用，并扫描 `exam_answers.answer_text` / `answers.answer_text` / `special_answer_records.answer_text`（学生作答可能引用教研图，保守跳过）；③ 被 `extract_tasks` 引用的 `uploaded_files` 行跳过（FK RESTRICT，硬删报错）；④ 磁盘文件删除在 DB commit **之后**，`fs.unlink` 失败只记日志不回滚（文件残留可接受，DB 一致性优先）；⑤ `DELETE FROM uploaded_files` 与 `content_audit_logs` 的 `image.delete` 审计必须在**同一连接同一事务**写（spec §9.2）：审计插入失败整条回滚——DB 行不删、磁盘不碰；审计字段 `action='image.delete'`, `target_type='image'`, `target_id=fileId`。三层清理：保存差集（PATCH）/ 取消清理（DELETE images）/ GC 兜底（POST gc）。
+
+---
+
+### 4.32 StudentFeaturedSets — `/api/student/featured-sets`（学生精选题单，2026-11-28）
+
+全部端点 `@Roles('student')` + `JwtAuthGuard, RolesGuard`；`studentId` **只取 JWT `sub`**，不接收 body 传入的身份字段。未登录 401/1003、越权 403/1005、订阅过期 403/2001（`SubscriptionGuard` 无新增豁免）。设计：`docs/superpowers/specs/2026-11-28-curated-question-set-design.md`。
+
+| 方法 | 路径 | HTTP | 说明 |
+|---|---|---|---|
+| GET | `/api/student/featured-sets?page=1` | 200 | 完整列表（当前年级 / published / 至少一题在架） |
+| GET | `/api/student/featured-sets/unread-count` | 200 | 未读摘要（角标与 Banner） |
+| POST | `/api/student/featured-sets/recommend` | **201** | 推荐题集（Nest `@Post` 默认） |
+| POST | `/api/student/featured-sets/publications/{id}/open` | **200** | 打开题单（显式 `@HttpCode(200)`） |
+
+**1. `GET /api/student/featured-sets`（200）**
+
+Query：`page`（正整数，缺省 1，非法 1001）；`pageSize` 固定 20。年级取 `resolveGradeInfo(student.grade)?.code`（`grade_N`），解析失败 1001。只返回 `status='published'` 且 `grade_code` 匹配且当前至少 1 道在架题的 publication，按 `published_at DESC` 分页。返回（`StudentFeaturedSetListResponse`）：
+
+```json
+{"items":[{"publicationId":12,"setId":7,"title":"七年级数学期末高频错题","subjectId":1,"subjectName":"数学","questionCount":8,"publishedAt":"2026-11-28T10:00:00.000Z","isRead":false}],"page":1,"pageSize":20,"total":3}
+```
+
+`questionCount` = 当前在架且可展示题数（不是发布时快照）；全部下架的 publication 不出现在列表、不计入未读。
+
+**2. `GET /api/student/featured-sets/unread-count`（200）**
+
+口径与列表一致，返回（`StudentFeaturedSetUnreadSummary`）：
+
+```json
+{"count":2,"latest":{"publicationId":12,"title":"七年级数学期末高频错题"}}
+```
+
+无未读时 `latest: null`、`count: 0`。
+
+**3. `POST /api/student/featured-sets/recommend`（201）**
+
+Body：`{questionIds: number[]}`。校验顺序固定：① 去重后 1～20 且均为正整数 → 否则 1001；② 学生存在且年级可解析 → 1001；③ 题目不存在/已下架 → 404/1002；④ 任一 `source='freeform'` 或无标准答案 → 1004；⑤ 跨学科 → 1001；⑥ 任一题不在该生既有作答事实中 → 1004；⑦ 当日新建题集数 ≥10 → **429/1008**（含精选题每日新题集上限，重复推荐同一题集不占额度）。`contentKey = sha256(subjectId + ':' + 排序去重 questionIds)`，同 key 幂等建集 + 同生同集唯一推荐票。返回（`CreateRecommendationResult`）：
+
+```json
+{"setId":7,"alreadyRecommended":false}
+```
+
+重复点击返回 201 + `alreadyRecommended: true`，不新增推荐行。
+
+**4. `POST /api/student/featured-sets/publications/{id}/open`（200）**
+
+单连接事务内：① `SELECT ... FOR UPDATE` 锁 publication；② 校验 `status='published'`、学生当前 `grade_N = grade_code`、至少 1 道在架题，任一不满足 → 404/1002（**不泄露 publication 是否存在、不写已读**）；③ 服务端生成 `sessionUid` 并建 `special_practice_sessions`（写 `featured_publication_id`）；④ 幂等写 `featured_question_set_reads`；⑤ 提交后返回（`StudentFeaturedSetOpenResponse`）：
+
+```json
+{"mode":"featured","sessionUid":"9b92...","subjectId":1,"title":"七年级数学期末高频错题","questions":[{"questionId":101,"text":"...","type":"choice","options":[{"label":"A","text":"..."}],"materialText":null,"materialUrl":null,"subNo":1,"materialPosition":null,"source":"bank","questionNo":3}]}
+```
+
+`sessionUid` 必须由服务端生成，运行器不得自行生成（判题按它识别 featured 会话）。部分题下架时标题仍用 publication 手填标题、只返回在架题；全部下架 → 1002。任何一步失败整事务回滚，绝不返回无服务端凭据的题单。
+
+---
+
+### 4.33 ResearchFeaturedSets — `/api/research/featured-sets`（教研审核与发布，2026-11-28）
+
+全部端点 `@Roles('researcher')` + `JwtAuthGuard, RolesGuard`（未登录 401/1003、越权 403/1005），`reviewerId` 只取 JWT `sub`。**隐私口径（PRD §11 裁决 C1）**：只读推荐人数与推荐时年级的**聚合分布**，不返回学生姓名/用户名/任何学习明细，不可反查到个人；学生也看不到推荐者身份。
+
+| 方法 | 路径 | HTTP | 说明 |
+|---|---|---|---|
+| GET | `/api/research/featured-sets?status=pending&page=1` | 200 | 审核列表，缺省 `pending` |
+| GET | `/api/research/featured-sets/pending-count` | 200 | 侧栏待审核角标 |
+| GET | `/api/research/featured-sets/{id}` | 200 | 题单详情 |
+| POST | `/api/research/featured-sets/{id}/publish` | **200** | 按单一年级发布（显式 `@HttpCode(200)`） |
+| POST | `/api/research/featured-sets/{id}/reject` | **200** | 拒绝 pending（显式 `@HttpCode(200)`） |
+| POST | `/api/research/featured-sets/{id}/reopen` | **200** | rejected 重回 pending（显式 `@HttpCode(200)`） |
+| POST | `/api/research/featured-sets/publications/{id}/withdraw` | **200** | 撤回一次发布（显式 `@HttpCode(200)`） |
+
+> **路由顺序**：`pending-count` 必须先于 `@Get(':id')` 声明，否则会被当成 `:id`。
+
+**1. `GET /api/research/featured-sets`（200）**
+
+Query：`status`（`pending|approved|rejected`，缺省 `pending`，非法 1001）、`page`（正整数，缺省 1，非法 1001）；`pageSize` 固定 20。返回（`ResearchFeaturedSetListResponse`）：
+
+```json
+{"items":[{"setId":7,"subjectId":1,"subjectName":"数学","questionCount":8,"recommendationCount":3,"gradeDistribution":[{"gradeCode":"grade_7","count":3}],"reviewStatus":"pending","createdAt":"2026-11-28T09:00:00.000Z"}],"page":1,"pageSize":20,"total":5}
+```
+
+按 `created_at ASC`（最早推荐在前）；`gradeDistribution` 来自 `GROUP BY student_grade_code`，只含聚合。
+
+**2. `GET /api/research/featured-sets/pending-count`（200）**
+
+返回 `{ "count": 4 }`（`ResearchFeaturedSetPendingCount`），仅供侧栏角标。
+
+**3. `GET /api/research/featured-sets/{id}`（200）**
+
+题集不存在 → 404/1002。返回详情（`ResearchFeaturedSetDetail`，= 列表项 + 题目 + publications）：
+
+```json
+{"setId":7,"subjectId":1,"subjectName":"数学","questionCount":8,"recommendationCount":3,"gradeDistribution":[{"gradeCode":"grade_7","count":3}],"reviewStatus":"pending","createdAt":"2026-11-28T09:00:00.000Z","questions":[{"questionId":101,"text":"...","type":"choice","answer":"A","explanation":null}],"publications":[{"publicationId":12,"gradeCode":"grade_7","title":"七年级数学期末高频错题","reachCount":120,"status":"published","publishedAt":"2026-11-28T10:00:00.000Z"}]}
+```
+
+只返回仍 `is_active` 的题目；`publications` 按 `published_at DESC`。
+
+**4. `POST /api/research/featured-sets/{id}/publish`（200）**
+
+Body（`PublishFeaturedSetRequest`）：`{ "title": "七年级数学期末高频错题", "gradeCode": "grade_7" }`。`title` 为 1～60 字（trim 后），`gradeCode` 必须是标准 `grade_N`（`gradeInfoByCode` 校验），否则 1001；题集不存在 404/1002、已 `rejected` 不能发布 1004。事务内按 `(set_id, grade_code)` upsert publication（独立标题、`reach_count` = 发布时该年级有效学生数快照），置题集 `approved` 并写审核人/时间；已 approved 追加其它年级不重复改审核字段。撤回后重发复用该行、刷新 `published_at`、清空撤回字段并删除旧 read 行（形成新未读投递）。返回 `{ "publicationId": 12 }`。
+
+**5. `POST /api/research/featured-sets/{id}/reject`（200）**
+
+仅 `pending` 可拒绝，否则 1004；题集不存在 404/1002。写 `review_status='rejected'` + `reviewed_by/reviewed_at`。已拒绝题集新增推荐只增加推荐信号，**不自动回到 pending**；教研员需手动 `reopen`。无响应体。
+
+**6. `POST /api/research/featured-sets/{id}/reopen`（200）**
+
+仅 `rejected` 可重开，否则 1004；题集不存在 404/1002。置回 `pending` 并清空审核字段。无响应体。
+
+**7. `POST /api/research/featured-sets/publications/{id}/withdraw`（200）**
+
+仓储 SQL 守卫 `WHERE id = ? AND status = 'published'` 保证只撤 published；写 `status='withdrawn'` + `withdrawn_by/withdrawn_at`。**阅读与作答历史一律保留**；撤回后学生列表/未读数不再可见（1002）。无响应体。
 
 ---
 
@@ -2415,6 +2528,40 @@ judge/stream（HTTP 200，text/event-stream）
 
 ---
 
+### 5.34 学生精选题单：推荐 → 聚合 → 年级发布 → 打开作答 → 度量（2026-11-28）
+
+```text
+学生完成专项/错题作答（已有作答事实）
+  → POST /api/student/featured-sets/recommend {questionIds}
+      → 校验：在架 + 有标准答案 + 非 freeform + 同学科 + 本生做过 + 当日新题集 <10
+      → contentKey = sha256(subjectId + ':' + 排序去重 questionIds)
+      → 同连接事务：幂等 upsert 题集 →（仅新建）写 items → INSERT IGNORE 推荐票
+      → 201 {setId, alreadyRecommended}
+  → GET /api/research/featured-sets：按 review_status 分页，推荐人数/年级分布只来自 GROUP BY 聚合
+  → GET /api/research/featured-sets/{id}：只读题目 + 聚合 + 各年级 publication（无学生身份）
+  → POST /api/research/featured-sets/{id}/publish {title, gradeCode}
+      → 锁题集、禁用 rejected、upsert publication（独立标题 + reach_count 快照）、置 approved
+      → 200 {publicationId}
+  → 学生 GET /api/student/featured-sets → 当前 grade_N / published / 至少一题在架的完整列表
+    学生 GET /api/student/featured-sets/unread-count → {count, latest}（训练首页 Banner）
+  → POST /api/student/featured-sets/publications/{id}/open
+      → 事务：FOR UPDATE 锁 publication → 校验年级/状态/在架 → 建服务端 session
+        （写 special_practice_sessions.featured_publication_id）→ 幂等标已读 → 返回 {mode:'featured', sessionUid, ...}
+  → 运行器复用 TargetedRunPage（sessionId=null、用服务端 sessionUid）
+      → 判题/自评：服务端按 sessionUid 查到 featured session 后强制 suppressErrorFixPoints=true
+      → 照常写 special_answer_records / 错题本（不发 training_sessions / point_ledger / error_fix）
+      → 结果页无积分元素，完成写专项 session 完成时间，返回 /student/profile
+```
+
+**关键口径**：
+
+1. **隐私**：教研只读推荐人数 + 推荐时年级聚合，不可反查个人（PRD §11 裁决 C1，§4.33 注）；学生看不到推荐者身份；不新增 `behavior_events` 与 `SubscriptionGuard` 豁免。
+2. **一次性投递**：按发布时目标年级匹配，学生升年级后不再投递；撤回/全部下架后打开报 1002、不写已读；撤回后重发清空旧 read 行形成新未读。
+3. **积分隔离**：featured 会话不发积分、不写 `training_sessions` / `point_ledger`，但照常写练习历史与错题本；`error_fix` 由服务端依据 `featured_publication_id` 强制压制，不信任客户端布尔值。
+4. **度量**（首发后 14 天，`tools/db/featured_question_set_metrics.sql`）：推荐学生数 = 去重 `student_id`；触达数 = `SUM(reach_count)`；打开数 = 去重 `(publication_id, student_id)` 已读；完成数 = 去重 `(featured_publication_id, student_id)` 且 `completed_at IS NOT NULL`。不达标判据见设计 spec §12。
+
+---
+
 ## 6. API 与前端页面对照表
 
 | 前端页面 | 路由 | 主要调用 API |
@@ -2439,7 +2586,7 @@ judge/stream（HTTP 200，text/event-stream）
 | ~~P4.1 错题本~~ | ~~`/student/error-book`~~ | **已废弃（2026-09-20 用户裁决）**：独立错题本页面从未实现，占位路由与主轨侧栏入口已删除；错题能力由训练轨错题练习 `/student/training/errors` 承担（`GET /api/training/error-book`） |
 | ~~P4.2 错题重做~~ | ~~`/student/error-book/redo`~~ | **已废弃（同上）**：重做在训练轨错题练习页内完成（`POST /api/training/judge`，答对即清零） |
 | ~~P4.3 解析与变式~~ | ~~`/student/error-book/variant`~~ | **已废弃（同上）**：变式生成本期未实现（`variation_questions` 表 0 引用）；AI 解析走 `POST /api/training/questions/explanations` |
-| P5.1 个人中心 | `/student/profile` | `GET /api/points/me`、`GET /api/points/me/ledger` |
+| P5.1 个人中心 | `/student/profile` | `GET /api/points/me`、`GET /api/points/me/ledger`；**精选题单卡片**：`GET /api/student/featured-sets`、`POST /api/student/featured-sets/publications/{id}/open`（§4.32） |
 | P5.2 奖励册 | `/student/rewards` | `GET /api/points/me/rewards` |
 | ~~P5.3 设置~~ | ~~`/student/settings`~~ | **已废止（2026-09-18 用户裁决）**：学生端不设独立设置页；手动护眼切换在学习沉浸页内，字号由学段（家长配的年级）决定 |
 | P6.1 家长仪表盘 | `/parent/dashboard` | `GET /api/parent/dashboard`, `GET /api/parent/alerts` |
@@ -2454,6 +2601,8 @@ judge/stream（HTTP 200，text/event-stream）
 | **P7.1 订阅中心** | `/parent/subscription` | **已实现（2026-09-30）**：`GET /api/quota/subscription`, `GET /api/quota/plans`, `GET /api/quota/usage`, `POST /api/billing/orders`(201), `GET /api/billing/orders/{orderNo}`（支付弹层 3s 轮询）, `POST .../cancel`(200), `POST .../confirm-paid`(200)。订单历史内嵌本页折叠列表（无独立 P7.2 页）；无优惠码（本期不做） |
 | ~~P7.2 订单管理~~ | ~~`/parent/orders`~~ | **页面未实现**：订单历史并入 P7.1 订阅中心折叠列表（`GET /api/billing/orders`, 就地取消 pending 单），无独立路由 |
 | ~~P7.3 优惠券~~ | ~~`/parent/coupons`~~ | **页面未实现**：优惠券/优惠码本期不做（用户裁决，spec §9；表已预留，下期立项） |
+| 训练首页未读 Banner（2026-11-28） | `/student/training/home?subjectId=` | `GET /api/student/featured-sets/unread-count`；「查看」跳 `/student/profile`（§4.32） |
+| 教研精选题单审核页（2026-11-28） | `/research/featured-sets` | `GET /api/research/featured-sets/pending-count`、`GET /api/research/featured-sets`、`GET /api/research/featured-sets/{id}`、`POST .../{id}/publish`、`POST .../{id}/reject`、`POST .../{id}/reopen`、`POST .../publications/{id}/withdraw`（§4.33） |
 
 ---
 
@@ -2614,6 +2763,7 @@ POST /api/error-book/items/{errorItemId}/redo
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v4.39 | 2026-11-28 | **学生精选题单**（11 个端点，§4.32 学生 4 / §4.33 教研 7，数据流 §5.34）。学生列表 `{items,page,pageSize:20,total}`、未读摘要 `{count,latest}`、推荐 201 `{setId,alreadyRecommended}`、`open` 显式 200；教研列表同分页格式、pending-count `{count}`、详情含聚合与 publications；`publish/reject/reopen/withdraw` 均为状态迁移 POST 显式 200。错误码 1008 补「精选题每日新题集上限」（429）。删卷 RESTRICT 表由 7 张增至 **8 张**（加 `featured_question_set_items`）。`openapi.yaml` 同步 11 个 operation 与 7 个响应 schema。PRD §11 隐私裁决 C1：学习明细仅家长可见，教研只能看推荐票年级聚合。 |
 | v4.38 | 2026-11-28 | **结果页批量拉解析改为纯读库**。`GET /api/training/questions/explanations` 不再等待在途生成（原「等 in-flight，60s 兜底」）、也不触发新生成：DB 有就给、没有给 null。根因：解析由强模型生成（实测单题 38s–8min），旧语义让每次答错后末题在「判题中」卡满 60 秒（`api_request_logs` 实测 latency 60004ms，而三次判题均 <50ms）。前端专项/错题练习/错题巩固也改为先渲染结果页、解析到达后合并。单题刷新 `explanation-wait`（120s，触发补生成）语义不变。openapi.yaml 同步。 |
 | v4.37 | 2026-11-24 | **英语训练轨四模块（真题考试 / 专项练习 / 错题练习 / 薄弱点图谱）**。① 考试复用 §4.19 七端点、`subjectId=3`，无新端点；英语 `short_answer`/`proof` 走**显式自评**（闸门①，不依赖 `JUDGE_SUBJECTIVE_MODE`）。② 收卷新增**最高优先级分支**：无参考答案（`questions.answer` 空）**任何科目**统一落 `is_correct=NULL + score=NULL + method='no_standard_answer'`——不判、不计分、不入错题本、不要求自评（英语 974 卷 35 题全无答案；取代原「记错但不入本」口径）。③ 汇总新增 `unscoredCount`（无答案题数，已从 `totalCount` 与 accuracy 分母剔除）；`ExamResultItem` 新增 `method`、`hasStandardAnswer`，`needsSelfAssessment = hasStandardAnswer && method='self_assess'`。④ 任务码新增 `en_paper`（50 分/套、不限次）与 `en_targeted`（1/3/5/10 → 2/8/15/35，日限 5）；§4.18 `targeted/start` 学科表补 `3→en_targeted`。⑤ §4.5 `coverage` 口径改五学科。openapi.yaml 的 `ExamSummary`/`ExamResultItem` 同步。 |
 | v4.36 | 2026-11-24 | **知识图谱开放英语**。§4.5 `weak-points` / `mastery` 的 `subjectId` 允许值由 `{1,4,5,9}` 扩到 `{1,3,4,5,9}`，错误文案改「subjectId 仅支持 1 / 3 / 4 / 5 / 9」（**删除「语文/英语…2/3 一律 400」中的 3**）；前端图谱页四个跳转动作（开始补这个 / 看错题 / 去专项练习 / 去考试）非数学一律带 `subjectId`，看错题同时保留 `kpId`。openapi.yaml 两个端点同步 enum 与 description。 |

@@ -14,6 +14,8 @@ export interface UpsertSessionInput {
   module: SpecialSessionModule;
   title: string | null;
   questionCount: number;
+  /** 服务端 open 创建的精选题会话归属；普通专项会话不传（写 NULL）。 */
+  featuredPublicationId?: number | null;
 }
 
 export interface SessionListRow {
@@ -40,9 +42,12 @@ export class SpecialPracticeSessionsRepository {
     const db = executor ?? this.pool;
     const [result] = await db.execute<ResultSetHeader>(
       `INSERT IGNORE INTO special_practice_sessions
-       (session_uid, student_id, subject_id, module, title, question_count)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [input.sessionUid, input.studentId, input.subjectId, input.module, input.title, input.questionCount],
+       (session_uid, student_id, subject_id, module, title, question_count, featured_publication_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.sessionUid, input.studentId, input.subjectId, input.module, input.title, input.questionCount,
+        input.featuredPublicationId ?? null,
+      ],
     );
     if (result.insertId > 0) return result.insertId;
     // 命中已存在行：session_uid 是客户端提供的全局唯一键，必须核对归属与场景，
@@ -133,6 +138,20 @@ export class SpecialPracticeSessionsRepository {
     const id = (rows[0] as { id?: number })?.id;
     if (!id) throw new HttpException({ code: 1002, message: '作答记录不存在或已失效，请重新提交' }, 409);
     return id;
+  }
+
+  /**
+   * 服务端判定会话是否为精选题会话（Task 7 硬约束：记历史但不发积分）。
+   * 客户端传来的 suppressErrorFixPoints=false 不可信，判题前按 uid + student 查库定夺。
+   */
+  async isFeaturedSession(sessionUid: string, studentId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT featured_publication_id
+       FROM special_practice_sessions
+      WHERE session_uid = ? AND student_id = ?`,
+      [sessionUid, studentId],
+    );
+    return rows[0]?.featured_publication_id != null;
   }
 
   /** 单个 session 归属校验（防 IDOR）。 */

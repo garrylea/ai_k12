@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import TrainingHomePage from './TrainingHomePage';
 import type { RemediationOverview } from '@/services/api';
@@ -16,10 +16,11 @@ import type { RemediationOverview } from '@/services/api';
 
 const getRemediationOverview = vi.hoisted(() => vi.fn());
 const getTrainingErrorBook = vi.hoisted(() => vi.fn());
+const getFeaturedUnreadSummary = vi.hoisted(() => vi.fn());
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
-  return { ...actual, getRemediationOverview, getTrainingErrorBook };
+  return { ...actual, getRemediationOverview, getTrainingErrorBook, getFeaturedUnreadSummary };
 });
 
 afterEach(() => {
@@ -30,7 +31,14 @@ afterEach(() => {
 beforeEach(() => {
   getRemediationOverview.mockReset();
   getTrainingErrorBook.mockReset();
+  getFeaturedUnreadSummary.mockReset();
   getTrainingErrorBook.mockResolvedValue([]);
+  // mockReset 会清掉实现：给两个「默认静默」的桩，单个用例再按需覆盖
+  getRemediationOverview.mockResolvedValue({
+    active: false, setId: 0, groupCount: 0, itemCount: 0, correctCount: 0,
+  });
+  // 新 Banner 默认静默：现有用例只关心相似题/四卡，不希望被精选题单干扰
+  getFeaturedUnreadSummary.mockResolvedValue({ count: 0, latest: null });
 });
 
 function overview(partial: Partial<RemediationOverview> = {}): RemediationOverview {
@@ -48,6 +56,7 @@ function renderPage() {
       { path: '/student/training/home', element: <TrainingHomePage /> },
       { path: '/student/training/remediation/run', element: <div>作答页桩</div> },
       { path: '/student/training/weak-points', element: <div>薄弱点图谱页桩</div> },
+      { path: '/student/profile', element: <div>个人中心页桩</div> },
     ],
     { initialEntries: ['/student/training/home'] },
   );
@@ -67,6 +76,7 @@ function renderAt(path: string) {
       { path: '/student/training/errors', element: <div>错题页桩</div> },
       { path: '/student/training/weak-points', element: <div>图谱页桩</div> },
       { path: '/student/training/remediation/run', element: <div>作答页桩</div> },
+      { path: '/student/profile', element: <div>个人中心页桩</div> },
     ],
     { initialEntries: [path] },
   );
@@ -201,5 +211,86 @@ describe('TrainingHomePage 学科参数化', () => {
     expect(await screen.findByText('数学 · 训练')).toBeTruthy();
     await waitFor(() => expect(getRemediationOverview).toHaveBeenCalled());
     expect(getTrainingErrorBook).toHaveBeenCalledWith({ subjectId: 1 });
+  });
+});
+
+describe('TrainingHomePage 新精选题单 Banner', () => {
+  it('有未读精选题时显示 Banner，点击进入个人中心', async () => {
+    getFeaturedUnreadSummary.mockResolvedValue({
+      count: 2,
+      latest: { publicationId: 1, title: '七年级数学精选' },
+    });
+
+    const { router } = await renderSettled();
+
+    expect(await screen.findByText('有 2 个新精选题单')).toBeInTheDocument();
+    expect(screen.getByText('最新：七年级数学精选')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/profile'));
+  });
+
+  it('count=0 时静默，不显示 Banner', async () => {
+    await renderSettled();
+
+    expect(screen.queryByText(/新精选题单/)).toBeNull();
+    expect(screen.getByRole('button', { name: '进入专项练习' })).toBeInTheDocument();
+  });
+
+  it('请求失败时静默，不阻塞四卡', async () => {
+    getFeaturedUnreadSummary.mockRejectedValue(new Error('boom'));
+
+    await renderSettled();
+
+    expect(screen.queryByText(/新精选题单/)).toBeNull();
+    expect(screen.getByRole('button', { name: '进入专项练习' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '进入真题考试' })).toBeInTheDocument();
+  });
+
+  it('Banner 排在相似题待办 Banner 之后', async () => {
+    getRemediationOverview.mockResolvedValue(overview());
+    getFeaturedUnreadSummary.mockResolvedValue({
+      count: 1,
+      latest: { publicationId: 1, title: '七年级数学精选' },
+    });
+
+    await renderSettled();
+    expect(await screen.findByText('有 1 个新精选题单')).toBeInTheDocument();
+
+    const alerts = screen.getAllByRole('alert');
+    expect(alerts).toHaveLength(2);
+    expect(alerts[0]).toHaveTextContent('相似题专项练习待完成');
+    expect(alerts[1]).toHaveTextContent('有 1 个新精选题单');
+  });
+
+  it('window.focus 时刷新未读数，不用定时器', async () => {
+    getFeaturedUnreadSummary
+      .mockResolvedValueOnce({ count: 1, latest: { publicationId: 1, title: '七年级数学精选' } })
+      .mockResolvedValueOnce({ count: 3, latest: { publicationId: 2, title: '八年级数学精选' } });
+
+    await renderSettled();
+    expect(await screen.findByText('有 1 个新精选题单')).toBeInTheDocument();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    expect(await screen.findByText('有 3 个新精选题单')).toBeInTheDocument();
+    expect(screen.getByText('最新：八年级数学精选')).toBeInTheDocument();
+    expect(getFeaturedUnreadSummary).toHaveBeenCalledTimes(2);
+  });
+
+  it('关闭只影响当前页面状态', async () => {
+    getFeaturedUnreadSummary.mockResolvedValue({
+      count: 1,
+      latest: { publicationId: 1, title: '七年级数学精选' },
+    });
+
+    await renderSettled();
+    expect(await screen.findByText('有 1 个新精选题单')).toBeInTheDocument();
+
+    const banner = screen.getByText('有 1 个新精选题单').closest('[role="alert"]')!;
+    fireEvent.click(within(banner as HTMLElement).getByText('×'));
+
+    await waitFor(() => expect(screen.queryByText('有 1 个新精选题单')).toBeNull());
   });
 });

@@ -421,3 +421,35 @@ describe('QuestionsRepository — 试卷题号', () => {
     expect(params).toEqual([7, 7, 7, 7, 1, '初三', 'first', 24, 7, 1, 7, 1, 2]);
   });
 });
+
+describe('QuestionsRepository.findAnsweredQuestionIds', () => {
+  it('四个 student_id 参数 + IN 参数按题目顺序，去重，返回作答过的题 id 集合', async () => {
+    const pool = {
+      execute: vi.fn().mockResolvedValue([[{ question_id: 2 }, { question_id: 3 }], []]),
+      query: vi.fn(),
+    };
+    const repo = new QuestionsRepository(pool as any);
+
+    const result = await repo.findAnsweredQuestionIds(7, [3, 2, 3]);
+
+    expect(result).toEqual(new Set([2, 3]));
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    // 派生表与抽题的「做过」判定同源，4 个 ? 依次是 student_id。
+    expect(sql).toContain('SELECT question_id FROM');
+    expect(sql).toContain('UNION ALL');
+    expect(sql).toContain('FROM special_answer_records sar');
+    expect(sql).toContain('FROM exam_answers ea');
+    expect(sql).toContain('FROM practice_results pr');
+    expect(sql).toContain('FROM question_self_assessments qsa');
+    expect(sql).toContain('WHERE question_id IN (?,?)');
+    expect(params).toEqual([7, 7, 7, 7, 3, 2]);
+  });
+
+  it('空题目数组直接返回空集合且不查库', async () => {
+    const pool = mockPool();
+    const repo = new QuestionsRepository(pool as any);
+
+    await expect(repo.findAnsweredQuestionIds(7, [])).resolves.toEqual(new Set());
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+});

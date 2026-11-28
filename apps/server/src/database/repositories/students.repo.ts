@@ -87,6 +87,14 @@ export class StudentsRepository {
     return rows.map((r) => this.mapRow(r));
   }
 
+  /** 精选题触达快照用：所有有效（未软删、在架）学生。 */
+  async listAllActive(): Promise<Student[]> {
+    const [rows] = await this.pool.execute<StudentRow[]>(
+      'SELECT * FROM students WHERE deleted_at IS NULL AND is_active = 1',
+    );
+    return rows.map((r) => this.mapRow(r));
+  }
+
   /** 启动重建封禁名单用：所有停用（未软删）学生。 */
   async listInactive(): Promise<Student[]> {
     const [rows] = await this.pool.execute<StudentRow[]>(
