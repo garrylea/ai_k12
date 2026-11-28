@@ -104,7 +104,7 @@ describe('ResearchPapersRepository.countImpact', () => {
     expect(out.answerCount).toBe(5);
   });
 
-  it('被引用检测的 UNION 覆盖 7 张 RESTRICT 表', async () => {
+  it('被引用检测的 UNION 覆盖 8 张 RESTRICT 表', async () => {
     const pool = {
       execute: vi.fn().mockImplementation((sql: string) => {
         if (/SELECT pq.question_id AS qid/.test(sql)) {
@@ -123,11 +123,31 @@ describe('ResearchPapersRepository.countImpact', () => {
     for (const table of [
       'main_error_books', 'aux_error_books', 'answers', 'exam_answers',
       'variation_questions', 'special_answer_records', 'remediation_set_items',
+      'featured_question_set_items',
     ]) {
       expect(unionSql).toContain(table);
     }
     // 本卷会话的作答不能算阻断（预览必须与执行一致）
     expect(unionSql).toContain('session_id NOT IN (SELECT id FROM exam_sessions WHERE paper_id = ?)');
+  });
+
+  it('被引用检测覆盖 8 张 RESTRICT 表，包含 featured_question_set_items', async () => {
+    const pool = {
+      execute: vi.fn().mockImplementation((sql: string) => {
+        if (/SELECT pq.question_id AS qid/.test(sql)) {
+          return Promise.resolve([[{ qid: 1 }, { qid: 2 }], []]);
+        }
+        if (/SELECT DISTINCT qid FROM/.test(sql)) return Promise.resolve([[], []]);
+        return Promise.resolve([[{ cnt: 0 }], []]);
+      }),
+    };
+    const repo = mkRepo(pool);
+
+    await repo.countImpact(1);
+    const unionSql = pool.execute.mock.calls
+      .map((c) => String(c[0]))
+      .find((sql) => sql.includes('SELECT DISTINCT qid FROM'))!;
+    expect(unionSql).toContain('featured_question_set_items');
   });
 
   it('exam_answers 分支排除本卷会话，且各分支参数与占位符按序对齐', async () => {
@@ -149,10 +169,10 @@ describe('ResearchPapersRepository.countImpact', () => {
     // 只有 exam_answers 分支带会话排除，且只出现一次
     expect(sql.match(/session_id NOT IN/g)).toHaveLength(1);
     expect(sql).toContain('session_id NOT IN (SELECT id FROM exam_sessions WHERE paper_id = ?)');
-    // 7 分支 × 2 个 id 占位 + exam_answers 分支额外的 paper_id 占位
-    expect(sql.split('?').length - 1).toBe(7 * 2 + 1);
-    expect(params).toHaveLength(7 * 2 + 1);
-    // 前 6 个分支各是 [1, 2]；最后是 exam_answers 分支的 [1, 2, paperId]
+    // 8 分支 × 2 个 id 占位 + exam_answers 分支额外的 paper_id 占位
+    expect(sql.split('?').length - 1).toBe(8 * 2 + 1);
+    expect(params).toHaveLength(8 * 2 + 1);
+    // 前 7 个分支各是 [1, 2]；最后是 exam_answers 分支的 [1, 2, paperId]
     expect(params.slice(0, 12)).toEqual([1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2]);
     expect(params.slice(-3)).toEqual([1, 2, 77]);
     expect(params.filter((p) => p === 77)).toHaveLength(1);

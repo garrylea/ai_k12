@@ -46,7 +46,7 @@ export interface PaperDeleteOutcome {
   deletedAnswers: number;
 }
 
-/** 删除题时会触发 ON DELETE RESTRICT 的表（schema 固定 7 张，勿凭印象增删）。 */
+/** 删除题时会触发 ON DELETE RESTRICT 的表（schema 固定 8 张，勿凭印象增删）。 */
 const BLOCKING_TABLES = [
   'main_error_books',
   'aux_error_books',
@@ -55,6 +55,7 @@ const BLOCKING_TABLES = [
   'variation_questions',
   'special_answer_records',
   'remediation_set_items',
+  'featured_question_set_items',
 ] as const;
 
 /** 只用到 execute 的最小执行器接口（Pool 与 PoolConnection 都满足）。 */
