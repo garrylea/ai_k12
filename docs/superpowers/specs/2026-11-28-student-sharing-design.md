@@ -1,7 +1,7 @@
 # 学生好友与「发给同学」（共享题单）设计
 
 **日期**：2026-11-28
-**状态**：v1 待评审（范围已与用户确认：集中部署、站内收件箱、加好友需对方同意、进错题本不发分、家长可见可解除、段位互看放 P2）
+**状态**：已废弃，由 `docs/superpowers/specs/2026-11-28-curated-question-set-design.md` 取代（2026-11-28 用户改为学生推荐、教研员按年级发布精选题单，不建设学生社交）
 **关联**：
 - 运行器复用：`apps/web/src/pages/student/training/TargetedRunPage.tsx`、`run-handoff.ts`
 - 题单映射：`apps/server/src/modules/training/history-practice.service.ts`（`toRunQuestion`，第 251 行）
