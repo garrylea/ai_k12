@@ -68,7 +68,7 @@
 - 不接收 `source='freeform'` 的题；
 - 推荐的每道题都必须能在该生已有的作答事实中找到记录；不能把任意未做过的题临时拼成题集；
 - 同一学生、同一题集只记一次推荐；
-- 每名学生每自然日最多产生 10 个新题集推荐，重复推荐同一题集不占额度；
+- 每名学生每自然日最多创建 10 个新题集，重复推荐同一题集不占额度；
 - 同一学生重复点击返回幂等结果，不新增推荐行。
 
 ### 3.2 教研员审核与发布
@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS featured_question_sets (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   content_key CHAR(64) NOT NULL COMMENT 'sha256(subject_id + 排序去重后的 questionIds)',
   subject_id BIGINT NOT NULL,
+  created_by_student_id BIGINT DEFAULT NULL COMMENT '首次推荐学生，仅用于限流与审计',
   review_status VARCHAR(16) NOT NULL DEFAULT 'pending'
     COMMENT 'pending|approved|rejected',
   question_count SMALLINT NOT NULL,
@@ -131,8 +132,11 @@ CREATE TABLE IF NOT EXISTS featured_question_sets (
     ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uniq_fqs_content_key (content_key),
   KEY idx_fqs_review (review_status, created_at),
+  KEY idx_fqs_creator_day (created_by_student_id, created_at),
   CONSTRAINT fk_fqs_subject FOREIGN KEY (subject_id) REFERENCES subjects (id)
     ON DELETE RESTRICT,
+  CONSTRAINT fk_fqs_creator FOREIGN KEY (created_by_student_id)
+    REFERENCES students (id) ON DELETE SET NULL,
   CONSTRAINT fk_fqs_reviewer FOREIGN KEY (reviewed_by) REFERENCES admins (id)
     ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -256,7 +260,8 @@ ALTER TABLE special_practice_sessions
 - 计算内容：`sha256(String(subjectId) + ':' + sortedQuestionIds.join(','))`。
 - 年级统一使用 `apps/server/src/common/utils/grade.ts` 的 `grade_N` code，不使用 `students.grade` 原始标签。
 - 读取时先 `resolveGradeInfo(student.grade)?.code`，解析失败则不匹配任何年级精选。
-- 首次推荐创建题集必须在一个事务内完成：按 `content_key` 执行幂等 upsert，写 items，再写 recommendation；并发命中同一 `content_key` 时复用已提交/已加锁的题集，不产生半套 items。
+- 首次推荐创建题集必须在一个事务内完成：按 `content_key` 执行幂等 upsert，写 `created_by_student_id`、items，再写 recommendation；并发命中同一 `content_key` 时复用已提交/已加锁的题集，不产生半套 items。
+- 每日额度按 `featured_question_sets.created_at + created_by_student_id` 统计，不按 recommendation 行数统计。
 
 ## 6. 接口
 
@@ -268,7 +273,7 @@ ALTER TABLE special_practice_sessions
 |---|---|---|---|
 | 1 | POST | `/api/student/featured-sets/recommend` | 入参 `{questionIds:number[]}`；成功 201 `{setId,alreadyRecommended:boolean}` |
 | 2 | GET | `/api/student/featured-sets?page=1` | `{items,page,pageSize:20,total}` |
-| 3 | GET | `/api/student/featured-sets/unread-count` | `{count:number}` |
+| 3 | GET | `/api/student/featured-sets/unread-count` | `{count:number,latest:{publicationId,title}\|null}` |
 | 4 | POST | `/api/student/featured-sets/publications/:id/open` | 创建服务端作答会话、幂等标已读并返回题单交接数据；显式 `@HttpCode(200)` |
 
 学生列表项：
