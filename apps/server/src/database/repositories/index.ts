@@ -87,3 +87,17 @@ export { SpecialPracticeSessionsRepository } from './special-practice-sessions.r
 export type { UpsertSessionInput, SessionListRow, SpecialSessionModule } from './special-practice-sessions.repo.js';
 export { SpecialAnswerRecordsRepository } from './special-answer-records.repo.js';
 export type { UpsertAnswerInput, UpsertSpecialAnswerInput, AnswerRow } from './special-answer-records.repo.js';
+export { FeaturedQuestionSetsRepository } from './featured-question-sets.repo.js';
+export type {
+  CreateRecommendationInput,
+  FeaturedSourceQuestion,
+  CreateRecommendationResult,
+  StudentFeaturedPublication,
+  FeaturedUnreadSummary,
+  ReviewStatus,
+  ReviewSetListItem,
+  ReviewQuestion,
+  ReviewPublication,
+  ReviewSetDetail,
+  OpenPublicationResult,
+} from './featured-question-sets.repo.js';
