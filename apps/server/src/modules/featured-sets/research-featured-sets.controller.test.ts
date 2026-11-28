@@ -15,8 +15,8 @@ const user: JwtUser = { sub: 8, role: 'researcher' };
 
 describe('ResearchFeaturedSetsController', () => {
   const service = {
-    list: vi.fn().mockResolvedValue('list'),
-    pendingCount: vi.fn().mockResolvedValue(3),
+    list: vi.fn().mockResolvedValue({ items: [], page: 1, pageSize: 20, total: 7 }),
+    pendingCount: vi.fn().mockResolvedValue({ count: 3 }),
     detail: vi.fn().mockResolvedValue('detail'),
     publish: vi.fn().mockResolvedValue({ publicationId: 22 }),
     reject: vi.fn().mockResolvedValue(undefined),
@@ -26,9 +26,11 @@ describe('ResearchFeaturedSetsController', () => {
   const controller = new ResearchFeaturedSetsController(service as never);
 
   it('7 个端点只从 JWT 取 reviewer 并原样透传参数', async () => {
-    await expect(controller.list('approved', '2')).resolves.toBe('list');
+    await expect(controller.list('approved', '2')).resolves.toEqual({
+      items: [], page: 1, pageSize: 20, total: 7,
+    });
     expect(service.list).toHaveBeenCalledWith('approved', '2');
-    await expect(controller.pendingCount()).resolves.toBe(3);
+    await expect(controller.pendingCount()).resolves.toEqual({ count: 3 });
     await expect(controller.detail(5)).resolves.toBe('detail');
     expect(service.detail).toHaveBeenCalledWith(5);
 

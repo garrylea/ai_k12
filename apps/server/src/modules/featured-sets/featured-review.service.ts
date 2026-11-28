@@ -30,7 +30,9 @@ export class FeaturedReviewService {
     if (!Number.isInteger(p) || p < 1) {
       throw new BadRequestException({ code: 1001, message: '页码必须是正整数' });
     }
-    return this.featuredRepo.listReviewSets(st, p);
+    // 仓储只返回 {items,total}；分页线格式由 service 补齐（pageSize 与仓储默认值一致）。
+    const { items, total } = await this.featuredRepo.listReviewSets(st, p);
+    return { items, page: p, pageSize: 20, total };
   }
 
   async detail(id: number): Promise<ReviewSetDetail> {
@@ -39,8 +41,9 @@ export class FeaturedReviewService {
     return set;
   }
 
-  pendingCount(): Promise<number> {
-    return this.featuredRepo.pendingCount();
+  async pendingCount(): Promise<{ count: number }> {
+    const count = await this.featuredRepo.pendingCount();
+    return { count };
   }
 
   /** 标题随每次发布独立写入该年级 publication，reachCount 是发布时的有效学生数快照。 */

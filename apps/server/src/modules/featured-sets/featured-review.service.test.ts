@@ -141,14 +141,17 @@ describe('FeaturedReviewService', () => {
     expect(repository.getReviewSet).not.toHaveBeenCalled();
   });
 
-  it('list 缺省 pending 第 1 页，显式参数透传', async () => {
-    const result = { items: [], total: 0 };
-    repository.listReviewSets.mockResolvedValueOnce(result);
+  it('list 返回 {items,page,pageSize,total} 线格式，缺省 pending 第 1 页', async () => {
+    repository.listReviewSets.mockResolvedValueOnce({ items: [], total: 7 });
 
-    await expect(service.list(undefined, undefined)).resolves.toEqual(result);
+    await expect(service.list(undefined, undefined)).resolves.toEqual({
+      items: [], page: 1, pageSize: 20, total: 7,
+    });
     expect(repository.listReviewSets).toHaveBeenCalledWith('pending', 1);
 
-    await service.list('approved', '3');
+    await expect(service.list('approved', '3')).resolves.toEqual({
+      items: [], page: 3, pageSize: 20, total: 0,
+    });
     expect(repository.listReviewSets).toHaveBeenCalledWith('approved', 3);
   });
 
@@ -159,8 +162,8 @@ describe('FeaturedReviewService', () => {
     expect(repository.listReviewSets).not.toHaveBeenCalled();
   });
 
-  it('pendingCount 与 detail 透传，detail 不存在 -> 1002', async () => {
-    await expect(service.pendingCount()).resolves.toBe(3);
+  it('pendingCount 返回 {count} 线格式；detail 透传，不存在 -> 1002', async () => {
+    await expect(service.pendingCount()).resolves.toEqual({ count: 3 });
     const found = detail();
     repository.getReviewSet.mockResolvedValueOnce(found);
     await expect(service.detail(5)).resolves.toEqual(found);
