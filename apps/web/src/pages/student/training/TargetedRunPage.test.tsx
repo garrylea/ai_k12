@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import TargetedRunPage from './TargetedRunPage';
 import {
@@ -9,6 +10,8 @@ import {
   getMyPoints,
   getTrainingExplanations,
   judgeTraining,
+  recommendFeaturedSet,
+  selfAssessTraining,
   type CompleteTrainingSessionResult,
   type JudgeResult,
   type MyPoints,
@@ -42,6 +45,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     completeSpecialSession: vi.fn(),
     getMyPoints: vi.fn(),
     generateRemediationSet: vi.fn(),
+    recommendFeaturedSet: vi.fn(),
+    selfAssessTraining: vi.fn(),
   };
 });
 
@@ -51,6 +56,8 @@ const completeSpecialMock = vi.mocked(completeSpecialSession);
 const explanationsMock = vi.mocked(getTrainingExplanations);
 const getMyPointsMock = vi.mocked(getMyPoints);
 const generateMock = vi.mocked(generateRemediationSet);
+const recommendMock = vi.mocked(recommendFeaturedSet);
+const selfAssessMock = vi.mocked(selfAssessTraining);
 
 const KEY = 'training:targeted';
 
@@ -72,6 +79,13 @@ const JUDGED: JudgeResult = {
 
 function seed(sessionId: number | null) {
   sessionStorage.setItem(KEY, JSON.stringify({ sessionId, questions: [QUESTION] }));
+}
+
+/** featured 精选题单交接体：sessionId 恒 null（不发分），sessionUid 来自服务端 open。 */
+function seedFeatured(sessionUid: string) {
+  sessionStorage.setItem(KEY, JSON.stringify({
+    sessionId: null, questions: [QUESTION], title: '精选数学', mode: 'featured', sessionUid,
+  }));
 }
 
 /** RunExitGuard 用 useBlocker —— 必须是 data router（createMemoryRouter）。
@@ -148,10 +162,14 @@ describe('TargetedRunPage 完成发分', () => {
     explanationsMock.mockReset();
     getMyPointsMock.mockReset();
     generateMock.mockReset();
+    recommendMock.mockReset();
+    selfAssessMock.mockReset();
     judgeMock.mockResolvedValue(JUDGED);
     explanationsMock.mockResolvedValue({ explanations: {} });
     getMyPointsMock.mockResolvedValue(myPoints('铸铁'));
     completeSpecialMock.mockResolvedValue({ completed: true });
+    recommendMock.mockResolvedValue({ setId: 3, alreadyRecommended: false });
+    selfAssessMock.mockResolvedValue({});
   });
 
   it('正常完成：用交接来的 sessionId 调 complete，并把发分结果 push 到 store', async () => {
@@ -510,5 +528,115 @@ describe('TargetedRunPage 完成发分', () => {
     await answerOnlyQuestion();
 
     expect(completeSpecialMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 精选题单 featured 模式（2026-11-28 Task 10）：复用专项运行器，但三处硬约束：
+ * 1. sessionUid 用服务端 open 端点生成并随交接体带来的那个，页面不得重新生成；
+ * 2. sessionId 恒 null → 积分 hook 自动跳过，结果页没有任何积分/庆祝反馈；
+ * 3. 判题/自评带 suppressErrorFixPoints（真实保证在服务端 session，见 Task 7）。
+ */
+describe('TargetedRunPage featured 模式', () => {
+  beforeEach(() => {
+    judgeMock.mockReset();
+    completeMock.mockReset();
+    completeSpecialMock.mockReset();
+    explanationsMock.mockReset();
+    recommendMock.mockReset();
+    selfAssessMock.mockReset();
+    judgeMock.mockResolvedValue(JUDGED);
+    explanationsMock.mockResolvedValue({ explanations: {} });
+    completeSpecialMock.mockResolvedValue({ completed: true });
+    recommendMock.mockResolvedValue({ setId: 3, alreadyRecommended: false });
+    selfAssessMock.mockResolvedValue({});
+  });
+
+  it('featured 完成后只调 completeSpecialSession（服务端 uid），不调积分完成', async () => {
+    seedFeatured('server-uid-1');
+
+    await answerOnlyQuestion();
+
+    await waitFor(() => expect(completeSpecialMock).toHaveBeenCalledWith('server-uid-1'));
+    expect(completeSpecialMock).toHaveBeenCalledTimes(1);
+    expect(completeMock).not.toHaveBeenCalled();
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+  });
+
+  it('featured 判题用服务端 sessionUid、带 suppressErrorFixPoints，且不带 sessionId', async () => {
+    seedFeatured('server-uid-2');
+
+    await answerOnlyQuestion();
+
+    expect(judgeMock).toHaveBeenCalledWith(expect.objectContaining({
+      sessionUid: 'server-uid-2',
+      suppressErrorFixPoints: true,
+      title: '精选数学',
+      questionCount: 1,
+      plannedQuestionIds: [101],
+      questionOrder: 1,
+    }));
+    expect(judgeMock.mock.calls[0][0]).not.toHaveProperty('sessionId');
+  });
+
+  it('featured 结果页不渲染积分反馈', async () => {
+    seedFeatured('server-uid-3');
+
+    await answerOnlyQuestion();
+
+    // brief 指定的断言（当前 CelebrationOverlay 根节点没有这个 testid，保留作契约占位）
+    expect(screen.queryByTestId('celebration-overlay')).toBeNull();
+    // 真正的强度来自下列断言：庆祝层三种图标都不在、无积分提示条、store 无入账
+    expect(screen.queryByTestId('celebration-glow')).toBeNull();
+    expect(screen.queryByTestId('celebration-level-icon')).toBeNull();
+    expect(screen.queryByTestId('celebration-task-icon')).toBeNull();
+    expect(screen.queryByText('积分稍后到账，可重试')).toBeNull();
+    expect(usePointsStore.getState().queue).toHaveLength(0);
+  });
+
+  it('featured 主观题自评带服务端 uid 与 suppressErrorFixPoints', async () => {
+    sessionStorage.setItem(KEY, JSON.stringify({
+      sessionId: null, questions: [{ ...QUESTION, questionId: 102, text: '证明题', type: 'proof' }],
+      title: '精选数学', mode: 'featured', sessionUid: 'server-uid-4',
+    }));
+    judgeMock.mockResolvedValue({
+      questionId: 102, isCorrect: null, method: 'self_assess',
+      needsSelfAssessment: true, pointsAwarded: 0,
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(screen.getByRole('textbox'), '我的证明');
+    await user.click(screen.getByRole('button', { name: '提交' }));
+    expect(await screen.findByRole('button', { name: '我做对了' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '我做对了' }));
+    await screen.findByText('答题结果');
+
+    expect(selfAssessMock).toHaveBeenCalledWith(expect.objectContaining({
+      sessionUid: 'server-uid-4',
+      suppressErrorFixPoints: true,
+      questionId: 102,
+      source: 'targeted',
+    }));
+  });
+
+  /**
+   * 结果页推荐按钮（Task 10 Step 6）：正常专项 / featured / redo 都能推荐，
+   * 推荐的是当前结果页里的实际题目集合（不是写死的 id）。
+   */
+  it.each([
+    ['正常专项', () => seed(77)],
+    ['featured', () => seedFeatured('server-uid-5')],
+    ['redo', () => sessionStorage.setItem(KEY, JSON.stringify({
+      sessionId: null, questions: [QUESTION], mode: 'redo', title: '重做：卷 · 第 1 题',
+    }))],
+  ])('结果页推荐按钮（%s）带当前题单 questionId', async (_label, setup) => {
+    setup();
+    completeMock.mockResolvedValue({ pointsAwarded: 0, balance: 600, totalEarned: 600, levelUp: null });
+
+    await answerOnlyQuestion();
+
+    fireEvent.click(screen.getByRole('button', { name: '推荐这套题' }));
+    await waitFor(() => expect(recommendMock).toHaveBeenCalledWith([101]));
   });
 });

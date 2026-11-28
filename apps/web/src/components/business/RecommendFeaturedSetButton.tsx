@@ -17,7 +17,7 @@ export default function RecommendFeaturedSetButton({
   const [state, setState] = useState<'idle' | 'sending' | 'done'>('idle');
 
   if (disabledReason) {
-    return <Button disabled>{disabledReason}</Button>;
+    return <Button type="button" disabled>{disabledReason}</Button>;
   }
 
   async function submit() {
@@ -35,6 +35,7 @@ export default function RecommendFeaturedSetButton({
 
   return (
     <Button
+      type="button"
       onClick={(e) => {
         e.stopPropagation();
         void submit();
