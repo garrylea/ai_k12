@@ -42,12 +42,16 @@ export class FeaturedDeliveryService {
   async list(
     studentId: number,
     page?: string | undefined,
-  ): Promise<{ items: StudentFeaturedPublication[]; total: number }> {
+  ): Promise<{ items: StudentFeaturedPublication[]; page: number; pageSize: number; total: number }> {
     const p = page === undefined ? 1 : Number(page);
     if (!Number.isInteger(p) || p < 1) {
       throw new BadRequestException({ code: 1001, message: '页码必须是正整数' });
     }
-    return this.repository.listStudentPublications(studentId, await this.gradeCode(studentId), p);
+    // 仓储只返回 {items,total}；分页线格式由 service 补齐（pageSize 与仓储默认值一致）。
+    const { items, total } = await this.repository.listStudentPublications(
+      studentId, await this.gradeCode(studentId), p,
+    );
+    return { items, page: p, pageSize: 20, total };
   }
 
   async unreadSummary(studentId: number): Promise<FeaturedUnreadSummary> {

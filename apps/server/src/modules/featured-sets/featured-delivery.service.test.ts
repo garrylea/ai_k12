@@ -77,10 +77,18 @@ describe('FeaturedDeliveryService', () => {
     );
   });
 
-  it('list 用 resolveGradeInfo 的 grade_N code，不把学生年级原始标签透传给仓储', async () => {
-    await expect(service.list(9, '2')).resolves.toEqual({ items: [], total: 0 });
+  it('list 返回 {items,page,pageSize,total} 线格式，年级用 grade_N code', async () => {
+    const items = [{ publicationId: 12 }];
+    repository.listStudentPublications.mockResolvedValueOnce({ items, total: 7 });
+
+    await expect(service.list(9, '2')).resolves.toEqual({
+      items, page: 2, pageSize: 20, total: 7,
+    });
     expect(students.findById).toHaveBeenCalledWith(9);
     expect(repository.listStudentPublications).toHaveBeenCalledWith(9, 'grade_7', 2);
+
+    await expect(service.list(9)).resolves.toEqual({ items: [], page: 1, pageSize: 20, total: 0 });
+    expect(repository.listStudentPublications).toHaveBeenLastCalledWith(9, 'grade_7', 1);
   });
 
   it('unreadSummary 同样用 grade_N code', async () => {

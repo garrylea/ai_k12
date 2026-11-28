@@ -25,13 +25,15 @@ describe('StudentFeaturedSetsController', () => {
   it('列表 / 未读摘要 / open：只从 JWT 取 studentId，page 与 publicationId 原样透传', async () => {
     const recommendation = { recommend: vi.fn() };
     const delivery = {
-      list: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      list: vi.fn().mockResolvedValue({ items: [], page: 3, pageSize: 20, total: 0 }),
       unreadSummary: vi.fn().mockResolvedValue({ count: 2, latest: { publicationId: 12, title: 'T' } }),
       open: vi.fn().mockResolvedValue({ mode: 'featured', sessionUid: 'u' }),
     };
     const controller = new StudentFeaturedSetsController(recommendation as never, delivery as never);
 
-    await expect(controller.list('3', { sub: 7 } as never)).resolves.toEqual({ items: [], total: 0 });
+    await expect(controller.list('3', { sub: 7 } as never)).resolves.toEqual({
+      items: [], page: 3, pageSize: 20, total: 0,
+    });
     expect(delivery.list).toHaveBeenCalledWith(7, '3');
     await expect(controller.unreadCount({ sub: 7 } as never)).resolves
       .toEqual({ count: 2, latest: { publicationId: 12, title: 'T' } });
