@@ -7,6 +7,7 @@ import {
   getAdminOverview,
   getExpiredAlertStats,
   getKnowledgeGraphMastery,
+  getResearchFeaturedPendingCount,
   getMyLedger,
   getMyPointRules,
   getMyPoints,
@@ -28,6 +29,7 @@ import {
   getUnreadMessageCount,
   getWeakPoints,
   listMyStudents,
+  listResearchFeaturedSets,
   putParentControls,
   type AdminAlertRetentionPreview,
   type MyPoints,
@@ -98,6 +100,9 @@ vi.mock('@/services/api', async (importOriginal) => {
     getSubscriptionStatus: vi.fn(),
     // 家长端顶栏裁决结果条（BillingNoticeBar）挂载即拉：默认无未读 → 不渲染
     listUnreadBillingNotices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    // `/research/featured-sets` 页面与 ResearchNav 角标挂载即拉
+    listResearchFeaturedSets: vi.fn(),
+    getResearchFeaturedPendingCount: vi.fn(),
   };
 });
 
@@ -126,6 +131,8 @@ const getWeakPointsMock = vi.mocked(getWeakPoints);
 const getMyPointRulesMock = vi.mocked(getMyPointRules);
 const getSubscriptionStatusMock = vi.mocked(getSubscriptionStatus);
 const listUnreadBillingNoticesMock = vi.mocked(listUnreadBillingNotices);
+const listResearchFeaturedSetsMock = vi.mocked(listResearchFeaturedSets);
+const getResearchFeaturedPendingCountMock = vi.mocked(getResearchFeaturedPendingCount);
 
 /** P6.6：与后端默认档一致（切走 5 / 无操作 15），恰好等于「标准」预设。 */
 const CONTROLS: ParentControls = {
@@ -215,6 +222,11 @@ function setParentSession() {
 function setAdminSession() {
   localStorage.setItem('token', validToken());
   localStorage.setItem('userRole', 'admin');
+}
+
+function setResearcherSession() {
+  localStorage.setItem('token', validToken());
+  localStorage.setItem('userRole', 'researcher');
 }
 
 function renderAt(path: string) {
@@ -310,6 +322,11 @@ beforeEach(() => {
   // 顶栏裁决结果条（BillingNoticeBar）挂载即拉：默认无未读 → 不渲染
   listUnreadBillingNoticesMock.mockReset();
   listUnreadBillingNoticesMock.mockResolvedValue({ items: [], total: 0 });
+  // 教研精选题单：页面默认空列表，侧栏角标默认 3 条待审核
+  listResearchFeaturedSetsMock.mockReset();
+  listResearchFeaturedSetsMock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+  getResearchFeaturedPendingCountMock.mockReset();
+  getResearchFeaturedPendingCountMock.mockResolvedValue({ count: 3 });
   getMyPointRulesMock.mockResolvedValue({
     tasks: [
       {
@@ -1022,5 +1039,67 @@ describe('路由表：忘记密码页', () => {
     // 学生口径说明（UX 文档：学生联系家长重置，不走本流程）
     expect(screen.getByText(/学生密码请联系家长在家长端重置/)).toBeInTheDocument();
     expect(document.querySelector('[data-theme="parent"]')).not.toBeNull();
+  });
+});
+
+/**
+ * 教研精选题单（2026-11-28）：`/research/featured-sets` 进 ResearchLayout + researcher 守卫。
+ * 页面组件测试挂的是页面本身、绕过了路由表；这里钉住「路径确实指向真页面」，
+ * 同时钉住侧栏「精选题单」入口和 pending 角标（>99 封顶、失败静默、focus 刷新）。
+ */
+describe('路由表：教研空间「精选题单」', () => {
+  it('/research/featured-sets 渲染 ResearchFeaturedSetsPage，而非无匹配路由', async () => {
+    setResearcherSession();
+
+    renderAt('/research/featured-sets');
+
+    expect(await screen.findByRole('heading', { name: '精选题单' })).toBeInTheDocument();
+    for (const label of ['待审核', '已发布', '已拒绝']) {
+      expect(screen.getByRole('tab', { name: label })).toBeInTheDocument();
+    }
+    expect(listResearchFeaturedSetsMock).toHaveBeenCalledWith('pending', 1);
+    expect(screen.queryByText(PLACEHOLDER_TEXT)).not.toBeInTheDocument();
+    // 侧栏入口是深链/书签的对外契约
+    expect(screen.getByRole('link', { name: /精选题单/ })).toHaveAttribute(
+      'href',
+      '/research/featured-sets',
+    );
+  });
+
+  it('侧栏 pending 角标：来自 pending-count、>99 显示 99+、0 不渲染、失败静默', async () => {
+    setResearcherSession();
+    getResearchFeaturedPendingCountMock.mockResolvedValue({ count: 3 });
+
+    renderAt('/research/featured-sets');
+    expect(await screen.findByTestId('featured-pending-badge')).toHaveTextContent('3');
+    expect(getResearchFeaturedPendingCountMock).toHaveBeenCalledTimes(1);
+
+    // focus 刷新；失败静默，旧值保留
+    getResearchFeaturedPendingCountMock.mockRejectedValueOnce(new Error('计数接口故障'));
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() => expect(getResearchFeaturedPendingCountMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('featured-pending-badge')).toHaveTextContent('3');
+
+    getResearchFeaturedPendingCountMock.mockResolvedValueOnce({ count: 120 });
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() =>
+      expect(screen.getByTestId('featured-pending-badge')).toHaveTextContent('99+'),
+    );
+
+    getResearchFeaturedPendingCountMock.mockResolvedValueOnce({ count: 0 });
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('featured-pending-badge')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('无 token 访问 /research/featured-sets → 回登录页，不拉列表', async () => {
+    localStorage.clear();
+
+    renderAt('/research/featured-sets');
+
+    expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '精选题单' })).not.toBeInTheDocument();
+    expect(listResearchFeaturedSetsMock).not.toHaveBeenCalled();
   });
 });
