@@ -1,10 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, Link, RouterProvider } from 'react-router-dom';
 import StudentStayLayout from './StudentStayLayout';
 import { buildStayReturnState, STAY_FALLBACK_PATH } from '@/utils/stayReturn';
 import { LearningLockContext } from '@/kiosk/learningLockContext';
+import { probeStudentSession } from '@/services/api';
+
+/** 「退出本页」会先探一次服务端会话（2026-11-28）：默认通过，失效/非会话失败的用例自行覆盖。 */
+vi.mock('@/services/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/api')>();
+  return { ...actual, probeStudentSession: vi.fn() };
+});
+
+const probeMock = vi.mocked(probeStudentSession);
 
 /**
  * 浅停留页（个人中心 / 奖励册 / 练习记录）顶栏「退出本页」的落点回归。
@@ -26,6 +35,8 @@ afterEach(() => cleanup());
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
+  probeMock.mockReset();
+  probeMock.mockResolvedValue(true);
 });
 
 /** 有效 JWT：浅停留页只有登录态能进，「退出本页」会查 isSessionValid，测试须按真实口径给未过期 token。 */
@@ -83,7 +94,7 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
 
     await user.click(screen.getByRole('button', { name: '退出本页' }));
 
-    expect(router.state.location.pathname).toBe('/student/star-map');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/star-map'));
     expect(screen.getByText('知识星图')).toBeInTheDocument();
   });
 
@@ -105,7 +116,7 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
 
     await user.click(exitButton);
 
-    expect(router.state.location.pathname).toBe('/student/course-detail');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/course-detail'));
     expect(router.state.location.state).toEqual({ subjectId: 7, lessonId: 42 });
     // 「退出本页」不是登出：token 原样保留（会话仍有效时）
     expect(localStorage.getItem('token')).toBe(tokenBefore);
@@ -117,7 +128,7 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
 
     await user.click(screen.getByRole('button', { name: '退出本页' }));
 
-    expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
+    await waitFor(() => expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH));
   });
 
   it('来源本身是兄弟页（奖励册）→ 不认，兜底回星图', async () => {
@@ -129,7 +140,40 @@ describe('StudentStayLayout 顶栏「退出本页」', () => {
 
     await user.click(screen.getByRole('button', { name: '退出本页' }));
 
-    expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
+    await waitFor(() => expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH));
+  });
+
+  /**
+   * 2026-11-28：本地 JWT 的 exp 还没到、但服务端会话已失效（后端重启后注册表重建失败/被踢/吊销）。
+   * 探针命中 1003/1013 → api 层清登录态并整页跳登录页、返回永不 resolve 的 Promise ——
+   * 用同形状的挂起 Promise 模拟：绝不能先回来源页（来源页同样要登录）。
+   */
+  it('本地 token 未过期但服务端会话失效 → 不回星图，停在原页等跳登录', async () => {
+    const user = userEvent.setup();
+    probeMock.mockReturnValue(new Promise(() => {}));
+    const router = renderStay({
+      pathname: '/student/profile',
+      state: buildStayReturnState('/student/star-map', undefined),
+    });
+
+    await user.click(screen.getByRole('button', { name: '退出本页' }));
+
+    await waitFor(() => expect(probeMock).toHaveBeenCalled());
+    expect(router.state.location.pathname).toBe('/student/profile');
+  });
+
+  /** 网络抖动 / 5xx 返回 false：不能把人当登录过期踢走，照常回来源页。 */
+  it('探针非会话类失败 → 照常回来源页，不阻断退出', async () => {
+    const user = userEvent.setup();
+    probeMock.mockResolvedValue(false);
+    const router = renderStay({
+      pathname: '/student/profile',
+      state: buildStayReturnState('/student/star-map', undefined),
+    });
+
+    await user.click(screen.getByRole('button', { name: '退出本页' }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/star-map'));
   });
 
   it('顶栏不再有左侧「返回」：只有「退出本页」一个离开入口', () => {
@@ -215,7 +259,7 @@ describe('练习记录顶栏「退出本页」也回最初来源', () => {
 
     await user.click(screen.getByRole('button', { name: '退出本页' }));
 
-    expect(router.state.location.pathname).toBe('/student/star-map');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/star-map'));
     expect(screen.getByText('知识星图')).toBeInTheDocument();
   });
 
@@ -228,7 +272,7 @@ describe('练习记录顶栏「退出本页」也回最初来源', () => {
 
     await user.click(screen.getByRole('button', { name: '退出本页' }));
 
-    expect(router.state.location.pathname).toBe('/student/training/chinese/special');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/student/training/chinese/special'));
     expect(screen.getByText('语文专项页')).toBeInTheDocument();
   });
 
@@ -238,7 +282,7 @@ describe('练习记录顶栏「退出本页」也回最初来源', () => {
 
     await user.click(screen.getByRole('button', { name: '退出本页' }));
 
-    expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH);
+    await waitFor(() => expect(router.state.location.pathname).toBe(STAY_FALLBACK_PATH));
   });
 });
 

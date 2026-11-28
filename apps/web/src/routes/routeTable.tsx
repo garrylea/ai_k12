@@ -90,6 +90,7 @@ import AnalyticsLlmTokensPage from '@/pages/admin/analytics/AnalyticsLlmTokensPa
 import AnalyticsEventsPage from '@/pages/admin/analytics/AnalyticsEventsPage';
 import RequireRole from './RequireRole';
 import RoleRedirect from './RoleRedirect';
+import StudentIndexRedirect from './StudentIndexRedirect';
 
 /**
  * 真实路由表（纯配置，**不定义组件**：本文件只导出 `routes`，路由级测试用
@@ -489,12 +490,14 @@ export const routes: RouteObject[] = [
   // 学生端主轨落地：`StudentLayout` 外壳与 P2.4–P2.9 / P4.x 占位页已于 2026-09-20 删除
   // （P4.x 错题本页面已废弃，错题能力由训练轨 `/student/training/errors` 承担）。
   // 保留这两条顶层重定向，否则老地址 `/student`、`/student/mainline` 会落到路由默认错误页
-  // （本仓无 404 兜底路由）。包 `RequireRole` 以维持未登录 → 登录页的行为。
+  // （本仓无 404 兜底路由）。`RequireRole` 挡本地无 token / 过期，`StudentIndexRedirect` 再打一次
+  // 受保护接口确认**服务端**会话仍有效，然后落到学科选择页（2026-11-28）—— 星图的数据按学科取，
+  // 旧地址没有 `subjectId`，直接落星图只会得到「缺少学生或学科信息」（详见该组件注释）。
   {
     path: '/student',
     element: (
       <RequireRole role="student">
-        <Navigate to="/student/star-map" replace />
+        <StudentIndexRedirect />
       </RequireRole>
     ),
   },
@@ -502,7 +505,7 @@ export const routes: RouteObject[] = [
     path: '/student/mainline',
     element: (
       <RequireRole role="student">
-        <Navigate to="/student/star-map" replace />
+        <StudentIndexRedirect />
       </RequireRole>
     ),
   },

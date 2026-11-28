@@ -124,7 +124,7 @@ export default function StarMapPage() {
     setLoading(true);
     setError(null);
     try {
-      if (!studentId || !subjectId) {
+      if (!studentId) {
         throw new Error('缺少学生或学科信息，请重新从学科选择页进入');
       }
       const result = await fetchStarMap(studentId, subjectId);
@@ -144,7 +144,18 @@ export default function StarMapPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, [studentId, subjectId, location.key]);
+  // 学科是星图数据的唯一维度（`/progress/students/:id/star-map?subjectId=`），从学科选择页进来时
+  // `subjectId` 放在 `location.state` 里。老地址 `/student`、书签/直接输 `/student/star-map` 都没有
+  // state —— 与其在页面上甩一句「缺少学生或学科信息」，不如送回学科选择页让用户点一下
+  // （2026-11-28：登录态有效也不该落到这句死路提示上）。
+  useEffect(() => {
+    if (!subjectId) navigate('/student/subjects', { replace: true });
+  }, [subjectId, navigate]);
+
+  useEffect(() => {
+    if (!subjectId) return;
+    fetchData();
+  }, [studentId, subjectId, location.key]);
 
   const selectedChapter = useMemo(
     () => data?.chapters.find(c => c.id === selectedPlanetId) ?? null,

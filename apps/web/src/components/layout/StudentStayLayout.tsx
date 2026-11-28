@@ -2,6 +2,7 @@ import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ExitIcon } from '@/components/base';
 import { LockedPillReveal } from '@/kiosk/LockedPillReveal';
 import { clearAuth, isSessionValid } from '@/utils/auth';
+import { probeStudentSession } from '@/services/api';
 import { buildStayReturnState, resolveStayReturn } from '@/utils/stayReturn';
 
 /**
@@ -104,7 +105,9 @@ export default function StudentStayLayout() {
 
         {/* 退出本页：回到进入本页之前的那一页（唯一的离开入口），不是登出。
             但会话已失效时（如停留期间后端重启/token 过期）不能回来源页——来源页同样要登录，
-            没 session 会卡死；统一回登录页并说明原因。 */}
+            没 session 会卡死；统一回登录页并说明原因。
+            2026-11-28：本地 exp 还没到、但服务端会话已失效的那种，也必须挡住 —— 先探一次会话，
+            探针命中 1003/1013 时 api 层已整页跳登录页且 Promise 永不 resolve，下面不会执行。 */}
         <button
           type="button"
           onClick={() => {
@@ -113,7 +116,7 @@ export default function StudentStayLayout() {
               navigate('/login?reason=expired', { replace: true });
               return;
             }
-            navigate(back.to, { state: back.state });
+            void probeStudentSession().then(() => navigate(back.to, { state: back.state }));
           }}
           title="退出本页"
           aria-label="退出本页"

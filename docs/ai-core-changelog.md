@@ -4509,3 +4509,23 @@ MDM 描述文件（`com.apple.applicationaccess` 的 `allowAssistant=false`，ma
 **测试**：`api.test.ts`（1003 拦截 + 业务 1003 不误伤）、`LoginPage.test.tsx`（两种原因文案）、`StudentStayLayout.test.tsx`（会话失效退出回登录 + 既有落点用例补有效 token）、`routeTable.test.tsx`。web 全量 195 文件 / 2011 用例绿。
 
 **未覆盖**：SSE 与 `uploadFile` 等裸 fetch 路径绕过 `fetchApi`，`1003` 跳转对它们不生效——与 1013/2001 同类既有缺口，非本批引入。
+
+---
+
+## 2026-11-28 · `/student` 旧地址落点改学科选择页，探测服务端会话
+
+**现象**：直接输 `http://localhost:5173/student`（或 `/student/mainline`）落到 `/student/star-map`；会话有效时页面只显示「缺少学生或学科信息」，本地清掉会话时昨晚那批「会话失效回登录页」在这条路径上也不生效。
+
+**根因**两条：
+1. **学科维度只来自路由 state**：星图数据按 `?subjectId=` 取，这个 id 由学科选择页 `navigate('/student/star-map', { state: { subjectId } })` 带过去；旧地址/书签/直接输地址没有 state → `StarMapPage` 本地抛「缺少学生或学科信息」，**一个接口都不发**。重启后端与此无关（`userId` 在 storage、`subjectId` 在浏览器 history）。
+2. **会话失效在这条路径上看不见**：`RequireRole` 只解码本地 JWT 的 `exp`；落点的星图本地就抛错不发请求，而学科选择页拉的是公开接口 `/content/subjects`，都不会返回 1003，服务端会话没了也发现不了。
+
+**改动**：
+- `routes/StudentIndexRedirect.tsx`（新增）+ `routes/routeTable.tsx`：`/student`、`/student/mainline` 先探会话，通过后落 **`/student/subjects`**，不再落星图。
+- `pages/student/StarMapPage.tsx`：没有 `subjectId` 时不再显示死路提示，直接 `replace` 到 `/student/subjects`（书签、老地址、丢 state 的入口都能自救），拿到学科才发请求。
+- `services/api.ts` 新增 `probeStudentSession()`（两处共用，复用 `/points/me`）：1003/1013 由 api 层清登录态并整页跳登录页、返回永不 resolve 的 Promise；网络/5xx 返回 false 照常放行。`components/layout/StudentStayLayout.tsx` 的「退出本页」也先探一次：本地 token 未过期但服务端会话已失效时不再回来源星图（昨天只修了本地 exp 已过的那一半）。
+- 测试：`routeTable.test.tsx` 三条钉住两条旧地址（会话有效→`/student/subjects` 且探测被调用、无会话→`/login?reason=expired` 且不发探测、服务端会话失效→停在原地址）；新增 `StarMapPage.test.tsx`（无 subjectId → 送学科选择页且不发请求）；`StudentStayLayout.test.tsx` 补两条（服务端会话失效→不回来源页、非会话类失败→照常回来源页）。
+
+**保留的原路径**：学科选择页选科目、课程详情的「完成/下一课」「返回关卡星图」、浅停留页「退出本页」且会话有效、浏览器后退——这些都带 `subjectId` 或属于用户主动导航，仍去星图。
+
+**为什么不改 `RequireRole`**：它是同步组件、挂在所有受保护路由上，逐个发探测请求会把每个页面的首屏都变成两次往返；这条旧地址是唯一「不发任何请求就跳转」的落点，就地修即可。

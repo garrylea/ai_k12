@@ -10,6 +10,7 @@ import {
   getMyLedger,
   getMyPointRules,
   getMyPoints,
+  probeStudentSession,
   getMyRewards,
   getPracticeHistory,
   getPracticeHistoryDetail,
@@ -61,6 +62,7 @@ vi.mock('@/services/api', async (importOriginal) => {
   return {
     ...actual,
     getMyPoints: vi.fn(),
+    probeStudentSession: vi.fn(),
     getMyLedger: vi.fn(),
     getMyRewards: vi.fn(),
     // 练习记录（2026-11-01）：列表 + 详情页挂载即拉
@@ -100,6 +102,7 @@ vi.mock('@/services/api', async (importOriginal) => {
 });
 
 const getMyPointsMock = vi.mocked(getMyPoints);
+const probeStudentSessionMock = vi.mocked(probeStudentSession);
 const getMyLedgerMock = vi.mocked(getMyLedger);
 const getMyRewardsMock = vi.mocked(getMyRewards);
 const getPracticeHistoryMock = vi.mocked(getPracticeHistory);
@@ -234,6 +237,9 @@ afterEach(() => {
 
 beforeEach(() => {
   getMyPointsMock.mockReset();
+  // 旧地址落点会先探一次服务端会话：默认通过；需要模拟失效的用例自行覆盖。
+  probeStudentSessionMock.mockReset();
+  probeStudentSessionMock.mockResolvedValue(true);
   // 学生页顶栏统一挂了 `UserBadge`（账号药丸）→ 每个学生会话用例都会拉一次积分。
   // 给个默认值，避免 `undefined.then` 把页面炸掉；需要特定余额的用例再自行覆盖。
   getMyPointsMock.mockResolvedValue(POINTS);
@@ -498,18 +504,59 @@ describe('路由表：积分相关页面', () => {
 
   /**
    * `StudentLayout` 删除后 `/student` 与 `/student/mainline` 不再有子路由，
-   * 改由两条顶层 `Navigate` 承接。本仓无 404 兜底路由，若这两条被顺手删掉，
+   * 改由两条顶层 `StudentIndexRedirect` 承接。本仓无 404 兜底路由，若这两条被顺手删掉，
    * 老地址会落到 React Router 默认错误页 —— 这里钉住它们。
+   *
+   * 2026-11-28：落点不再是无条件 `Navigate`，也不再是星图。
+   * - `RequireRole` 只看本地 JWT 的 exp，服务端会话已失效时照样放行 → 必须先探测一次会话；
+   * - 星图的数据按学科取，旧地址没有 `subjectId`，落星图只会显示「缺少学生或学科信息」
+   *   → 落点是学科选择页。
+   * 两条旧地址的行为都要钉住。
    */
   it.each([['/student'], ['/student/mainline']])(
-    '%s 重定向到 /student/star-map',
+    '%s 会话有效 → 探测通过后落 /student/subjects（不是没学科的星图）',
     async (entry) => {
       setStudentSession();
 
       const router = createMemoryRouter(routes, { initialEntries: [entry] });
       render(<RouterProvider router={router} />);
 
-      await waitFor(() => expect(router.state.location.pathname).toBe('/student/star-map'));
+      await waitFor(() => expect(router.state.location.pathname).toBe('/student/subjects'));
+      expect(probeStudentSessionMock).toHaveBeenCalled();
+    },
+  );
+
+  it.each([['/student'], ['/student/mainline']])(
+    '%s 无会话 → 登录页（带 reason=expired），且不发探测请求',
+    async (entry) => {
+      localStorage.clear();
+
+      const router = createMemoryRouter(routes, { initialEntries: [entry] });
+      render(<RouterProvider router={router} />);
+
+      expect(await screen.findByRole('heading', { name: '智学系统' })).toBeInTheDocument();
+      expect(router.state.location.pathname).toBe('/login');
+      expect(router.state.location.search).toBe('?reason=expired');
+      expect(probeStudentSessionMock).not.toHaveBeenCalled();
+    },
+  );
+
+  /**
+   * 服务端会话失效（后端重启后注册表重建失败 / 被踢 / token 吊销）时，本地 token 仍未过期。
+   * api 层收到 1003/1013 会清登录态并整页跳登录页，返回**永不 resolve** 的 Promise ——
+   * 这里用同形状的挂起 Promise 模拟：只要探测没成功，就绝不能提前放行到星图。
+   */
+  it.each([['/student'], ['/student/mainline']])(
+    '%s 本地 token 未过期但服务端会话失效 → 停在原地址等跳登录，不落星图',
+    async (entry) => {
+      setStudentSession();
+      probeStudentSessionMock.mockReturnValue(new Promise(() => {}));
+
+      const router = createMemoryRouter(routes, { initialEntries: [entry] });
+      render(<RouterProvider router={router} />);
+
+      await waitFor(() => expect(probeStudentSessionMock).toHaveBeenCalled());
+      expect(router.state.location.pathname).toBe(entry);
     },
   );
 });

@@ -2613,6 +2613,26 @@ export function getMyPoints(): Promise<MyPoints> {
   return fetchApi<MyPoints>('/points/me');
 }
 
+/**
+ * 服务端会话探针（2026-11-28，两处落点共用：`StudentIndexRedirect` / `StudentStayLayout` 退出本页）。
+ *
+ * 本地 JWT 的 `exp` 只看得见「本地有没有过期」，后端重启后注册表重建失败、账号被踢、token 被吊销时
+ * 本地 token 仍「没过期」；而这些落点的下一个页面（学科选择）拉的是公开接口，发现不了会话已失效。
+ * 所以发一次**学生本人维度**的受保护请求 `/points/me`（只读、新学生也返回全 0、不依赖入参）。
+ *
+ * 会话失效时 `handleApiResponse` 已清登录态并整页跳登录页，返回**永不 resolve** 的 Promise ——
+ * 这里的 await 会一直挂起，调用方不会提前放行到目标页。其它失败（网络抖动 / 5xx）不应把用户
+ * 当成登录过期踢走，吞掉并返回 false，由调用方照常放行。
+ */
+export async function probeStudentSession(): Promise<boolean> {
+  try {
+    await getMyPoints();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function getMyLedger(page = 1, pageSize = 20): Promise<PointLedgerPage> {
   const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   return fetchApi<PointLedgerPage>(`/points/me/ledger?${qs.toString()}`);
