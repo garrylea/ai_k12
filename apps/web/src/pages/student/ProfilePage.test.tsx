@@ -3,8 +3,10 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom';
 import ProfilePage from './ProfilePage';
 import {
+  getFeaturedUnreadSummary,
   getMyLedger,
   getMyPoints,
+  listFeaturedSets,
   type MyPoints,
   type PointLedgerEntry,
   type PointLedgerPage,
@@ -26,11 +28,21 @@ import {
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
-  return { ...actual, getMyPoints: vi.fn(), getMyLedger: vi.fn() };
+  return {
+    ...actual,
+    getMyPoints: vi.fn(),
+    getMyLedger: vi.fn(),
+    // 个人中心挂载即拉精选题单卡片：这几个也必须 mock，不能让请求漏到真实 fetch
+    listFeaturedSets: vi.fn(),
+    getFeaturedUnreadSummary: vi.fn(),
+    openFeaturedSet: vi.fn(),
+  };
 });
 
 const getMyPointsMock = vi.mocked(getMyPoints);
 const getMyLedgerMock = vi.mocked(getMyLedger);
+const listFeaturedSetsMock = vi.mocked(listFeaturedSets);
+const getFeaturedUnreadSummaryMock = vi.mocked(getFeaturedUnreadSummary);
 
 const POINTS: MyPoints = {
   balance: 120,
@@ -80,9 +92,29 @@ afterEach(() => {
 beforeEach(() => {
   getMyPointsMock.mockReset();
   getMyLedgerMock.mockReset();
+  listFeaturedSetsMock.mockReset();
+  getFeaturedUnreadSummaryMock.mockReset();
+  listFeaturedSetsMock.mockResolvedValue({ items: [], page: 1, pageSize: 20, total: 0 });
+  getFeaturedUnreadSummaryMock.mockResolvedValue({ count: 0, latest: null });
 });
 
 describe('ProfilePage', () => {
+  it('精选题单卡片位于「个人中心」标题之后、段位卡之前', async () => {
+    getMyPointsMock.mockResolvedValue(POINTS);
+    getMyLedgerMock.mockResolvedValue(ledgerPage());
+
+    renderPage();
+
+    const heading = screen.getByRole('heading', { name: '个人中心' });
+    const featured = await screen.findByTestId('featured-sets-card');
+    const rank = screen.getByTestId('profile-level-icon');
+    expect(heading.compareDocumentPosition(featured) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(featured.compareDocumentPosition(rank) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('暂无精选题单')).toBeInTheDocument();
+    expect(listFeaturedSetsMock).toHaveBeenCalledWith(1);
+    expect(getFeaturedUnreadSummaryMock).toHaveBeenCalledTimes(1);
+  });
+
   it('加载中显示骨架，不先渲染 0 分', () => {
     getMyPointsMock.mockReturnValue(new Promise<MyPoints>(() => {}));
     getMyLedgerMock.mockReturnValue(new Promise<PointLedgerPage>(() => {}));
