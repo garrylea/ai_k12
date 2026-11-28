@@ -4205,3 +4205,123 @@ export function startSimilarPractice(
     { method: 'POST', body: JSON.stringify({ count }) },
   );
 }
+
+// --- 精选题单 / featured sets（2026-11-28，契约见 docs/superpowers/plans/2026-11-28-curated-question-set.md） ---
+
+export interface FeaturedSetListItem {
+  publicationId: number;
+  setId: number;
+  title: string;
+  subjectId: number;
+  subjectName: string;
+  questionCount: number;
+  publishedAt: string;
+  isRead: boolean;
+}
+
+export interface FeaturedSetPage {
+  items: FeaturedSetListItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface FeaturedUnreadSummary {
+  count: number;
+  latest: { publicationId: number; title: string } | null;
+}
+
+export interface FeaturedRunPayload {
+  mode: 'featured';
+  sessionUid: string;
+  subjectId: number;
+  title: string;
+  questions: TargetedPracticeQuestion[];
+}
+
+export interface ResearchFeaturedSetItem {
+  setId: number;
+  subjectId: number;
+  subjectName: string;
+  questionCount: number;
+  recommendationCount: number;
+  gradeDistribution: Array<{ gradeCode: string; count: number }>;
+  reviewStatus: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+}
+
+export interface ResearchFeaturedSetDetail extends ResearchFeaturedSetItem {
+  questions: Array<{ questionId: number; text: string; type: string; answer: string; explanation: string | null }>;
+  publications: Array<{
+    publicationId: number;
+    gradeCode: string;
+    title: string;
+    reachCount: number;
+    status: 'published' | 'withdrawn';
+    publishedAt: string;
+  }>;
+}
+
+/** 推荐入库：Nest `@Post` 默认 201；重复推荐同一题集幂等（alreadyRecommended=true）。 */
+export function recommendFeaturedSet(questionIds: number[]): Promise<{ setId: number; alreadyRecommended: boolean }> {
+  return fetchApi<{ setId: number; alreadyRecommended: boolean }>(
+    '/student/featured-sets/recommend',
+    { method: 'POST', body: JSON.stringify({ questionIds }) },
+  );
+}
+
+export function listFeaturedSets(page = 1): Promise<FeaturedSetPage> {
+  const qs = new URLSearchParams({ page: String(page) });
+  return fetchApi<FeaturedSetPage>(`/student/featured-sets?${qs.toString()}`);
+}
+
+export function getFeaturedUnreadSummary(): Promise<FeaturedUnreadSummary> {
+  return fetchApi<FeaturedUnreadSummary>('/student/featured-sets/unread-count');
+}
+
+/** 开练：`@Post` 显式 200；服务端生成 sessionUid（运行器不得自行生成）。 */
+export function openFeaturedSet(publicationId: number): Promise<FeaturedRunPayload> {
+  return fetchApi<FeaturedRunPayload>(`/student/featured-sets/publications/${publicationId}/open`, {
+    method: 'POST',
+  });
+}
+
+export function listResearchFeaturedSets(
+  status: string,
+  page: number,
+): Promise<{ items: ResearchFeaturedSetItem[]; total: number; page: number; pageSize: number }> {
+  const qs = new URLSearchParams({ status, page: String(page) });
+  return fetchApi<{ items: ResearchFeaturedSetItem[]; total: number; page: number; pageSize: number }>(
+    `/research/featured-sets?${qs.toString()}`,
+  );
+}
+
+export function getResearchFeaturedSet(id: number): Promise<ResearchFeaturedSetDetail> {
+  return fetchApi<ResearchFeaturedSetDetail>(`/research/featured-sets/${id}`);
+}
+
+export function getResearchFeaturedPendingCount(): Promise<{ count: number }> {
+  return fetchApi<{ count: number }>('/research/featured-sets/pending-count');
+}
+
+export function publishFeaturedSet(
+  id: number,
+  input: { title: string; gradeCode: string },
+): Promise<{ publicationId: number }> {
+  return fetchApi<{ publicationId: number }>(`/research/featured-sets/${id}/publish`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function rejectFeaturedSet(id: number): Promise<null> {
+  return fetchApi<null>(`/research/featured-sets/${id}/reject`, { method: 'POST' });
+}
+
+export function reopenFeaturedSet(id: number): Promise<null> {
+  return fetchApi<null>(`/research/featured-sets/${id}/reopen`, { method: 'POST' });
+}
+
+export function withdrawFeaturedPublication(id: number): Promise<null> {
+  return fetchApi<null>(`/research/featured-sets/publications/${id}/withdraw`, { method: 'POST' });
+}

@@ -9,6 +9,7 @@ import {
 } from '@/components/markdown';
 import { Button, Card, PageHeader, Skeleton, Tag } from '@/components/base';
 import { StudentAccountActions } from '@/components/business';
+import RecommendFeaturedSetButton from '@/components/business/RecommendFeaturedSetButton';
 import { getTrainingSubject, parseSubjectId, subjectHomePath, SUBJECT_MATH } from '@/constants';
 import {
   getKnowledgePoints,
@@ -466,6 +467,21 @@ export default function ErrorPracticePage() {
                             {varCount} 道变式待练
                           </button>
                         )}
+                        {/* 推荐为精选题单（2026-11-28）：做题题/孤儿题/无标准答案按原因禁用；按钮内部 stopPropagation */}
+                        <div className="flex justify-end">
+                          <RecommendFeaturedSetButton
+                            questionIds={entry.questionId == null ? [] : [entry.questionId]}
+                            disabledReason={
+                              entry.questionId == null
+                                ? '该题暂不支持推荐'
+                                : entry.source === 'freeform'
+                                  ? '做题题暂不支持推荐'
+                                  : !entry.answerable
+                                    ? '暂无标准答案'
+                                    : undefined
+                            }
+                          />
+                        </div>
                       </div>
                     </div>
                   </Card>

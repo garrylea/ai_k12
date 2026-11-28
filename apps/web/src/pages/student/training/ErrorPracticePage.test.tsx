@@ -20,10 +20,17 @@ import ErrorPracticePage from './ErrorPracticePage';
 const getTrainingErrorBook = vi.hoisted(() => vi.fn());
 const getKnowledgePoints = vi.hoisted(() => vi.fn());
 const getTrainingVariations = vi.hoisted(() => vi.fn());
+const recommendFeaturedSet = vi.hoisted(() => vi.fn());
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
-  return { ...actual, getTrainingErrorBook, getKnowledgePoints, getTrainingVariations };
+  return {
+    ...actual,
+    getTrainingErrorBook,
+    getKnowledgePoints,
+    getTrainingVariations,
+    recommendFeaturedSet,
+  };
 });
 
 afterEach(() => {
@@ -36,6 +43,8 @@ beforeEach(() => {
   getTrainingErrorBook.mockReset();
   getKnowledgePoints.mockReset();
   getTrainingVariations.mockReset();
+  recommendFeaturedSet.mockReset();
+  recommendFeaturedSet.mockResolvedValue({ setId: 3, alreadyRecommended: false });
   getTrainingErrorBook.mockResolvedValue([]);
   getKnowledgePoints.mockResolvedValue([
     { id: 1, name: '数与式', parentKpId: null, gradeBand: 'junior' },
@@ -330,5 +339,68 @@ describe('ErrorPracticePage 做题错题重练入口（2026-11-10）', () => {
     expect(await screen.findByText('普通题')).toBeInTheDocument();
     expect(screen.queryByTestId('redo-all-freeform')).toBeNull();
     expect(screen.queryByText('重练')).toBeNull();
+  });
+});
+
+describe('ErrorPracticePage 推荐精选题按钮（2026-11-28）', () => {
+  const BASE = {
+    questionText: '推荐题面',
+    type: 'choice',
+    fullScore: 10,
+    level: 1,
+    createdAt: '2026-11-28',
+    source: 'practice',
+    answerable: true,
+  };
+  const NORMAL = { ...BASE, errorBookId: 1, questionId: 11 };
+  const ORPHAN = { ...BASE, errorBookId: 2, questionId: null, answerable: false };
+  const FREEFORM = { ...BASE, errorBookId: 3, questionId: 13, source: 'freeform' };
+  const NO_ANSWER = { ...BASE, errorBookId: 4, questionId: 14, answerable: false };
+
+  it('普通错题：渲染可用「推荐这套题」按钮', async () => {
+    getTrainingErrorBook.mockResolvedValue([NORMAL]);
+    renderAt('/student/training/errors');
+
+    expect(await screen.findByRole('button', { name: '推荐这套题' })).toBeEnabled();
+  });
+
+  it('孤儿题（questionId=null）：按钮禁用，文案「该题暂不支持推荐」', async () => {
+    getTrainingErrorBook.mockResolvedValue([ORPHAN]);
+    renderAt('/student/training/errors');
+
+    expect(
+      await screen.findByRole('button', { name: '该题暂不支持推荐' }),
+    ).toBeDisabled();
+  });
+
+  it('做题题（source=freeform）：按钮禁用，文案「做题题暂不支持推荐」', async () => {
+    getTrainingErrorBook.mockResolvedValue([FREEFORM]);
+    renderAt('/student/training/errors');
+
+    expect(
+      await screen.findByRole('button', { name: '做题题暂不支持推荐' }),
+    ).toBeDisabled();
+  });
+
+  it('无标准答案（answerable=false）：按钮禁用，文案「暂无标准答案」', async () => {
+    getTrainingErrorBook.mockResolvedValue([NO_ANSWER]);
+    renderAt('/student/training/errors');
+
+    expect(await screen.findByRole('button', { name: '暂无标准答案' })).toBeDisabled();
+  });
+
+  it('点击推荐按钮 stopPropagation：带 questionId 发请求且不勾选该行', async () => {
+    const user = userEvent.setup();
+    getTrainingErrorBook.mockResolvedValue([NORMAL]);
+    renderAt('/student/training/errors');
+
+    const btn = await screen.findByRole('button', { name: '推荐这套题' });
+    await user.click(btn);
+
+    await waitFor(() =>
+      expect(recommendFeaturedSet).toHaveBeenCalledWith([11]),
+    );
+    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
+    expect(checkbox).not.toBeChecked();
   });
 });
