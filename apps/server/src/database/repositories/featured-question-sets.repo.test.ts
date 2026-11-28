@@ -388,6 +388,8 @@ describe('FeaturedQuestionSetsRepository — 学生投递', () => {
     });
     expect(sqlOf(conn.execute.mock.calls[0])).toContain("p.status = 'published'");
     expect(sqlOf(conn.execute.mock.calls[0])).toContain('p.grade_code = ?');
+    // 设计 §6.1 步骤 1：open 事务内先锁 publication，避免并发撤回/重发读到旧题单。
+    expect(sqlOf(conn.execute.mock.calls[0])).toContain('FOR UPDATE');
     expect(paramsOf(conn.execute.mock.calls[0])).toEqual([22, 'grade_7']);
     expect(sqlOf(conn.execute.mock.calls[1])).toContain('ORDER BY fqsi.sort_order, q.sub_no');
     expect(sqlOf(conn.execute.mock.calls[1])).toContain('q.is_active = 1');

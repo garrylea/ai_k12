@@ -16,7 +16,7 @@ import { contentPrefix } from '../../common/utils/content-hash.util.js';
  * 在专项作答页 / 练习记录里只剩来源、没有题号（lc1 的 4686 即此例）。
  * freeform / practice / remediation 等无卷来源的 group_order 为 NULL，仍返回 NULL。
  */
-const PAPER_QUESTION_NO_SQL = `COALESCE((
+export const PAPER_QUESTION_NO_SQL = `COALESCE((
   SELECT pq.question_no FROM paper_questions pq
   JOIN exam_papers ep ON ep.id = pq.paper_id
   WHERE pq.question_id = q.id

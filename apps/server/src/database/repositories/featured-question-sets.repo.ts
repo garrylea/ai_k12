@@ -1,5 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { PAPER_QUESTION_NO_SQL } from './questions.repo.js';
 
 export interface CreateRecommendationInput {
   subjectId: number;
@@ -88,15 +89,6 @@ export interface OpenPublicationResult {
   subjectId: number;
   questions: FeaturedSourceQuestion[];
 }
-
-/** 题目在原试卷中的题号；与 questions.repo.ts 的 PAPER_QUESTION_NO_SQL 同源。 */
-const PAPER_QUESTION_NO_SQL = `COALESCE((
-  SELECT pq.question_no FROM paper_questions pq
-  JOIN exam_papers ep ON ep.id = pq.paper_id
-  WHERE pq.question_id = q.id
-  ORDER BY (SUBSTRING_INDEX(ep.source_key, '/', -1) = q.source) DESC, pq.question_no
-  LIMIT 1
-), q.group_order)`;
 
 /** 当前在架题数（精选题单只投递仍可作答的题目）。 */
 const AVAILABLE_COUNT_SQL = `(SELECT COUNT(*) FROM featured_question_set_items fqsi
@@ -578,7 +570,13 @@ export class FeaturedQuestionSetsRepository {
     };
   }
 
-  /** open 事务内使用：锁 publication 后读在架题，题目按 sort_order, q.sub_no 排序。 */
+  /**
+   * open 事务内使用：先锁 publication 再读在架题，题目按 sort_order, q.sub_no 排序。
+   *
+   * 锁只在传入事务连接（executor）时真正生效——autocommit 下 SELECT ... FOR UPDATE
+   * 语句结束即释放。Task 6 的 open 必须把同一事务连接传进来（设计 §6.1 步骤 1），
+   * 这样并发的 withdraw / 重新发布会被串行化，不会读到已撤回或换题后的题单。
+   */
   async findOpenPublication(
     publicationId: number,
     gradeCode: string,
@@ -594,7 +592,8 @@ export class FeaturedQuestionSetsRepository {
       `SELECT p.id AS publication_id, p.set_id, p.title, s.subject_id
          FROM featured_question_set_publications p
          JOIN featured_question_sets s ON s.id = p.set_id
-        WHERE p.id = ? AND p.grade_code = ? AND p.status = 'published'`,
+        WHERE p.id = ? AND p.grade_code = ? AND p.status = 'published'
+        FOR UPDATE`,
       [publicationId, gradeCode],
     );
     const pub = pubRows[0];
