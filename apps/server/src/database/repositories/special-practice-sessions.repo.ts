@@ -140,6 +140,20 @@ export class SpecialPracticeSessionsRepository {
     return id;
   }
 
+  /**
+   * 服务端判定会话是否为精选题会话（Task 7 硬约束：记历史但不发积分）。
+   * 客户端传来的 suppressErrorFixPoints=false 不可信，判题前按 uid + student 查库定夺。
+   */
+  async isFeaturedSession(sessionUid: string, studentId: number): Promise<boolean> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT featured_publication_id
+       FROM special_practice_sessions
+      WHERE session_uid = ? AND student_id = ?`,
+      [sessionUid, studentId],
+    );
+    return rows[0]?.featured_publication_id != null;
+  }
+
   /** 单个 session 归属校验（防 IDOR）。 */
   async findByIdOwned(sessionId: number, studentId: number, executor?: PoolConnection): Promise<SessionListRow | null> {
     const db = executor ?? this.pool;

@@ -58,6 +58,8 @@ const mk = (overrides: any = {}) => ({
   specialSessionsRepo: {
     upsertSession: vi.fn().mockResolvedValue(101),
     markCompletedByUid: vi.fn().mockResolvedValue(1),
+    // 精选题会话判定（Task 7）：默认非 featured，featured 用例单独 mockResolvedValue(true)。
+    isFeaturedSession: vi.fn().mockResolvedValue(false),
   },
   specialAnswersRepo: {
     upsertAnswer: vi.fn().mockResolvedValue(undefined),
@@ -187,6 +189,82 @@ describe('TrainingService.judgeTraining', () => {
     await svc.judgeTraining({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice' });
     expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith({ studentId: 1, questionId: 10, subjectId: 1, studentAnswer: 'A', source: 'error_practice', sourceRefId: null, defaultIncorrect: false });
   });
+
+  it('featured session 即使客户端传 false，也强制 suppressErrorFixPoints=true', async () => {
+    const deps = mk();
+    deps.specialSessionsRepo.isFeaturedSession.mockResolvedValue(true);
+    deps.judgeCore.judgeQuestion.mockResolvedValue({ questionId: 10, isCorrect: true, method: 'exact', pointsAwarded: 0 });
+
+    await mkSvc(deps).judgeTraining({
+      studentId: 7, questionId: 10, subjectId: 1, studentAnswer: 'A',
+      source: 'targeted', sessionUid: 'featured-uid',
+      suppressErrorFixPoints: false,
+    });
+
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ suppressErrorFixPoints: true }),
+    );
+  });
+
+  it('普通 targeted 会话（非 featured）：客户端 false 原样透传，不误压制', async () => {
+    const deps = mk();
+    deps.specialSessionsRepo.isFeaturedSession.mockResolvedValue(false);
+    deps.judgeCore.judgeQuestion.mockImplementation(async (input: { suppressErrorFixPoints?: boolean }) => ({
+      questionId: 10, isCorrect: true, method: 'exact',
+      pointsAwarded: input.suppressErrorFixPoints ? 0 : 8,
+    }));
+
+    const out = await mkSvc(deps).judgeTraining({
+      studentId: 7, questionId: 10, subjectId: 1, studentAnswer: 'A',
+      source: 'targeted', sessionUid: 'ordinary-uid', suppressErrorFixPoints: false,
+    });
+
+    expect(deps.specialSessionsRepo.isFeaturedSession).toHaveBeenCalledWith('ordinary-uid', 7);
+    expect(out.pointsAwarded).toBe(8);
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ suppressErrorFixPoints: false }),
+    );
+  });
+
+  it('featured objective correct：不写 point_ledger，仍清零错题', async () => {
+    const deps = mk();
+    deps.specialSessionsRepo.isFeaturedSession.mockResolvedValue(true);
+    deps.judgeCore.judgeQuestion.mockImplementation(async (input: { suppressErrorFixPoints?: boolean }) => ({
+      questionId: 10,
+      isCorrect: true,
+      method: 'exact',
+      pointsAwarded: input.suppressErrorFixPoints ? 0 : 8,
+    }));
+
+    const out = await mkSvc(deps).judgeTraining({
+      studentId: 7, questionId: 10, subjectId: 1, studentAnswer: 'A',
+      source: 'targeted', sessionUid: 'featured-uid',
+    });
+
+    expect(out.pointsAwarded).toBe(0);
+    expect(deps.judgeCore.judgeQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ suppressErrorFixPoints: true }),
+    );
+  });
+
+  it('featured answer：创建 special_practice_sessions/records，不创建 training_sessions', async () => {
+    const deps = mk();
+    deps.specialSessionsRepo.isFeaturedSession.mockResolvedValue(true);
+    deps.judgeCore.judgeQuestion.mockResolvedValue({
+      questionId: 10, isCorrect: true, method: 'exact', pointsAwarded: 0,
+    });
+    deps.specialSessionsRepo.upsertSession.mockResolvedValue(101);
+    deps.specialAnswersRepo.upsertAnswer.mockResolvedValue(undefined);
+
+    await mkSvc(deps).judgeTraining({
+      studentId: 7, questionId: 10, subjectId: 1, studentAnswer: 'A',
+      source: 'targeted', sessionUid: 'featured-uid', questionOrder: 1,
+    });
+
+    expect(deps.specialSessionsRepo.upsertSession).toHaveBeenCalled();
+    expect(deps.specialAnswersRepo.upsertAnswer).toHaveBeenCalled();
+    expect(deps.trainingSessionsRepo.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('TrainingService.selfAssess', () => {
@@ -234,6 +312,24 @@ describe('TrainingService.selfAssess', () => {
       studentId: 1, subjectId: 1, questionId: 10,
       assessment: 'correct', source: 'targeted', sessionUid: 'uid-1',
     });
+    expect(deps.judgeCore.recordSelfAssessment).not.toHaveBeenCalled();
+  });
+
+  it('featured self-assess correct：不进入 recordSelfAssessment 发奖励分支', async () => {
+    const deps = mk({
+      questionsRepo: { findById: vi.fn().mockResolvedValue(userQ) },
+    });
+    deps.specialSessionsRepo.isFeaturedSession.mockResolvedValue(true);
+    deps.settlement.confirmSelfAssessment.mockResolvedValue({ errorBookId: undefined });
+
+    await mkSvc(deps).selfAssess({
+      studentId: 7, questionId: 10, subjectId: 1,
+      assessment: 'correct', source: 'targeted', sessionUid: 'featured-uid',
+    });
+
+    expect(deps.settlement.confirmSelfAssessment).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionUid: 'featured-uid', source: 'targeted' }),
+    );
     expect(deps.judgeCore.recordSelfAssessment).not.toHaveBeenCalled();
   });
 
@@ -1412,7 +1508,11 @@ describe('TrainingService.judgeTraining — special_answer_records 旁路写入'
   it('写入失败不阻断判题', async () => {
     const deps = mk({
       judgeCore: { judgeQuestion: vi.fn().mockResolvedValue(judgeResult) },
-      specialSessionsRepo: { upsertSession: vi.fn().mockRejectedValue(new Error('DB down')) },
+      specialSessionsRepo: {
+        upsertSession: vi.fn().mockRejectedValue(new Error('DB down')),
+        // 该用例完整替换 repo，需补齐 Task 7 新增的判定桩（默认非 featured）。
+        isFeaturedSession: vi.fn().mockResolvedValue(false),
+      },
     });
     const result = await mkSvc(deps).judgeTraining({
       studentId: 7, questionId: 100, subjectId: 1, studentAnswer: 'B', source: 'targeted',

@@ -148,4 +148,24 @@ describe('SpecialPracticeSessionsRepository', () => {
       response: { code: 1002, message: '作答记录不存在或已失效，请重新提交' },
     });
   });
+
+  it('isFeaturedSession 按 session_uid + student_id 查 featured_publication_id，非 NULL 返回 true', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ featured_publication_id: 22 }]] as any);
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    expect(await repo.isFeaturedSession('featured-uid', 7)).toBe(true);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('SELECT featured_publication_id');
+    expect(sql).toMatch(/FROM\s+special_practice_sessions\s+WHERE\s+session_uid = \? AND student_id = \?/);
+    expect(params).toEqual(['featured-uid', 7]);
+  });
+
+  it('isFeaturedSession 为 NULL 或查无会话（含非本人）返回 false', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([[{ featured_publication_id: null }]] as any);
+    pool.execute.mockResolvedValueOnce([[]] as any);
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    expect(await repo.isFeaturedSession('u-1', 7)).toBe(false);
+    expect(await repo.isFeaturedSession('u-1', 7)).toBe(false);
+  });
 });

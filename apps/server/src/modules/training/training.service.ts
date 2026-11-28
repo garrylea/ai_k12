@@ -221,6 +221,13 @@ export class TrainingService {
   }) {
     // plannedQuestionIds 只是作答记录的入参，不能顺带喂给 JudgeCore（它不认这个字段）。
     const { plannedQuestionIds, ...judgeInput } = input;
+    // 精选题会话（Task 7）：记历史但不发积分。客户端的 suppressErrorFixPoints 不可信，
+    // 服务端按 uid + student 查库定夺——命中 featured_publication_id 就强制压制订正分。
+    // 普通 targeted/error_practice 不改调用形状（judgeInput 原样透传）。
+    const featured = input.sessionUid
+      ? await this.specialSessionsRepo?.isFeaturedSession(input.sessionUid, input.studentId)
+      : false;
+    const suppressErrorFixPoints = input.suppressErrorFixPoints === true || featured === true;
     // 默认错（Task 8）：带 uid 的主观题先按错回包，由 settlement 在单连接事务里落
     // 作答行/错题本/掌握度；judge-core 该分支不写掌握度、不记连错，避免重复记账。
     // judgeTraining 的 source 类型只有 targeted/error_practice（exam 走 exams 模块，不经此处），
@@ -228,6 +235,10 @@ export class TrainingService {
     const useDefaultIncorrect = !!input.sessionUid;
     const result = await this.judgeCore.judgeQuestion({
       ...judgeInput, sourceRefId: null, defaultIncorrect: useDefaultIncorrect,
+      // 仅在需要压制且入参未带 true 时补写，避免改变普通会话的既有调用形状。
+      ...(suppressErrorFixPoints && judgeInput.suppressErrorFixPoints !== true
+        ? { suppressErrorFixPoints: true }
+        : {}),
     });
     if (result.needsSelfAssessment && useDefaultIncorrect) {
       const module = targetedSessionModule(input.subjectId) as SpecialSessionModule;
