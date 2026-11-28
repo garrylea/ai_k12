@@ -14,6 +14,8 @@ export interface UpsertSessionInput {
   module: SpecialSessionModule;
   title: string | null;
   questionCount: number;
+  /** 服务端 open 创建的精选题会话归属；普通专项会话不传（写 NULL）。 */
+  featuredPublicationId?: number | null;
 }
 
 export interface SessionListRow {
@@ -40,9 +42,12 @@ export class SpecialPracticeSessionsRepository {
     const db = executor ?? this.pool;
     const [result] = await db.execute<ResultSetHeader>(
       `INSERT IGNORE INTO special_practice_sessions
-       (session_uid, student_id, subject_id, module, title, question_count)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [input.sessionUid, input.studentId, input.subjectId, input.module, input.title, input.questionCount],
+       (session_uid, student_id, subject_id, module, title, question_count, featured_publication_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.sessionUid, input.studentId, input.subjectId, input.module, input.title, input.questionCount,
+        input.featuredPublicationId ?? null,
+      ],
     );
     if (result.insertId > 0) return result.insertId;
     // 命中已存在行：session_uid 是客户端提供的全局唯一键，必须核对归属与场景，

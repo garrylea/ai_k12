@@ -29,6 +29,36 @@ describe('SpecialPracticeSessionsRepository', () => {
     );
   });
 
+  it('upsertSession 写入 featured_publication_id，open 建 featured session 用', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([{ insertId: 55, affectedRows: 1 } as any]);
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    const id = await repo.upsertSession({
+      sessionUid: 'featured-uid',
+      studentId: 9,
+      subjectId: 1,
+      module: 'math_targeted',
+      title: '七年级数学精选',
+      questionCount: 2,
+      featuredPublicationId: 22,
+    });
+    expect(id).toBe(55);
+    const [sql, params] = pool.execute.mock.calls[0];
+    expect(sql).toContain('featured_publication_id');
+    expect(params).toEqual(['featured-uid', 9, 1, 'math_targeted', '七年级数学精选', 2, 22]);
+  });
+
+  it('upsertSession 未传 featuredPublicationId 时写 NULL，不改变既有调用', async () => {
+    const pool = mockPool();
+    pool.execute.mockResolvedValueOnce([{ insertId: 42, affectedRows: 1 } as any]);
+    const repo = new SpecialPracticeSessionsRepository(pool as any);
+    await repo.upsertSession({
+      sessionUid: 'abc-123', studentId: 7, subjectId: 1, module: 'math_targeted', title: null, questionCount: 0,
+    });
+    const [, params] = pool.execute.mock.calls[0];
+    expect(params[6]).toBeNull();
+  });
+
   it('upsertSession 命中已存在行时校验归属后返回 id（affectedRows=0 分支）', async () => {
     const pool = mockPool();
     pool.execute.mockResolvedValueOnce([{ insertId: 0, affectedRows: 0 } as any]);
