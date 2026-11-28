@@ -612,6 +612,23 @@ export class QuestionsRepository {
     return rows as QuestionRow[];
   }
 
+  /**
+   * 该生实际做过的题 id 集合（精选推荐「只能推荐自己做过的题」门禁）。
+   * 与抽题的「从未做过」判定完全同源（ANSWERED_TIMES_SQL 的 4 个 ? 依次是 student_id），
+   * 避免两处口径分叉。入参先去重，空集合直接返回，不查库。
+   */
+  async findAnsweredQuestionIds(studentId: number, questionIds: number[]): Promise<Set<number>> {
+    const ids = [...new Set(questionIds)];
+    if (ids.length === 0) return new Set();
+    const placeholders = ids.map(() => '?').join(',');
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT question_id FROM (${ANSWERED_TIMES_SQL}) answered
+        WHERE question_id IN (${placeholders})`,
+      [studentId, studentId, studentId, studentId, ...ids],
+    );
+    return new Set(rows.map((r) => Number(r.question_id)));
+  }
+
   /** question_id -> primary 知识点 id（补偿套题按 primary 考点分组；无 primary 的题由调用方跳过）。 */
   async findPrimaryKpIds(questionIds: number[]): Promise<Map<number, number>> {
     if (questionIds.length === 0) return new Map();
