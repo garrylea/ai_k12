@@ -1599,6 +1599,99 @@ CREATE TABLE IF NOT EXISTS special_practice_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
+-- 17.4 精选题集（2026-11-28，curated question set）
+-- ============================================================
+-- 教研选题 → 审核 → 按年级发布 → 学生收件/已读；publication 即学生端精选题单入口。
+-- 迁移：tools/db/migrations/2026-11-28_curated_question_sets.sql
+
+CREATE TABLE IF NOT EXISTS featured_question_sets (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  content_key CHAR(64) NOT NULL,
+  subject_id BIGINT NOT NULL,
+  created_by_student_id BIGINT DEFAULT NULL,
+  review_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  question_count SMALLINT NOT NULL,
+  reviewed_by BIGINT DEFAULT NULL,
+  reviewed_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_fqs_content_key (content_key),
+  KEY idx_fqs_review (review_status, created_at),
+  KEY idx_fqs_creator_day (created_by_student_id, created_at),
+  CONSTRAINT fk_fqs_subject FOREIGN KEY (subject_id) REFERENCES subjects (id)
+    ON DELETE RESTRICT,
+  CONSTRAINT fk_fqs_creator FOREIGN KEY (created_by_student_id)
+    REFERENCES students (id) ON DELETE SET NULL,
+  CONSTRAINT fk_fqs_reviewer FOREIGN KEY (reviewed_by) REFERENCES admins (id)
+    ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS featured_question_set_items (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  set_id BIGINT NOT NULL,
+  question_id BIGINT NOT NULL,
+  sort_order SMALLINT NOT NULL,
+  UNIQUE KEY uniq_fqsi_set_question (set_id, question_id),
+  UNIQUE KEY uniq_fqsi_set_order (set_id, sort_order),
+  KEY idx_fqsi_question (question_id),
+  CONSTRAINT fk_fqsi_set FOREIGN KEY (set_id)
+    REFERENCES featured_question_sets (id) ON DELETE CASCADE,
+  CONSTRAINT fk_fqsi_question FOREIGN KEY (question_id)
+    REFERENCES questions (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS featured_question_set_recommendations (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  set_id BIGINT NOT NULL,
+  student_id BIGINT NOT NULL,
+  student_grade_code VARCHAR(10) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_fqsr_set_student (set_id, student_id),
+  KEY idx_fqsr_set_grade (set_id, student_grade_code),
+  CONSTRAINT fk_fqsr_set FOREIGN KEY (set_id)
+    REFERENCES featured_question_sets (id) ON DELETE CASCADE,
+  CONSTRAINT fk_fqsr_student FOREIGN KEY (student_id)
+    REFERENCES students (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS featured_question_set_publications (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  set_id BIGINT NOT NULL,
+  grade_code VARCHAR(10) NOT NULL,
+  title VARCHAR(60) NOT NULL,
+  reach_count INT NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'published',
+  published_by BIGINT NOT NULL,
+  published_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  withdrawn_by BIGINT DEFAULT NULL,
+  withdrawn_at DATETIME(3) DEFAULT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uniq_fqsp_set_grade (set_id, grade_code),
+  KEY idx_fqsp_grade_status (grade_code, status, published_at),
+  CONSTRAINT fk_fqsp_set FOREIGN KEY (set_id)
+    REFERENCES featured_question_sets (id) ON DELETE CASCADE,
+  CONSTRAINT fk_fqsp_publisher FOREIGN KEY (published_by) REFERENCES admins (id)
+    ON DELETE RESTRICT,
+  CONSTRAINT fk_fqsp_withdrawer FOREIGN KEY (withdrawn_by) REFERENCES admins (id)
+    ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS featured_question_set_reads (
+  publication_id BIGINT NOT NULL,
+  student_id BIGINT NOT NULL,
+  read_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (publication_id, student_id),
+  KEY idx_fqsr_student (student_id, read_at),
+  CONSTRAINT fk_fqsread_publication FOREIGN KEY (publication_id)
+    REFERENCES featured_question_set_publications (id) ON DELETE CASCADE,
+  CONSTRAINT fk_fqsread_student FOREIGN KEY (student_id)
+    REFERENCES students (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
 -- 17.5 专项练习作答历史（2026-11-01，专项作答历史一期）
 -- ============================================================
 -- 与 exam_sessions / exam_answers 对称，但专项不限时、无 paper_id。
@@ -1619,9 +1712,14 @@ CREATE TABLE IF NOT EXISTS special_practice_sessions (
   completed_at   DATETIME(3)  DEFAULT NULL,
   created_at     DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at     DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  featured_publication_id BIGINT DEFAULT NULL,
   UNIQUE KEY uniq_sps_uid (session_uid),
   KEY idx_sps_student_time (student_id, started_at),
-  CONSTRAINT fk_sps_student FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+  KEY idx_sps_featured_publication (featured_publication_id),
+  CONSTRAINT fk_sps_student FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE,
+  CONSTRAINT fk_sps_featured_publication
+    FOREIGN KEY (featured_publication_id)
+    REFERENCES featured_question_set_publications (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS special_answer_records (
